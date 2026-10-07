@@ -1,9 +1,16 @@
 'use strict';
-const { createHash } = require('node:crypto');
-const { inheritMoldFields, validateConfig, isNonMoldPart, updateEngineeringFields } = require('../../frontend/mixed-molds');
+const { createHash, randomUUID } = require('node:crypto');
+const { inheritMoldFields, validateConfig, prepareMoldImport, isNonMoldPart, updateEngineeringFields } = require('../../frontend/mixed-molds');
 const canonical = value => /^\d+$/.test(String(value).trim()) ? String(Number(value)).padStart(2, '0') : String(value).trim();
 function productNumbers(name) {
   const text = String(name || '').normalize('NFKC').trim();
+  // P-prefixed product codes may touch the Chinese part name (P48千层饼下件).
+  // A slash-separated shared part can belong to multiple products.
+  if (/^P\s*\d+(?![A-Za-z0-9])/i.test(text)) {
+    const codes = [...text.matchAll(/(?:^|[、,，/／&＆+＋])\s*P\s*(\d+)(?![A-Za-z0-9])/gi)]
+      .map(match => `P${canonical(match[1])}`);
+    return [...new Set(codes)];
+  }
   const match = text.match(/^(\d+(?:\s*[、,，/／&＆+＋]\s*\d+)*)\s*[-－–—:：]\s*\S/);
   return match ? [...new Set(match[1].split(/[、,，/／&＆+＋]/).map(canonical))] : [];
 }
@@ -36,10 +43,18 @@ function unusedPlaceholders(config, payloads) {
       && !(root.mixed_molds || []).some(m => m.parts?.some(part => part.product_id === p.id))))
     .map(p => p.id);
 }
-function importParts(config, engineering, molds, { replacePlaceholders = false, sourceFile = '', existingParts = [], placeholderIds = [] } = {}) {
+function importParts(config, engineering, molds, { replacePlaceholders = false, sourceFile = '', existingParts = [], placeholderIds = [], mode = 'append' } = {}) {
   const summary = summarize(molds);
   if (!summary.product_count) throw new Error('没有识别到配件名称前的产品序号');
-  const next = structuredClone(config), root = structuredClone(engineering);
+  const next = structuredClone(config);
+  let root = prepareMoldImport(engineering, existingParts, mode);
+  const removedProducts = mode === 'replace' ? next.products.filter(p => !summary.products.some(group => canonical(p.code) === group.code)) : [];
+  if (removedProducts.length) {
+    const removedIds = new Set(removedProducts.map(p => p.id));
+    next.products = next.products.filter(p => !removedIds.has(p.id));
+    root = require('./removeMixedProducts').removeMixedProducts(root, [...removedIds]);
+  }
+  if (mode === 'replace') existingParts = [];
   if (summary.product_count >= 2) {
     const removed = new Set(replacePlaceholders ? next.products.map(p => p.id) : placeholderIds);
     for (const id of removed) { delete root.mixed_products?.[id]; delete root.mixed_part_selections?.[id]; }
@@ -66,7 +81,7 @@ function importParts(config, engineering, molds, { replacePlaceholders = false, 
       if (matches.length === 1) stored = matches[0];
     }
     if (!stored) {
-      const id = 'numbered_' + createHash('sha256').update(key).digest('hex').slice(0,24);
+      const id = 'numbered_' + (mode === 'replace' ? randomUUID().replace(/-/g, '') : createHash('sha256').update(key).digest('hex').slice(0,24));
       if ([...known.values()].some(p => p.id === id)) throw new Error('零件标识冲突');
       stored = {...part, id, source_file:sourceFile, material_unit_price:null, shot_price:0, loss_pct:3};
       root.mixed_imported_parts.push(stored); known.set(key,stored); added++;
@@ -82,6 +97,7 @@ function importParts(config, engineering, molds, { replacePlaceholders = false, 
       stored.production_demand = part.production_demand; demandsFilled++;
       if (!root.mixed_imported_parts.some(p => p.id === stored.id)) root.mixed_imported_parts.push({...stored});
     }
+    root.mixed_deleted_part_ids = (root.mixed_deleted_part_ids || []).filter(id => id !== stored.id);
     for (const code of productNumbers(part.name)) {
       const product = next.products.find(p => canonical(p.code) === code);
       const refs = root.mixed_part_selections[product.id] ||= [];
@@ -92,6 +108,6 @@ function importParts(config, engineering, molds, { replacePlaceholders = false, 
     if (!root.mixed_imported_molds.some(m => JSON.stringify(m) === JSON.stringify({...mold,source_file:sourceFile}))) root.mixed_imported_molds.push({...mold,source_file:sourceFile});
   }
   root.mixed_import_summary = {...summary, source_file:sourceFile};
-  return { config:next, engineering:root, summary:{...summary,added,assigned,demands_filled:demandsFilled,total_products:next.products.length} };
+  return { config:next, engineering:root, summary:{...summary,added,assigned,demands_filled:demandsFilled,total_products:next.products.length,removed_product_ids:removedProducts.map(p => p.id)} };
 }
 module.exports = { productNumbers, summarize, importParts, unusedPlaceholders };

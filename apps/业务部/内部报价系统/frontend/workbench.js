@@ -4379,12 +4379,19 @@ function renderPaintingTable(container, payload, onChange, canEdit) {
     // 五工序
     const calcCells = [];
     PAINTING_PROCS.forEach(p => {
-      tr.appendChild(makePCell(p.key + '_qty', 'number', row, canEdit, () => { onChange(); refreshAmt(); }));
-      tr.appendChild(makePCell(p.key + '_unit', 'number', row, canEdit, () => { onChange(); refreshAmt(); }));
+      tr.appendChild(makePCell(p.key + '_qty', 'formula', row, canEdit, () => { onChange(); refreshAmt(); }));
+      tr.appendChild(makePCell(p.key + '_unit', 'formula', row, canEdit, () => { onChange(); refreshAmt(); }));
     });
     // 报价（计算列）
     const tdAmt = document.createElement('td'); tdAmt.className = 'ro';
-    const refreshAmt = () => { tdAmt.textContent = formatNum(paintingRowAmount(row)); };
+    const refreshAmt = () => {
+      tdAmt.textContent = formatNum(paintingRowAmount(row));
+      const footer = table.querySelector('[data-painting-total]');
+      if (footer) {
+        PAINTING_PROCS.forEach((proc, i) => { footer.cells[1+i*2].textContent = formatNum(weightedPaintingProcSum(payload, proc.key)); });
+        footer.cells[1+PAINTING_PROCS.length*2].textContent = formatNum(weightedPaintingSum(payload));
+      }
+    };
     refreshAmt();
     tr.appendChild(tdAmt);
     // 备注
@@ -4405,7 +4412,7 @@ function renderPaintingTable(container, payload, onChange, canEdit) {
   // 合计行
   const totals = PAINTING_PROCS.map(p => weightedPaintingProcSum(payload, p.key));
   const totalAmt = weightedPaintingSum(payload);
-  const tr = document.createElement('tr'); tr.className = 'hi';
+  const tr = document.createElement('tr'); tr.className = 'hi'; tr.dataset.paintingTotal = '';
   const totalRatio = sum(groups, group => productMixRatio(payload, group.key));
   let html = `<td colspan="4" style="text-align:right">${hasMultipleProducts ? `配比加权平均（总配比 ${formatNum(totalRatio)}）` : '合计'}</td>`;
   PAINTING_PROCS.forEach((p, i) => { html += `<td>${formatNum(totals[i])}</td><td></td>`; });
@@ -4427,16 +4434,33 @@ function renderPaintingTable(container, payload, onChange, canEdit) {
 
 function makePCell(key, type, row, canEdit, onChange) {
   const td = document.createElement('td');
-  // 数量/单价为 0 或空 → 显示空白（不显示 0.0000）
-  const blankIfZero = type === 'number' && !num(row[key]);
+  const formula = type === 'formula';
+  const blankIfZero = (formula || type === 'number') && !num(row[key]);
   if (!canEdit) {
-    td.className = 'ro'; td.textContent = blankIfZero ? '-' : formatNum(row[key] ?? '');
+    td.className = 'ro';
+    td.textContent = blankIfZero ? '-' : (type === 'text' ? (row[key] ?? '') : formatNum(row[key] ?? ''));
+    if (formula && row[key + '_raw']) td.title = row[key + '_raw'];
   } else {
     const inp = document.createElement('input');
     inp.type = type === 'number' ? 'number' : 'text';
     if (type === 'number') inp.step = 'any';
-    inp.value = blankIfZero ? '' : (row[key] ?? '');
-    inp.oninput = () => { row[key] = type === 'number' ? (inp.value === '' ? null : Number(inp.value)) : inp.value; onChange(); };
+    inp.value = formula ? (row[key + '_raw'] ?? row[key] ?? '') : (blankIfZero ? '' : (row[key] ?? ''));
+    if (formula) {
+      inp.title = '支持数字、加减乘除和括号，例如 =0.04*1.2';
+      inp.style.minWidth = '90px';
+    }
+    inp.oninput = () => {
+      if (formula) {
+        const value = parseFormulaInput(inp.value);
+        const invalid = inp.value.trim() !== '' && (value == null || value < 0);
+        inp.setCustomValidity(invalid ? '请输入有效的非负数算式，不能除以零' : '');
+        inp.style.color = invalid ? '#b91c1c' : '';
+        inp.title = invalid ? '算式无效：请输入有效的非负数算式，不能除以零' : '计算结果：' + (value ?? '');
+        row[key + '_raw'] = inp.value;
+        row[key] = invalid ? null : value;
+      } else row[key] = type === 'number' ? (inp.value === '' ? null : Number(inp.value)) : inp.value;
+      onChange();
+    };
     td.appendChild(inp);
   }
   return td;

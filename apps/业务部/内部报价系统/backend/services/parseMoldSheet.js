@@ -27,7 +27,7 @@ const FIELD_KEYWORDS = {
   product_size:   ['产品尺寸'],
   machine:        ['机型(TON)', '机台大小', 'INJECTIONMACHINETYPE', '机型'],
   weight:         ['净重', '重量', '料重', '克重', '零件重量', '零件重', 'PARTWEIGHT'],
-  production_demand: ['日产能要求', '生产需求量', 'PRODUCTIONDEMAND'],
+  production_demand: ['日产能要求', '产能要求', '生产需求量', 'PRODUCTIONDEMAND'],
   daily_capacity: ['预计产品日产能', '日产能', 'DAILYCAP', 'PCS/DAY'],
   cycle:          ['周期', 'CYCLETIME', 'CYCLE'],   // 注塑生产周期(秒)
   target:         ['模具预计日啤数', '目标数', 'CYCLES/DAY', 'CYCLESDAY'],
@@ -83,6 +83,14 @@ function mapColumns(headerRow) {
       if (cols[field] >= 0) break;
     }
   }
+  // 实际啤数优先于原产能；件数与啤数不得混用。同名列取最左侧。
+  const compact = value => nu(value).replace(/[（）()]/g, '');
+  const actualShots = headerRow.findIndex(v => /^实际产能啤数$/.test(compact(v)));
+  const actualPieces = headerRow.findIndex(v => /^实际产能个数$/.test(compact(v)));
+  const originalShots = headerRow.findIndex(v => compact(v) === '原产能');
+  if (actualShots >= 0) cols.target = actualShots;
+  else if (cols.target < 0 && originalShots >= 0) cols.target = originalShots;
+  if (actualPieces >= 0) cols.daily_capacity = actualPieces;
   // “件*套”常以一个合并表头覆盖相邻两列：左列为出模数，右列为套数。
   const pieceSetIdx = headerRow.findIndex(v => /件[*×X\/]?套/i.test(nu(v)));
   if (pieceSetIdx >= 0) {
@@ -99,6 +107,15 @@ function mapColumns(headerRow) {
     }
   }
   return cols;
+}
+
+// 需求列允许数字及“数量*份数+数量*份数”，不执行单元格文本。
+function parseDemand(value) {
+  const text = String(value ?? '').normalize('NFKC').replace(/[\s,，]/g, '').replace(/[×xX]/g, '*');
+  if (!text) return null;
+  if (!/^\d+(?:\.\d+)?(?:\*\d+(?:\.\d+)?)*(?:\+\d+(?:\.\d+)?(?:\*\d+(?:\.\d+)?)*)*$/.test(text)) return null;
+  const result = text.split('+').reduce((sum, term) => sum + term.split('*').reduce((product, n) => product * Number(n), 1), 0);
+  return Number.isFinite(result) ? result : null;
 }
 
 function parseNumber(v) {
@@ -308,6 +325,19 @@ function tryParseSheet(wb, sheetName) {
   }
   const cols = mapColumns(header);
   const machineHeader = cols.machine >= 0 ? header[cols.machine] : '';
+  // 只展开需求列真实存在的纵向合并区域；普通空白不能沿用上一零件需求。
+  if (cols.production_demand >= 0) {
+    for (const range of ws['!merges'] || []) {
+      if (range.s.c !== cols.production_demand || range.e.c !== cols.production_demand || range.s.r < dataStart) continue;
+      const value = aoa[range.s.r]?.[cols.production_demand];
+      if (value == null || value === '') continue;
+      for (let row = range.s.r + 1; row <= range.e.r; row++) {
+        aoa[row] ||= [];
+        if (aoa[row][cols.production_demand] == null || aoa[row][cols.production_demand] === '') aoa[row][cols.production_demand] = value;
+      }
+    }
+  }
+
 
   const cell = (r, k) => cols[k] >= 0 ? String(r[cols[k]] ?? '').trim() : '';
 
@@ -323,6 +353,9 @@ function tryParseSheet(wb, sheetName) {
     if (!txt) continue;
     const rowText = r.map(c => nu(c)).join('|');
     const firstNonEmpty = r.map(c => String(c ?? '').trim()).find(Boolean) || '';
+    // 附录开始后是钢料标准/签字信息，不再属于模具明细。
+    if (r.some(c => /^(?:模具标准(?:一览表|表)?|模具制作标准|制定\s*Prepared\s*by\s*[:：]?)$/i.test(String(c ?? '').trim()))) break;
+
     // 边界：再遇到 "X、XXX部分" 章节标题 → 停止
     if (/[一二三四五六七八九十]、.+部分/.test(rowText)) break;
     // 同一工作表的五金/包装区不是注塑模具，不能继承上一模具参数。
@@ -423,7 +456,7 @@ function tryParseSheet(wb, sheetName) {
     }
     const cyc = parseNumber(cell(r, 'cycle')); if (cyc != null && current.cycle == null) current.cycle = cyc;
     const machine = normalizeMachine(cell(r, 'machine'), machineHeader); if (machine && !current.machine) current.machine = machine;
-    const demand = parseNumber(cell(r, 'production_demand')); if (demand != null && current.production_demand == null) current.production_demand = demand;
+    const demand = parseDemand(cell(r, 'production_demand')); if (demand != null && current.production_demand == null) current.production_demand = demand;
     const capacity = parseNumber(cell(r, 'daily_capacity')); if (capacity != null && current.daily_capacity == null) current.daily_capacity = capacity;
     const target = parseNumber(cell(r, 'target')); if (target != null && current.target == null) current.target = target;
     const shotPrice = parseNumber(cell(r, 'shot_price')); if (shotPrice != null && current.shot_price == null) current.shot_price = shotPrice;
@@ -594,7 +627,7 @@ function buildPartDetailMolds(dataRows, cell, machineHeader = '') {
     const g = groups.get(key);
     g.parts.push({
       name: partName,
-      production_demand: parseNumber(cell(r, 'production_demand')),
+      production_demand: parseDemand(cell(r, 'production_demand')),
       name_en: partNameEn,
       name_cn: partNameCn,
       material,

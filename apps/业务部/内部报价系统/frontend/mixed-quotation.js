@@ -1,5 +1,15 @@
 (function () {
   'use strict';
+  // crypto.randomUUID 仅在安全上下文（HTTPS/localhost）可用；
+  // 内网 HTTP 部署下用 getRandomValues 生成 UUIDv4 降级（该 API 非安全上下文也可用）。
+  const uuid = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  };
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = value => Number(value || 0).toFixed(4);
   const config = () => window.__data?.mixed_quote;
@@ -260,7 +270,7 @@
     host.querySelector('[data-add]')?.addEventListener('click', () => { catalog.parts.push({ id: `part_${Date.now()}`, name: '新零件', mold_no: '', material: 'PVC', weight_g: 0, material_unit_price: 0, shot_price: 0, loss_pct: root.catalog_loss_pct ?? 3, cavity: 1 }); changed(); redraw(); });
   }
   function moldImportMode(numbered = false) {
-    const name = `mold-import-${crypto.randomUUID()}`;
+    const name = `mold-import-${uuid()}`;
     return `<fieldset class="mixed-import-options"><legend>选择导入方式</legend><div class="mixed-import-choices">
       <label class="mixed-import-choice"><input type="radio" name="${name}" data-import-mode value="append" checked><span><strong>追加 / 更新同名零件 <small>默认</small></strong><span>保留旧零件；同模号、同名称的零件更新工程资料，保留啤机价格和已有用量。</span></span></label>
       <label class="mixed-import-choice"><input type="radio" name="${name}" data-import-mode value="replace"><span><strong>完全替换模具与零件</strong><span>移除全部旧模具、零件及选用关系，按本次文件重新建立。${numbered ? '小产品清单同步更新；新文件中没有的产品及其部门明细将移除。' : ''}</span></span></label>
@@ -392,7 +402,7 @@
       row.querySelector('[data-copy-part]').onclick=()=>{
         const original = parts.find(p=>p.id===id);
         const copy = JSON.parse(JSON.stringify({...original, ...(root.mixed_part_edits?.[id] || {})}));
-        copy.id = 'manual_' + crypto.randomUUID().replace(/-/g,'');
+        copy.id = 'manual_' + uuid().replace(/-/g,'');
         copy.name = (copy.name || '零件') + '（副本）';
         delete copy.shared_source;
         delete copy.source_row;
@@ -698,7 +708,7 @@
         row.querySelectorAll('input').forEach(el => el.oninput = () => { cfg.products[index][el.dataset.field] = el.type === 'number' ? Number(el.value) : el.value; });
         row.querySelector('.mixed-remove')?.addEventListener('click', () => { cfg.products.splice(index, 1); draw(); });
       });
-      panel.querySelector('.mixed-add')?.addEventListener('click', () => { cfg.products.push({ id: `p_${crypto.randomUUID()}`, code: '', name: '', ratio: 1 }); draw(); });
+      panel.querySelector('.mixed-add')?.addEventListener('click', () => { cfg.products.push({ id: `p_${uuid()}`, code: '', name: '', ratio: 1 }); draw(); });
       panel.querySelector('.mixed-save-config')?.addEventListener('click', async event => {
         const button = event.target, message = panel.querySelector('.mixed-message');
         try {

@@ -13,7 +13,8 @@ test('reimport removes unused defaults even after numbered products exist',()=>{
  const ids=unusedPlaceholders(first.config,[first.engineering]);
  const next=importParts(first.config,first.engineering,molds,{placeholderIds:ids});
  assert.deepEqual(next.config.products.map(p=>p.code),['01','02']);
- assert.deepEqual(next.engineering.mixed_imported_parts,first.engineering.mixed_imported_parts);
+ // 按持久化口径比较：undefined 键在 JSON 保存时会被丢弃，不参与深比较
+ assert.deepEqual(JSON.parse(JSON.stringify(next.engineering.mixed_imported_parts)),JSON.parse(JSON.stringify(first.engineering.mixed_imported_parts)));
  assert.equal(next.summary.added,0);
 });
 test('saved data, pending data, selection and edited names protect placeholders',()=>{

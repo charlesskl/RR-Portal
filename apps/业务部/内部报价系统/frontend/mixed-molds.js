@@ -301,7 +301,13 @@ function lookupMaterialPrice(material, grade, prices) {
   const ENGINEERING_FIELDS = ['name','mold_no','material','color','weight_g','cavity','sets','cycle_sec','machine','machine_model','target','daily_capacity','production_demand','mold_type','mold_size','price_rmb','price_usd','images','note','source_file'];
   function updateEngineeringFields(existing, incoming) {
     const result = {...existing};
-    for (const key of ENGINEERING_FIELDS) if (Object.prototype.hasOwnProperty.call(incoming, key)) result[key] = incoming[key];
+    // 新文件里缺失/留空的字段不清空已有值（缺失 ≠ 删除）；空串也不覆盖。
+    for (const key of ENGINEERING_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(incoming, key)) continue;
+      const value = incoming[key];
+      if (value == null || value === '') continue;
+      result[key] = value;
+    }
     return result;
   }
   function prepareMoldImport(engineering, existingParts, mode = 'append') {

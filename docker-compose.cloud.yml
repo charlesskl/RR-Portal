@@ -17,6 +17,7 @@ x-qc-report-environment: &qc-report-environment
   SEED_SAMPLE_DATA: "false"
   PROXY_PREFIX: /qc-report
   SESSION_COOKIE_PATH: /qc-report/
+  SSO_SECRET: ${SSO_SECRET:?SSO_SECRET is required}
   COOKIE_SECURE: ${QC_REPORT_COOKIE_SECURE:-false}
   REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/2
   QUEUE_REQUIRED: "true"

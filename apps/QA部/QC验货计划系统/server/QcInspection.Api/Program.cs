@@ -151,6 +151,9 @@ using (var scope = app.Services.CreateScope())
     if (!inspectionColumns.Contains("ScheduleSource")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN ScheduleSource TEXT NOT NULL DEFAULT ''");
     if (!inspectionColumns.Contains("ScheduleCreatedBatchId")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN ScheduleCreatedBatchId INTEGER NULL");
     if (!inspectionColumns.Contains("InspectedQuantity")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN InspectedQuantity TEXT NULL");
+    if (!inspectionColumns.Contains("InspectionTemplate")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN InspectionTemplate TEXT NOT NULL DEFAULT ''");
+    if (!inspectionColumns.Contains("SampledCartons")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN SampledCartons TEXT NULL");
+    if (!inspectionColumns.Contains("SecondaryCartons")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN SecondaryCartons TEXT NULL");
     var approvalColumns = db.Database.SqlQueryRaw<string>("SELECT name AS Value FROM pragma_table_info('InspectionResultApprovals')").ToHashSet();
     if (!approvalColumns.Contains("RequestedInspectedQuantity")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionResultApprovals ADD COLUMN RequestedInspectedQuantity TEXT NULL");
     db.Database.ExecuteSqlRaw("CREATE INDEX IF NOT EXISTS IX_InspectionRecords_ScheduleCreatedBatchId ON InspectionRecords (ScheduleCreatedBatchId)");
@@ -162,6 +165,38 @@ using (var scope = app.Services.CreateScope())
     db.Database.ExecuteSqlRaw("CREATE UNIQUE INDEX IF NOT EXISTS IX_InspectionRecords_ScheduleKey ON InspectionRecords (ScheduleKey) WHERE ScheduleKey <> ''");
     db.Database.ExecuteSqlRaw("UPDATE InspectionRecords SET WorkflowStatus = CASE WHEN InternalResult = '不用验' OR ThirdPartyResult = '不用验' THEN '不用验' WHEN InternalResult = '待复检' OR ThirdPartyResult = '待复检' THEN '待复检' WHEN InternalResult = 'REJ' OR ThirdPartyResult = 'REJ' THEN 'REJ' WHEN InternalResult = 'HOLD' OR ThirdPartyResult = 'HOLD' THEN 'HOLD' WHEN InternalResult IN ('PASS', 'AOD', 'LG', 'AOD+LG') OR ThirdPartyResult IN ('PASS', 'AOD', 'LG', 'AOD+LG') THEN '已完成' ELSE '待验货' END WHERE WorkflowStatus = '待验货'");
     db.Database.ExecuteSqlRaw("UPDATE InspectionRecords SET WorkflowStatus = '待验货' WHERE WorkflowStatus = '已完成' AND TRIM(InternalResult) IN ('', 'Pending', '需要验货', '还需要验货', 'NA') AND TRIM(ThirdPartyResult) IN ('', 'Pending', '需要验货', '还需要验货', 'NA')");
+    // Older completed batches did not store actual writes. Recover only records whose source and
+    // last import timestamp match that batch's confirmation; never infer from a filename alone.
+    foreach (var legacyBatch in db.ScheduleImportBatches.Where(value => value.Status == "已完成" && value.ImportRange == "").ToList())
+    {
+        if (legacyBatch.ConfirmedAt is null) continue;
+        var previewKinds = (JsonSerializer.Deserialize<ZuruPreviewItem[]>(legacyBatch.PreviewJson) ?? [])
+            .GroupBy(item => item.Row.BusinessKey).ToDictionary(group => group.Key, group => group.First().Kind);
+        var lower = legacyBatch.ConfirmedAt.Value.AddSeconds(-2);
+        var upper = legacyBatch.ConfirmedAt.Value.AddSeconds(2);
+        var restored = db.InspectionRecords.Where(record => record.ScheduleSource == legacyBatch.Source &&
+            record.SourceFile == legacyBatch.FileName && record.ImportedAt >= lower && record.ImportedAt <= upper).ToList();
+        var actualNew = 0; var actualChanged = 0;
+        var sites = new Dictionary<string, (int New, int Changed)>();
+        foreach (var record in restored)
+        {
+            if (!previewKinds.TryGetValue(record.ScheduleKey, out var kind) || kind is not ("新增" or "变更")) continue;
+            sites.TryGetValue(record.Site, out var counts);
+            if (kind == "新增")
+            {
+                if (record.ScheduleCreatedBatchId is not null && record.ScheduleCreatedBatchId != legacyBatch.Id) continue;
+                record.ScheduleCreatedBatchId = legacyBatch.Id;
+                actualNew++; counts.New++;
+            }
+            else { actualChanged++; counts.Changed++; }
+            sites[record.Site] = counts;
+        }
+        legacyBatch.ActualNewCount = actualNew;
+        legacyBatch.ActualChangedCount = actualChanged;
+        legacyBatch.ImportRange = sites.Count == 0 ? "历史批次无法可靠追溯实际写入范围" : string.Join("；", sites.OrderBy(entry => entry.Key)
+            .Select(entry => $"{entry.Key}：新增{entry.Value.New}、变更{entry.Value.Changed}"));
+    }
+    db.SaveChanges();
     db.Database.ExecuteSqlRaw("UPDATE Users SET Role = '管理员', DataScope = '全部厂区及系统设置' WHERE Role = 'Admin'");
     var adminPassword = Environment.GetEnvironmentVariable("QC_ADMIN_PASSWORD");
     if (!string.IsNullOrWhiteSpace(adminPassword) && !db.Users.Any())
@@ -323,9 +358,9 @@ app.MapGet("/api/public/plans", async (string site, string? template, string? mo
     if (site is not ("兴信" or "湖南" or "华登" or "待分配")) return Results.BadRequest(new { error = "厂区无效" });
     var siteQuery = db.InspectionRecords.AsNoTracking().Where(record => record.Site == site);
     if (site == "华登" && template == "JAZ专用")
-        siteQuery = siteQuery.Where(record => record.ScheduleSource == "JAZ/JWC" || EF.Functions.Like(record.Customer, "%JAZ%") || EF.Functions.Like(record.InspectionParty, "%JAZ%"));
+        siteQuery = siteQuery.Where(record => record.InspectionTemplate == "JAZ专用" || record.InspectionTemplate == "" && (record.ScheduleSource == "JAZ/JWC" || EF.Functions.Like(record.SourceSheet, "%DPI%") || EF.Functions.Like(record.SourceSheet, "%JAZ%") || EF.Functions.Like(record.Customer, "%JAZ%") || EF.Functions.Like(record.InspectionParty, "%JAZ%")));
     else if (site == "华登" && template == "普通验货")
-        siteQuery = siteQuery.Where(record => record.ScheduleSource != "JAZ/JWC" && !EF.Functions.Like(record.Customer, "%JAZ%") && !EF.Functions.Like(record.InspectionParty, "%JAZ%"));
+        siteQuery = siteQuery.Where(record => record.InspectionTemplate == "普通验货" || record.InspectionTemplate == "" && record.ScheduleSource != "JAZ/JWC" && !EF.Functions.Like(record.SourceSheet, "%DPI%") && !EF.Functions.Like(record.SourceSheet, "%JAZ%") && !EF.Functions.Like(record.Customer, "%JAZ%") && !EF.Functions.Like(record.InspectionParty, "%JAZ%"));
     if (view is not (null or "all" or "week" or "unfinished")) return Results.BadRequest(new { error = "计划视图无效" });
     siteQuery = FilterInspectionPlanView(siteQuery, view);
     var dates = await siteQuery.Where(record => record.InspectionDate != null).Select(record => record.InspectionDate!.Value).Distinct().ToListAsync(ct);
@@ -368,7 +403,7 @@ app.MapGet("/api/public/plans", async (string site, string? template, string? mo
         .Select(record => new { record.Id, record.ScheduleSource, record.InspectionDate, record.InspectionLocation,
             record.InspectionParty, record.ThirdPartyOrganization, record.ThirdPartyInspectionLocation,
             record.Customer, record.ContractNumber, record.CustomerPo, record.ItemNumber, record.ProductName,
-            record.Quantity, record.Cartons, record.PackingQuantity, record.PackagingSpec,
+            record.Quantity, record.Cartons, record.SampledCartons, record.SecondaryCartons, record.PackingQuantity, record.PackagingSpec,
             record.InternalResult, record.ThirdPartyResult, record.HoldRejectReason,
             record.ProductionWorkshop, record.ProductionSupervisor, record.ResponsibleLineLeader,
             record.ProblemSource, record.HandlingResult, record.TestScrap, record.Note, record.WorkflowStatus })
@@ -585,16 +620,13 @@ app.MapPost("/api/legacy-inspections/import", async (HttpRequest request, string
         return Results.BadRequest(new { error = error.Message });
     }
 
-    // All matching and conflict checks finish before any mutation; one save commits the complete file.
+    // Plan every row before writing; commit accepted entries together and leave skipped rows untouched.
     await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
     var existingRecords = await db.InspectionRecords.Where(value => value.Site == site).ToListAsync(cancellationToken);
+    var invalidRows = issues.Select(issue => (issue.Sheet, issue.Row)).Distinct().Count();
     var entries = LegacyInspectionImport.Plan(incoming, existingRecords, site, issues);
-    if (issues.Count > 0)
-        return Results.Conflict(new
-        {
-            error = $"发现 {issues.Select(issue => (issue.Sheet, issue.Row)).Distinct().Count()} 行有问题，共 {issues.Count} 个问题；本次整批未写入，请查看问题清单并修正Excel。",
-            issues = issues.OrderBy(issue => issue.Sheet).ThenBy(issue => issue.Row),
-        });
+    var pendingRows = issues.Select(issue => (issue.Sheet, issue.Row)).Distinct().Count();
+    var duplicatesSkipped = incoming.Count + invalidRows - pendingRows - entries.Count;
     var ids = entries.Where(entry => entry.Current is not null).Select(entry => entry.Current!.Id).ToArray();
     var pending = await db.InspectionResultApprovals.Where(value => ids.Contains(value.InspectionRecordId) && value.Status == "待审批")
         .ToListAsync(cancellationToken);
@@ -603,6 +635,7 @@ app.MapPost("/api/legacy-inspections/import", async (HttpRequest request, string
     var inserted = 0;
     var updated = 0;
     var resultChanged = 0;
+    var unchanged = 0;
     foreach (var entry in entries)
     {
         var record = entry.Incoming;
@@ -613,6 +646,11 @@ app.MapPost("/api/legacy-inspections/import", async (HttpRequest request, string
             record.WorkflowStatus = ResultStatus(record.InternalResult, record.ThirdPartyResult);
             db.InspectionRecords.Add(record);
             inserted++;
+            continue;
+        }
+        if (LegacyInspectionImport.IsSame(current, record) && !pending.Any(value => value.InspectionRecordId == current.Id))
+        {
+            unchanged++;
             continue;
         }
         var before = new { current.InternalResult, current.ThirdPartyResult, current.HoldRejectReason, current.InspectedQuantity };
@@ -660,8 +698,9 @@ app.MapPost("/api/legacy-inspections/import", async (HttpRequest request, string
     {
         return Results.Conflict(new { error = "记录重复或导入期间数据发生变化，本次未写入，请刷新后核对并重试" });
     }
-    return Results.Ok(new { site, fileName = file.FileName, parsed = incoming.Count, inserted, updated,
-        duplicatesSkipped = incoming.Count - entries.Count, resultChanged, total = existingRecords.Count + inserted });
+    return Results.Ok(new { site, fileName = file.FileName, parsed = incoming.Count + invalidRows, inserted, updated, unchanged,
+        duplicatesSkipped, pendingReviewCount = pendingRows, resultChanged, total = existingRecords.Count + inserted,
+        issues = issues.OrderBy(issue => issue.Sheet).ThenBy(issue => issue.Row) });
 }).DisableAntiforgery().RequireAuthorization("QcWrite");
 
 app.MapGet("/api/legacy-inspections", async (string site, string? template, string? month, string? from, string? to, string? view, int? page, string? q, string? status, string? customer, string? location, ClaimsPrincipal principal, AppDbContext db, CancellationToken cancellationToken) =>
@@ -672,9 +711,9 @@ app.MapGet("/api/legacy-inspections", async (string site, string? template, stri
     var pageNumber = Math.Max(page ?? 1, 1);
     var siteQuery = db.InspectionRecords.AsNoTracking().Where(record => record.Site == site);
     if (site == "华登" && template == "JAZ专用")
-        siteQuery = siteQuery.Where(record => record.ScheduleSource == "JAZ/JWC" || EF.Functions.Like(record.Customer, "%JAZ%") || EF.Functions.Like(record.InspectionParty, "%JAZ%"));
+        siteQuery = siteQuery.Where(record => record.InspectionTemplate == "JAZ专用" || record.InspectionTemplate == "" && (record.ScheduleSource == "JAZ/JWC" || EF.Functions.Like(record.SourceSheet, "%DPI%") || EF.Functions.Like(record.SourceSheet, "%JAZ%") || EF.Functions.Like(record.Customer, "%JAZ%") || EF.Functions.Like(record.InspectionParty, "%JAZ%")));
     else if (site == "华登" && template == "普通验货")
-        siteQuery = siteQuery.Where(record => record.ScheduleSource != "JAZ/JWC" && !EF.Functions.Like(record.Customer, "%JAZ%") && !EF.Functions.Like(record.InspectionParty, "%JAZ%"));
+        siteQuery = siteQuery.Where(record => record.InspectionTemplate == "普通验货" || record.InspectionTemplate == "" && record.ScheduleSource != "JAZ/JWC" && !EF.Functions.Like(record.SourceSheet, "%DPI%") && !EF.Functions.Like(record.SourceSheet, "%JAZ%") && !EF.Functions.Like(record.Customer, "%JAZ%") && !EF.Functions.Like(record.InspectionParty, "%JAZ%"));
     if (view is not (null or "all" or "week" or "unfinished")) return Results.BadRequest(new { error = "计划视图无效" });
     siteQuery = FilterInspectionPlanView(siteQuery, view);
     var dates = await siteQuery.Where(record => record.InspectionDate != null)
@@ -739,9 +778,9 @@ app.MapGet("/api/legacy-inspections/export", async (string site, string? templat
     var selectedTemplate = site == "华登" && template == "JAZ专用" ? "JAZ专用" : "普通验货";
     var query = db.InspectionRecords.AsNoTracking().Where(record => record.Site == site);
     if (site == "华登" && selectedTemplate == "JAZ专用")
-        query = query.Where(record => record.ScheduleSource == "JAZ/JWC" || EF.Functions.Like(record.Customer, "%JAZ%") || EF.Functions.Like(record.InspectionParty, "%JAZ%"));
+        query = query.Where(record => record.InspectionTemplate == "JAZ专用" || record.InspectionTemplate == "" && (record.ScheduleSource == "JAZ/JWC" || EF.Functions.Like(record.SourceSheet, "%DPI%") || EF.Functions.Like(record.SourceSheet, "%JAZ%") || EF.Functions.Like(record.Customer, "%JAZ%") || EF.Functions.Like(record.InspectionParty, "%JAZ%")));
     else if (site == "华登")
-        query = query.Where(record => record.ScheduleSource != "JAZ/JWC" && !EF.Functions.Like(record.Customer, "%JAZ%") && !EF.Functions.Like(record.InspectionParty, "%JAZ%"));
+        query = query.Where(record => record.InspectionTemplate == "普通验货" || record.InspectionTemplate == "" && record.ScheduleSource != "JAZ/JWC" && !EF.Functions.Like(record.SourceSheet, "%DPI%") && !EF.Functions.Like(record.SourceSheet, "%JAZ%") && !EF.Functions.Like(record.Customer, "%JAZ%") && !EF.Functions.Like(record.InspectionParty, "%JAZ%"));
     if (view is not (null or "all" or "week" or "unfinished")) return Results.BadRequest(new { error = "计划视图无效" });
     query = FilterInspectionPlanView(query, view);
 
@@ -1183,6 +1222,7 @@ static void ApplyInspectionWrite(InspectionRecord target, InspectionWriteRequest
     target.ItemNumber = source.ItemNumber?.Trim() ?? string.Empty;
     target.ProductName = source.ProductName?.Trim() ?? string.Empty;
     target.Quantity = source.Quantity;
+    target.SampledCartons = source.SampledCartons; target.SecondaryCartons = source.SecondaryCartons;
     target.Cartons = source.Quantity is not null && source.PackingQuantity is > 0
         ? Math.Ceiling(source.Quantity.Value / source.PackingQuantity.Value)
         : source.Cartons;
@@ -1319,4 +1359,4 @@ public sealed record InspectionWriteRequest(string Site, DateTime? InspectionDat
     string? CustomerPo, string? ItemNumber, string? ProductName, decimal? Quantity, decimal? Cartons,
     string? InternalResult, string? ThirdPartyResult, string? HoldRejectReason, string? ProductionWorkshop,
     string? ProductionSupervisor, string? ResponsibleLineLeader, string? ProblemSource, string? HandlingResult,
-    string? TestScrap, string? PackagingSpec, decimal? PackingQuantity, string? ThirdPartyInspectionLocation, string? Note);
+    string? TestScrap, string? PackagingSpec, decimal? PackingQuantity, string? ThirdPartyInspectionLocation, string? Note, decimal? SampledCartons = null, decimal? SecondaryCartons = null);

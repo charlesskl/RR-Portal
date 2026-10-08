@@ -10,6 +10,9 @@ public sealed class InspectionRecord
     public string ScheduleKey { get; set; } = string.Empty;
     public string ScheduleSource { get; set; } = string.Empty;
     public long? ScheduleCreatedBatchId { get; set; }
+    public string InspectionTemplate { get; set; } = string.Empty;
+    public decimal? SampledCartons { get; set; }
+    public decimal? SecondaryCartons { get; set; }
     public string Site { get; set; } = string.Empty;
     public DateTime? InspectionDate { get; set; }
     public string InspectionLocation { get; set; } = string.Empty;

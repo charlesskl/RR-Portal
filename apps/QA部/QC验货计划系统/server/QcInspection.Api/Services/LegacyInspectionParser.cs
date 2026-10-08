@@ -28,7 +28,8 @@ public static class LegacyInspectionParser
             var headerRow = FindHeaderRow(sheet);
             if (headerRow < 0) continue;
             var headers = BuildHeaders(sheet.Rows[headerRow]);
-            if (site == "华登" && template == "JAZ专用" && !headers.ContainsKey(NormalizeHeader("现PO号"))) continue;
+            var jazHeaders = headers.ContainsKey("现PO号") || headers.ContainsKey("工作单号") || headers.ContainsKey("洋行名称");
+            if (site == "华登" && (template == "JAZ专用") != jazHeaders) continue;
             for (var rowIndex = headerRow + 1; rowIndex < sheet.Rows.Count; rowIndex++)
             {
                 var row = sheet.Rows[rowIndex];
@@ -45,8 +46,8 @@ public static class LegacyInspectionParser
     private static bool ShouldImportSheet(string site, string sheetName, string? template) => site switch
     {
         "兴信" => System.Text.RegularExpressions.Regex.IsMatch(sheetName, @"^\d+月份?$"),
-        "华登" when template == "JAZ专用" => sheetName.Contains("JAZ", StringComparison.OrdinalIgnoreCase),
-        "华登" => !sheetName.Contains("DPI", StringComparison.OrdinalIgnoreCase),
+        "华登" when template == "JAZ专用" => sheetName.Contains("JAZ", StringComparison.OrdinalIgnoreCase) || sheetName.Contains("DPI", StringComparison.OrdinalIgnoreCase),
+        "华登" => !sheetName.Contains("DPI", StringComparison.OrdinalIgnoreCase) && !sheetName.Contains("JAZ", StringComparison.OrdinalIgnoreCase),
         "湖南" => sheetName == "验货总结汇总表",
         _ => false,
     };
@@ -55,7 +56,7 @@ public static class LegacyInspectionParser
     {
         for (var rowIndex = 0; rowIndex < Math.Min(sheet.Rows.Count, 10); rowIndex++)
         {
-            var values = sheet.Rows[rowIndex].ItemArray.Select(Text).ToArray();
+            var values = sheet.Rows[rowIndex].ItemArray.Select(value => NormalizeHeader(Text(value))).ToArray();
             var standard = values.Any(value => value == "日期") && values.Any(value => value == "货号");
             var jaz = values.Any(value => value == "现PO号") && values.Any(value => value == "货号") && values.Any(value => value == "第三方验货时间");
             if (standard || jaz) return rowIndex;
@@ -92,31 +93,35 @@ public static class LegacyInspectionParser
             return string.Empty;
         }
 
-        var isJaz = headers.ContainsKey(NormalizeHeader("现PO号"));
+        var isJaz = headers.ContainsKey("现PO号") || headers.ContainsKey("工作单号") || headers.ContainsKey("洋行名称");
         var date = Date(Get("日期")) ?? EmbeddedMonthDay(Get("第三方验货时间"), fileName);
         var itemNumber = Get("货号");
-        var contract = Get("合同编号");
-        if (date is null && string.IsNullOrWhiteSpace(itemNumber) && string.IsNullOrWhiteSpace(contract)) return null;
+        var contract = Get("合同编号", "工作单号", "现PO号");
+        if (date is null && new[] { itemNumber, contract, Get("客户/PO", "客户PO", "现PO号"),
+            Get("产品名称", "名称"), Get("数量"), Get("洋行结果", "结果"), Get("第三方结果") }.All(string.IsNullOrWhiteSpace)) return null;
         var note = Get("备注");
-        var workshop = Get("生产车间");
+        var workshop = Get("生产车间", "生产地点");
         var supervisor = Get("责任主管", "生产主管");
         var record = new InspectionRecord
         {
             Site = site,
+            InspectionTemplate = site == "华登" ? isJaz ? "JAZ专用" : "普通验货" : "",
             InspectionDate = date,
             InspectionLocation = Get("验货地点", "验货地址"),
             InspectionParty = site == "华登" ? Get("验货客户") : note,
             ThirdPartyOrganization = Get("第三方"),
-            Customer = isJaz ? "JAZWARES" : Get("客户名称"),
-            ContractNumber = isJaz ? Get("现PO号") : contract,
+            Customer = isJaz ? Get("洋行名称", "客户名称") is { Length: > 0 } name ? name : "JAZWARES" : Get("客户名称"),
+            ContractNumber = contract,
             CustomerPo = Get("客户/PO", "客户PO", "现PO号"),
             ItemNumber = itemNumber,
             ProductName = Get("产品名称", "名称"),
             Quantity = Number(Get("数量")),
             Cartons = Number(Get("箱数", "总箱数")),
-            InternalResult = Get("洋行结果", "结果"),
+            SampledCartons = Number(Get("抽箱数")),
+            SecondaryCartons = Number(Get("箱数#2")),
+            InternalResult = Get("洋行结果", "结果", "验货结果"),
             ThirdPartyResult = Get("第三方结果"),
-            HoldRejectReason = Get("HOLD/REJ原因"),
+            HoldRejectReason = Get("HOLD/REJ原因", "原因描述"),
             ProductionWorkshop = workshop,
             ProductionSupervisor = ResolveProductionSupervisor(workshop, supervisor),
             ResponsibleLineLeader = Get("责任拉长"),
@@ -137,22 +142,23 @@ public static class LegacyInspectionParser
             ["InspectionDate"] = ["日期", "第三方验货时间"],
             ["InspectionLocation"] = ["验货地点", "验货地址"],
             ["InspectionParty"] = site == "华登" ? ["验货客户"] : ["备注"],
-            ["ThirdPartyOrganization"] = ["第三方"], ["Customer"] = ["客户名称", "现PO号"],
-            ["ContractNumber"] = isJaz ? ["现PO号"] : ["合同编号"],
+            ["ThirdPartyOrganization"] = ["第三方"], ["Customer"] = ["客户名称", "洋行名称", "现PO号"],
+            ["ContractNumber"] = ["合同编号", "工作单号", "现PO号"],
             ["CustomerPo"] = ["客户/PO", "客户PO", "现PO号"], ["ItemNumber"] = ["货号"],
             ["ProductName"] = ["产品名称", "名称"], ["Quantity"] = ["数量"],
             ["InspectedQuantity"] = ["实际验货数量", "本次实际验货数量", "实检数量"],
-            ["Cartons"] = ["箱数", "总箱数"], ["InternalResult"] = ["洋行结果", "结果"],
-            ["ThirdPartyResult"] = ["第三方结果"], ["HoldRejectReason"] = ["HOLD/REJ原因"],
-            ["ProductionWorkshop"] = ["生产车间"], ["ProductionSupervisor"] = ["责任主管", "生产主管", "生产车间"],
+            ["Cartons"] = ["箱数", "总箱数"], ["InternalResult"] = ["洋行结果", "结果", "验货结果"],
+            ["ThirdPartyResult"] = ["第三方结果"], ["HoldRejectReason"] = ["HOLD/REJ原因", "原因描述"],
+            ["ProductionWorkshop"] = ["生产车间", "生产地点"], ["ProductionSupervisor"] = ["责任主管", "生产主管", "生产车间", "生产地点"],
             ["ResponsibleLineLeader"] = ["责任拉长"], ["ProblemSource"] = ["问题源头"],
             ["HandlingResult"] = ["处理结果"], ["TestScrap"] = ["测试报废"],
             ["PackagingSpec"] = ["包装"], ["PackingQuantity"] = ["装箱数"],
-            ["ThirdPartyInspectionLocation"] = ["验货地点#2"], ["Note"] = ["备注"],
+            ["ThirdPartyInspectionLocation"] = ["验货地点#2"], ["Note"] = ["备注"], ["SampledCartons"] = ["抽箱数"], ["SecondaryCartons"] = ["箱数#2"],
         };
         record.ImportFields = columns.Where(pair => pair.Value.Any(name => headers.ContainsKey(NormalizeHeader(name))))
             .Select(pair => pair.Key).ToHashSet();
-        foreach (var field in new[] { "Quantity", "Cartons", "PackingQuantity", "InspectedQuantity" })
+        if (site == "华登") record.ImportFields.Add(nameof(record.InspectionTemplate));
+        foreach (var field in new[] { "Quantity", "Cartons", "PackingQuantity", "InspectedQuantity", "SampledCartons", "SecondaryCartons" })
         {
             var value = Get(columns[field]);
             if (!string.IsNullOrWhiteSpace(value) && Number(value) is null)
@@ -162,18 +168,13 @@ public static class LegacyInspectionParser
         if (record.Quantity is < 0 || record.Cartons is < 0 || record.PackingQuantity is < 0 ||
             record.InspectedQuantity is < 0 || record.InspectedQuantity > record.Quantity)
             issues.Add(LegacyImportIssue.From(record, "数量不能为负数，实检数量不能超过计划数量"));
-        if (date is null || string.IsNullOrWhiteSpace(record.ItemNumber) ||
-            string.IsNullOrWhiteSpace(record.ContractNumber) && string.IsNullOrWhiteSpace(record.CustomerPo))
-            issues.Add(LegacyImportIssue.From(record, "请填写有效验货日期、货号及合同号或客户PO"));
-        record.Fingerprint = Fingerprint(record);
+        // Empty optional cells are legitimate in historical inspection sheets.
+        // A supplied, unparseable date still needs correction; an absent date is accepted.
+        var dateText = Get("日期");
+        if (date is null && !string.IsNullOrWhiteSpace(dateText) && dateText is not ("-" or "—"))
+            issues.Add(LegacyImportIssue.From(record, $"验货日期无法识别：{dateText}"));
+        record.Fingerprint = LegacyInspectionImport.Fingerprint(record);
         return record;
-    }
-
-    private static string Fingerprint(InspectionRecord record)
-    {
-        var identity = string.Join('|', record.Site, record.InspectionDate?.ToString("yyyy-MM-dd"),
-            record.ContractNumber, record.CustomerPo, record.ItemNumber, record.Quantity, record.Cartons);
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
 
     private static string NormalizeHeader(string value) => value.Replace(" ", string.Empty)
@@ -188,6 +189,8 @@ public static class LegacyInspectionParser
 
     private static DateTime? Date(string value)
     {
+        value = System.Text.RegularExpressions.Regex.Replace(value.Trim(),
+            @"\s*[（(](?:星期|周)?[一二三四五六日天][)）]\s*$", "");
         if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var serial) && serial > 0)
             try { return DateTime.FromOADate(serial).Date; } catch (ArgumentException) { return null; }
         return DateTime.TryParse(value, CultureInfo.GetCultureInfo("zh-CN"), DateTimeStyles.None, out var date) ? date.Date : null;

@@ -88,10 +88,8 @@ public static class InspectionExportService
             var cells = new List<Cell>();
             for (var index = 0; index < columns.Length; index++)
             {
-                object? value = template == "JAZ专用" && index == 0 ? sequence : columns[index].Value(record);
-                if (template == "JAZ专用" && index == 6 && record.Quantity is not null && record.PackingQuantity is > 0)
-                    cells.Add(FormulaCell($"ROUNDUP(E{rowNumber}/F{rowNumber},0)"));
-                else cells.Add(ValueCell(value));
+                object? value = columns[index].Value(record);
+                cells.Add(ValueCell(value));
             }
             data.Append(RowOf(cells, 24));
             sequence++; rowNumber++;
@@ -108,10 +106,11 @@ public static class InspectionExportService
     {
         if (template == "JAZ专用") return
         [
-            new("序号", _ => null, 8), new("现PO号", r => string.IsNullOrWhiteSpace(r.CustomerPo) ? r.ContractNumber : r.CustomerPo, 22),
-            new("货号", r => r.ItemNumber, 18), new("名称", r => r.ProductName, 32), new("数量", r => r.Quantity, 12),
-            new("装箱数", r => r.PackingQuantity, 12), new("总箱数", r => r.Cartons, 12),
-            new("第三方验货时间", r => r.InspectionDate, 20), new("包装", r => r.PackagingSpec, 35), new("备注", r => r.Note, 35),
+            new("日期", r => r.InspectionDate, 18), new("洋行名称", r => r.Customer, 18), new("工作单号", r => r.ContractNumber, 22),
+            new("货号", r => r.ItemNumber, 22), new("名称", r => r.ProductName, 32), new("数量", r => r.Quantity, 12), new("箱数", r => r.Cartons, 12),
+            new("验货结果", r => r.InternalResult, 18), new("原因描述", r => r.HoldRejectReason, 26), new("生产地点", r => r.ProductionWorkshop, 18),
+            new("责任主管", r => r.ProductionSupervisor, 18), new("责任拉长", r => r.ResponsibleLineLeader, 18), new("抽箱数", r => r.SampledCartons, 12),
+            new("箱数", r => r.SecondaryCartons, 12), new("测试报废", r => r.TestScrap, 18),
         ];
         if (site == "湖南") return
         [

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Text.Json.Nodes;
 using VoyagePlex.Api.Entities;
 
 namespace VoyagePlex.Api.Services;
@@ -7,6 +8,16 @@ public sealed record ProductInfoMatch(ProductInfo Product, string ChineseName, i
 
 public static class ProductInfoMatching
 {
+    public static void FillCategory(JsonObject item, IEnumerable<ProductInfo> products)
+    {
+        if (!string.IsNullOrWhiteSpace(item["category"]?.ToString())) return;
+        if (!decimal.TryParse(item["spec"]?.ToString(), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var specification)) return;
+        var match = FindExact(item["product_code"]?.ToString(), specification, products);
+        if (!string.IsNullOrWhiteSpace(match?.Product.ToyCategory))
+            item["category"] = match.Product.ToyCategory.Trim();
+    }
+
     public static string NormalizeCode(string? value) =>
         Regex.Replace((value ?? string.Empty).ToUpperInvariant(), "[^A-Z0-9]", string.Empty);
 

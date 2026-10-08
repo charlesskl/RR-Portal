@@ -25,6 +25,22 @@ from app.destination_country import country_from_text, infer_destination_country
 
 
 class ParserTests(unittest.TestCase):
+    def test_shipment_export_toy_categories_follow_each_item(self):
+        task = {"customer": "ZURU", "soNumber": "CAT-TEST", "items": [
+            {"product_code": "A", "category": "电子"},
+            {"product_code": "B", "category": "塑胶"},
+            {"product_code": "C"},
+        ]}
+        for variant in ("shipping", "warehouse"):
+            task["exportVariant"] = variant
+            workbook, _ = build_shipment_workbook(task)
+            sheet = openpyxl.load_workbook(BytesIO(workbook)).active
+            self.assertEqual("玩具类别", sheet["H5"].value)
+            self.assertEqual("电子", sheet["H6"].value)
+            self.assertEqual("塑胶", sheet["H7"].value)
+            self.assertIsNone(sheet["H8"].value)
+
+
     def test_destination_country_uses_explicit_country_and_curated_ports(self):
         self.assertEqual("美国", country_from_text("WM US ELWOOD; SAVANNAH"))
         self.assertEqual("英国", country_from_text("YTN-FELIXSTOWE, UK"))

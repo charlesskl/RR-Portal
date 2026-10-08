@@ -12,6 +12,9 @@ public sealed class ImportEmailItem
     public string MailSender { get; set; } = string.Empty;
     public string MailReceivedAt { get; set; } = string.Empty;
     public string MailReceivedDate { get; set; } = string.Empty;
+    public string ShipmentMode { get; set; } = "Unknown";
+    public string HandlingOutcome { get; set; } = string.Empty;
+    public string TaskIdsJson { get; set; } = "[]";
     public string WorkCategory { get; set; } = "Unclassified";
     public string ClassificationSource { get; set; } = "Automatic";
     public int ClassificationConfidence { get; set; }

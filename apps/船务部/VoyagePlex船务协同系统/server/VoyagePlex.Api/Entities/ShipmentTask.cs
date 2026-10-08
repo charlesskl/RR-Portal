@@ -16,6 +16,7 @@ public sealed class ShipmentTask
     public string SpecialRequirements { get; set; } = string.Empty;
     public string WarehouseGroupsJson { get; set; } = "[]";
     public string ItemsJson { get; set; } = "[]";
+    public string SourceEmailsJson { get; set; } = "[]";
     public long? SourceImportItemId { get; set; }
     public string SourceGroupKey { get; set; } = string.Empty;
     public string Status { get; set; } = "PendingReview";

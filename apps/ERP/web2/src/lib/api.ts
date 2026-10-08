@@ -8,10 +8,13 @@ export class ApiError extends Error {
   }
 }
 
+/** 站点根路径(dev 为 '/',云端为 '/erp/'),用于拼 API 与整页跳转 */
+export const base = import.meta.env.BASE_URL;
+
 /** fetch 封装:自动带 token,401 清令牌并跳登录;错误消息取后端 {消息} 字段 */
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${base}api${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -21,7 +24,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (res.status === 401) {
     clearToken();
-    if (!location.pathname.startsWith("/login")) location.assign("/login");
+    if (!location.pathname.endsWith("/login")) location.assign(`${base}login`);
     throw new ApiError(401, "登录已过期，请重新登录");
   }
   if (res.status === 204) return undefined as T;

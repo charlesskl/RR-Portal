@@ -10,7 +10,7 @@ export default function LogoutPage() {
     void authApi.logout().catch(() => {});
     logout();
     // 整页跳转:不走 react-router 内部导航,确保 keep-alive 标签页与查询缓存一并清空
-    window.location.assign("/login");
+    window.location.assign(`${import.meta.env.BASE_URL}login`);
   }, []);
   return (
     <div className="flex h-full min-h-60 items-center justify-center">

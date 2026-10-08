@@ -175,6 +175,11 @@ jobs:
             # PrintLink 3D 打印协同平台：首次启动的初始管理员密码（仅首次初始化生效）
             sync_qc_plan_secret PRINTLINK_ADMIN_PASSWORD '${{ secrets.PRINTLINK_ADMIN_PASSWORD }}'
 
+            # ERP 生产管理系统：SQL Server sa 密码（仅首次初始化生效，之后改密码需在库内改）
+            # 与 JWT 签名密钥（改动后下次部署随镜像重建生效）
+            sync_qc_plan_secret ERP_SA_PASSWORD '${{ secrets.ERP_SA_PASSWORD }}'
+            sync_qc_plan_secret ERP_JWT_KEY '${{ secrets.ERP_JWT_KEY }}'
+
             echo "=== Script version check ==="
             git fetch origin main
             DEPLOY_SCRIPT_RUNNER=$(mktemp)
@@ -287,6 +292,7 @@ jobs:
               /zuru-order-system/health \
               /zuru-master/health \
               /voyageplex/api/health \
+              /erp/health \
               /qc-plan/api/health; do
             check_endpoint "$ENDPOINT" || FAILED=$((FAILED + 1))
           done

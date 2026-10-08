@@ -174,7 +174,7 @@ export function TopBar({
             onSelect={() => {
               void authApi.logout().catch(() => {});
               logout();
-              location.assign("/login");
+              location.assign(`${import.meta.env.BASE_URL}login`);
             }}
           >
             <SignOut className="mr-2 h-4.5 w-4.5" />

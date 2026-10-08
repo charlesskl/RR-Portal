@@ -1293,6 +1293,85 @@ services:
     networks:
       - platform-net
 
+  # ERP 生产管理系统（独立顶层系统，不属任何部门）：SQL Server + 迁移初始化 + 后端同源托管前端
+  erp-sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${ERP_SA_PASSWORD:?ERP_SA_PASSWORD is required}
+      # 限制 SQL Server 内存，避免挤占同机其他服务
+      MSSQL_MEMORY_LIMIT_MB: "1536"
+      TZ: Asia/Shanghai
+    volumes:
+      - ./apps/ERP/data/sqlserver:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S 127.0.0.1 -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -l 3 >/dev/null 2>&1 || /opt/mssql-tools/bin/sqlcmd -S 127.0.0.1 -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -l 3 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 90s
+    mem_limit: 2304m
+    memswap_limit: 2304m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  erp-db-init:
+    build:
+      context: ./apps/ERP
+      dockerfile: Dockerfile.dbinit
+    environment:
+      ERP_DB: Server=erp-sqlserver,1433;Database=erp;User Id=sa;Password=${ERP_SA_PASSWORD:?ERP_SA_PASSWORD is required};TrustServerCertificate=True
+    depends_on:
+      erp-sqlserver:
+        condition: service_healthy
+    # 迁移脚本幂等，每次部署可重复执行；跑完即退出
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  erp-api:
+    build:
+      context: ./apps/ERP
+      dockerfile: Dockerfile
+    environment:
+      ERP_DB: Server=erp-sqlserver,1433;Database=erp;User Id=sa;Password=${ERP_SA_PASSWORD:?ERP_SA_PASSWORD is required};TrustServerCertificate=True
+      ERP_JWT_KEY: ${ERP_JWT_KEY:?ERP_JWT_KEY is required}
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: Production
+      TZ: Asia/Shanghai
+    volumes:
+      - ./apps/ERP/data/uploads:/app/wwwroot/uploads
+    depends_on:
+      erp-db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    mem_limit: 768m
+    memswap_limit: 768m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
 
 networks:
   platform-net:

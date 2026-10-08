@@ -1,0 +1,12 @@
+# Docker 构建上下文精简（以 .gitignore 为蓝本）
+**/bin/
+**/obj/
+**/node_modules/
+web2/dist/
+src/ErpApi/wwwroot/
+backups/
+*.log
+tmp/
+publish/
+docs/
+.git

@@ -5,6 +5,8 @@ import tailwindcss from "@tailwindcss/vite";
 
 // https://vite.dev/config/
 export default defineConfig({
+  // 云端经 nginx 部署在 /erp/ 子路径(仅影响生产构建;dev 服务器不受 base 影响)
+  base: "/erp/",
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { "@": path.resolve(import.meta.dirname, "./src") },

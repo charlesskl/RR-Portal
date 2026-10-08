@@ -583,7 +583,15 @@ if [[ "${#MAINT_WAIT_SERVICES[@]}" -gt 0 ]]; then
     for svc in "${MAINT_WAIT_SERVICES[@]}"; do
       CID=$(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps -q "$svc" 2>/dev/null | head -1)
       if [[ -z "$CID" ]]; then
-        ALL_HEALTHY=0; PENDING="$svc(容器不存在)"; break
+        # 无运行中容器：可能是一次性初始化容器（如 erp-db-init，restart:"no"）
+        # 已跑完退出——compose ps 默认只列 running，需 -a 才能看到；退出码 0 视为就绪。
+        XCID=$(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps -a -q "$svc" 2>/dev/null | head -1)
+        XSTATE=""
+        [[ -n "$XCID" ]] && XSTATE=$(docker inspect -f '{{.State.Status}}/{{.State.ExitCode}}' "$XCID" 2>/dev/null || true)
+        if [[ "$XSTATE" == "exited/0" ]]; then
+          continue
+        fi
+        ALL_HEALTHY=0; PENDING="$svc(未在运行${XSTATE:+,$XSTATE})"; break
       fi
       HSTATUS=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CID" 2>/dev/null || echo "unknown")
       case "$HSTATUS" in

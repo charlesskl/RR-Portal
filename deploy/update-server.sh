@@ -608,3 +608,5 @@ echo "  [MAINT] 维护模式已关闭"
 echo "[OK] Update complete."
 echo "=== Container Status ==="
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null || true
+
+# 2026-10-08: 占位变更——触发一次无影响的快速部署以清除维护模式（ERP 上线暂停中）。

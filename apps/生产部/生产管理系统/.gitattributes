@@ -1,0 +1,21 @@
+# 统一换行符：所有文本文件在仓库内一律 LF，杜绝跨平台 CRLF 漂移。
+# git 会自动识别二进制文件并跳过，无需逐一声明。
+* text=auto eol=lf
+
+# Windows 脚本保留 CRLF（cmd.exe / cscript 对 LF 敏感）。
+# 注：.ps1 用 LF 亦可，故不特殊处理，保持与仓库现状一致。
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+*.vbs  text eol=crlf
+
+# 常见二进制资源，显式标注更稳妥。
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.ico  binary
+*.gif  binary
+*.pdf  binary
+*.dll  binary
+*.xlsx binary
+*.xls  binary
+*.docx binary

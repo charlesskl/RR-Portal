@@ -7,7 +7,12 @@ public static class LegacyInspectionImport
 {
     public sealed record Entry(InspectionRecord Incoming, InspectionRecord? Current);
     private static string Normalize(string value) => value.Replace(" ", "").Trim().ToUpperInvariant();
-    private static string Order(InspectionRecord row) => string.Join('|', Normalize(row.ContractNumber), Normalize(row.CustomerPo), Normalize(row.ItemNumber));
+    private static string Order(InspectionRecord row)
+    {
+        var key = string.Join('|', Normalize(row.ContractNumber), Normalize(row.CustomerPo), Normalize(row.ItemNumber));
+        var template = row.Site == "华登" ? row.InspectionTemplate != "" ? row.InspectionTemplate : row.SourceSheet.Contains("DPI", StringComparison.OrdinalIgnoreCase) || row.SourceSheet.Contains("JAZ", StringComparison.OrdinalIgnoreCase) || row.ScheduleSource == "JAZ/JWC" || row.Customer.Contains("JAZ", StringComparison.OrdinalIgnoreCase) ? "JAZ专用" : "普通验货" : "";
+        return template + "|" + (key == "||" ? $"未填单号|{Normalize(row.Customer)}|{Normalize(row.ProductName)}" : key);
+    }
     private static string Values(InspectionRecord row) => JsonSerializer.Serialize(row.ImportFields.OrderBy(name => name)
         .ToDictionary(name => name, name => typeof(InspectionRecord).GetProperty(name)!.GetValue(row)));
 
@@ -16,48 +21,41 @@ public static class LegacyInspectionImport
         var problems = issues ?? new List<LegacyImportIssue>();
         var rows = incoming.ToArray();
         var local = existing.Where(row => row.Site == site).ToArray();
+        var byOrder = local.ToLookup(Order);
+        var byContractItem = local.ToLookup(row => (Normalize(row.ContractNumber), Normalize(row.ItemNumber)));
         var result = new List<Entry>();
         var used = new HashSet<long>();
-        foreach (var group in rows.GroupBy(row => (Order(row), row.InspectionDate?.Date)))
+        foreach (var group in rows.GroupBy(row => (Order(row), row.InspectionDate?.Date, row.Quantity, row.Cartons)))
         {
             if (group.Select(Values).Distinct().Count() > 1)
             {
                 var locations = string.Join("、", group.Select(row => $"{row.SourceSheet}第{row.SourceRow}行"));
-                problems.AddRange(group.Select(row => LegacyImportIssue.From(row, $"同订单同日期内容不同，与这些行冲突：{locations}；请核对重复行或拆分批次")));
+                problems.AddRange(group.Select(row => LegacyImportIssue.From(row, $"同订单、日期、数量及箱数相同，但其他内容不同，与这些行冲突：{locations}；请核对重复行或拆分批次")));
                 continue;
             }
             var row = group.First();
+            InspectionRecord[] candidates = [];
             try
             {
-            var candidates = local.Where(value => Order(value) == Order(row)).ToArray();
+            candidates = byOrder[Order(row)].ToArray();
             // A missing customer PO may be filled only when all other identity fields agree.
             if (candidates.Length == 0)
-                candidates = local.Where(value => Normalize(value.ItemNumber) == Normalize(row.ItemNumber) &&
-                    Normalize(value.ContractNumber) == Normalize(row.ContractNumber) &&
-                    Normalize(row.ContractNumber) != "" &&
-                    (Normalize(value.CustomerPo) == "" || Normalize(row.CustomerPo) == "")).ToArray();
+                candidates = byContractItem[(Normalize(row.ContractNumber), Normalize(row.ItemNumber))]
+                    .Where(value => Normalize(row.ContractNumber) != "" &&
+                        (Normalize(value.CustomerPo) == "" || Normalize(row.CustomerPo) == "") &&
+                        Order(value).Split('|')[0] == Order(row).Split('|')[0]).ToArray();
             var dated = candidates.Where(value => value.InspectionDate?.Date == row.InspectionDate?.Date).ToArray();
-            if (dated.Length > 1)
-                dated = dated.Where(value => value.Quantity == row.Quantity).ToArray();
+            var exactBatch = dated.Where(value => (!row.ImportFields.Contains(nameof(row.Quantity)) || value.Quantity == row.Quantity) &&
+                (!row.ImportFields.Contains(nameof(row.Cartons)) || value.Cartons == row.Cartons)).ToArray();
             InspectionRecord? current = null;
-            if (dated.Length == 1) current = dated[0];
-            else if (dated.Length > 1 || candidates.Any(value => value.InspectionDate?.Date == row.InspectionDate?.Date))
-                throw Conflict(row);
-            else if (candidates.Length > 0)
+            if (exactBatch.Length == 1) current = exactBatch[0];
+            else if (exactBatch.Length > 1)
             {
-                // A complete sheet listing old and new dates explicitly identifies separate batches.
-                var oldDatesPresent = candidates.All(value => rows.Any(other => Order(other) == Order(row) &&
-                    other.InspectionDate?.Date == value.InspectionDate?.Date));
-                if (!oldDatesPresent)
-                {
-                    // Only a single unfinished plan can be rescheduled without mistaking history for a new batch.
-                    var finalResults = new[] { "PASS", "HOLD", "REJ", "AOD", "LG", "AOD+LG", "不用验", "待复检" };
-                    if (candidates.Length != 1 || candidates[0].Quantity != row.Quantity ||
-                        finalResults.Contains(candidates[0].InternalResult.Trim().ToUpperInvariant()) ||
-                        finalResults.Contains(candidates[0].ThirdPartyResult.Trim().ToUpperInvariant())) throw Conflict(row);
-                    current = candidates[0];
-                }
+                // Existing duplicate history does not block an unchanged Excel row.
+                current = exactBatch.FirstOrDefault(value => IsSame(value, row));
+                if (current is null) throw Conflict(row);
             }
+            // Different dates, quantities or cartons are distinct inspections, even for the same order.
             if (current is not null && !used.Add(current.Id)) throw Conflict(row);
             var quantity = row.ImportFields.Contains(nameof(row.Quantity)) ? row.Quantity : current?.Quantity;
             var inspected = row.ImportFields.Contains(nameof(row.InspectedQuantity)) ? row.InspectedQuantity : current?.InspectedQuantity;
@@ -67,7 +65,7 @@ public static class LegacyInspectionImport
             }
             catch (InvalidDataException error)
             {
-                problems.AddRange(group.Select(value => LegacyImportIssue.From(value, error.Message)));
+                problems.AddRange(group.Select(value => LegacyImportIssue.From(value, error.Message, candidates)));
             }
         }
         if (issues is null && problems.Count > 0)
@@ -76,7 +74,18 @@ public static class LegacyInspectionImport
     }
 
     private static InvalidDataException Conflict(InspectionRecord row) => new(
-        "日期或批次匹配不明确，请在表中保留原批次记录并核对日期，不会自动合并");
+        "同厂区、订单、日期、数量和箱数匹配到多条记录，已保留旧记录并跳过此行，请对照系统记录核对");
+
+    public static string Fingerprint(InspectionRecord row)
+    {
+        var identity = string.Join('|', row.Site, Order(row), row.InspectionDate?.ToString("yyyy-MM-dd"),
+            row.Quantity?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            row.Cartons?.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(identity)));
+    }
+
+    public static bool IsSame(InspectionRecord current, InspectionRecord incoming) => incoming.ImportFields.All(field =>
+        Equals(typeof(InspectionRecord).GetProperty(field)!.GetValue(current), typeof(InspectionRecord).GetProperty(field)!.GetValue(incoming)));
 
     public static void Apply(InspectionRecord target, InspectionRecord source)
     {
@@ -85,12 +94,7 @@ public static class LegacyInspectionImport
             var property = typeof(InspectionRecord).GetProperty(field)!;
             property.SetValue(target, property.GetValue(source));
         }
-        if (target.ScheduleKey == "")
-        {
-            var identity = string.Join('|', target.Site, target.InspectionDate?.ToString("yyyy-MM-dd"),
-                target.ContractNumber, target.CustomerPo, target.ItemNumber, target.Quantity, target.Cartons);
-            target.Fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(identity)));
-        }
+        if (target.ScheduleKey == "") target.Fingerprint = Fingerprint(target);
         target.SourceFile = source.SourceFile;
         target.SourceSheet = source.SourceSheet;
         target.SourceRow = source.SourceRow;

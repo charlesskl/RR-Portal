@@ -80,8 +80,11 @@ export function poNextSeq(existing: string[], prefix: string): number {
 
 export function poGenContractNo(existing: string[], entity: PoEntity, wcode: string): string {
   const prefix = poContractPrefix(entity, wcode)
-  // 华登实业 HS 合同号从 IRRIHS0301 起排；若已有更大编号则继续递增。
-  const startSeq = prefix === 'IRRIHS' ? 301 : 1
+  // 衔接线下已用编号；已有更大编号时继续递增，不修改历史订单。
+  // 华胜益的基线仅适用于 2026 年，其他年份沿用原有年度编号规则。
+  const startSeq = prefix === 'IRRIHS' ? 402
+    : prefix === 'IRRMHS' ? 60
+      : entity === 'HSY' && prefix === '2026' ? 900171 : 1
   const seq = Math.max(poNextSeq(existing, prefix), startSeq)
   const digits = entity === 'HSY' ? 6 : 4
   return prefix + String(seq).padStart(digits, '0')

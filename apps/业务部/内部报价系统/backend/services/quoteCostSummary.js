@@ -111,7 +111,7 @@ function calculateSingleQuoteCosts(quote, sections) {
   const sewingCloth = (sewingTotalRmb - sewingHairRmb) / fxRH;
 
   const baseRate = num(assembly.assembly_base_rate == null ? (quote.factory_code === 'heyuan' ? 260 : 310) : assembly.assembly_base_rate);
-  const stepTotal = groups => sum(groups, group => sum(group.steps, step => baseRate * num(step.count) * (num(group.team == null ? 1 : group.team) || 1) / Math.max(num(group.qty), 1)));
+  const stepTotal = groups => require('./assemblyMix').assemblyGroupsTotal(groups, baseRate);
   const assemblyLabor = sum(assembly.assembly_labor, row => num(row.unit_price) * num(row.qty))
     + sum(assembly.packaging_labor, row => num(row.unit_price) * num(row.qty))
     + stepTotal(assembly.assembly_step_groups) + stepTotal(assembly.packaging_step_groups);

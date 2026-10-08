@@ -1702,8 +1702,7 @@ function renderSummaryPane(host, sections, quote, me) {
   const pkLaborTotal = sum(asm.packaging_labor || [], r => num(r.unit_price)*num(r.qty));
   // 新版 排拉工序 组装 + 包装 — 每组合计 = 基数 × 人数 ÷ 该组生产量
   const _asmBase = num(asm.assembly_base_rate ?? defaultAssemblyBaseRateForFactory());
-  const stepGroupTotal = (groups) => sum(groups || [], g =>
-    sum(g.steps || [], s => _asmBase * num(s.count) * (num(g.team ?? 1) || 1) / Math.max(num(g.qty), 1)));
+  const stepGroupTotal = groups => assemblyGroupsTotal(groups, _asmBase);
   const asmStepTotal = stepGroupTotal(asm.assembly_step_groups);
   const pkgStepTotal = stepGroupTotal(asm.packaging_step_groups);
   const combinedAsmHkd = asmLaborTotal + pkLaborTotal + asmStepTotal + pkgStepTotal;  // 装配人工为港币(基数310 HKD)
@@ -4622,6 +4621,16 @@ function makePCell(key, type, row, canEdit, onChange) {
   return td;
 }
 
+function assemblyGroupFactor(group, groups) {
+  const n = value => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
+  const usage = n(group.usage ?? 1);
+  if (group.cost_mode !== 'average') return 1;
+  const denominator = (groups || []).filter(g => g.cost_mode === 'average').reduce((s, g) => s + n(g.usage ?? 1), 0);
+  return denominator > 0 ? usage / denominator : 0;
+}
+function assemblyGroupsTotal(groups, base) {
+  return (groups || []).reduce((total, g) => total + assemblyGroupFactor(g, groups) * (g.steps || []).reduce((s, step) => s + Number(base || 0) * Number(step.count || 0) * (Number(g.team ?? 1) || 1) / Math.max(Number(g.qty || 0), 1), 0), 0);
+}
 function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
   payload.assembly_labor = payload.assembly_labor || [];
   payload.packaging_labor = payload.packaging_labor || [];
@@ -4670,25 +4679,42 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
       const team = num(g.team ?? 1) || 1;
       const people = (g.steps || []).reduce((s, x) => s + num(x.count), 0);
       const total = (g.steps || []).reduce((s, x) => s + base * num(x.count) * team / Math.max(num(g.qty), 1), 0);
-      return { type, product: g.product || '未命名', qty: num(g.qty), team, people, total };
+      return { group: g, type, product: g.product || '未命名', qty: num(g.qty), team, people, total: total * (g.cost_mode === 'average' ? num(g.usage ?? 1) : 1) };
     };
     const asm = (payload.assembly_step_groups || []).map(g => rowFor(g, '组装'));
     const pkg = (payload.packaging_step_groups || []).map(g => rowFor(g, '包装/混装'));
     const all = asm.concat(pkg);
-    const asmTotal = asm.reduce((s, r) => s + r.total, 0);
-    const pkgTotal = pkg.reduce((s, r) => s + r.total, 0);
+    const asmTotal = assemblyGroupsTotal(payload.assembly_step_groups, base);
+    const pkgTotal = assemblyGroupsTotal(payload.packaging_step_groups, base);
     const grand = asmTotal + pkgTotal;
     sumHost.innerHTML = `
-      <table class="wb-table" style="max-width:940px">
-        <thead><tr><th style="width:80px">类型</th><th>产品</th><th style="width:80px">标准工时</th><th style="width:90px">基数 HKD</th><th style="width:90px">生产量</th><th style="width:60px">小组</th><th style="width:80px">总人数</th><th style="width:140px">合计 人工/PCS HKD</th></tr></thead>
+      <p class="muted">参与配比平均：按用量加权，合计＝Σ（人工单价 × 用量）÷参与平均的总用量；直接累加项另加。</p><div style="overflow-x:auto"><table class="wb-table" style="min-width:1200px">
+        <thead><tr><th style="width:80px">类型</th><th>产品</th><th style="width:80px">标准工时</th><th style="width:90px">基数 HKD</th><th style="width:90px">生产量</th><th style="width:60px">小组</th><th style="width:80px">总人数</th><th>用量</th><th>计算方式</th><th style="width:140px">小计 人工/PCS HKD（含用量）</th></tr></thead>
         <tbody>
-          ${all.length ? all.map(r => `<tr><td>${r.type}</td><td>${escapeHtml(r.product)}</td><td>${formatNum(stdTime)}</td><td>${formatNum(base)}</td><td>${formatNum(r.qty)}</td><td>${r.team}</td><td>${r.people}</td><td style="font-weight:600;color:#0369a1">${formatNum(r.total)}</td></tr>`).join('')
-            : `<tr><td colspan="8" class="ro" style="text-align:center;color:#9ca3af;padding:14px">暂无数据，下方导入排拉工序表或新增产品组</td></tr>`}
-          ${asm.length ? `<tr class="hi"><td colspan="7" style="text-align:right">组装人工 合计</td><td style="font-weight:700">${formatNum(asmTotal)}</td></tr>` : ''}
-          ${pkg.length ? `<tr class="hi"><td colspan="7" style="text-align:right">包装/混装人工 合计</td><td style="font-weight:700">${formatNum(pkgTotal)}</td></tr>` : ''}
-          <tr class="hi"><td colspan="7" style="text-align:right;color:#16a34a">所有产品 总合计 人工/PCS</td><td style="font-weight:800;color:#16a34a">${formatNum(grand)} HKD</td></tr>
+          ${all.length ? all.map((r, index) => `<tr><td>${r.type}</td><td>${escapeHtml(r.product)}</td><td>${formatNum(stdTime)}</td><td>${formatNum(base)}</td><td>${formatNum(r.qty)}</td><td>${r.team}</td><td>${r.people}</td>
+          <td>${r.group.cost_mode !== 'average' ? '—' : canEdit ? `<input data-assembly-summary="usage" data-row="${index}" aria-label="${escapeHtml(r.product)} 用量" type="number" min="0" step="any" value="${r.group.usage ?? 1}" style="width:76px">` : formatNum(r.group.usage ?? 1)}</td>
+          <td>${canEdit ? `<select data-assembly-summary="cost_mode" data-row="${index}" aria-label="${escapeHtml(r.product)} 计算方式"><option value="direct" ${r.group.cost_mode !== 'average' ? 'selected' : ''}>直接累加</option><option value="average" ${r.group.cost_mode === 'average' ? 'selected' : ''}>参与配比平均</option></select>` : (r.group.cost_mode === 'average' ? '参与配比平均' : '直接累加')}</td>
+          <td style="font-weight:600;color:#0369a1">${formatNum(r.total)}</td></tr>`).join('')
+            : `<tr><td colspan="10" class="ro" style="text-align:center;color:#9ca3af;padding:14px">暂无数据，下方导入排拉工序表或新增产品组</td></tr>`}
+          ${asm.length ? `<tr class="hi"><td colspan="9" style="text-align:right">组装人工 合计</td><td style="font-weight:700">${formatNum(asmTotal)}</td></tr>` : ''}
+          ${pkg.length ? `<tr class="hi"><td colspan="9" style="text-align:right">包装/混装人工 合计</td><td style="font-weight:700">${formatNum(pkgTotal)}</td></tr>` : ''}
+          <tr class="hi"><td colspan="9" style="text-align:right;color:#16a34a">所有产品 合计（配比平均＋直接累加） 人工/PCS</td><td style="font-weight:800;color:#16a34a">${formatNum(grand)} HKD</td></tr>
         </tbody>
-      </table>`;
+      </table></div>`;
+    if (canEdit) sumHost.querySelectorAll('[data-assembly-summary]').forEach(input => {
+      input.onchange = () => {
+        const group = all[Number(input.dataset.row)].group;
+        const key = input.dataset.assemblySummary;
+        if (key !== 'cost_mode' && (input.value.trim() === '' || !Number.isFinite(Number(input.value)) || Number(input.value) < 0)) {
+          input.setCustomValidity('请输入非负数'); input.reportValidity(); return;
+        }
+        input.setCustomValidity('');
+        group[key] = key === 'cost_mode' ? input.value : Number(input.value);
+        onChange();
+        renderGroups(); renderPkgGroups();
+      };
+      input.oninput = () => input.setCustomValidity('');
+    });
   };
 
   const renderGroups = () => {
@@ -4716,13 +4742,15 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
       const team = num(g.team ?? 1) || 1;
       const groupTotal = g.steps.reduce((s, x) => s + baseRate * num(x.count) * team / Math.max(num(g.qty), 1), 0);
       const totalPeople = g.steps.reduce((s, x) => s + num(x.count), 0);
-      grand += groupTotal;
+      grand += groupTotal * assemblyGroupFactor(g, payload.assembly_step_groups);
       card.innerHTML = `
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
           <strong style="color:#16a34a">📦 产品：</strong>
           <input class="asg-name" data-gi="${gi}" value="${(g.product||'').replace(/"/g,'&quot;')}" placeholder="如：6寸小蜥蜴" style="width:200px" ${ro}/>
           <label>生产量 <input class="asg-qty" data-gi="${gi}" type="number" step="any" value="${g.qty}" style="width:90px" ${ro}/></label>
           <label>小组 <input class="asg-team" data-gi="${gi}" type="number" step="1" min="1" value="${g.team ?? 1}" style="width:60px" ${ro}/></label>
+          ${g.cost_mode === 'average' ? `<label>用量 <input class="asg-usage" data-gi="${gi}" type="number" min="0" step="any" value="${g.usage ?? 1}" style="width:70px" ${ro}/></label>` : ''}
+          <select class="asg-mode" data-gi="${gi}" aria-label="计算方式" ${ro}><option value="direct" ${g.cost_mode !== 'average' ? 'selected' : ''}>直接累加</option><option value="average" ${g.cost_mode === 'average' ? 'selected' : ''}>参与配比平均</option></select>
           <span class="muted">总人数：${totalPeople} · 合计 人工/PCS：<b style="color:#0369a1">${formatNum(groupTotal)} HKD</b></span>
           ${canEdit ? `<button class="mini asg-add-step" data-gi="${gi}">+ 增加工序</button>` : ''}
           ${canEdit ? `<button class="mini danger asg-del" data-gi="${gi}" style="margin-left:auto">删除整组</button>` : ''}
@@ -4749,6 +4777,13 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
     // 绑定
     host.querySelectorAll('.asg-name').forEach(i => i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].product = e.target.value; onChange(); });
     host.querySelectorAll('.asg-qty').forEach(i => { i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].qty = Number(e.target.value) || 1; onChange(); paintSummary(); }; i.onchange = () => renderGroups(); });
+    for (const [suffix, key] of [['usage','usage'],['mode','cost_mode']]) {
+      host.querySelectorAll('.asg-' + suffix).forEach(input => input.onchange = () => {
+        if (suffix !== 'mode' && (!Number.isFinite(Number(input.value)) || Number(input.value) < 0)) { input.setCustomValidity('请输入非负数'); input.reportValidity(); return; }
+        payload.assembly_step_groups[+input.dataset.gi][key] = suffix === 'mode' ? input.value : Number(input.value);
+        onChange(); renderGroups();
+      });
+    }
     host.querySelectorAll('.asg-team').forEach(i => { i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].team = Number(e.target.value) || 1; onChange(); paintSummary(); }; i.onchange = () => renderGroups(); });
     host.querySelectorAll('.asg-step-name').forEach(i => i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].steps[+i.dataset.i].name = e.target.value; onChange(); });
     host.querySelectorAll('.asg-step-count').forEach(i => { i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].steps[+i.dataset.i].count = e.target.value === '' ? null : Number(e.target.value); onChange(); paintSummary(); }; i.onchange = () => renderGroups(); });
@@ -4921,13 +4956,15 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
       const team = num(g.team ?? 1) || 1;
       const groupTotal = g.steps.reduce((s, x) => s + baseRate * num(x.count) * team / Math.max(num(g.qty), 1), 0);
       const totalPeople = g.steps.reduce((s, x) => s + num(x.count), 0);
-      grand += groupTotal;
+      grand += groupTotal * assemblyGroupFactor(g, payload.packaging_step_groups);
       card.innerHTML = `
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
           <strong style="color:#16a34a">📦 产品：</strong>
           <input class="pkg-name" data-gi="${gi}" value="${(g.product||'').replace(/"/g,'&quot;')}" placeholder="如：6寸小蜥蜴" style="width:200px" ${ro}/>
           <label>生产量 <input class="pkg-qty" data-gi="${gi}" type="number" step="any" value="${g.qty}" style="width:90px" ${ro}/></label>
           <label>小组 <input class="pkg-team" data-gi="${gi}" type="number" step="1" min="1" value="${g.team ?? 1}" style="width:60px" ${ro}/></label>
+          ${g.cost_mode === 'average' ? `<label>用量 <input class="pkg-usage" data-gi="${gi}" type="number" min="0" step="any" value="${g.usage ?? 1}" style="width:70px" ${ro}/></label>` : ''}
+          <select class="pkg-mode" data-gi="${gi}" aria-label="计算方式" ${ro}><option value="direct" ${g.cost_mode !== 'average' ? 'selected' : ''}>直接累加</option><option value="average" ${g.cost_mode === 'average' ? 'selected' : ''}>参与配比平均</option></select>
           <span class="muted">总人数：${totalPeople} · 合计 人工/PCS：<b style="color:#0369a1">${formatNum(groupTotal)} HKD</b></span>
           ${canEdit ? `<button class="mini pkg-add-step" data-gi="${gi}">+ 增加工序</button>` : ''}
           ${canEdit ? `<button class="mini danger pkg-del" data-gi="${gi}" style="margin-left:auto">删除整组</button>` : ''}
@@ -4952,6 +4989,13 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
     if (!canEdit) return;
     host.querySelectorAll('.pkg-name').forEach(i => i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].product = e.target.value; onChange(); });
     host.querySelectorAll('.pkg-qty').forEach(i => { i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].qty = Number(e.target.value) || 1; onChange(); paintSummary(); }; i.onchange = () => renderPkgGroups(); });
+    for (const [suffix, key] of [['usage','usage'],['mode','cost_mode']]) {
+      host.querySelectorAll('.pkg-' + suffix).forEach(input => input.onchange = () => {
+        if (suffix !== 'mode' && (!Number.isFinite(Number(input.value)) || Number(input.value) < 0)) { input.setCustomValidity('请输入非负数'); input.reportValidity(); return; }
+        payload.packaging_step_groups[+input.dataset.gi][key] = suffix === 'mode' ? input.value : Number(input.value);
+        onChange(); renderPkgGroups();
+      });
+    }
     host.querySelectorAll('.pkg-team').forEach(i => { i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].team = Number(e.target.value) || 1; onChange(); paintSummary(); }; i.onchange = () => renderPkgGroups(); });
     host.querySelectorAll('.pkg-step-name').forEach(i => i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].steps[+i.dataset.i].name = e.target.value; onChange(); });
     host.querySelectorAll('.pkg-step-count').forEach(i => { i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].steps[+i.dataset.i].count = e.target.value === '' ? null : Number(e.target.value); onChange(); paintSummary(); }; i.onchange = () => renderPkgGroups(); });

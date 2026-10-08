@@ -148,6 +148,8 @@ async function saveRow(tr) {
 async function load(showLoading = true) {
   if (showLoading) $('summary-body').innerHTML = `<tr><td colspan="${totalColumns()}" class="summary-empty">正在读取…</td></tr>`;
   const data = await api('/quote-summary');
+  $('completion-open').hidden = !data.can_view_completion;
+  if (!data.can_view_completion) { $('completion-panel').hidden = true; $('completion-body').textContent = ''; }
   state.rows = data.rows || []; state.workshops = data.workshops || []; state.components = data.components || []; state.summaryColumns = data.summary_columns || []; state.canEdit = Boolean(data.can_edit);
   $('summary-add-workshop').hidden = !state.canEdit;
   $('summary-edit-workshop').hidden = !state.canEdit;
@@ -237,4 +239,24 @@ $('summary-edit-workshop').onclick = () => {
     finally { button.disabled = false; }
   };
   document.body.append(dialog); dialog.showModal();
+};
+
+$('completion-open').onclick = async () => {
+  try {
+    const report = await api('/quote-summary/completion');
+    $('completion-title').textContent = report.title;
+    $('completion-body').innerHTML = [...report.rows,{customer:'共计',...report.totals,note:''}].map(r=>`<tr><td>${esc(r.customer)}</td><td>${r.total}</td><td>${r.incomplete}</td><td>${r.completed}</td><td>${esc(r.note)}</td></tr>`).join('');
+    $('completion-panel').hidden = false;
+    $('completion-panel').scrollIntoView({behavior:'smooth',block:'start'});
+  } catch(e) { $('completion-panel').hidden=true; $('completion-body').textContent=''; alert(e.message); }
+};
+$('completion-export').onclick = async () => {
+  const button=$('completion-export'); button.disabled=true;
+  try {
+    const response=await fetch('/api/quote-summary/completion/xlsx',{credentials:'include'});
+    if(!response.ok) { const error=await response.json(); throw new Error(error.error||'导出失败'); }
+    const url=URL.createObjectURL(await response.blob());
+    const link=document.createElement('a'); link.href=url; link.download='内部报价完成情况.xlsx'; link.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  } catch(e) { alert(e.message); } finally { button.disabled=false; }
 };

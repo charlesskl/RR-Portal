@@ -1053,7 +1053,7 @@ function addAssemblyDetailSheet(wb, asm, baseRate, stdTime) {
       // 产品标题（基数/标准工时 常量在此，每组一次）
       ws.mergeCells(row, 1, row, 4);
       const team = num(g.team ?? 1) || 1;
-      ws.getCell(row, 1).value = `产品：${g.product || '未命名'}    生产量：${num(g.qty)}    小组：${team}    基数：${baseRate} HKD    标准工时：${stdTime} H`;
+      ws.getCell(row, 1).value = `产品：${g.product || '未命名'}    生产量：${num(g.qty)}    小组：${team}    基数：${baseRate} HKD    标准工时：${stdTime} H    ${g.cost_mode === 'average' ? '按用量配比平均 · 用量 ' + (g.usage ?? 1) : '直接累加'}`;
       ws.getCell(row, 1).font = { bold: true, color: { argb: 'FF16A34A' }, name: 'Microsoft YaHei' };
       ws.getCell(row, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFECFDF5' } };
       row += 1;
@@ -1071,7 +1071,7 @@ function addAssemblyDetailSheet(wb, asm, baseRate, stdTime) {
       });
       const stepEnd = row - 1;
       const peopleVal = sum(g.steps || [], s => num(s.count));
-      laborVal += baseRate * peopleVal * team / Math.max(num(g.qty), 1);
+      laborVal += baseRate * peopleVal * team / Math.max(num(g.qty), 1) * require('./assemblyMix').assemblyGroupFactor(g, groups);
       // 本组合计 人数 = SUM(C)
       ws.mergeCells(row, 1, row, 2);
       ws.getCell(row, 1).value = '本组合计 人数';
@@ -1694,7 +1694,8 @@ function renderUnifiedCostTable(ws, row, data, refs) {
       const people = sum(group.steps || [], step => num(step.count));
       const quantity = Math.max(num(group.qty), 1);
       const unitAmount = num(data.baseRate) * people / quantity;
-      const amount = unitAmount * team;
+      const factor = require('./assemblyMix').assemblyGroupFactor(group, groups);
+      const amount = unitAmount * team * factor;
       ws.getCell(row, 2).value = category;
       ws.getCell(row, 3).value = group.product || fallbackName;
       ws.getCell(row, 4).value = `${num(data.stdTime)}小时`;
@@ -1706,9 +1707,9 @@ function renderUnifiedCostTable(ws, row, data, refs) {
       ws.getCell(row, 8).value = team;
       ws.getCell(row, 9).value = '';
       ws.getCell(row, 10).value = { formula: `E${row}*G${row}/MAX(F${row},1)`, result: unitAmount };
-      ws.getCell(row, 11).value = { formula: `H${row}*J${row}`, result: amount };
+      ws.getCell(row, 11).value = { formula: `H${row}*J${row}${factor === 1 ? '' : '*' + factor}`, result: amount };
       ws.getCell(row, 12).value = 0;
-      ws.getCell(row, 13).value = '';
+      ws.getCell(row, 13).value = `${group.cost_mode === 'average' ? '按用量配比平均 · 用量 ' + (group.usage ?? 1) : '直接累加'}`;
       finishRow(bucket);
     });
   };
@@ -2039,7 +2040,7 @@ function renderAssemblyStepGroups(ws, row, title, groups, baseRate, stdTime, fxR
   groups.forEach(g => {
     // 产品标题
     ws.mergeCells(row, 1, row, 8);
-    ws.getCell(row, 1).value = `产品：${g.product || '未命名'}    生产量：${num(g.qty)}    基数：${baseRate} HKD    标准工时：${stdTime} H`;
+    ws.getCell(row, 1).value = `产品：${g.product || '未命名'}    生产量：${num(g.qty)}    基数：${baseRate} HKD    标准工时：${stdTime} H    ${g.cost_mode === 'average' ? '按用量配比平均 · 用量 ' + (g.usage ?? 1) : '直接累加'}`;
     ws.getCell(row, 1).font = { bold: true, color: { argb: 'FF16A34A' }, name: 'Microsoft YaHei' };
     ws.getCell(row, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFECFDF5' } };
     row += 1;

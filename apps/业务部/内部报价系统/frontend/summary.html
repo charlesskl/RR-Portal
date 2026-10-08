@@ -25,8 +25,15 @@
         <label>状态 <select id="summary-status"><option value="">全部</option><option value="pending">待确认</option><option value="confirmed">已确认</option></select></label>
         <button id="summary-edit-workshop" hidden>编辑车间</button>
         <button id="summary-add-workshop" hidden>＋ 添加车间</button>
+        <button id="completion-open" hidden>报价完成情况</button>
         <button id="summary-export">⬇️ 导出报价汇总</button>
       </div>
+    </section>
+    <section class="card" id="completion-panel" hidden>
+      <h2 id="completion-title"></h2>
+      <p class="muted">当前厂区全部有效内部报价；所有部门审核通过计为已完成。新建报价为累计报价单数，不受上方客户或确认状态筛选影响。</p>
+      <button id="completion-export">导出完成情况 Excel</button>
+      <div style="overflow:auto"><table class="wb-table"><thead><tr><th>客户</th><th>新建报价</th><th>未完成报价</th><th>已完成报价</th><th>备注</th></tr></thead><tbody id="completion-body"></tbody></table></div>
     </section>
     <section class="card summary-stats" id="summary-stats"></section>
     <section class="card summary-table-card">
@@ -50,6 +57,6 @@
       };
     })();
   </script>
-  <script src="./summary.js?v=20261007-edit-workshops"></script>
+  <script src="./summary.js?v=20261008-completion"></script>
 </body>
 </html>

@@ -7,6 +7,7 @@ import dayjs from 'dayjs'
 import { api, type Material } from '../api/client'
 import { numToChinese, poDetermineEntity, poGenContractNo, PO_ENTITY_META, type PoEntity } from '../utils/poNumber'
 import './PurchasePage.css'
+import { combinePurchaseContracts } from '../utils/purchaseContractWorkbook'
 
 interface SchedRow {
   source?: string
@@ -997,20 +998,21 @@ export default function PurchasePage() {
     message.success(`已导出 ${filtered.length} 张 PO · ${flat.length} 行明细`)
   }
 
-  // Export the single PO currently being edited
-  async function exportSingle() {
-    if (!editing?.id) { message.warning('请先打开 / 保存一张 PO'); return }
+  // 单张和批量导出共用同一合同格式；批量仅使用已保存的订单。
+  async function buildContractSheet(po?: PoDetail) {
     const XLSX = await import('xlsx-js-style')
-    const v = form.getFieldsValue()
-    const poNo = v.po_no || String(editing.id)
+    const v = po || form.getFieldsValue()
+    const contractItems = po ? (po.items ?? []) : items
+    const poNo = v.po_no || String(po?.id ?? editing?.id)
     const supplier = v.supplier || ''
     // 实体由 PO 号前缀推断（IRRM→华登全球 / IRRI→华登实业 / 年份→华胜益）
     let entity: PoEntity = 'HD_INDUSTRY'
     if (/^IRRM/i.test(poNo)) entity = 'HD_GLOBAL'
     else if (/^IRRI/i.test(poNo)) entity = 'HD_INDUSTRY'
     else if (/^\d{4}/.test(poNo)) entity = 'HSY'
+    else if (po) throw new Error(`订单 ${poNo} 无法识别采购主体`)
     const meta = PO_ENTITY_META[entity]
-    const today = new Date()
+    const today = po?.order_date && dayjs(po.order_date).isValid() ? dayjs(po.order_date).toDate() : new Date()
     const todayStr = today.getFullYear() + '/' + String(today.getMonth() + 1).padStart(2, '0') + '/' + String(today.getDate()).padStart(2, '0')
     const todayCN = today.getFullYear() + '年' + (today.getMonth() + 1) + '月' + today.getDate() + '日'
     const deliveryDay = v.delivery_date ? dayjs(v.delivery_date) : null
@@ -1019,9 +1021,9 @@ export default function PurchasePage() {
       : todayCN.replace(String(today.getFullYear()), String(today.getFullYear() + 1))
 
     // 导出时从货号库补全英文名称和物料编码。PO 明细只保存物料 ID，不重复存储这两个可维护字段。
-    const productCodes = [...new Set(items.map(it => resolveProductCode(it.product_code)).filter(Boolean))]
+    const productCodes = [...new Set(contractItems.map(it => resolveProductCode(it.product_code)).filter(Boolean))]
     const materials = (await Promise.all(productCodes.map(code =>
-      api.get<Material[]>('/materials', { params: { code } }).then(r => r.data || []).catch(() => [])
+      api.get<Material[]>('/materials', { params: { code } }).then(r => r.data || [])
     ))).flat()
     const materialById = new Map(materials.filter(m => m.id != null).map(m => [Number(m.id), m]))
     const normalize = (value: unknown) => String(value ?? '').trim().toUpperCase().replace(/[×*]/g, 'X').replace(/\s+/g, '')
@@ -1040,7 +1042,7 @@ export default function PurchasePage() {
 
     // 按 (货号+物料+规格) 聚合：合同数量/单位/单价使用走货口径，金额保持与采购口径一致。
     const merged = new Map<string, any>()
-    for (const it of items) {
+    for (const it of contractItems) {
       const material = findMaterial(it)
       const k = (it.material_id || '') + '||' + (it.product_code || '') + '||' + (it.material_name || '') + '||' + (it.spec || '')
       const cur = merged.get(k) || {
@@ -1182,64 +1184,43 @@ export default function PurchasePage() {
       setStyle(r, 5, { font: { sz: 12 }, alignment: left })
     }
 
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, '购销合同')
-    XLSX.writeFile(wb, `${poNo}_${supplier}_购销合同.xlsx`)
-    message.success('已导出购销合同')
+    return { ws, poNo, supplier, entity }
   }
 
-  // Merge multiple POs of the same supplier into one (keeps earliest PO's header)
-  async function mergeSameSupplier() {
-    if (!poSelKeys.length) { message.warning('请先勾选 2 张以上同供应商的 PO'); return }
-    const picked = rows.filter(r => poSelKeys.includes(r.id))
-    if (picked.length < 2) { message.warning('至少选 2 张'); return }
-    const suppliers = new Set(picked.map(p => p.supplier ?? ''))
-    if (suppliers.size > 1) { message.warning('选中的 PO 不是同一供应商，无法合并'); return }
-    setLoading(true)
+  async function exportSingle() {
+    if (!editing?.id) { message.warning('请先打开 / 保存一张 PO'); return }
     try {
-      // Sort by id ASC, keep the first as host
-      picked.sort((a, b) => a.id - b.id)
-      const host = picked[0]
-      const others = picked.slice(1)
-      // Load all details + concat items
-      const dets = await Promise.all(picked.map(p => api.get<PoDetail>(`/purchase/${p.id}`).then(r => r.data)))
-      const allItems = dets.flatMap(d => d.items ?? [])
-      // Delete others
-      for (const o of others) await api.delete(`/purchase/${o.id}`)
-      // Recreate host with merged items (legacy backend can't update items, so delete + insert)
-      await api.delete(`/purchase/${host.id}`)
-      await api.post('/purchase', {
-        po_no: host.po_no, supplier: host.supplier, status: host.status,
-        order_date: host.order_date,
-        notes: (host.notes ?? '') + ` · 已合并 ${others.length} 张：${others.map(o => o.po_no).join(', ')}`,
-        items: allItems.map(it => ({
-          product_code: it.product_code,
-          material_id: it.material_id,
-          material_name: it.material_name,
-          qty: it.qty,
-          price: it.price,
-          currency: it.currency,
-          notes: it.notes,
-          category: it.category,
-          spec: it.spec,
-          usage_qty: it.usage_qty,
-          ordered_qty: it.ordered_qty,
-          material_qty: it.material_qty,
-          spoilage_qty: it.spoilage_qty,
-          purchase_qty: it.purchase_qty,
-          purchase_unit: it.purchase_unit,
-          ship_unit: it.ship_unit,
-          net_per_pc: it.net_per_pc,
-          eta: it.eta,
-          tomy_po: it.tomy_po,
-        })),
-      })
-      message.success(`已合并 ${picked.length} 张 PO 为一张（${host.po_no}）`)
-      setPoSelKeys([])
-      load()
+      const XLSX = await import('xlsx-js-style')
+      const { ws, poNo, supplier } = await buildContractSheet()
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, '购销合同')
+      XLSX.writeFile(wb, `${poNo}_${supplier}_购销合同.xlsx`)
+      message.success('已导出购销合同')
     } catch {
-      /* 拦截器已提示 */
-    } finally { setLoading(false) }
+      message.error('导出失败，请确认订单及物料数据可读取后重试')
+    }
+  }
+
+  const [exportingContracts, setExportingContracts] = useState(false)
+  async function exportContractsByEntity() {
+    if (!filtered.length) { message.warning('当前筛选没有可导出的采购订单'); return }
+    setExportingContracts(true)
+    try {
+      const XLSX = await import('xlsx-js-style')
+      const contracts = []
+      // 逐单加载，避免大批导出时同时请求过多物料数据；任何失败均停止导出。
+      for (const summary of filtered) {
+        const { data } = await api.get<PoDetail>(`/purchase/${summary.id}`)
+        contracts.push(await buildContractSheet(data))
+      }
+      const wb = combinePurchaseContracts(contracts)
+      XLSX.writeFile(wb, `采购合同_按主体_${dayjs().format('YYYY-MM-DD')}.xlsx`)
+      message.success(`已导出 ${contracts.length} 张订单，分为 ${wb.SheetNames.length} 个采购主体工作表`)
+    } catch (error) {
+      message.error(`合并导出失败，未生成文件：${error instanceof Error ? error.message : '请重试'}`)
+    } finally {
+      setExportingContracts(false)
+    }
   }
 
   function patchItem(i: number, k: keyof PoItem, v: any) {
@@ -1445,13 +1426,7 @@ export default function PurchasePage() {
             />
             <Button onClick={() => setStatsOpen(true)}>📋 PO 数据</Button>
             <Button onClick={exportFiltered}>📤 导出 Excel (按筛选)</Button>
-            <Popconfirm
-              title={`合并选中的 ${poSelKeys.length} 张 PO 为一张（须同供应商）`}
-              onConfirm={mergeSameSupplier}
-              disabled={poSelKeys.length < 2}
-            >
-              <Button disabled={poSelKeys.length < 2}>🔗 合并同名 ({poSelKeys.length})</Button>
-            </Popconfirm>
+            <Button loading={exportingContracts} onClick={exportContractsByEntity}>合并导出合同（按主体/当前筛选）</Button>
             <Popconfirm
               title={`删除选中的 ${poSelKeys.length} 张 PO？不可恢复`}
               onConfirm={delSelected}

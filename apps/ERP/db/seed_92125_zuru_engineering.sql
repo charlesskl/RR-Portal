@@ -20,7 +20,14 @@ BEGIN TRANSACTION;
 -- ZURU 客户编号按本库客户资料查找(各库编号可能不同, 避免硬编码 FK 冲突), 找不到则中止
 DECLARE @ZuruCustNo nvarchar(20);
 SELECT TOP 1 @ZuruCustNo = 客户编号 FROM 客户资料 WHERE 客户名称 = N'ZURU';
-IF @ZuruCustNo IS NULL THROW 50001, '客户资料中找不到 ZURU, 请先建档', 1;
+IF @ZuruCustNo IS NULL
+BEGIN
+  -- 全新空库（云端首装）尚无客户档案：跳过本 seed 不算错误；
+  -- 将来库内有 ZURU 客户后，重跑部署会自动补种（本脚本幂等）。
+  PRINT N'客户资料中无 ZURU，跳过 92125 工程资料 seed';
+  ROLLBACK TRANSACTION;
+  RETURN;
+END
 -- ----- 工模表: 26 行 -----
 DELETE FROM [工模表] WHERE 客户 = 'ZURU';
 SET IDENTITY_INSERT [工模表] ON;

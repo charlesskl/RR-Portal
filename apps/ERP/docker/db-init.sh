@@ -2,8 +2,8 @@
 # 复刻 db/run-db.ps1 的脚本枚举顺序（Linux 版，供 Dockerfile.dbinit 使用）：
 #   1) 编号迁移 NN[_字母]_*.sql 按数字升序，同号无字母后缀在前；排除文件名含 demo 的；
 #      01/02 以 lenient: 前缀执行（逐语句、失败跳过），其余严格模式出错即止。
-#   2) seed_*_perms.sql 按文件名字母序。
-#   3) 最后 seed_92125_zuru_engineering.sql。
+#   2) seed_*_perms.sql 按文件名字母序；随后 seed_admin_user.sql（空库首账号，幂等）。
+#   3) 最后 seed_92125_zuru_engineering.sql（无 ZURU 客户时跳过，不报错）。
 # DbDeploy 会自动建库（Chinese_PRC_CI_AS），全部脚本幂等，可重复执行。
 set -euo pipefail
 : "${ERP_DB:?需要 ERP_DB 连接串}"
@@ -32,6 +32,7 @@ done < <(
 )
 
 while IFS= read -r f; do specs+=("/db/$f"); done < <(ls seed_*_perms.sql 2>/dev/null | LC_ALL=C sort)
+[[ -f seed_admin_user.sql ]] && specs+=("/db/seed_admin_user.sql")
 [[ -f seed_92125_zuru_engineering.sql ]] && specs+=("/db/seed_92125_zuru_engineering.sql")
 
 echo "共 ${#specs[@]} 个迁移脚本"

@@ -708,7 +708,7 @@
         row.querySelectorAll('input').forEach(el => el.oninput = () => { cfg.products[index][el.dataset.field] = el.type === 'number' ? Number(el.value) : el.value; });
         row.querySelector('.mixed-remove')?.addEventListener('click', () => { cfg.products.splice(index, 1); draw(); });
       });
-      panel.querySelector('.mixed-add')?.addEventListener('click', () => { cfg.products.push({ id: `p_${crypto.randomUUID()}`, code: '', name: '', ratio: 1 }); draw(); });
+      panel.querySelector('.mixed-add')?.addEventListener('click', () => { cfg.products.push({ id: `p_${uuid()}`, code: '', name: '', ratio: 1 }); draw(); });
       panel.querySelector('.mixed-cancel')?.addEventListener('click', () => { expanded = false; draw(); });
       panel.querySelector('.mixed-type')?.addEventListener('change', async event => {
         if (event.target.value === 'mixed') { cfg.enabled = true; expanded = true; draw(); return; }

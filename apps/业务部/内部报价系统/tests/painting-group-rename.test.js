@@ -6,6 +6,7 @@ const vm=require('node:vm');
 const source=fs.readFileSync(path.join(__dirname,'../frontend/workbench.js'),'utf8');
 const code=source.slice(source.indexOf('function renamePaintingProductGroup('),source.indexOf('function renderPaintingTable('));
 const context=vm.createContext({crypto:require('node:crypto')});
+vm.runInContext(source.slice(source.indexOf('const uuid = () =>'),source.indexOf('const STATUS_TXT')),context);
 vm.runInContext(code,context);
 const rename=context.renamePaintingProductGroup;
 test('rename preserves stable group identity, ratios, costs and custom row names',()=>{

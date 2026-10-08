@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
 const ctx = vm.createContext({ crypto: require('node:crypto') });
+vm.runInContext(source.slice(source.indexOf('const uuid = () =>'), source.indexOf('const STATUS_TXT')), ctx);
 vm.runInContext(source.slice(source.indexOf('function addManualMoldGroup('), source.indexOf('function renderMolds(')), ctx);
 test('manual mold groups keep separate identities and add rows within the selected product', () => {
   const molds = [];

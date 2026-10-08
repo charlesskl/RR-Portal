@@ -5,6 +5,17 @@
 
 const $ = (id) => document.getElementById(id);
 
+// crypto.randomUUID 仅在安全上下文（HTTPS/localhost）可用；
+// 内网 HTTP 部署下用 getRandomValues 生成 UUIDv4 降级（该 API 非安全上下文也可用）。
+const uuid = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+
 const STATUS_TXT = { empty: '空', filled: '已填', approved: '已审', rejected: '驳回' };
 const STATUS_CLS = { empty: 'b-empty', filled: 'b-filled', approved: 'b-approved', rejected: 'b-rejected' };
 let quoteSaveShortcutHandler = null;
@@ -570,7 +581,7 @@ function addManualMoldGroup(molds, name) {
   if (molds.some(m => String(m.product_group_name || '').trim() === name)) {
     throw new Error('产品分组已存在，请在该组内增加模具');
   }
-  const row = { images: [], product_group_id: 'manual-product-' + crypto.randomUUID(), product_group_name: name };
+  const row = { images: [], product_group_id: 'manual-product-' + uuid(), product_group_name: name };
   molds.push(row);
   return row;
 }
@@ -4389,7 +4400,7 @@ function renamePaintingProductGroup(payload, groupKey, name) {
   if (!members.length) throw new Error('产品分组不存在');
   if (rows.some(row => keyOf(row) !== groupKey && row.product_group_name === name))
     throw new Error('该产品名称已存在，请使用其他名称');
-  const id = members[0].product_group_id || 'manual-product-' + crypto.randomUUID();
+  const id = members[0].product_group_id || 'manual-product-' + uuid();
   payload.product_mix_ratios ||= {};
   const ratio = payload.product_mix_ratios[groupKey] ?? 1;
   for (const row of members) {
@@ -4563,7 +4574,7 @@ function renderPaintingTable(container, payload, onChange, canEdit) {
       const error = form.querySelector('[data-group-error]');
       if (!name || raw === '' || !Number.isFinite(ratio) || ratio < 0) { error.textContent = '请填写产品名称和大于等于 0 的配比。'; return; }
       if (groups.some(group => group.name === name)) { error.textContent = '该产品分组已存在，请使用“本组增加行”。'; return; }
-      const id = 'manual-product-' + crypto.randomUUID();
+      const id = 'manual-product-' + uuid();
       rows.push({name,images:[],product_group_id:id,product_group_name:name});
       payload.product_mix_ratios[id] = ratio;
       renderPaintingTable(container,payload,onChange,canEdit); onChange();

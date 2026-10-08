@@ -28,8 +28,6 @@ public static class LegacyInspectionParser
             var headerRow = FindHeaderRow(sheet);
             if (headerRow < 0) continue;
             var headers = BuildHeaders(sheet.Rows[headerRow]);
-            var jazHeaders = headers.ContainsKey("现PO号") || headers.ContainsKey("工作单号") || headers.ContainsKey("洋行名称");
-            if (site == "华登" && (template == "JAZ专用") != jazHeaders) continue;
             for (var rowIndex = headerRow + 1; rowIndex < sheet.Rows.Count; rowIndex++)
             {
                 var row = sheet.Rows[rowIndex];
@@ -46,8 +44,7 @@ public static class LegacyInspectionParser
     private static bool ShouldImportSheet(string site, string sheetName, string? template) => site switch
     {
         "兴信" => System.Text.RegularExpressions.Regex.IsMatch(sheetName, @"^\d+月份?$"),
-        "华登" when template == "JAZ专用" => sheetName.Contains("JAZ", StringComparison.OrdinalIgnoreCase) || sheetName.Contains("DPI", StringComparison.OrdinalIgnoreCase),
-        "华登" => !sheetName.Contains("DPI", StringComparison.OrdinalIgnoreCase) && !sheetName.Contains("JAZ", StringComparison.OrdinalIgnoreCase),
+        "华登" => !sheetName.Contains("DPI", StringComparison.OrdinalIgnoreCase),
         "湖南" => sheetName == "验货总结汇总表",
         _ => false,
     };
@@ -105,7 +102,7 @@ public static class LegacyInspectionParser
         var record = new InspectionRecord
         {
             Site = site,
-            InspectionTemplate = site == "华登" ? isJaz ? "JAZ专用" : "普通验货" : "",
+            InspectionTemplate = site == "华登" ? "普通验货" : "",
             InspectionDate = date,
             InspectionLocation = Get("验货地点", "验货地址"),
             InspectionParty = site == "华登" ? Get("验货客户") : note,

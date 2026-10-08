@@ -243,7 +243,7 @@ app.MapGet("/api/integrations/shipping/results", async (HttpRequest request, str
     if (!string.IsNullOrWhiteSpace(site) && site is not ("兴信" or "湖南" or "华登" or "待分配"))
         return Results.BadRequest(new { error = "厂区无效" });
     request.HttpContext.Response.Headers.CacheControl = "no-store";
-    var records = db.InspectionRecords.AsNoTracking().Where(value =>
+    var records = db.InspectionRecords.AsNoTracking().Where(value => value.Site != "华登" || !EF.Functions.Like(value.SourceSheet, "%DPI%")).Where(value =>
         value.WorkflowStatus == "已完成" || value.WorkflowStatus == "HOLD" ||
         value.WorkflowStatus == "REJ" || value.WorkflowStatus == "待复检" || value.WorkflowStatus == "不用验");
     if (!string.IsNullOrWhiteSpace(contractNumber)) records = records.Where(value => value.ContractNumber == contractNumber);
@@ -305,7 +305,7 @@ app.MapPost("/api/integrations/shipping/results/batch", async (HttpRequest reque
             }
             else
             {
-                var records = db.InspectionRecords.AsNoTracking().Where(value =>
+                var records = db.InspectionRecords.AsNoTracking().Where(value => value.Site != "华登" || !EF.Functions.Like(value.SourceSheet, "%DPI%")).Where(value =>
                     value.WorkflowStatus == "已完成" || value.WorkflowStatus == "HOLD" ||
                     value.WorkflowStatus == "REJ" || value.WorkflowStatus == "待复检" || value.WorkflowStatus == "不用验");
                 if (contractNumber.Length > 0) records = records.Where(value => value.ContractNumber == contractNumber);
@@ -327,7 +327,7 @@ app.MapPost("/api/integrations/shipping/results/batch", async (HttpRequest reque
 });
 app.MapGet("/api/public/results", async (string? q, string? site, int? page, AppDbContext db, CancellationToken ct) =>
 {
-    var query = db.InspectionRecords.AsNoTracking().Where(record =>
+    var query = db.InspectionRecords.AsNoTracking().Where(value => value.Site != "华登" || !EF.Functions.Like(value.SourceSheet, "%DPI%")).Where(record =>
         record.InternalResult != "" || record.ThirdPartyResult != "");
     if (site is "兴信" or "湖南" or "华登") query = query.Where(record => record.Site == site);
     if (!string.IsNullOrWhiteSpace(q))
@@ -348,7 +348,7 @@ app.MapGet("/api/public/results", async (string? q, string? site, int? page, App
 });
 app.MapGet("/api/public/overview", async (AppDbContext db, CancellationToken ct) => Results.Ok(new
 {
-    totals = await db.InspectionRecords.AsNoTracking().GroupBy(record => record.Site)
+    totals = await db.InspectionRecords.AsNoTracking().Where(value => value.Site != "华登" || !EF.Functions.Like(value.SourceSheet, "%DPI%")).GroupBy(record => record.Site)
         .Select(group => new { site = group.Key, count = group.Count() })
         .ToDictionaryAsync(value => value.site, value => value.count, ct),
 }));
@@ -356,11 +356,9 @@ app.MapGet("/api/public/plans", async (string site, string? template, string? mo
     int? page, string? q, string? status, string? customer, string? location, AppDbContext db, CancellationToken ct) =>
 {
     if (site is not ("兴信" or "湖南" or "华登" or "待分配")) return Results.BadRequest(new { error = "厂区无效" });
-    var siteQuery = db.InspectionRecords.AsNoTracking().Where(record => record.Site == site);
-    if (site == "华登" && template == "JAZ专用")
-        siteQuery = siteQuery.Where(record => record.InspectionTemplate == "JAZ专用" || record.InspectionTemplate == "" && (record.ScheduleSource == "JAZ/JWC" || EF.Functions.Like(record.SourceSheet, "%DPI%") || EF.Functions.Like(record.SourceSheet, "%JAZ%") || EF.Functions.Like(record.Customer, "%JAZ%") || EF.Functions.Like(record.InspectionParty, "%JAZ%")));
-    else if (site == "华登" && template == "普通验货")
-        siteQuery = siteQuery.Where(record => record.InspectionTemplate == "普通验货" || record.InspectionTemplate == "" && record.ScheduleSource != "JAZ/JWC" && !EF.Functions.Like(record.SourceSheet, "%DPI%") && !EF.Functions.Like(record.SourceSheet, "%JAZ%") && !EF.Functions.Like(record.Customer, "%JAZ%") && !EF.Functions.Like(record.InspectionParty, "%JAZ%"));
+    var siteQuery = db.InspectionRecords.AsNoTracking().Where(value => value.Site != "华登" || !EF.Functions.Like(value.SourceSheet, "%DPI%")).Where(record => record.Site == site);
+    if (site == "华登")
+        siteQuery = siteQuery.Where(record => !EF.Functions.Like(record.SourceSheet, "%DPI%"));
     if (view is not (null or "all" or "week" or "unfinished")) return Results.BadRequest(new { error = "计划视图无效" });
     siteQuery = FilterInspectionPlanView(siteQuery, view);
     var dates = await siteQuery.Where(record => record.InspectionDate != null).Select(record => record.InspectionDate!.Value).Distinct().ToListAsync(ct);
@@ -598,8 +596,8 @@ app.MapPost("/api/legacy-inspections/import", async (HttpRequest request, string
 {
     if (!CanAccessSite(principal, site)) return Results.Forbid();
     if (site is not ("兴信" or "湖南" or "华登")) return Results.BadRequest(new { error = "厂区必须是兴信、湖南或华登" });
-    if (site == "华登" && template is not (null or "" or "普通验货" or "JAZ专用"))
-        return Results.BadRequest(new { error = "华登表类型必须是普通验货或JAZ专用" });
+    if (site == "华登" && template is not (null or "" or "普通验货"))
+        return Results.BadRequest(new { error = "华登统一导入成品验货表（含JAZ客户），DPI生产抽检表不导入" });
     if (!request.HasFormContentType) return Results.BadRequest(new { error = "请上传Excel验货表" });
     var form = await request.ReadFormAsync(cancellationToken);
     var file = form.Files.GetFile("file");
@@ -622,7 +620,7 @@ app.MapPost("/api/legacy-inspections/import", async (HttpRequest request, string
 
     // Plan every row before writing; commit accepted entries together and leave skipped rows untouched.
     await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-    var existingRecords = await db.InspectionRecords.Where(value => value.Site == site).ToListAsync(cancellationToken);
+    var existingRecords = await db.InspectionRecords.Where(value => value.Site == site && (site != "华登" || !EF.Functions.Like(value.SourceSheet, "%DPI%"))).ToListAsync(cancellationToken);
     var invalidRows = issues.Select(issue => (issue.Sheet, issue.Row)).Distinct().Count();
     var entries = LegacyInspectionImport.Plan(incoming, existingRecords, site, issues);
     var pendingRows = issues.Select(issue => (issue.Sheet, issue.Row)).Distinct().Count();
@@ -709,11 +707,9 @@ app.MapGet("/api/legacy-inspections", async (string site, string? template, stri
     if (site is not ("兴信" or "湖南" or "华登" or "待分配")) return Results.BadRequest(new { error = "厂区必须是兴信、湖南、华登或待分配" });
     const int pageSize = 100;
     var pageNumber = Math.Max(page ?? 1, 1);
-    var siteQuery = db.InspectionRecords.AsNoTracking().Where(record => record.Site == site);
-    if (site == "华登" && template == "JAZ专用")
-        siteQuery = siteQuery.Where(record => record.InspectionTemplate == "JAZ专用" || record.InspectionTemplate == "" && (record.ScheduleSource == "JAZ/JWC" || EF.Functions.Like(record.SourceSheet, "%DPI%") || EF.Functions.Like(record.SourceSheet, "%JAZ%") || EF.Functions.Like(record.Customer, "%JAZ%") || EF.Functions.Like(record.InspectionParty, "%JAZ%")));
-    else if (site == "华登" && template == "普通验货")
-        siteQuery = siteQuery.Where(record => record.InspectionTemplate == "普通验货" || record.InspectionTemplate == "" && record.ScheduleSource != "JAZ/JWC" && !EF.Functions.Like(record.SourceSheet, "%DPI%") && !EF.Functions.Like(record.SourceSheet, "%JAZ%") && !EF.Functions.Like(record.Customer, "%JAZ%") && !EF.Functions.Like(record.InspectionParty, "%JAZ%"));
+    var siteQuery = db.InspectionRecords.AsNoTracking().Where(value => value.Site != "华登" || !EF.Functions.Like(value.SourceSheet, "%DPI%")).Where(record => record.Site == site);
+    if (site == "华登")
+        siteQuery = siteQuery.Where(record => !EF.Functions.Like(record.SourceSheet, "%DPI%"));
     if (view is not (null or "all" or "week" or "unfinished")) return Results.BadRequest(new { error = "计划视图无效" });
     siteQuery = FilterInspectionPlanView(siteQuery, view);
     var dates = await siteQuery.Where(record => record.InspectionDate != null)
@@ -775,12 +771,10 @@ app.MapGet("/api/legacy-inspections/export", async (string site, string? templat
 {
     if (!CanAccessSite(principal, site)) return Results.Forbid();
     if (site is not ("兴信" or "湖南" or "华登")) return Results.BadRequest(new { error = "厂区必须是兴信、湖南或华登" });
-    var selectedTemplate = site == "华登" && template == "JAZ专用" ? "JAZ专用" : "普通验货";
-    var query = db.InspectionRecords.AsNoTracking().Where(record => record.Site == site);
-    if (site == "华登" && selectedTemplate == "JAZ专用")
-        query = query.Where(record => record.InspectionTemplate == "JAZ专用" || record.InspectionTemplate == "" && (record.ScheduleSource == "JAZ/JWC" || EF.Functions.Like(record.SourceSheet, "%DPI%") || EF.Functions.Like(record.SourceSheet, "%JAZ%") || EF.Functions.Like(record.Customer, "%JAZ%") || EF.Functions.Like(record.InspectionParty, "%JAZ%")));
-    else if (site == "华登")
-        query = query.Where(record => record.InspectionTemplate == "普通验货" || record.InspectionTemplate == "" && record.ScheduleSource != "JAZ/JWC" && !EF.Functions.Like(record.SourceSheet, "%DPI%") && !EF.Functions.Like(record.SourceSheet, "%JAZ%") && !EF.Functions.Like(record.Customer, "%JAZ%") && !EF.Functions.Like(record.InspectionParty, "%JAZ%"));
+    var selectedTemplate = "普通验货";
+    var query = db.InspectionRecords.AsNoTracking().Where(value => value.Site != "华登" || !EF.Functions.Like(value.SourceSheet, "%DPI%")).Where(record => record.Site == site);
+    if (site == "华登")
+        query = query.Where(record => !EF.Functions.Like(record.SourceSheet, "%DPI%"));
     if (view is not (null or "all" or "week" or "unfinished")) return Results.BadRequest(new { error = "计划视图无效" });
     query = FilterInspectionPlanView(query, view);
 
@@ -932,24 +926,24 @@ app.MapGet("/api/inspection-overview", async (string? site, ClaimsPrincipal prin
 {
     if (!string.IsNullOrWhiteSpace(site) && !CanAccessSite(principal, site)) return Results.Forbid();
     var allowedSites = new[] { "兴信", "湖南", "华登", "待分配" }.Where(value => CanAccessSite(principal, value)).ToArray();
-    var totals = await db.InspectionRecords.AsNoTracking().Where(value => allowedSites.Contains(value.Site)).GroupBy(value => value.Site)
+    var totals = await db.InspectionRecords.AsNoTracking().Where(value => value.Site != "华登" || !EF.Functions.Like(value.SourceSheet, "%DPI%")).Where(value => allowedSites.Contains(value.Site)).GroupBy(value => value.Site)
         .Select(group => new { site = group.Key, count = group.Count() }).ToDictionaryAsync(value => value.site, value => value.count, cancellationToken);
-    var statusCounts = await db.InspectionRecords.AsNoTracking()
+    var statusCounts = await db.InspectionRecords.AsNoTracking().Where(value => value.Site != "华登" || !EF.Functions.Like(value.SourceSheet, "%DPI%"))
         .Where(value => allowedSites.Contains(value.Site) && (site == null || site == "" || value.Site == site))
         .GroupBy(value => value.WorkflowStatus).Select(group => new { status = group.Key, count = group.Count() })
         .ToDictionaryAsync(value => value.status, value => value.count, cancellationToken);
-    var alertsQuery = db.InspectionAlerts.AsNoTracking().Where(value => value.Status == "待处理" && allowedSites.Contains(value.Site));
+    var alertsQuery = db.InspectionAlerts.AsNoTracking().Where(value => value.Site != "华登" || db.InspectionRecords.Any(record => record.Id == value.InspectionRecordId && !EF.Functions.Like(record.SourceSheet, "%DPI%"))).Where(value => value.Status == "待处理" && allowedSites.Contains(value.Site));
     if (!string.IsNullOrWhiteSpace(site)) alertsQuery = alertsQuery.Where(value => value.Site == site);
     var alerts = await alertsQuery.GroupBy(value => value.Type).Select(group => new { type = group.Key, count = group.Count() })
         .ToDictionaryAsync(value => value.type, value => value.count, cancellationToken);
-    var pendingApprovals = await db.InspectionResultApprovals.AsNoTracking().CountAsync(value => value.Status == "待审批" && allowedSites.Contains(value.Site) && (site == null || site == "" || value.Site == site), cancellationToken);
+    var pendingApprovals = await db.InspectionResultApprovals.AsNoTracking().Where(value => value.Site != "华登" || db.InspectionRecords.Any(record => record.Id == value.InspectionRecordId && !EF.Functions.Like(record.SourceSheet, "%DPI%"))).CountAsync(value => value.Status == "待审批" && allowedSites.Contains(value.Site) && (site == null || site == "" || value.Site == site), cancellationToken);
     return Results.Ok(new { totals, statusCounts, alerts, pendingApprovals });
 }).RequireAuthorization("QcRead");
 
 app.MapGet("/api/inspection-alerts", async (string site, string? type, ClaimsPrincipal principal, AppDbContext db, CancellationToken cancellationToken) =>
 {
     if (!CanAccessSite(principal, site)) return Results.Forbid();
-    var query = db.InspectionAlerts.AsNoTracking().Where(value => value.Site == site && value.Status == "待处理");
+    var query = db.InspectionAlerts.AsNoTracking().Where(value => value.Site != "华登" || db.InspectionRecords.Any(record => record.Id == value.InspectionRecordId && !EF.Functions.Like(record.SourceSheet, "%DPI%"))).Where(value => value.Site == site && value.Status == "待处理");
     if (!string.IsNullOrWhiteSpace(type)) query = query.Where(value => value.Type == type);
     return Results.Ok(await query.OrderByDescending(value => value.Id).Take(200).ToListAsync(cancellationToken));
 }).RequireAuthorization("QcRead");
@@ -967,7 +961,7 @@ app.MapGet("/api/inspection-approvals", async (string? site, ClaimsPrincipal pri
 {
     if (!string.IsNullOrWhiteSpace(site) && !CanAccessSite(principal, site)) return Results.Forbid();
     var allowedSites = new[] { "兴信", "湖南", "华登", "待分配" }.Where(value => CanAccessSite(principal, value)).ToArray();
-    var query = db.InspectionResultApprovals.AsNoTracking().Where(value => value.Status == "待审批" && allowedSites.Contains(value.Site));
+    var query = db.InspectionResultApprovals.AsNoTracking().Where(value => value.Site != "华登" || db.InspectionRecords.Any(record => record.Id == value.InspectionRecordId && !EF.Functions.Like(record.SourceSheet, "%DPI%"))).Where(value => value.Status == "待审批" && allowedSites.Contains(value.Site));
     if (!string.IsNullOrWhiteSpace(site)) query = query.Where(value => value.Site == site);
     return Results.Ok(await query.OrderByDescending(value => value.Id).Take(200).ToListAsync(cancellationToken));
 }).RequireAuthorization("QcRead");

@@ -121,33 +121,41 @@ with tempfile.TemporaryDirectory(prefix='qc-import-check-') as tmp:
             assert next(r for r in records() if r['quantity'] == 1764 and r['contractNumber'] == 'C1' and r['inspectionDate'].startswith('2026-01-07'))['internalResult'] == 'PASS'
             alerts = request('/api/inspection-alerts?site=' + urllib.parse.quote('兴信') + '&type=' + urllib.parse.quote('验货结果变更'))[1]
             assert len(alerts) == 1 and 'HOLD' in alerts[0]['summary'] and 'PASS' in alerts[0]['summary']
-            # Both entry points read the same mixed workbook but import only their own worksheets.
-            jaz_headers = ['日期','洋行\n名称','工作单号','货号','名称','数量','箱数','验货\n结果','原因描述','生产地点','责任主管','责任拉长','抽箱数','箱数','测试报废']
-            jaz_row = ['2026/1/7(三)','JAZWARES','C1','ITEM1','JAZ toy','1764','147','已约再验','抽版','华登','主管','拉长','3','5','2']
-            contents = mixed_workbook(HEADERS, [changed], jaz_headers, [jaz_row])
+            # Finished inspections include JAZ customers; DPI production samples are skipped.
+            dpi_headers = ['日期','洋行名称','工作单号','货号','名称','数量','箱数','验货结果']
+            dpi_row = ['2026/1/7(三)','JAZWARES','DPI1','SAMPLE1','Production sample','14','14','PASS']
+            finished_jaz = changed.copy(); finished_jaz[1] = 'JAZWARES'; finished_jaz[2] = 'FINISHED-JAZ'
+            contents = mixed_workbook(HEADERS, [changed, finished_jaz], dpi_headers, [dpi_row])
             status, result = upload([],site='华登',template='普通验货',contents=contents)
-            assert status == 200 and result['parsed'] == 1 and result['inserted'] == 1, result
-            status, result = upload([],site='华登',template='JAZ专用',contents=contents)
-            assert status == 200 and result['parsed'] == 1 and result['inserted'] == 1, result
-            prefix = '/api/legacy-inspections?site=' + urllib.parse.quote('华登') + '&template='
-            normal = request(prefix + urllib.parse.quote('普通验货'))[1]['items']
-            jaz = request(prefix + urllib.parse.quote('JAZ专用'))[1]['items']
-            assert len(normal) == len(jaz) == 1 and normal[0]['productName'] == 'Toy' and jaz[0]['productName'] == 'JAZ toy'
-            assert jaz[0]['internalResult'] == '已约再验' and jaz[0]['holdRejectReason'] == '抽版' and jaz[0]['productionWorkshop'] == '华登'
-            assert jaz[0]['sampledCartons'] == 3 and jaz[0]['secondaryCartons'] == 5 and jaz[0]['cartons'] == 147
-            assert jaz[0]['contractNumber'] == 'C1' and jaz[0]['responsibleLineLeader'] == '拉长'
-            assert upload([],site='华登',template='JAZ专用',contents=contents)[1]['unchanged'] == 1
-            export_url = '/api/legacy-inspections/export?site=' + urllib.parse.quote('华登') + '&template=' + urllib.parse.quote('JAZ专用')
+            assert status == 200 and result['parsed'] == 2 and result['inserted'] == 2, result
+            normal_url = '/api/legacy-inspections?site=' + urllib.parse.quote('华登')
+            normal = request(normal_url)[1]['items']
+            assert len(normal) == 2 and any(r['customer'] == 'JAZWARES' for r in normal)
+            assert all(r['itemNumber'] != 'SAMPLE1' for r in normal)
+            assert upload([],site='华登',contents=contents)[1]['unchanged'] == 2
+            assert upload([],site='华登',template='JAZ专用',contents=contents)[0] == 400
+            # Previously imported finished JAZ records remain visible, but old DPI data is excluded.
+            with sqlite3.connect(tmp+'/test.db') as db:
+                db.execute("UPDATE InspectionRecords SET InspectionTemplate='JAZ专用', ScheduleSource='JAZ/JWC' WHERE Site='华登' AND ContractNumber='FINISHED-JAZ'")
+                columns = [entry[1] for entry in db.execute('pragma table_info(InspectionRecords)') if entry[1] != 'Id']
+                overrides = {'PlanId': "'old-dpi-plan'", 'Fingerprint': "'old-dpi-fingerprint'", 'SourceSheet': "'8月DPI'", 'ItemNumber': "'SAMPLE1'", 'ProductName': "'Production sample'"}
+                selection = [overrides.get(name, '"'+name+'"') for name in columns]
+                db.execute('INSERT INTO InspectionRecords ('+','.join('"'+name+'"' for name in columns)+') SELECT '+','.join(selection)+" FROM InspectionRecords WHERE Site='华登' AND ContractNumber='FINISHED-JAZ'")
+                db.commit()
+            assert request(normal_url)[1]['total'] == 2
+            assert request('/api/public/plans?site=' + urllib.parse.quote('华登'))[1]['total'] == 2
+            assert upload([],site='华登',contents=contents)[1]['inserted'] == 0
+            export_url = '/api/legacy-inspections/export?site=' + urllib.parse.quote('华登')
             req = urllib.request.Request(base+export_url,headers={'Authorization':'Bearer '+token})
             with urllib.request.urlopen(req) as response: exported = response.read()
             with zipfile.ZipFile(io.BytesIO(exported)) as z:
                 all_xml = ''.join(z.read(name).decode() for name in z.namelist() if name.endswith('.xml'))
-                assert '工作单号' in all_xml and '抽箱数' in all_xml and '原因描述' in all_xml and 'ROUNDUP' not in all_xml
-            assert upload([],site='华登',template='JAZ专用',contents=exported)[1]['unchanged'] == 1
+                assert 'JAZWARES' in all_xml and 'Production sample' not in all_xml
+            assert upload([],site='华登',contents=exported)[1]['inserted'] == 0
             status, _ = request('/api/users', json.dumps({'username':'qc-local','displayName':'QC','department':'QC','role':'QC文员','dataScope':'兴信','password':'Test-only-12345'}).encode()); assert status in (200,201)
             token = request('/api/auth/login', b'{"username":"qc-local","password":"Test-only-12345"}')[1]['accessToken']
             assert upload([row],site='湖南')[0] == 403
-            print('PASS: partial imports, unchanged skips, separate dates/quantities, empty fields, weekday dates, result updates, conflict details with existing matches, duplicate history, factory isolation and access control')
+            print('PASS: partial imports, unchanged skips, separate dates/quantities, empty fields, weekday dates, result updates, conflict details with existing matches, duplicate history, factory isolation, JAZ finished inspections, DPI exclusion and access control')
         except Exception:
             log.flush(); log.seek(0); print(log.read()[-5000:]); raise
         finally:

@@ -34,7 +34,7 @@ public static class InspectionExportService
     private static IEnumerable<(string Name, IReadOnlyList<InspectionRecord> Rows)> Groups(
         IReadOnlyList<InspectionRecord> records, string site, string template)
     {
-        if (site == "湖南" || template == "JAZ专用")
+        if (site == "湖南")
         {
             yield return (DefaultSheetName(site, template), records);
             yield break;
@@ -49,8 +49,7 @@ public static class InspectionExportService
         }
     }
 
-    private static string DefaultSheetName(string site, string template) => template == "JAZ专用"
-        ? "JAZ验货排期" : site == "湖南" ? "验货总结汇总表" : "验货汇总";
+    private static string DefaultSheetName(string site, string template) => site == "湖南" ? "验货总结汇总表" : "验货汇总";
 
     private static void AddSheet(WorkbookPart workbookPart, Sheets sheets, uint sheetId, string rawName,
         string site, string template, IReadOnlyList<InspectionRecord> records)
@@ -71,7 +70,7 @@ public static class InspectionExportService
         worksheet.Append(data);
         worksheetPart.Worksheet = worksheet;
 
-        var title = template == "JAZ专用" ? "JAZWARES验货排期" : $"{site}每日验货总结表";
+        var title = $"{site}每日验货总结表";
         data.Append(RowOf([TextCell(title, 1)], 28));
         var headerRowNumber = 2u;
         if (site == "湖南")
@@ -104,14 +103,6 @@ public static class InspectionExportService
 
     private static ExportColumn[] ColumnsFor(string site, string template)
     {
-        if (template == "JAZ专用") return
-        [
-            new("日期", r => r.InspectionDate, 18), new("洋行名称", r => r.Customer, 18), new("工作单号", r => r.ContractNumber, 22),
-            new("货号", r => r.ItemNumber, 22), new("名称", r => r.ProductName, 32), new("数量", r => r.Quantity, 12), new("箱数", r => r.Cartons, 12),
-            new("验货结果", r => r.InternalResult, 18), new("原因描述", r => r.HoldRejectReason, 26), new("生产地点", r => r.ProductionWorkshop, 18),
-            new("责任主管", r => r.ProductionSupervisor, 18), new("责任拉长", r => r.ResponsibleLineLeader, 18), new("抽箱数", r => r.SampledCartons, 12),
-            new("箱数", r => r.SecondaryCartons, 12), new("测试报废", r => r.TestScrap, 18),
-        ];
         if (site == "湖南") return
         [
             new("日期", r => r.InspectionDate), new("验货地址", r => r.InspectionLocation), new("客户名称", r => r.Customer),

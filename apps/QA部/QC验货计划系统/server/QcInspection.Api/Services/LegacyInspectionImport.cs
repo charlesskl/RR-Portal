@@ -10,7 +10,7 @@ public static class LegacyInspectionImport
     private static string Order(InspectionRecord row)
     {
         var key = string.Join('|', Normalize(row.ContractNumber), Normalize(row.CustomerPo), Normalize(row.ItemNumber));
-        var template = row.Site == "华登" ? row.InspectionTemplate != "" ? row.InspectionTemplate : row.SourceSheet.Contains("DPI", StringComparison.OrdinalIgnoreCase) || row.SourceSheet.Contains("JAZ", StringComparison.OrdinalIgnoreCase) || row.ScheduleSource == "JAZ/JWC" || row.Customer.Contains("JAZ", StringComparison.OrdinalIgnoreCase) ? "JAZ专用" : "普通验货" : "";
+        var template = row.Site == "华登" ? "普通验货" : "";
         return template + "|" + (key == "||" ? $"未填单号|{Normalize(row.Customer)}|{Normalize(row.ProductName)}" : key);
     }
     private static string Values(InspectionRecord row) => JsonSerializer.Serialize(row.ImportFields.OrderBy(name => name)
@@ -20,7 +20,7 @@ public static class LegacyInspectionImport
     {
         var problems = issues ?? new List<LegacyImportIssue>();
         var rows = incoming.ToArray();
-        var local = existing.Where(row => row.Site == site).ToArray();
+        var local = existing.Where(row => row.Site == site && (site != "华登" || !row.SourceSheet.Contains("DPI", StringComparison.OrdinalIgnoreCase))).ToArray();
         var byOrder = local.ToLookup(Order);
         var byContractItem = local.ToLookup(row => (Normalize(row.ContractNumber), Normalize(row.ItemNumber)));
         var result = new List<Entry>();

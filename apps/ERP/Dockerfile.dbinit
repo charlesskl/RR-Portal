@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1
+# 数据库初始化镜像：编译 DbDeploy，内置 db/ 脚本，启动时按 run-db.ps1 同序执行迁移（幂等，可重复跑）
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+COPY tools/DbDeploy/DbDeploy.csproj tools/DbDeploy/
+RUN dotnet restore tools/DbDeploy/DbDeploy.csproj
+COPY tools/DbDeploy/ tools/DbDeploy/
+RUN dotnet publish tools/DbDeploy/DbDeploy.csproj -c Release --no-restore -o /out
+
+FROM mcr.microsoft.com/dotnet/runtime:8.0
+WORKDIR /opt/dbinit
+COPY --from=build /out/ ./
+COPY db/ /db/
+COPY docker/db-init.sh /db-init.sh
+ENTRYPOINT ["bash", "/db-init.sh"]

@@ -1258,14 +1258,14 @@ export const imageNoteApi = {
     if (备注) fd.append("备注", 备注);
     fd.append("file", file);
     const token = getToken();
-    const res = await fetch("/api/image-notes", {
+    const res = await fetch(`${import.meta.env.BASE_URL}api/image-notes`, {
       method: "POST",
       body: fd,
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (res.status === 401) {
       clearToken();
-      if (!location.pathname.startsWith("/login")) location.assign("/login");
+      if (!location.pathname.endsWith("/login")) location.assign(`${import.meta.env.BASE_URL}login`);
       throw new ApiError(401, "登录已过期，请重新登录");
     }
     const text = await res.text();
@@ -1282,8 +1282,8 @@ export const imageNoteApi = {
   remove: (id: number) => api<void>(`/image-notes/${id}`, { method: "DELETE" }),
 };
 
-// 静态文件在站点根 /uploads 下(api 在 /api 下),dev 由 vite proxy 转发
-export const imageNoteUrl = (n: ImageNote) => `/${n.存储路径 ?? ""}`;
+// 静态文件在站点根 /uploads 下(api 在 /api 下),dev 由 vite proxy 转发;云端部署在 /erp/ 子路径,需带 BASE_URL 前缀
+export const imageNoteUrl = (n: ImageNote) => `${import.meta.env.BASE_URL}${n.存储路径 ?? ""}`;
 
 // ---------- Batch 5 半成品仓群(照抄老系统 web/src/api/semi.ts + semiFinishedLabelOrders.ts + semiFinishedCommonMaterials.ts) ----------
 

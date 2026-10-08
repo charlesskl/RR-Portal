@@ -137,6 +137,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/QA部/玩具质量管理系统/"]="toyqms"
   ["apps/品制管理部/品质集中门户/"]="quality-portal"
   ["apps/QA部/QC验货计划系统/"]="qc-plan-api qc-plan-web"
+  ["apps/ERP/"]="erp-sqlserver erp-db-init erp-api"
   ["apps/task-api/"]="task-api"
 )
 

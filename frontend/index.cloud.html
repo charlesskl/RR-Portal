@@ -80,6 +80,7 @@
   .dept-icon.qa { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
   .dept-icon.portal { background: linear-gradient(135deg, #f43f5e, #8b5cf6); }
   .dept-icon.shipping { background: linear-gradient(135deg, #0ea5e9, #2563eb); }
+  .dept-icon.erp { background: linear-gradient(135deg, #14b8a6, #0f766e); }
   .dept-name { font-size: 20px; font-weight: 600; color: #f1f5f9; }
   .dept-desc { font-size: 13px; color: #94a3b8; margin-top: 2px; }
   .dept-card-body { padding: 0 28px 24px; }
@@ -184,7 +185,7 @@
 
     <div class="stats-bar">
       <div class="stat-card">
-        <div class="stat-value" id="statDepts">7</div>
+        <div class="stat-value" id="statDepts">9</div>
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
@@ -530,6 +531,63 @@
         </div>
       </div>
 
+    </div>
+
+    <div class="section-title">独立系统</div>
+    <div class="dept-grid">
+
+      <!-- ERP（不属任何部门） -->
+      <div class="dept-card" onclick="showDept('erp')">
+        <div class="dept-card-header">
+          <div class="dept-icon erp">&#128188;</div>
+          <div>
+            <div class="dept-name">ERP</div>
+            <div class="dept-desc">生产管理系统</div>
+          </div>
+        </div>
+        <div class="dept-card-body">
+          <div class="plugin-list">
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="erpDot"></div>
+                <span class="plugin-name">ERP 生产管理系统</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===== ERP 详情（独立系统，不属任何部门） ===== -->
+  <div class="detail-view" id="erpDetail">
+    <div class="back-btn" onclick="goHome()">&larr; 返回控制台</div>
+    <div class="breadcrumb">
+      <a href="#" onclick="goHome()">控制台</a>
+      <span>/</span>
+      <span style="color:#14b8a6">ERP</span>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#14b8a6,#0f766e);">&#128188;</div>
+        <div>
+          <div class="detail-plugin-name">ERP 生产管理系统</div>
+          <div class="detail-plugin-desc">兴信塑胶生产管理：工程 BOM/款号、业务排期与生产通知单、原料仓/来料仓、塑胶仓采购与啤机加工、外发加工委托单、半成品仓、装配、船务、品质与系统权限管理</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128295; 工程 BOM</div>
+            <div class="feature-tag">&#128197; 排期/生产通知单</div>
+            <div class="feature-tag">&#128230; 采购入出仓</div>
+            <div class="feature-tag">&#9881; 啤机加工</div>
+            <div class="feature-tag">&#128101; 外发加工</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="erpDetailDot"></div> 检查中...</div>
+        <a href="/erp/" target="_blank" rel="noopener" class="btn btn-primary">打开系统</a>
+      </div>
     </div>
   </div>
 
@@ -1376,7 +1434,7 @@
 </div>
 
 <script>
-var allDepts = ['engineering', 'pmc', 'production', 'spray', 'business', 'shipping', 'indonesia', 'qa', 'qcportal'];
+var allDepts = ['engineering', 'pmc', 'production', 'spray', 'business', 'shipping', 'indonesia', 'qa', 'qcportal', 'erp'];
 
 function showDept(dept) {
   document.getElementById('homeView').classList.add('hidden');
@@ -1431,6 +1489,7 @@ async function checkHealth() {
       { name: 'qaWeekly', url: '/qa-weekly-report/api/health', dot: 'qaWeeklyDot', detailDot: 'qaWeeklyDetailDot' },
       { name: 'qcReport', url: '/qc-report/health', dot: 'qcReportDot', detailDot: 'qcReportDetailDot' },
       { name: 'qcPlan', url: '/qc-plan/api/health', dot: 'qcPlanDot', detailDot: 'qcPlanDetailDot' },
+      { name: 'erp', url: '/erp/health', dot: 'erpDot', detailDot: 'erpDetailDot' },
       { name: 'qualityPortal', url: '/portal/', dot: 'portalDot', detailDot: 'portalDetailDot' },
     ];
     var healthy = 0;

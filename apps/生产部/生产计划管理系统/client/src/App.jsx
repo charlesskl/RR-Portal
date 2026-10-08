@@ -33,6 +33,15 @@ export default function App() {
       .catch(() => setLines([]));
   }, [workshop]);
 
+  // 切换车间/页签/拉之前，先问编辑器有没有未保存的修改（复制粘贴的新行没保存就切走会丢）
+  const guardPending = () => {
+    const fn = window.__rrPendingChanges;
+    if (fn && fn()) {
+      return window.confirm('表格里有还没保存的修改，现在切换会丢掉这些修改。\n\n确定要离开吗？（不想丢就点「取消」，先回表格按「保存」）');
+    }
+    return true;
+  };
+
   if (!workshop) {
     return (
       <ConfigProvider locale={zhCN}>
@@ -51,7 +60,7 @@ export default function App() {
         }}>
           <div
             style={{ cursor: 'pointer', fontWeight: 700, fontSize: 15, color: '#1890ff', marginRight: 32 }}
-            onClick={() => setWorkshop(null)}
+            onClick={() => { if (guardPending()) setWorkshop(null); }}
           >
             ← 返回
           </div>
@@ -62,7 +71,7 @@ export default function App() {
             {TABS.map(t => (
               <div
                 key={t.key}
-                onClick={() => { setTab(t.key); setCurrentLine('all'); }}
+                onClick={() => { if (guardPending()) { setTab(t.key); setCurrentLine('all'); } }}
                 style={{
                   padding: '12px 20px', cursor: 'pointer', fontSize: 14,
                   borderBottom: tab === t.key ? '2px solid #1890ff' : '2px solid transparent',
@@ -84,7 +93,7 @@ export default function App() {
             <span style={{ fontSize: 13, color: '#999', marginRight: 12 }}>拉：</span>
             <div
               key="all"
-              onClick={() => setCurrentLine('all')}
+              onClick={() => { if (guardPending()) setCurrentLine('all'); }}
               style={{
                 padding: '8px 16px', cursor: 'pointer', fontSize: 13,
                 borderBottom: currentLine === 'all' ? '2px solid #fa8c16' : '2px solid transparent',
@@ -95,7 +104,7 @@ export default function App() {
             {lines.map(l => (
               <div
                 key={l.key}
-                onClick={() => setCurrentLine(l.key)}
+                onClick={() => { if (guardPending()) setCurrentLine(l.key); }}
                 onDoubleClick={() => { setEditingLine(l.key); setEditName(l.name); }}
                 style={{
                   padding: '8px 16px', cursor: 'pointer', fontSize: 13,

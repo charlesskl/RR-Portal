@@ -655,7 +655,13 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
 
   const handleAddRow = async () => {
     try {
-      await axios.post('/api/orders', { workshop, status: STATUS_MAP[tab] || 'active' });
+      // 在某条拉的页签下新增，直接带上当前拉名——否则新行拉名是 null，
+      // 只出现在「全部」里，当前页签看不到，用户以为没加上
+      await axios.post('/api/orders', {
+        workshop,
+        status: STATUS_MAP[tab] || 'active',
+        ...(lineName && lineName !== 'all' ? { line_name: lineName } : {}),
+      });
       fetchData();
     } catch {
       message.error('新增失败');

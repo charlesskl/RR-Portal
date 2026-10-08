@@ -696,19 +696,33 @@
     let expanded = !!saved?.enabled;
     const locked = sections.some(s => s.status === 'approved');
     function draw() {
-      panel.innerHTML = `<h3>${saved?.enabled ? '混装产品配置' : '报价类型：单品报价'}</h3>${!expanded ? `<p>支持多个小产品独立报价、共用模具拆价及混装平均价。</p>${edit && !locked ? '<button type="button" class="mixed-enable">设置为混装报价</button>' : '<p class="muted">解除审核后可设置混装报价。</p>'}` : `
+      panel.innerHTML = `${edit && !locked ? `<label>报价类型 <select class="mixed-type" aria-label="报价类型"><option value="single" ${!expanded ? 'selected' : ''}>单品报价</option><option value="mixed" ${expanded ? 'selected' : ''}>混装报价</option></select></label>` : ''}<h3>${saved?.enabled ? '混装产品配置' : '报价类型：单品报价'}</h3>${!expanded ? `<p>支持多个小产品独立报价、共用模具拆价及混装平均价。</p>${edit && !locked ? '<button type="button" class="mixed-enable">设置为混装报价</button>' : '<p class="muted">解除审核后可设置混装报价。</p>'}` : `
         <p class="muted">不预设小产品；可在工程/业务导入模具报价单，按配件序号建立小产品，也可手动添加。在此维护小产品和每包装数量。啤工需求量在啤机部手填，报价NA比例在汇总页填写。</p>
         <div class="mixed-fields"><label>每包装小产品数量${input('units_per_pack', cfg.units_per_pack, edit && !locked)}</label></div>
         <div class="mixed-scroll"><table><thead><tr><th>小产品货号</th><th>小产品名称</th><th></th></tr></thead><tbody>${cfg.products.map((p, i) => `<tr data-product="${i}"><td>${input('code', p.code, edit && !locked, 'text')}</td><td>${input('name', p.name, edit && !locked, 'text')}</td><td>${edit && !locked ? '<button type="button" class="mini mixed-remove">移除</button>' : ''}</td></tr>`).join('')}</tbody></table></div>
-        ${edit && !locked ? `<div class="wb-bar"><button type="button" class="mini mixed-add">＋ 添加小产品</button><button type="button" class="mixed-save-config">${saved ? '保存混装配置并刷新' : '保存并启用（现有明细归入首款）'}</button></div><p class="muted">修改配置后，各部门需重新提交审核。移除小产品后保存时需确认，将一并删除该产品的部门明细与零件选用关系，保留共用零件和其他小产品。</p>` : '<p class="muted">修改混装构成前请先解除各部门审核。</p>'}<p class="mixed-message" role="status"></p>`}`;
-      panel.querySelector('.mixed-enable')?.addEventListener('click', () => { expanded = true; draw(); });
+        ${edit && !locked ? `<div class="wb-bar"><button type="button" class="mini mixed-add">＋ 添加小产品</button>${!saved?.enabled ? '<button type="button" class="mini mixed-cancel">取消设置</button>' : ''}<button type="button" class="mixed-save-config">${saved ? '保存混装配置并刷新' : '保存并启用（现有明细归入首款）'}</button></div><p class="muted">修改配置后，各部门需重新提交审核。移除小产品后保存时需确认，将一并删除该产品的部门明细与零件选用关系，保留共用零件和其他小产品。</p>` : '<p class="muted">修改混装构成前请先解除各部门审核。</p>'}<p class="mixed-message" role="status"></p>`}`;
+      panel.querySelector('.mixed-enable')?.addEventListener('click', () => { cfg.enabled = true; expanded = true; draw(); });
       panel.querySelector('[data-field="units_per_pack"]')?.addEventListener('input', event => { cfg.units_per_pack = Number(event.target.value); });
       panel.querySelectorAll('[data-product]').forEach(row => {
         const index = Number(row.dataset.product);
         row.querySelectorAll('input').forEach(el => el.oninput = () => { cfg.products[index][el.dataset.field] = el.type === 'number' ? Number(el.value) : el.value; });
         row.querySelector('.mixed-remove')?.addEventListener('click', () => { cfg.products.splice(index, 1); draw(); });
       });
-      panel.querySelector('.mixed-add')?.addEventListener('click', () => { cfg.products.push({ id: `p_${uuid()}`, code: '', name: '', ratio: 1 }); draw(); });
+      panel.querySelector('.mixed-add')?.addEventListener('click', () => { cfg.products.push({ id: `p_${crypto.randomUUID()}`, code: '', name: '', ratio: 1 }); draw(); });
+      panel.querySelector('.mixed-cancel')?.addEventListener('click', () => { expanded = false; draw(); });
+      panel.querySelector('.mixed-type')?.addEventListener('change', async event => {
+        if (event.target.value === 'mixed') { cfg.enabled = true; expanded = true; draw(); return; }
+        if (!saved?.enabled) { expanded = false; draw(); return; }
+        const button = event.target, message = panel.querySelector('.mixed-message');
+        try {
+          if (document.querySelector('.dept-tab[title="有未保存修改"]')) throw new Error('请先保存或取消当前部门修改，再取消混装');
+          if (!window.confirm('恢复单品报价后，将使用各部门原有单品明细计算。混装小产品、共用资料会保留，但不参与单品计算，重新启用时可继续使用。是否继续？')) return;
+          button.disabled = true;
+          await request(`/quotes/${quote.id}/mixed`, { method: 'PUT', body: JSON.stringify({ config: { enabled: false }, expected_config: saved }) });
+          location.reload();
+        } catch (error) { message.textContent = error.message; message.className = 'mixed-message mixed-error'; }
+        finally { button.disabled = false; button.value = 'mixed'; }
+      });
       panel.querySelector('.mixed-save-config')?.addEventListener('click', async event => {
         const button = event.target, message = panel.querySelector('.mixed-message');
         try {
@@ -763,7 +777,7 @@
   }
   function shippingSummary(host, result, sales, salesSection, quote, me) {
     const p = result.pricing, c = result.components;
-    const editable = ['sales', 'engineering'].includes(me?.dept) && salesSection?.status !== 'approved';
+    const editable = ['sales', 'engineering'].includes(me?.dept) && me?.perms?.['报价单详情']?.can_edit && me?.perms?.['业务部']?.can_edit && me?.perms?.['汇总分析']?.can_edit && salesSection?.status !== 'approved';
     const fields = { surtax_markup_x: sales.shipping?.surtax_markup_x ?? p.markup, markup_x: p.markup, sew_markup_x: sales.shipping?.sew_markup_x ?? p.markup, elec_markup_x: sales.shipping?.elec_markup_x ?? p.markup, divisor: p.divisor, fx_hkd_usd: p.fx, amortization_usd: Number(sales.mixed_pricing?.amortization_usd || 0), surtax_pct: p.surtax_pct, target_usd: Number(sales.shipping?.target_usd || 0) };
     const nonnegative = new Set(['amortization_usd', 'surtax_pct', 'surtax_markup_x', 'target_usd']);
     const validFields = () => Object.entries(fields).every(([key, value]) => Number.isFinite(value) && (nonnegative.has(key) ? value >= 0 : value > 0));

@@ -64,8 +64,34 @@ test('混装报价：新建、保存、拆价、权限、审核锁、确认锁�
   const fresh = await api('/quotes/' + created.id);
   assert.equal(fresh.mixed_engineering_molds.p1[0].mold_no, 'A');
   assert.equal(fresh.mixed_engineering_molds.p2[0].mold_no, 'B');
+  const beforeDisable = await api('/quotes/' + created.id);
+  const keepDepartments = beforeDisable.sections.filter(s => s.dept !== 'sales').map(s => s.payload_json);
+  await api('/quotes/' + created.id + '/mixed', 'PUT', { config: { enabled: false }, expected_config: beforeDisable.mixed_quote });
+  const disabled = await api('/quotes/' + created.id);
+  assert.equal(disabled.mixed_quote.enabled, false);
+  assert.deepEqual(disabled.sections.filter(s => s.dept !== 'sales').map(s => s.payload_json), keepDepartments);
+  assert.deepEqual(disabled.mixed_quote.products, beforeDisable.mixed_quote.products);
+  await api('/quotes/' + created.id + '/mixed', 'PUT', { config: { enabled: false }, expected_config: beforeDisable.mixed_quote }, 409);
+  await api('/quotes/' + created.id + '/mixed', 'PUT', { config: { ...disabled.mixed_quote, enabled: true }, expected_config: disabled.mixed_quote });
+  const restored = await api('/quotes/' + created.id);
+  assert.deepEqual(restored.sections.filter(s => s.dept !== 'sales').map(s => s.payload_json), keepDepartments);
+  assert.equal((await api('/quotes/' + created.id + '/mixed')).final_usd, 95);
+  for (const section of restored.sections.filter(s => ['engineering','molding','sales'].includes(s.dept))) {
+    await api('/sections/' + section.id, 'PUT', {payload:JSON.parse(section.payload_json),submit:true,base_filled_at:section.filled_at});
+  }
   const { DatabaseSync } = require('node:sqlite');
   const local = new DatabaseSync(path.join(temporary, 'test.db'));
+  const admin = local.prepare("SELECT id FROM users WHERE username='admin'").get();
+  const snapshotPerms = local.prepare('SELECT * FROM user_perms WHERE user_id=?').all(admin.id);
+  local.prepare('UPDATE user_perms SET can_edit=0,can_review=0 WHERE user_id=?').run(admin.id);
+  const readonly = await api('/quotes/' + created.id);
+  const currentEng = readonly.sections.find(s => s.dept === 'engineering');
+  await api('/sections/' + eng.id, 'PUT', {payload:JSON.parse(currentEng.payload_json),submit:false,base_filled_at:currentEng.filled_at},403);
+  await api('/quotes/' + created.id + '/header', 'PUT', {product_name:'禁止修改'},403);
+  await api('/quotes/' + created.id + '/mixed', 'PUT', {config:{enabled:false},expected_config:readonly.mixed_quote},403);
+  await api('/reviews/' + eng.id, 'POST', {action:'approve'},403);
+  assert.equal((await api('/quotes/' + created.id)).sections.find(s=>s.dept==='engineering').payload_json,currentEng.payload_json);
+  for (const perm of snapshotPerms) local.prepare('UPDATE user_perms SET can_edit=?,can_review=? WHERE user_id=? AND menu=?').run(perm.can_edit,perm.can_review,admin.id,perm.menu);
   const staff = local.prepare("INSERT INTO users (username,password_hash,display_name,dept,role,factory_code) VALUES (?,?,?,'molding','staff','qingxi')")
     .run('mold-test', require('bcryptjs').hashSync('mixed-staff-only', 4), '啤机测试账号').lastInsertRowid;
   local.prepare('INSERT INTO user_customers (user_id,customer) VALUES (?,?)').run(staff, 'TEST');
@@ -134,6 +160,9 @@ test('混装报价：新建、保存、拆价、权限、审核锁、确认锁�
     .run('customer-scope', require('bcryptjs').hashSync('customer-scope-only', 4), '客户范围测试').lastInsertRowid;
   accounts.prepare('INSERT INTO user_customers (user_id,customer) VALUES (?,?)').run(salesUser, 'TOMY');
   accounts.prepare('INSERT INTO user_factories (user_id,factory_code) VALUES (?,?)').run(salesUser, 'qingxi');
+  for (const perm of require('../backend/permissions/role_templates').templateFor('sales','staff')) {
+    accounts.prepare('INSERT INTO user_perms (user_id,menu,can_view,can_edit,can_review,can_admin) VALUES (?,?,?,?,?,?)').run(salesUser,perm.menu,perm.can_view,perm.can_edit,perm.can_review,perm.can_admin);
+  }
   accounts.close(); cookie = '';
   await api('/auth/login', 'POST', { username: 'customer-scope', password: 'customer-scope-only' });
   await t.test('业务可上传并解析模具报价表', async () => {

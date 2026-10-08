@@ -292,6 +292,7 @@ jobs:
               /zuru-order-system/health \
               /zuru-master/health \
               /voyageplex/api/health \
+              /erp/health \
               /qc-plan/api/health; do
             check_endpoint "$ENDPOINT" || FAILED=$((FAILED + 1))
           done

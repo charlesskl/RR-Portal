@@ -16,9 +16,17 @@ while IFS='|' read -r _num _suffix file; do
   if [[ "$_num" == "1" || "$_num" == "2" ]]; then spec="lenient:$spec"; fi
   specs+=("$spec")
 done < <(
+  # 两个兼容坑（2026-10-08 erp-db-init exit 139 实录）：
+  # ① BASH_REMATCH 须在匹配成功后立即取走——第二个 =~ 会覆盖它（bash 5 不匹配也清空）。
+  # ② bash 3.2 的 for 循环体经进程替换喂给 while 时，case 里的 continue 会直接解析失败；
+  #    这里改用嵌套 if，不用 continue。
   for f in *.sql; do
-    if [[ $f =~ ^([0-9]+)([A-Za-z]*)_ ]] && [[ ! $f =~ [Dd][Ee][Mm][Oo] ]]; then
-      printf '%d|%s|%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "$f"
+    if [[ $f =~ ^([0-9]+)([A-Za-z]*)_ ]]; then
+      num="${BASH_REMATCH[1]}"; suffix="${BASH_REMATCH[2]}"
+      if [[ ! $f = *[Dd][Ee][Mm][Oo]* ]]; then
+        # 10#$num：去掉前导零强制十进制，否则 08/09 会被 printf %d 当八进制报错
+        printf '%d|%s|%s\n' "$((10#$num))" "$suffix" "$f"
+      fi
     fi
   done | LC_ALL=C sort -t'|' -k1,1n -k2,2
 )

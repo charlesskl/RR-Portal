@@ -31,7 +31,7 @@ async function buildMixedWorkbook({ quote, sections, dept, customerOnly = false,
     ws.addRow(['小产品平均报价 USD', { formula: `SUMPRODUCT(C2:C${last},E2:E${last})`, result: result.average_usd }]);
     ws.addRow([result.config.na_direct ? 'NA合计计入倍数' : '每包装小产品数量', result.cost_units ?? result.units_per_pack]);
     ws.addRow(['每包装共有费用及摊费 USD', result.common_usd]);
-    ws.addRow(['附加费 USD', { formula: `(B${averageRow}*B${averageRow + 1}+B${averageRow + 2})*${result.pricing.surtax_pct}/100*${result.pricing.markup}/${result.pricing.divisor}`, result: result.surcharge_usd }]);
+    ws.addRow(['附加费 USD', { formula: `(B${averageRow}*B${averageRow + 1}+B${averageRow + 2})*${result.pricing.surtax_pct}/100*${result.pricing.surtax_markup}/${result.pricing.divisor}`, result: result.surcharge_usd }]);
     ws.addRow(['每包装最终报价 USD', { formula: `B${averageRow}*B${averageRow + 1}+B${averageRow + 2}+B${averageRow + 3}`, result: result.final_usd }]);
     ws.addRow(['每包装最终报价 HKD', { formula: `B${averageRow + 4}*${result.pricing.fx}`, result: result.final_hkd }]);
     ws.addRow(['主货号 / 产品', `${quote.quote_no} / ${quote.product_name}`]);

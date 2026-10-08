@@ -1158,6 +1158,7 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
   const sc = shipping.scenarios;
   const cols = sc.length;
   const markupX = shipping.markup_x == null || shipping.markup_x === '' ? 1 : num(shipping.markup_x);
+  const surtaxMarkupX = shipping.surtax_markup_x == null || shipping.surtax_markup_x === '' ? markupX : num(shipping.surtax_markup_x);
   const sewMarkupX = shipping.sew_markup_x == null || shipping.sew_markup_x === '' ? markupX : num(shipping.sew_markup_x);
   const elecMarkupX = shipping.elec_markup_x == null || shipping.elec_markup_x === '' ? markupX : num(shipping.elec_markup_x);
   const customerSuppliedProducts = Array.isArray(shipping.customer_supplied_products)
@@ -1212,7 +1213,7 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
     const testingShareUSD = num(refs.testingShareUsd);
     const finalUSD = totalUSD + moldShareUSD + prototypeShareUSD + testingShareUSD + customerSuppliedUSD;
     const surtaxUsd = finalUSD * 0.004;
-    const surtaxMarkup = surtaxUsd * markupX;
+    const surtaxMarkup = surtaxUsd * surtaxMarkupX;
     const surtaxDivided = surtaxMarkup / divisor;
     const quotedUSD = finalUSD + surtaxDivided;
     return { base, freight, lifting, mainMarkup, freightMarkup, combinedHkd, totalHKD, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, customerSuppliedUSD, finalUSD,
@@ -1341,7 +1342,7 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
   writeRow('附加税0.4%', i => ({ formula: `${colLetter(i+2)}${rFinal}*0.4%`, result: rows[i].surtaxUsd }),
     { fmt: '0.00', bold: true, fill: 'FFFFF2CC', fontColor: 'FF7F6000' });
   const rSurtaxMarkup = row;
-  writeRow(`码点 × ${markupX}`, i => ({ formula: `${colLetter(i+2)}${rSurtax}*${markupX}`, result: rows[i].surtaxMarkup }),
+  writeRow(`码点 × ${surtaxMarkupX}`, i => ({ formula: `${colLetter(i+2)}${rSurtax}*${surtaxMarkupX}`, result: rows[i].surtaxMarkup }),
     { fmt: '0.00' });
   const rSurtaxDivisor = row;
   writeRow(`找数 ÷ ${shipping.divisor || 1}`, i => ({ formula: `${colLetter(i+2)}${rSurtaxMarkup}/${num(shipping.divisor)}`, result: rows[i].surtaxDivided }),
@@ -1439,8 +1440,8 @@ function renderInjection(ws, row, payload, fxRH, refs) {
     // 合计行：按产品配比分别加权原料单价(G) / 啤价(I) / 成品金额(N)
     const totalRow = row;
     const mixGroups = injectionProductGroups(payload);
-    const totalRatio = sum(mixGroups, group => group.ratio);
-    ws.getCell(row, 1).value = mixGroups.length > 1 ? `加权合计（总配比 ${totalRatio}）` : '合计';
+    const totalRatio = sum(mixGroups.filter(group => !group.direct), group => group.ratio);
+    ws.getCell(row, 1).value = mixGroups.length > 1 ? `${mixGroups.some(g => g.direct) ? '配比平均 + 直接累加' : '加权合计'}（总配比 ${totalRatio}）` : '合计';
     ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
     ws.mergeCells(row, 1, row, 6);
     ws.getCell(row, 7).value = { formula: weightedColumnFormula(payload, dataStart, 'G'), result: rawSumVal };
@@ -1501,13 +1502,13 @@ function injectionSubtotal(p) {
 }
 
 function renderSecondProc(ws, row, payload, fxRH, refs) {
-  // 二次加工 = 喷油部 painting_items（夹模/移印/炒货/散枪/边模/油色/浸油/抹油/擦PP水/UV 十工序）
+  // 二次加工 = 喷油部 painting_items（夹模/移印/炒货/散枪/边模/油色/浸油/抹油/擦PP水/UV/热转印 十一工序）
   const items = payload.painting_items || payload.second_proc || [];
   const colLetter = (n) => { let s=''; while(n>0){const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26);} return s; };
   // 工序列布局：A 序号 | B 名称 | C 位置 | 各工序(数量+单价 两列) | 报价
-  const procs = ['夹模', '移印', '炒货', '散枪', '边模', '油色', '浸油', '抹油', '擦PP水', 'UV'];
-  const procKeys = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv'];
-  const priceCol = 4 + procs.length * 2;      // 报价列号（十工序 = 24）
+  const procs = ['夹模', '移印', '炒货', '散枪', '边模', '油色', '浸油', '抹油', '擦PP水', 'UV', '热转印'];
+  const procKeys = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv', 'heat_transfer'];
+  const priceCol = 4 + procs.length * 2;      // 报价列号（十一工序 = 26）
   const PRICE = colLetter(priceCol);
   ws.getColumn(priceCol).width = 16;
   ws.mergeCells(row, 1, row, priceCol); styleSection(ws.getCell(row, 1));
@@ -1578,7 +1579,7 @@ function renderSecondProc(ws, row, payload, fxRH, refs) {
   return row;
 }
 function secondProcSubtotal(p) {
-  const procKeys = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv'];
+  const procKeys = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv', 'heat_transfer'];
   const items = p.painting_items || p.second_proc || [];
   ensureExplicitProductGroups(items);
   const s = weightedRowsSum(p, items, r => {
@@ -1619,7 +1620,7 @@ function addPaintingDetailSheet(wb, painting, fxRH) {
   const items = painting.painting_items || painting.second_proc || [];
   if (!items.length) return null;
   const ws = wb.addWorksheet('喷油明细');
-  ws.columns = Array.from({ length: 24 }, (_, index) => ({ width: index < 3 ? [7, 28, 18][index] : 13 }));
+  ws.columns = Array.from({ length: 26 }, (_, index) => ({ width: index < 3 ? [7, 28, 18][index] : 13 }));
   const refs = {};
   renderSecondProc(ws, 1, painting, fxRH, refs);
   return {

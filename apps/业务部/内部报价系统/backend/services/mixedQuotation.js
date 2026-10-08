@@ -57,12 +57,13 @@ function calculateMixedQuote(quote, sections, { strict = false } = {}) {
     if (data.molding?.parts_catalog) molds.catalogRows(data.molding, config, quote.qty); }
   catch (e) { errors.push(e.message); return invalid(); }
   const sales = data.sales, shipping = sales.shipping || {}, extra = sales.mixed_pricing || {};
-  let fx, divisor, markup, freight, amortization, surtax, fixedCharge, freightScenarios, selectedFreight;
+  let fx, divisor, markup, surtaxMarkup, freight, amortization, surtax, fixedCharge, freightScenarios, selectedFreight;
   try {
     molds.number(sales.header?.fx_rmb_hkd ?? .85, 'RMB→HKD 汇率', true);
     fx = molds.number(sales.header?.fx_hkd_usd ?? 7.8, 'HKD→USD 汇率', true);
     divisor = molds.number(shipping.divisor ?? .98, '除数', true);
     markup = molds.number(shipping.markup_x ?? 1.2, '码点', true);
+    surtaxMarkup = molds.number(shipping.surtax_markup_x ?? markup, '附加税码点');
     molds.number(shipping.sew_markup_x ?? markup, '车缝码点', true);
     molds.number(shipping.elec_markup_x ?? markup, '电子码点', true);
     fixedCharge = 0; // 附加税统一按可编辑税率计算，旧固定金额不再叠加。
@@ -100,7 +101,7 @@ function calculateMixedQuote(quote, sections, { strict = false } = {}) {
   common.components.misc += fixedCharge;
   const commonUsd = (common.rawQuotedPrice + (freight + fixedCharge) * markup) / divisor / fx + commonAmortization;
   const beforeSurtax = average * costUnits + commonUsd;
-  const surcharge = beforeSurtax * surtax * markup / divisor;
+  const surcharge = beforeSurtax * surtax * surtaxMarkup / divisor;
   const components = Object.fromEntries(Object.keys(common.components).map(key => [key,
     common.components[key] + products.reduce((n, p) => n + p.components[key] * p.weight * costUnits, 0)]));
   components.freight += selectedFreight.freight;
@@ -113,9 +114,9 @@ function calculateMixedQuote(quote, sections, { strict = false } = {}) {
     // 汇总表沿用现有「HKD 码点后、除数前」口径；最终报客价在 final_usd。
     quotedPrice: +(products.reduce((n, p) => n + p.base_hkd * p.weight * costUnits, 0)
       + common.rawQuotedPrice + (freight + fixedCharge) * markup).toFixed(4),
-    freight_scenarios: freightScenarios.map(s => ({ ...s, final_usd: (beforeSurtax + (s.total - freight) * markup / divisor / fx) * (1 + surtax * markup / divisor) })),
+    freight_scenarios: freightScenarios.map(s => ({ ...s, final_usd: (beforeSurtax + (s.total - freight) * markup / divisor / fx) * (1 + surtax * surtaxMarkup / divisor) })),
     selected_container: selectedFreight.key,
-    components, hasSourceData: true, pricing: { fx, divisor, markup, tax_mode: taxMode, fixed_charge_hkd: fixedCharge, surtax_pct: surtax * 100 } };
+    components, hasSourceData: true, pricing: { fx, divisor, markup, surtax_markup: surtaxMarkup, tax_mode: taxMode, fixed_charge_hkd: fixedCharge, surtax_pct: surtax * 100 } };
   if (strict && errors.length) throw new Error(errors.join('；'));
   return result;
 }

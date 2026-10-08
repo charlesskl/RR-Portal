@@ -335,7 +335,7 @@ function patchPaintingProductMix(ws, painting) {
   // 喷油表使用两层表头（工序名 + 数量/单价），数据从标题下第 3 行开始。
   const dataStart = headerRow + 2;
   const originalTotalRow = dataStart + items.length;
-  const amountKeys = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv'];
+  const amountKeys = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv', 'heat_transfer'];
   const amountColumn = 4 + amountKeys.length * 2;
   const ratioColumn = amountColumn - 1;
   const ratioLetter = colLetter(ratioColumn);
@@ -353,7 +353,7 @@ function patchPaintingProductMix(ws, painting) {
     const subtotal = sum(group.rows, entry => amountOf(entry.row));
     const amountCells = group.rows.map(entry => `${amountLetter}${dataStart + entry.index}`);
     ws.mergeCells(row, 1, row, ratioColumn - 1);
-    ws.getCell(row, 1).value = `${group.name} 小计 · 配比`;
+    ws.getCell(row, 1).value = `${group.name} 小计 · ${group.direct ? '直接累加' : '配比'}`;
     ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
     applyStyle(ws.getCell(row, 1), labelStyle);
     for (let column = 2; column < ratioColumn; column += 1) {
@@ -368,8 +368,11 @@ function patchPaintingProductMix(ws, painting) {
     applyStyle(ws.getCell(row, amountColumn), totalStyle, '0.0000');
   });
 
+  const averageRows = groups.map((g, i) => g.direct ? null : originalTotalRow + i).filter(r => r !== null);
+  const directRows = groups.map((g, i) => g.direct ? originalTotalRow + i : null).filter(r => r !== null);
+  const avgFormula = averageRows.length ? `IFERROR((${averageRows.map(r => `${ratioLetter}${r}*${amountLetter}${r}`).join('+')})/(${averageRows.map(r => `${ratioLetter}${r}`).join('+')}),0)` : '0';
   ws.getCell(movedTotalRow, amountColumn).value = {
-    formula: `(IFERROR(SUMPRODUCT(${ratioLetter}${originalTotalRow}:${ratioLetter}${movedTotalRow - 1},${amountLetter}${originalTotalRow}:${amountLetter}${movedTotalRow - 1})/SUM(${ratioLetter}${originalTotalRow}:${ratioLetter}${movedTotalRow - 1}),0))`,
+    formula: directRows.length ? [avgFormula, ...directRows.map(r => `${amountLetter}${r}`)].join('+') : `(IFERROR(SUMPRODUCT(${ratioLetter}${originalTotalRow}:${ratioLetter}${movedTotalRow - 1},${amountLetter}${originalTotalRow}:${amountLetter}${movedTotalRow - 1})/SUM(${ratioLetter}${originalTotalRow}:${ratioLetter}${movedTotalRow - 1}),0))`,
     result: weightedTotal,
   };
   ws.getCell(movedTotalRow, amountColumn).numFmt = HKD4;
@@ -384,7 +387,7 @@ function patchSimpleIndoColumns(ws, payloads) {
   const patches = [
     { title: '二、注塑部分', dept: payloads.molding || {}, amountCol: 14, indoCol: 15, weighted: true, hideDisplay: true },
     { title: '二·B、吹气部分 (HKD)', dept: payloads.molding || {}, amountCol: 12, indoCol: 15, hideDisplay: true },
-    { title: '五、二次加工（印喷报价）', refKey: 'paintingDetail', dept: payloads.painting || {}, amountCol: 24, indoCol: 25, factor: 0.3, totalFromAmount: true },
+    { title: '五、二次加工（印喷报价）', refKey: 'paintingDetail', dept: payloads.painting || {}, amountCol: 26, indoCol: 27, factor: 0.3, totalFromAmount: true },
     {
       title: '六、电子',
       refKey: 'electronic',
@@ -903,7 +906,7 @@ function blowSubtotal(molding) {
 }
 
 function secondProcSubtotal(painting) {
-  const keys = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv'];
+  const keys = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv', 'heat_transfer'];
   const payload = painting || {};
   const items = payload.painting_items || [];
   ensureExplicitProductGroups(items);
@@ -1180,7 +1183,7 @@ function enhanceWorkbook(workbook, { quote, sections }) {
         payloads.painting || {},
         (payloads.painting && payloads.painting.painting_items) || [],
         item => sum(
-          ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv'],
+          ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv', 'heat_transfer'],
           key => num(item[`${key}_qty`]) * num(item[`${key}_unit`])
         )
       ),

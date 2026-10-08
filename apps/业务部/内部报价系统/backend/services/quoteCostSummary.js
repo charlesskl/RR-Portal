@@ -3,7 +3,7 @@
 const { ensureExplicitProductGroups, weightedRowsSum, weightedInjectionSum } = require('./productMix');
 
 const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '产品利宝', '彩盒利宝', '电镀', '植绒', '其他外购'];
-const PAINT_KEYS = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv'];
+const PAINT_KEYS = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv', 'heat_transfer'];
 
 function num(value) {
   const parsed = Number(value);

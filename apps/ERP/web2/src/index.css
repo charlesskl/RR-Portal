@@ -1,0 +1,138 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* 圆角系统:卡片/面板 16px(--radius-xl),按钮/输入框 10px(--radius-md),徽章全圆角 */
+  --radius: 0.75rem;
+
+  /* 中性色 zinc 系兜底:仅供 portal 到 body 的弹层(data-theme 作用域外)使用,
+     页面主体令牌见 future.css 的 [data-theme="future"];
+     主色/信息蓝/禁用灰与 future.css 同值,弹层 hover/focus 色与页内统一 */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.21 0.006 285.9);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.006 285.9);
+  --primary: #16a34a;
+  --primary-foreground: #ffffff;
+  --secondary: oklch(0.967 0.001 286.4);
+  --secondary-foreground: oklch(0.27 0.008 285.9);
+  --muted: oklch(0.967 0.001 286.4);
+  --muted-foreground: oklch(0.552 0.016 285.9);
+  --accent: rgb(22 163 74 / 0.08);
+  --accent-foreground: #15803d;
+  --destructive: oklch(0.577 0.215 27.3);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.92 0.004 286.3);
+  --input: oklch(0.92 0.004 286.3);
+  --ring: #16a34a;
+  /* 信息蓝(在排/经理已审等次级状态徽标)与禁用/占位灰:与 future.css 同值 */
+  --info: #2563eb;
+  --info-foreground: #1d4ed8;
+  --disabled: #9aa5b1;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-disabled: var(--disabled);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* 中文系统栈 + 西文;数字统一 tabular-nums(在 body 上启用) */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+
+  /* 有色调的厚实阴影(zinc 调),不用纯黑投影 */
+  --shadow-xs: 0 1px 2px 0 oklch(0.21 0.006 285.9 / 0.05);
+  --shadow-sm: 0 2px 6px -1px oklch(0.21 0.006 285.9 / 0.08);
+  --shadow-md: 0 6px 16px -4px oklch(0.21 0.006 285.9 / 0.1);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-size: 15px;
+    font-feature-settings: "tnum" 1, "cv03" 1;
+  }
+  /* 尊重 prefers-reduced-motion:关掉过渡与动画 */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* ---- 宽表冻结列(table[data-freeze],lib/tableFreeze.ts 驱动) ---- */
+/* 冻结格必须不透明背景,否则下方滚过的内容会透出;悬停行冻结格同步变灰 */
+table[data-freeze] td.fz-td {
+  background: #ffffff;
+}
+table[data-freeze] tbody tr:hover td.fz-td {
+  background: #f2f4f3;
+}
+table[data-freeze] th.fz-th {
+  background: #f7faf8;
+}
+/* 冻结边界右侧分隔线 */
+table[data-freeze] .fz-bd {
+  box-shadow: inset -2px 0 0 #dfe7e1;
+}
+/* 表头冻结钉:默认隐形,悬停表头格显现;激活(边界列)常显绿色 */
+table[data-freeze] .fz-pin {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 6px;
+  color: #9aa5b1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+table[data-freeze] th:hover > .fz-pin,
+table[data-freeze] .fz-pin:hover {
+  opacity: 0.65;
+}
+table[data-freeze] .fz-pin:hover {
+  color: #15803d;
+}
+table[data-freeze] .fz-pin.fz-pin-on {
+  color: #15803d;
+  opacity: 1;
+}
+/* 打印:隐藏钉,冻结格还原普通流(防止只打出冻结列) */
+@media print {
+  table[data-freeze] .fz-pin {
+    display: none;
+  }
+  table[data-freeze] td,
+  table[data-freeze] th {
+    position: static !important;
+  }
+}

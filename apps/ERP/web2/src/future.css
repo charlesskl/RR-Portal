@@ -1,0 +1,239 @@
+/* ============================================================
+   主主题 v2:白 + 绿浅色
+   作用域 [data-theme="future"](布局与登录页根节点挂载);
+   通过覆盖 shadcn CSS 变量完成浅色定制,另加少量 f-* 工具类。
+   ============================================================ */
+
+[data-theme="future"] {
+  color-scheme: light;
+
+  /* 圆角系统:卡片 14px(--radius-xl)、按钮/输入框 8px(--radius-md)、徽章全圆角 */
+  --radius: 0.625rem;
+
+  /* 基底:白色 / 极浅灰白带一点绿调 */
+  --background: #f7faf8;
+  --foreground: #1a2330;
+  /* 卡片:白底 */
+  --card: #ffffff;
+  --card-foreground: #1a2330;
+  /* 弹层:白底 */
+  --popover: #ffffff;
+  --popover-foreground: #1a2330;
+  /* 唯一强调色:鲜绿 #16a34a;按钮文字白色 */
+  --primary: #16a34a;
+  --primary-foreground: #ffffff;
+  --secondary: #eef3ee;
+  --secondary-foreground: #3d4a5c;
+  --muted: #f0f4f0;
+  --muted-foreground: #5f6b7d;
+  --accent: rgb(22 163 74 / 0.08);
+  --accent-foreground: #15803d;
+  /* 语义色:浅色底上保证对比;红色保留警示(与绿形成对比) */
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  /* 信息蓝:在排/经理已审等次级状态徽标(浅底深字) */
+  --info: #2563eb;
+  --info-foreground: #1d4ed8;
+  /* 禁用/占位灰(既有 #9aa5b1 收进令牌,色值不变) */
+  --disabled: #9aa5b1;
+  /* 描边:浅灰绿 */
+  --border: #e3eae4;
+  --input: #d3ddd5;
+  --ring: #16a34a;
+  --success: #059669;
+  --success-foreground: #ffffff;
+  --warning: #d97706;
+  --warning-foreground: #ffffff;
+  /* 琥珀深字:未审核/超收等警示徽标浅底深字(组件内仍以 [#b45309] 字面量使用,色值以此令牌为准) */
+  --warning-strong: #b45309;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1a2330;
+  --sidebar-primary: #16a34a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgb(22 163 74 / 0.08);
+  --sidebar-accent-foreground: #15803d;
+  --sidebar-border: #e3eae4;
+  --sidebar-ring: #16a34a;
+
+  /* 变体内部专用变量(可读性优先:主文字近黑,次要文字中灰) */
+  --f-text: #3d4a5c;
+  --f-text-dim: #5f6b7d;
+  --f-text-strong: #1a2330;
+  --f-cyan: #16a34a;
+  --f-line: rgb(26 35 48 / 0.07);
+  --f-mono:
+    ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* ---------- 白色卡片(柔和投影 + 浅灰绿描边) ---------- */
+.f-panel {
+  background: #ffffff;
+  border: 1px solid #e3eae4;
+  border-radius: 14px;
+  box-shadow:
+    0 1px 2px rgb(26 35 48 / 0.04),
+    0 10px 28px -16px rgb(26 35 48 / 0.12);
+}
+
+/* ---------- Aurora 背景(极淡绿色渐变痕迹,静态无动画,克制) ---------- */
+.f-aurora {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(640px 420px at 12% -5%, rgb(22 163 74 / 0.06), transparent 62%),
+    radial-gradient(760px 520px at 88% 8%, rgb(5 150 105 / 0.05), transparent 60%),
+    radial-gradient(900px 640px at 50% 115%, rgb(22 163 74 / 0.04), transparent 65%);
+}
+
+/* ---------- 极淡网格纹理(仅登录页/欢迎页) ---------- */
+.f-grid-tex {
+  background-image:
+    linear-gradient(rgb(26 35 48 / 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(26 35 48 / 0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, black, transparent 75%);
+}
+
+/* ---------- HUD 文本 ---------- */
+/* 注:var() 全部带兜底值。shadcn 弹窗 portal 到 body,不在 [data-theme] 作用域内,
+   没有兜底时 var(--f-*) 未定义会导致样式失效(曾出现弹窗按钮白字白底不可见) */
+.f-label {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--f-text-dim, #5f6b7d);
+}
+.f-mono {
+  font-family: var(
+    --f-mono,
+    ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas,
+    "Liberation Mono", monospace
+  );
+  font-feature-settings: "tnum" 1;
+}
+
+/* ---------- 浅色按钮(白底灰绿描边;主操作实心绿) ---------- */
+.f-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--f-text, #3d4a5c);
+  background: #ffffff;
+  border: 1px solid #dbe4dc;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s;
+}
+.f-btn:hover:not(:disabled) {
+  border-color: #b9cbbd;
+  background: #f4f8f4;
+}
+.f-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+/* 主操作:实心绿 + 白字(类名沿用 f-btn-cyan,仅换配色) */
+.f-btn-cyan {
+  background: var(--f-cyan, #16a34a);
+  border-color: transparent;
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2);
+}
+.f-btn-cyan:hover:not(:disabled) {
+  background: #15803d;
+  border-color: transparent;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.2),
+    0 0 0 1px rgb(22 163 74 / 0.35);
+}
+
+/* ---------- 浅色输入框 ---------- */
+.f-input {
+  height: 44px;
+  width: 100%;
+  border-radius: 8px;
+  padding: 0 14px;
+  font-size: 15px;
+  color: var(--f-text-strong, #1a2330);
+  background: #ffffff;
+  border: 1px solid #d3ddd5;
+  outline: none;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.f-input::placeholder {
+  color: var(--f-text-dim, #5f6b7d);
+}
+.f-input:focus {
+  border-color: rgb(22 163 74 / 0.55);
+  box-shadow: 0 0 0 3px rgb(22 163 74 / 0.15);
+}
+.f-input:disabled {
+  opacity: 0.5;
+}
+/* 带左图标的输入框:.f-input 是无层叠样式,优先级高于 Tailwind 工具类,
+   必须用同优先级的修饰类加左 padding,pl-* 工具类会被 .f-input 覆盖 */
+.f-input-icon {
+  padding-left: 44px;
+}
+/* 紧凑输入框/下拉:与 h-9(36px)按钮对齐;.f-input 无层叠 height:44px 会压住 Tailwind h-9,
+   同 .f-input-icon 用同优先级修饰类修法 */
+.f-input-slim {
+  height: 36px;
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+/* ---------- 状态点:真实状态才脉动 ---------- */
+@keyframes f-pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+.f-pulse {
+  animation: f-pulse-dot 2.2s ease-in-out infinite;
+}
+
+/* ---------- 页面淡入(MOTION 3-4,极轻) ---------- */
+@keyframes f-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.f-page {
+  animation: f-fade-in 0.25s ease-out;
+}
+
+/* ---------- 浅色细滚动条 ---------- */
+[data-theme="future"] *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+[data-theme="future"] *::-webkit-scrollbar-thumb {
+  background: rgb(26 35 48 / 0.16);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+[data-theme="future"] *::-webkit-scrollbar-track {
+  background: transparent;
+}

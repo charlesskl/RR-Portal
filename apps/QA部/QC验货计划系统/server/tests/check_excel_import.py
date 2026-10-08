@@ -44,12 +44,12 @@ with tempfile.TemporaryDirectory(prefix='qc-import-check-') as tmp:
     env = dict(os.environ, QC_JWT_KEY='isolated-import-test-key-32-characters-long', QC_ADMIN_PASSWORD='Test-only-12345',
                QC_ADMIN_USERNAME='admin', ASPNETCORE_URLS=base, ConnectionStrings__Default=f'Data Source={tmp}/test.db')
     token = ''
-    def request(path, data=None, content_type='application/json'):
+    def request(path, data=None, content_type='application/json', method=None):
         headers = {'Content-Type': content_type}
         if token: headers['Authorization'] = 'Bearer ' + token
-        req = urllib.request.Request(base + path, data=data, headers=headers)
+        req = urllib.request.Request(base + path, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req) as response: return response.status, json.load(response)
+            with urllib.request.urlopen(req) as response: return response.status, json.loads(response.read() or b'{}')
         except urllib.error.HTTPError as error:
             return error.code, json.loads(error.read() or b'{}')
     def upload(rows, site='兴信', headers=HEADERS, filename='daily.xlsx', template=None, contents=None):
@@ -97,10 +97,12 @@ with tempfile.TemporaryDirectory(prefix='qc-import-check-') as tmp:
             conflict1 = row.copy(); conflict1[2] = 'CONFLICT'
             conflict2 = conflict1.copy(); conflict2[8] = 'PASS'
             status, result = upload([new_order,invalid,conflict1,conflict2])
-            assert status == 200 and result['inserted'] == 1 and result['pendingReviewCount'] == 3 and result['duplicatesSkipped'] == 0, result
-            assert {issue['row'] for issue in result['issues']} == {3,4,5}, result
+            assert status == 200 and result['inserted'] == 3 and result['pendingReviewCount'] == 1 and result['duplicatesSkipped'] == 0, result
+            assert {issue['row'] for issue in result['issues']} == {3}, result
             assert any(r['contractNumber'] == 'C2' for r in records())
-            assert not any(r['contractNumber'] in ('BAD','CONFLICT') for r in records())
+            assert not any(r['contractNumber'] == 'BAD' for r in records())
+            assert sum(r['contractNumber'] == 'CONFLICT' for r in records()) == 2
+            assert upload([conflict2,conflict1])[1]['unchanged'] == 2
             # Seed duplicate historical rows to test skip versus ambiguous update.
             dup = row.copy(); dup[2] = 'DUP'
             assert upload([dup])[1]['inserted'] == 1
@@ -112,9 +114,9 @@ with tempfile.TemporaryDirectory(prefix='qc-import-check-') as tmp:
             dup_changed = dup.copy(); dup_changed[8] = 'PASS'
             valid = row.copy(); valid[2] = 'C3'
             result = upload([dup_changed,valid])[1]
-            assert result['inserted'] == 1 and result['pendingReviewCount'] == 1, result
-            assert len(result['issues'][0]['matches']) == 2 and result['issues'][0]['inspectionDate'].startswith('2026-01-07'), result
-            assert all(r['internalResult'] == 'HOLD' for r in records() if r['contractNumber'] == 'DUP')
+            assert result['inserted'] == 2 and result['pendingReviewCount'] == 0, result
+            assert sum(r['internalResult'] == 'HOLD' for r in records() if r['contractNumber'] == 'DUP') == 2
+            assert upload([dup_changed])[1]['unchanged'] == 1
             # Missing columns preserve data and current factory remains isolated.
             assert upload([changed[:8]],headers=HEADERS[:8])[1]['unchanged'] == 1
             assert upload([row],site='湖南')[1]['inserted'] == 1
@@ -152,10 +154,66 @@ with tempfile.TemporaryDirectory(prefix='qc-import-check-') as tmp:
                 all_xml = ''.join(z.read(name).decode() for name in z.namelist() if name.endswith('.xml'))
                 assert 'JAZWARES' in all_xml and 'Production sample' not in all_xml
             assert upload([],site='华登',contents=exported)[1]['inserted'] == 0
+            # Separate ordinary/third-party inspections and harmless name differences without blocking either row.
+            ordinary = row.copy(); ordinary[2] = 'DUAL-LANE'; ordinary[8] = 'PASS'; ordinary[9] = 'NA'
+            third_party = ordinary.copy(); third_party[8] = 'NA'; third_party[9] = 'PASS'
+            result = upload([ordinary,third_party])[1]
+            assert result['inserted'] == 2 and result['pendingReviewCount'] == 0, result
+            assert upload([ordinary,third_party])[1]['unchanged'] == 2
+            assert upload([third_party,ordinary])[1]['unchanged'] == 2
+            name_one = ordinary.copy(); name_one[2] = 'NAME-VARIANTS'
+            name_two = name_one.copy(); name_two[5] = 'Toy-NA'
+            result = upload([name_one,name_two])[1]
+            assert result['inserted'] == 2 and result['pendingReviewCount'] == 0, result
+            assert upload([name_two,name_one])[1]['unchanged'] == 2
+            for index, (text, quantity) in enumerate([('60个空PDQ',60),('80个空PDQ',80),('40个空展示架',40),('22套散件(共154pcs)',154)]):
+                text_row = row.copy(); text_row[2] = f'TEXT-QTY-{index}'; text_row[6] = text
+                assert upload([text_row])[1]['inserted'] == 1
+                saved = next(r for r in records() if r['contractNumber'] == text_row[2])
+                assert saved['quantity'] == quantity and saved['note'] == 'note；数量原文：' + text
+                assert upload([text_row])[1]['unchanged'] == 1
+            ambiguous = row.copy(); ambiguous[2] = 'AMBIGUOUS-QTY'; ambiguous[6] = '22套/154件'
+            assert upload([ambiguous])[1]['pendingReviewCount'] == 1
+            slash = row.copy(); slash[2] = 'SLASH-CARTONS'; slash[7] = '/'
+            assert upload([slash])[1]['inserted'] == 1
+            assert next(r for r in records() if r['contractNumber'] == 'SLASH-CARTONS')['cartons'] is None
+            invalid_date = row.copy(); invalid_date[2] = 'BAD-DATE'; invalid_date[0] = '2026/7/43'
+            result = upload([invalid_date])[1]
+            assert result['inserted'] == 0 and result['pendingReviewCount'] == 1
+            # REJ is a separate immutable attempt, including same-day/same-quantity Excel repeats.
+            rejected = row.copy(); rejected[2] = 'REJ-HISTORY'; rejected[8] = 'REJ'
+            passed = rejected.copy(); passed[8] = 'PASS'; passed[10] = ''
+            result = upload([rejected, passed])[1]
+            assert result['inserted'] == 2 and result['pendingReviewCount'] == 0, result
+            attempts = [r for r in records() if r['contractNumber'] == 'REJ-HISTORY']
+            assert len(attempts) == 2 and {r['internalResult'] for r in attempts} == {'REJ','PASS'}
+            assert upload([rejected, passed])[1]['unchanged'] == 2
+            lone = rejected.copy(); lone[2] = 'REJ-LONE'
+            assert upload([lone])[1]['inserted'] == 1
+            repass = lone.copy(); repass[8] = 'PASS'
+            assert upload([repass])[1]['inserted'] == 1
+            original = next(r for r in records() if r['contractNumber'] == 'REJ-LONE' and r['internalResult'] == 'REJ')
+            result_body = json.dumps({'internalResult':'PASS','thirdPartyResult':'','holdRejectReason':'','note':'','inspectedQuantity':100}).encode()
+            assert request(f"/api/inspections/{original['id']}/result", result_body, method='PUT')[0] == 409
+            assert request(f"/api/inspections/{original['id']}", method='DELETE')[0] == 409
+            status, child = request(f"/api/inspections/{original['id']}/reinspection", b'', method='POST')
+            assert status == 201 and child['internalResult'] == '' and child['thirdPartyResult'] == '' and child['reinspectionOfId'] == original['id']
+            assert request(f"/api/inspections/{original['id']}/reinspection", b'', method='POST')[1]['id'] == child['id']
+            assert request(f"/api/inspections/{child['id']}/result", result_body, method='PUT')[0] == 200
+            assert next(r for r in records() if r['id'] == original['id'])['internalResult'] == 'REJ'
+            real_file = os.environ.get('QC_REAL_WORKBOOK')
+            if real_file:
+                contents = pathlib.Path(real_file).read_bytes()
+                status, actual = upload([], contents=contents, filename=pathlib.Path(real_file).name)
+                assert status == 200 and actual['pendingReviewCount'] <= 1, actual
+                if actual['issues']: assert actual['issues'][0]['row'] == 277, actual['issues']
+                status, again = upload([], contents=contents, filename=pathlib.Path(real_file).name)
+                assert status == 200 and again['inserted'] == 0 and again['updated'] == 0 and again['pendingReviewCount'] == actual['pendingReviewCount'], again
+                print('REAL WORKBOOK:', {key: again[key] for key in ('parsed','inserted','updated','unchanged','pendingReviewCount')}, again['issues'])
             status, _ = request('/api/users', json.dumps({'username':'qc-local','displayName':'QC','department':'QC','role':'QC文员','dataScope':'兴信','password':'Test-only-12345'}).encode()); assert status in (200,201)
             token = request('/api/auth/login', b'{"username":"qc-local","password":"Test-only-12345"}')[1]['accessToken']
             assert upload([row],site='湖南')[0] == 403
-            print('PASS: partial imports, unchanged skips, separate dates/quantities, empty fields, weekday dates, result updates, conflict details with existing matches, duplicate history, factory isolation, JAZ finished inspections, DPI exclusion and access control')
+            print('PASS: partial imports, unchanged skips, separate dates/quantities, empty fields, weekday dates, result updates, conflict details with existing matches, duplicate history, factory isolation, JAZ finished inspections, DPI exclusion, immutable REJ history and reinspection result entry')
         except Exception:
             log.flush(); log.seek(0); print(log.read()[-5000:]); raise
         finally:

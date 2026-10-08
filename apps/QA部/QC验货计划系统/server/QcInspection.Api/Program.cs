@@ -151,6 +151,7 @@ using (var scope = app.Services.CreateScope())
     if (!inspectionColumns.Contains("ScheduleSource")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN ScheduleSource TEXT NOT NULL DEFAULT ''");
     if (!inspectionColumns.Contains("ScheduleCreatedBatchId")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN ScheduleCreatedBatchId INTEGER NULL");
     if (!inspectionColumns.Contains("InspectedQuantity")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN InspectedQuantity TEXT NULL");
+    if (!inspectionColumns.Contains("ReinspectionOfId")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN ReinspectionOfId INTEGER NULL");
     if (!inspectionColumns.Contains("InspectionTemplate")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN InspectionTemplate TEXT NOT NULL DEFAULT ''");
     if (!inspectionColumns.Contains("SampledCartons")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN SampledCartons TEXT NULL");
     if (!inspectionColumns.Contains("SecondaryCartons")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN SecondaryCartons TEXT NULL");
@@ -634,6 +635,7 @@ app.MapPost("/api/legacy-inspections/import", async (HttpRequest request, string
     var updated = 0;
     var resultChanged = 0;
     var unchanged = 0;
+    var importFingerprints = existingRecords.Select(value => value.Fingerprint).ToHashSet();
     foreach (var entry in entries)
     {
         var record = entry.Incoming;
@@ -641,6 +643,11 @@ app.MapPost("/api/legacy-inspections/import", async (HttpRequest request, string
         if (current is null)
         {
             record.PlanId = $"PLAN-{Guid.NewGuid():N}";
+            if (!importFingerprints.Add(record.Fingerprint))
+            {
+                record.Fingerprint = $"REINSPECTION-{Guid.NewGuid():N}";
+                importFingerprints.Add(record.Fingerprint);
+            }
             record.WorkflowStatus = ResultStatus(record.InternalResult, record.ThirdPartyResult);
             db.InspectionRecords.Add(record);
             inserted++;
@@ -879,11 +886,33 @@ app.MapPost("/api/inspections/bulk-update", async (InspectionBulkUpdateRequest r
     return Results.Ok(new { updated = items.Length });
 }).RequireAuthorization("QcWrite");
 
+app.MapPost("/api/inspections/{id:long}/reinspection", async (long id, ClaimsPrincipal principal, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var original = await db.InspectionRecords.FirstOrDefaultAsync(value => value.Id == id, cancellationToken);
+    if (original is null) return Results.NotFound(new { error = "验货计划不存在" });
+    if (!CanAccessSite(principal, original.Site)) return Results.Forbid();
+    if (!LegacyInspectionImport.IsRejected(original)) return Results.BadRequest(new { error = "仅REJ记录可通过此入口新增复验" });
+    var pending = await db.InspectionRecords.FirstOrDefaultAsync(value => value.ReinspectionOfId == id && value.InternalResult == "" && value.ThirdPartyResult == "", cancellationToken);
+    if (pending is not null) return Results.Ok(pending);
+    var record = JsonSerializer.Deserialize<InspectionRecord>(JsonSerializer.Serialize(original))!;
+    record.Id = 0; record.PlanId = $"PLAN-{Guid.NewGuid():N}";
+    record.ReinspectionOfId = id; record.ScheduleKey = ""; record.ScheduleCreatedBatchId = null;
+    record.Fingerprint = $"REINSPECTION-{Guid.NewGuid():N}";
+    record.InspectionDate = DateTime.UtcNow.AddHours(8).Date;
+    record.InternalResult = ""; record.ThirdPartyResult = ""; record.HoldRejectReason = "";
+    record.InspectedQuantity = null; record.Note = ""; record.WorkflowStatus = "待验货";
+    record.SourceFile = "系统新增复验"; record.SourceSheet = "复验"; record.SourceRow = 0; record.ImportedAt = DateTime.UtcNow;
+    db.InspectionRecords.Add(record);
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.Created($"/api/inspections/{record.Id}", record);
+}).RequireAuthorization("QcWrite");
+
 app.MapPut("/api/inspections/{id:long}/result", async (long id, InspectionResultRequest request, ClaimsPrincipal principal, AppDbContext db, CancellationToken cancellationToken) =>
 {
     var record = await db.InspectionRecords.FirstOrDefaultAsync(value => value.Id == id, cancellationToken);
     if (record is null) return Results.NotFound(new { error = "验货计划不存在" });
     if (!CanAccessSite(principal, record.Site)) return Results.Forbid();
+    if (LegacyInspectionImport.IsRejected(record)) return Results.Conflict(new { error = "REJ结果必须保留，请新增复验记录后填写结果" });
     var requestedInternal = request.InternalResult?.Trim() ?? string.Empty;
     var requestedThirdParty = request.ThirdPartyResult?.Trim() ?? string.Empty;
     if (request.InspectedQuantity is < 0 || request.InspectedQuantity > record.Quantity)
@@ -975,6 +1004,7 @@ app.MapPost("/api/inspection-approvals/{id:long}/review", async (long id, Approv
     if (!CanAccessSite(principal, approval.Site)) return Results.Forbid();
     var record = await db.InspectionRecords.FirstOrDefaultAsync(value => value.Id == approval.InspectionRecordId, cancellationToken);
     if (record is null) return Results.NotFound(new { error = "验货计划不存在" });
+    if (request.Approved && LegacyInspectionImport.IsRejected(record)) return Results.Conflict(new { error = "REJ记录不能审批覆盖，请驳回并新增复验记录" });
     approval.Status = request.Approved ? "已通过" : "已驳回"; approval.ReviewedBy = principal.Identity?.Name ?? "未知用户";
     approval.ReviewedAt = DateTime.UtcNow; approval.ReviewComment = request.Comment?.Trim() ?? string.Empty;
     if (request.Approved)
@@ -994,6 +1024,7 @@ app.MapDelete("/api/inspections/{id:long}", async (long id, ClaimsPrincipal prin
     var record = await db.InspectionRecords.FirstOrDefaultAsync(value => value.Id == id, cancellationToken);
     if (record is null) return Results.NotFound(new { error = "验货计划不存在或已删除" });
     if (!CanAccessSite(principal, record.Site)) return Results.Forbid();
+    if (LegacyInspectionImport.IsRejected(record)) return Results.Conflict(new { error = "REJ验货历史必须保留，不能删除" });
     if (HasInspectionResult(record) && !principal.IsInRole("管理员") && !principal.IsInRole("Admin"))
         return Results.Forbid();
     if (await db.InspectionResultApprovals.AnyAsync(value => value.InspectionRecordId == id && value.Status == "待审批", cancellationToken))
@@ -1010,6 +1041,7 @@ app.MapPost("/api/inspections/bulk-delete", async (InspectionBulkDeleteRequest r
     var records = await db.InspectionRecords.Where(value => ids.Contains(value.Id)).ToListAsync(cancellationToken);
     if (records.Count != ids.Length) return Results.NotFound(new { error = "部分验货计划不存在或已被删除，请刷新后重试" });
     if (records.Any(record => !CanAccessSite(principal, record.Site))) return Results.Forbid();
+    if (records.Any(LegacyInspectionImport.IsRejected)) return Results.Conflict(new { error = "所选记录包含REJ验货历史，不能删除" });
     if (!principal.IsInRole("管理员") && !principal.IsInRole("Admin") && records.Any(HasInspectionResult))
         return Results.Forbid();
     if (await db.InspectionResultApprovals.AnyAsync(value => ids.Contains(value.InspectionRecordId) && value.Status == "待审批", cancellationToken))

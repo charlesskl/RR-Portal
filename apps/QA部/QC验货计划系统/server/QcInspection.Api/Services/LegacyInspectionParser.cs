@@ -112,7 +112,7 @@ public static class LegacyInspectionParser
             CustomerPo = Get("客户/PO", "客户PO", "现PO号"),
             ItemNumber = itemNumber,
             ProductName = Get("产品名称", "名称"),
-            Quantity = Number(Get("数量")),
+            Quantity = QuantityNumber(Get("数量")),
             Cartons = Number(Get("箱数", "总箱数")),
             SampledCartons = Number(Get("抽箱数")),
             SecondaryCartons = Number(Get("箱数#2")),
@@ -158,8 +158,15 @@ public static class LegacyInspectionParser
         foreach (var field in new[] { "Quantity", "Cartons", "PackingQuantity", "InspectedQuantity", "SampledCartons", "SecondaryCartons" })
         {
             var value = Get(columns[field]);
-            if (!string.IsNullOrWhiteSpace(value) && Number(value) is null)
+            if (field is "Cartons" or "SampledCartons" or "SecondaryCartons" && value.Trim() is "/" or "／") continue;
+            if (!string.IsNullOrWhiteSpace(value) && (field == "Quantity" ? QuantityNumber(value) : Number(value)) is null)
                 issues.Add(LegacyImportIssue.From(record, $"{columns[field][0]}格式无效：{value}"));
+        }
+        var quantityText = Get("数量");
+        if (!string.IsNullOrWhiteSpace(quantityText) && Number(quantityText) is null && record.Quantity is not null)
+        {
+            record.Note = string.Join("；", new[] { note, $"数量原文：{quantityText}" }.Where(value => !string.IsNullOrWhiteSpace(value)));
+            record.ImportFields.Add(nameof(record.Note));
         }
         record.InspectedQuantity = Number(Get(columns["InspectedQuantity"]));
         if (record.Quantity is < 0 || record.Cartons is < 0 || record.PackingQuantity is < 0 ||
@@ -202,6 +209,16 @@ public static class LegacyInspectionParser
         return int.TryParse(match.Groups[1].Value, out var month) && int.TryParse(match.Groups[2].Value, out var day)
             && month is >= 1 and <= 12 && day >= 1 && day <= DateTime.DaysInMonth(year, month)
             ? new DateTime(year, month, day) : null;
+    }
+
+    private static decimal? QuantityNumber(string value)
+    {
+        if (Number(value) is { } plain) return plain;
+        var total = System.Text.RegularExpressions.Regex.Match(value,
+            @"共\s*([+-]?\d[\d,]*(?:\.\d+)?)\s*(?:pcs|件|个)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (total.Success) return Number(total.Groups[1].Value);
+        var numbers = System.Text.RegularExpressions.Regex.Matches(value, @"[+-]?\d[\d,]*(?:\.\d+)?");
+        return numbers.Count == 1 ? Number(numbers[0].Value) : null;
     }
 
     private static decimal? Number(string value) => decimal.TryParse(value.Replace(",", string.Empty),

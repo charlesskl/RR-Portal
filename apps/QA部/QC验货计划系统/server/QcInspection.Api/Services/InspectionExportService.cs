@@ -121,7 +121,7 @@ public static class InspectionExportService
             new("洋行 结果", r => r.InternalResult), new("验货地点", r => r.InspectionLocation), new("第三方结果", r => r.ThirdPartyResult),
             new("验货地点", r => r.ThirdPartyInspectionLocation), new("HOLD/REJ 原因", r => r.HoldRejectReason, 30),
             new("生产车间", r => r.ProductionWorkshop), new("责任主管", r => r.ProductionSupervisor),
-            new("责任拉长", r => r.ResponsibleLineLeader), new("箱数", r => r.Cartons), new("测试报废", r => r.TestScrap),
+            new("责任拉长", r => r.ResponsibleLineLeader), new("箱数", r => r.Cartons), new("测试报废", r => r.TestScrap), new("备注", r => r.Note, 25),
         ];
         return
         [

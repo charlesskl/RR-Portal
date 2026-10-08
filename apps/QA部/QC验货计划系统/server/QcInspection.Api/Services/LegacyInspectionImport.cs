@@ -6,6 +6,7 @@ namespace QcInspection.Api.Services;
 public static class LegacyInspectionImport
 {
     public sealed record Entry(InspectionRecord Incoming, InspectionRecord? Current);
+    public static bool IsRejected(InspectionRecord row) => row.InternalResult.Trim().Equals("REJ", StringComparison.OrdinalIgnoreCase) || row.ThirdPartyResult.Trim().Equals("REJ", StringComparison.OrdinalIgnoreCase);
     private static string Normalize(string value) => value.Replace(" ", "").Trim().ToUpperInvariant();
     private static string Order(InspectionRecord row)
     {
@@ -25,14 +26,11 @@ public static class LegacyInspectionImport
         var byContractItem = local.ToLookup(row => (Normalize(row.ContractNumber), Normalize(row.ItemNumber)));
         var result = new List<Entry>();
         var used = new HashSet<long>();
-        foreach (var group in rows.GroupBy(row => (Order(row), row.InspectionDate?.Date, row.Quantity, row.Cartons)))
+        var batches = rows.GroupBy(row => (Order(row), row.InspectionDate?.Date, row.Quantity, row.Cartons)).ToArray();
+        foreach (var batch in batches)
+        foreach (var group in batch.GroupBy(Values))
         {
-            if (group.Select(Values).Distinct().Count() > 1)
-            {
-                var locations = string.Join("、", group.Select(row => $"{row.SourceSheet}第{row.SourceRow}行"));
-                problems.AddRange(group.Select(row => LegacyImportIssue.From(row, $"同订单、日期、数量及箱数相同，但其他内容不同，与这些行冲突：{locations}；请核对重复行或拆分批次")));
-                continue;
-            }
+            var separateRows = batch.Select(Values).Distinct().Count() > 1;
             var row = group.First();
             InspectionRecord[] candidates = [];
             try
@@ -47,16 +45,21 @@ public static class LegacyInspectionImport
             var dated = candidates.Where(value => value.InspectionDate?.Date == row.InspectionDate?.Date).ToArray();
             var exactBatch = dated.Where(value => (!row.ImportFields.Contains(nameof(row.Quantity)) || value.Quantity == row.Quantity) &&
                 (!row.ImportFields.Contains(nameof(row.Cartons)) || value.Cartons == row.Cartons)).ToArray();
-            InspectionRecord? current = null;
-            if (exactBatch.Length == 1) current = exactBatch[0];
-            else if (exactBatch.Length > 1)
+            // Different Excel rows are distinct inspections. Match unchanged data before considering updates.
+            var current = exactBatch.FirstOrDefault(value => !used.Contains(value.Id) && IsSame(value, row));
+            if (current is null && !separateRows)
             {
-                // Existing duplicate history does not block an unchanged Excel row.
-                current = exactBatch.FirstOrDefault(value => IsSame(value, row));
-                if (current is null) throw Conflict(row);
+                var editable = exactBatch.Where(value => !IsRejected(value) && !used.Contains(value.Id) && SameInspectionLane(value, row) &&
+                    (!IsRejected(row) || value.InternalResult == "" && value.ThirdPartyResult == "")).ToArray();
+                if (editable.Length == 1) current = editable[0];
+                else if (editable.Length > 1)
+                {
+                    // Source position can identify an edited row in the same workbook. Otherwise preserve history and add.
+                    var located = editable.Where(value => value.SourceFile == row.SourceFile && value.SourceSheet == row.SourceSheet && value.SourceRow == row.SourceRow).ToArray();
+                    if (located.Length == 1) current = located[0];
+                }
             }
-            // Different dates, quantities or cartons are distinct inspections, even for the same order.
-            if (current is not null && !used.Add(current.Id)) throw Conflict(row);
+            if (current is not null) used.Add(current.Id);
             var quantity = row.ImportFields.Contains(nameof(row.Quantity)) ? row.Quantity : current?.Quantity;
             var inspected = row.ImportFields.Contains(nameof(row.InspectedQuantity)) ? row.InspectedQuantity : current?.InspectedQuantity;
             if (inspected > quantity)
@@ -73,8 +76,21 @@ public static class LegacyInspectionImport
         return result;
     }
 
-    private static InvalidDataException Conflict(InspectionRecord row) => new(
-        "同厂区、订单、日期、数量和箱数匹配到多条记录，已保留旧记录并跳过此行，请对照系统记录核对");
+    private static bool SameInspectionLane(InspectionRecord current, InspectionRecord incoming)
+    {
+        foreach (var field in new[] { nameof(incoming.Customer), nameof(incoming.ThirdPartyOrganization) })
+        {
+            if (!incoming.ImportFields.Contains(field)) continue;
+            var property = typeof(InspectionRecord).GetProperty(field)!;
+            if (Normalize((string)property.GetValue(current)!) != Normalize((string)property.GetValue(incoming)!)) return false;
+        }
+        static bool HasResult(string value) => Normalize(value) is not ("" or "NA" or "N/A" or "/" or "不用验");
+        var currentHasResult = HasResult(current.InternalResult) || HasResult(current.ThirdPartyResult);
+        var incomingHasResult = HasResult(incoming.InternalResult) || HasResult(incoming.ThirdPartyResult);
+        return !currentHasResult || !incomingHasResult ||
+            ((!incoming.ImportFields.Contains(nameof(incoming.InternalResult)) || HasResult(current.InternalResult) == HasResult(incoming.InternalResult)) &&
+             (!incoming.ImportFields.Contains(nameof(incoming.ThirdPartyResult)) || HasResult(current.ThirdPartyResult) == HasResult(incoming.ThirdPartyResult)));
+    }
 
     public static string Fingerprint(InspectionRecord row)
     {
@@ -94,7 +110,7 @@ public static class LegacyInspectionImport
             var property = typeof(InspectionRecord).GetProperty(field)!;
             property.SetValue(target, property.GetValue(source));
         }
-        if (target.ScheduleKey == "") target.Fingerprint = Fingerprint(target);
+        // Keep persisted identity stable when adding a separate reinspection to the same batch.
         target.SourceFile = source.SourceFile;
         target.SourceSheet = source.SourceSheet;
         target.SourceRow = source.SourceRow;

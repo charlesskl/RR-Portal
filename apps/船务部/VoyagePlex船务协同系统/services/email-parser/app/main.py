@@ -26,7 +26,7 @@ app = FastAPI(title="VoyagePlex Email Parser", version=PARSER_VERSION)
 
 
 @app.get("/v1/mailbox/poll")
-async def poll_mailbox(after_uid: int = 0, start_date: str = "2026-08-01"):
+async def poll_mailbox(after_uid: int = 0, start_date: str = "2026-10-08"):
     if after_uid < 0:
         return Response(content='{"error":"after_uid 无效"}', status_code=400, media_type="application/json")
     try:

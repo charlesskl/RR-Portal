@@ -1,3 +1,5 @@
+using VoyagePlex.Api.Services;
+
 namespace VoyagePlex.Api.Entities;
 
 public sealed class MailSystemSetting
@@ -6,6 +8,7 @@ public sealed class MailSystemSetting
     public bool SyncEnabled { get; set; } = true;
     public int SyncIntervalMinutes { get; set; } = 5;
     public int RetentionDays { get; set; } = 180;
-    public string StartDate { get; set; } = "2026-08-01";
+    public string StartDate { get; set; } = DailyMailRules.StartDate;
+    public int DailyWorkflowVersion { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

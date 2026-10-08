@@ -40,6 +40,8 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             var parser = scope.ServiceProvider.GetRequiredService<EmailParserClient>();
             var setting = await db.MailSystemSettings.AsNoTracking().FirstAsync(value => value.Id == 1, cancellationToken);
             var startDate = setting.StartDate;
+            if (string.CompareOrdinal(MailboxDateRules.ReceivedDate(DateTime.UtcNow.ToString("O")), startDate) < 0)
+                return new { configured = true, imported = 0, waitingUntil = startDate };
             var state = await db.MailSyncStates.FirstOrDefaultAsync(cancellationToken);
             state ??= new MailSyncState();
             if (db.Entry(state).State == EntityState.Detached) db.MailSyncStates.Add(state);
@@ -140,13 +142,14 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                     }
                     if (contact is not null) { contact.MessageCount++; contact.UpdatedAt = DateTime.UtcNow; }
                     var subject = item["message"]?["subject"]?.ToString() ?? "";
-                    var classification = MailClassificationRules.Classify(subject);
+                    var classification = MailClassificationRules.ClassifyParsed(subject, item);
                     batch.EmailItems.Add(new ImportEmailItem
                     {
                         MailboxKey = key, FileName = item["filename"]?.ToString() ?? $"mail-{uid}.eml",
                         MailSubject = subject, MailSender = sender,
                         MailReceivedAt = receivedAt,
                         MailReceivedDate = receivedDate,
+                        ShipmentMode = classification.Mode,
                         WorkCategory = classification.Category, ClassificationConfidence = classification.Confidence,
                         ClassificationSource = classification.Source, NeedsClassificationReview = classification.NeedsReview,
                         Fingerprint = fingerprint, Status = failed ? "failed" : duplicate is null ? "pending" : "duplicate",

@@ -19,7 +19,7 @@ def received_at_from_fetch(parts: list) -> str:
     return received.astimezone(timezone.utc).isoformat()
 
 
-def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-08-01") -> dict:
+def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08") -> dict:
     first_day = date.fromisoformat(start_date)
     address = os.environ.get("VOYAGEPLEX_MAIL_ADDRESS", "").strip()
     secret = os.environ.get("VOYAGEPLEX_MAIL_AUTH_CODE", "")

@@ -30,6 +30,43 @@ if (!MailContactRules.IsInternal("name@hanson2.com") || !MailContactRules.IsInte
     throw new InvalidOperationException("公司内部邮箱域名判断不正确");
 Console.WriteLine("Mailbox internal-domain tests passed.");
 
+var parsedWarehouse = DailyMailRules.Parse("""{"message":{"body_text":"交仓通知"},"fields":{"so_number":"SO-W"},"items":[{"product_code":"P1"}]}""");
+var parsedContainer = DailyMailRules.Parse("""{"fields":{"container_type":"1*40HQ"},"items":[{"product_code":"P2"}]}""");
+if (MailClassificationRules.ClassifyParsed("交仓通知", parsedWarehouse) is not { Category: "Shipment", Mode: "Warehouse", NeedsReview: false } ||
+    MailClassificationRules.ClassifyParsed("附件资料", parsedContainer) is not { Category: "Shipment", Mode: "Container" } ||
+    MailClassificationRules.ClassifyStored("资料", "invalid") is not { Category: "Unclassified", NeedsReview: true })
+    throw new InvalidOperationException("解析后的自动用途与出货方式分类不正确");
+var parsedChange = DailyMailRules.Parse("""{"message":{"body_text":"计划日期变更为明天"},"fields":{"so_number":"SO-C"}}""");
+if (MailClassificationRules.ClassifyParsed("补充资料", parsedChange).Category != "Change")
+    throw new InvalidOperationException("正文变更资料应由系统识别为变更");
+var ordinaryReply = DailyMailRules.Parse("""{"message":{"body_text":"已收到，谢谢\nFrom: Old sender\n交仓通知"}}""");
+if (MailClassificationRules.ClassifyParsed("回执", ordinaryReply) is not { Category: "Other", Mode: "Unknown" })
+    throw new InvalidOperationException("引用中的历史邮件不能把收件回执变成任务邮件");
+var mailForTask = new ImportEmailItem { Id=900, Status="pending", WorkCategory="Shipment", NeedsClassificationReview=false, MailSubject="新增 SO900" };
+if (!DailyMailRules.CanCreateTask(mailForTask)) throw new InvalidOperationException("待确认新增资料应支持建任务");
+foreach (var state in new[] { "failed", "duplicate", "confirmed" })
+{
+    mailForTask.Status=state;
+    if (DailyMailRules.CanCreateTask(mailForTask)) throw new InvalidOperationException("失败、重复和已确认邮件不能再次建立任务");
+}
+mailForTask.Status="pending"; mailForTask.HandlingStatus="Processed"; mailForTask.HandlingOutcome="NoTask";
+if (DailyMailRules.CanCreateTask(mailForTask)) throw new InvalidOperationException("无需建任务的已确认邮件不能建立任务");
+var sourceTask = new ShipmentTask();
+try { DailyMailRules.RecordSource(sourceTask,mailForTask,true); throw new Exception("应拒绝未确认邮件来源"); }
+catch (InvalidOperationException) { }
+mailForTask.Status="confirmed";
+DailyMailRules.RecordSource(sourceTask,mailForTask,true);
+DailyMailRules.RecordSource(sourceTask,mailForTask,false);
+if (JsonNode.Parse(sourceTask.SourceEmailsJson)!.AsArray().Count!=1)
+    throw new InvalidOperationException("确认来源摘要必须去重并保存在任务内");
+var changedTask = new ShipmentTask { PlannedShipDate=new DateOnly(2026,10,15), Port="原装货港", ContainerType="1*40HQ", Status="PendingShipment" };
+DailyMailRules.ApplyConfirmedChanges(changedTask,DailyMailRules.Parse("""{"fields":{"ship_date":"2026-10-16","port":"","si_deadline":"2026-10-12T12:00"}}"""));
+if (changedTask.PlannedShipDate!=new DateOnly(2026,10,16) || changedTask.Port!="原装货港" || changedTask.ContainerType!="1*40HQ" || changedTask.Status!="PendingShipment")
+    throw new InvalidOperationException("确认变更应更新船期，保留缺失字段及任务状态");
+try { DailyMailRules.ApplyConfirmedChanges(changedTask,DailyMailRules.Parse("""{"fields":{"ship_date":"not-a-date"}}"""));throw new Exception("应拒绝无效船期变更"); }
+catch (InvalidOperationException) { }
+Console.WriteLine("Daily mailbox confirmation and task-source snapshot tests passed.");
+
 var allowed = new[]
 {
     ("PendingReview", "PendingShipment"),
@@ -199,3 +236,21 @@ ShipmentOrderTotals.Apply(extractedPayload, [fullContainer, looseCargo]);
 if (extractedPayload["items"]![0]!["order_total_pieces"]!.GetValue<decimal>() != 888)
     throw new InvalidOperationException("邮件已提取的每单总件数不应被系统汇总覆盖");
 Console.WriteLine("Shipment order total pieces tests passed.");
+
+var categoryProducts = new[] { new ProductInfo { ProductCode="CAT-01", QuantityPerBox=12, ToyCategory="电子" } };
+var categoryItem = JsonNode.Parse("""{"product_code":"CAT01","spec":12}""")!.AsObject();
+ProductInfoMatching.FillCategory(categoryItem, categoryProducts);
+if (categoryItem["category"]?.ToString() != "电子") throw new InvalidOperationException("产品类别应按货号和规格带入");
+categoryItem["category"]="塑胶";
+ProductInfoMatching.FillCategory(categoryItem, categoryProducts);
+if (categoryItem["category"]?.ToString() != "塑胶") throw new InvalidOperationException("人工类别应保留");
+foreach (var spec in new[] { "24", "invalid" })
+{
+    var unmatched = new JsonObject { ["product_code"]="CAT01", ["spec"]=spec };
+    ProductInfoMatching.FillCategory(unmatched, categoryProducts);
+    if (unmatched["category"] is not null) throw new InvalidOperationException("无匹配规格不能推断类别");
+}
+var ambiguousCategory = new JsonObject { ["product_code"]="CAT01", ["spec"]=12 };
+ProductInfoMatching.FillCategory(ambiguousCategory, [categoryProducts[0], new ProductInfo { ProductCode="CAT01", QuantityPerBox=12, ToyCategory="塑胶" }]);
+if (ambiguousCategory["category"] is not null) throw new InvalidOperationException("多重匹配不能推断类别");
+Console.WriteLine("Shipment product category tests passed.");

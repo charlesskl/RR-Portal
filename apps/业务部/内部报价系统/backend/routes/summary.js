@@ -6,6 +6,14 @@ const { WORKSHOPS, QUOTE_COMPONENTS, SUMMARY_COLUMNS, calculateSummaryValues, bu
 const router = express.Router();
 router.use(requireAuth);
 
+const HIDE_IMPORTED_VERIFICATIONS = `AND NOT EXISTS (
+  SELECT 1 FROM quote_sections imported_section
+  WHERE imported_section.quote_id = q.id
+    AND imported_section.dept = 'sales'
+    AND imported_section.payload_json LIKE '%"legacy_import"%'
+)`;
+
+
 function isAdmin(user) {
   return user.role === 'admin' || Boolean(user.perms?.['账号管理']?.can_admin);
 }
@@ -87,10 +95,34 @@ async function loadRows(user) {
   return result;
 }
 
+// Completion reports are restricted to the super administrator role, including downloads.
+async function completionReport(req, res, next) {
+  res.setHeader('Cache-Control', 'no-store');
+  if (req.user.role !== 'admin') return res.status(403).json({error:'仅超级管理员可查看报价完成情况汇总'});
+  try {
+    const rows = await db.prepare(`SELECT q.customer, CASE WHEN EXISTS (SELECT 1 FROM departments)
+      AND NOT EXISTS (SELECT 1 FROM departments d WHERE NOT EXISTS (
+        SELECT 1 FROM quote_sections s WHERE s.quote_id=q.id AND s.dept=d.code AND s.status='approved'
+      )) THEN 1 ELSE 0 END AS completed
+      FROM quotes q WHERE q.factory_code=? AND q.deleted_at IS NULL ${HIDE_IMPORTED_VERIFICATIONS}`).all(req.user.active_factory_code);
+    const {aggregateCompletion,buildCompletionWorkbook}=require('../services/quoteCompletionSummary');
+    const report=aggregateCompletion(rows);
+    if (!req.path.endsWith('/xlsx')) return res.json(report);
+    const buffer=await buildCompletionWorkbook(report).xlsx.writeBuffer();
+    const filename=encodeURIComponent(`内部报价完成情况_${report.as_of}.xlsx`);
+    res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+    res.send(Buffer.from(buffer));
+  } catch(error) { next(error); }
+}
+router.get('/completion', completionReport);
+router.get('/completion/xlsx', completionReport);
+
 router.get('/', async (req, res) => {
   const rows = await loadRows(req.user);
   res.json({
     rows,
+    can_view_completion: req.user.role === 'admin',
     workshops: await workshopOptions(req.user.active_factory_code),
     components: QUOTE_COMPONENTS.map(([code, name]) => ({ code, name })),
     summary_columns: SUMMARY_COLUMNS.map(([code, name, format]) => ({ code, name, format })),

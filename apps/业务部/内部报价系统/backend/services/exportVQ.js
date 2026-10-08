@@ -964,11 +964,7 @@ function sectionsToData({ quote, sections }) {
   // 装配人工（BCD E.OTHERS 段）：只用装配部真实「组装人工」，不取成本汇总里的残留值。
   const asmLineHkd = (assembly.assembly_labor || []).reduce((s, r) => s + num(r.unit_price) * num(r.qty), 0);
   const asmBase = num(assembly.assembly_base_rate ?? 310);
-  const asmStepHkd = (assembly.assembly_step_groups || []).reduce((s, g) => {
-    const team = num(g.team ?? 1) || 1;
-    const qty = Math.max(num(g.qty), 1);
-    return s + (g.steps || []).reduce((a, step) => a + asmBase * num(step.count) * team / qty, 0);
-  }, 0);
+  const asmStepHkd = require('./assemblyMix').assemblyGroupsTotal(assembly.assembly_step_groups, asmBase);
   const asmHkd = asmLineHkd + asmStepHkd;
   const assemblyLaborItems = asmHkd
     ? [{ name: 'Assembly', new_price: asmHkd }]
@@ -976,11 +972,7 @@ function sectionsToData({ quote, sections }) {
 
   const pkgLineHkd = (assembly.packaging_labor || [])
     .reduce((s, r) => s + num(r.unit_price) * num(r.qty || 1), 0);
-  const pkgStepHkd = (assembly.packaging_step_groups || []).reduce((s, g) => {
-    const team = num(g.team ?? 1) || 1;
-    const qty = Math.max(num(g.qty), 1);
-    return s + (g.steps || []).reduce((a, step) => a + asmBase * num(step.count) * team / qty, 0);
-  }, 0);
+  const pkgStepHkd = require('./assemblyMix').assemblyGroupsTotal(assembly.packaging_step_groups, asmBase);
   const packingLabourHkd = pkgLineHkd + pkgStepHkd;
 
   // 包装（VQ Section B）：工程辅助材料 + 包装材料

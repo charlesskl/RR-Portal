@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { requireAuth, quoteAccess } = require('../middleware/auth');
+const { requireAuth, quoteAccess, canEditDepartment } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -10,6 +10,7 @@ router.put('/:id', async (req, res) => {
   const id = Number(req.params.id);
   const sec = await db.prepare('SELECT * FROM quote_sections WHERE id = ?').get(id);
   if (!sec) return res.status(404).json({ error: '不存在' });
+  if (!canEditDepartment(req.user, sec.dept)) return res.status(403).json({ error: '没有该部门的编辑权限' });
   // 客户可见范围校验（防跨客户越权写）
   const acc = await quoteAccess(req.user, sec.quote_id);
   if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '不存在' : '无权操作该客户的报价单' });

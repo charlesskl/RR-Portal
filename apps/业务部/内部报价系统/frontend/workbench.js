@@ -48,6 +48,11 @@ function hasPerm(me, menu, action) {
   const p = me.perms[menu];
   return !!(p && p['can_' + action]);
 }
+function canEditDepartment(me, dept) {
+  return hasPerm(me, '报价单详情', 'view') && hasPerm(me, '报价单详情', 'edit')
+    && hasPerm(me, DEPT_MENU[dept], 'view') && hasPerm(me, DEPT_MENU[dept], 'edit')
+    && (me.dept === dept || ['sales', 'engineering'].includes(me.dept));
+}
 const DEPT_MENU = {
   sales: '业务部', engineering: '工程部', electronic: '电子部', molding: '啤机部',
   painting: '喷油部', slush: '搪胶', sewing: '车缝', assembly: '装配部',
@@ -1855,7 +1860,7 @@ function renderSummaryPane(host, sections, quote, me) {
   };
   const freightCalcSum = sales.freight_calc;
   const freightMapSum = computeFreightMap(freightCalcSum, eCartonSum);
-  const canEditShip = me?.dept === 'sales' || me?.dept === 'engineering';
+  const canEditShip = canEditDepartment(me, 'sales') && hasPerm(me, '汇总分析', 'edit');
   // 模具分摊传美金（与「生产模具费用」表同口径），出货价算价直接在 USD 层加
   // 统一保存业务 section（同步本地缓存，避免重渲染按旧 payload 还原）
   const saveSales = () => {
@@ -5806,7 +5811,7 @@ async function renderQuotePage() {
   const payload = mySec.payload_json ? JSON.parse(mySec.payload_json) : {};
   const canEdit = mySec.status !== 'approved' && me.dept !== 'sales' ? true : false;
   // 业务部门 section 永远可编辑（除非已审）
-  const canEditMine = mySec.status !== 'approved';
+  const canEditMine = mySec.status !== 'approved' && canEditDepartment(me, mySec.dept);
 
   const host = document.getElementById('sections'); host.innerHTML = '';
   const dirtyByDept = new Map();
@@ -5926,10 +5931,10 @@ async function renderQuotePage() {
     <div class="wb-bar">
       ${canEditMine ? `<button id="btn-save" title="快捷键：Ctrl+S / Command+S">保存草稿（Ctrl/⌘+S）</button>
                        <button id="btn-submit">提交审核</button>` : ''}
-      ${(me.role === 'supervisor' || me.role === 'admin') && mySec.status === 'filled'
+      ${hasPerm(me, DEPT_MENU[mySec.dept], 'review') && (me.role === 'supervisor' || me.role === 'admin') && mySec.status === 'filled'
         ? `<button id="btn-approve">审核通过</button>
            <button id="btn-reject" class="danger">驳回</button>` : ''}
-      ${mySec.status === 'approved'
+      ${hasPerm(me, DEPT_MENU[mySec.dept], 'review') && mySec.status === 'approved'
         ? `<button id="btn-reopen" class="mini">🔓 解除审核 / 重新编辑</button>` : ''}
       ${mySec.review_comment ? `<span class="muted">${mySec.review_comment}</span>` : ''}
     </div>`;
@@ -5987,7 +5992,9 @@ async function renderQuotePage() {
       // 例外：工程/业务部门由业务查看时直接可编辑（两者同属，免点按钮）；其他部门仍只读。
       // 工程/业务直接可编辑：仅在「未提交审核」(status=empty) 时自动进入编辑；
       // 已提交(filled) 则退出编辑、露出 审核通过/驳回 按钮（否则跳不出审核界面）
-      let inEdit = (s.dept === 'engineering' && (me.dept === 'sales' || me.dept === 'engineering') && s.status === 'empty');
+      const mayEdit = canEditDepartment(me, s.dept);
+      const mayReview = hasPerm(me, DEPT_MENU[s.dept], 'review') && ['supervisor','admin'].includes(me.role);
+      let inEdit = mayEdit && (s.dept === 'engineering' && (me.dept === 'sales' || me.dept === 'engineering') && s.status === 'empty');
       const c = document.createElement('div'); c.className = 'card section-pane';
       c.dataset.dept = s.dept;
       c.style.display = 'none';
@@ -5995,13 +6002,13 @@ async function renderQuotePage() {
         ${s.reviewed_at ? `<small class="muted" style="font-weight:normal;font-size:13px">审于 ${s.reviewed_at}</small>` : ''}
         ${inEdit ? `<small style="color:#dc2626;font-weight:600;margin-left:8px">⚠️ 编辑模式</small>` : ''}</h2>`;
       const renderBar = () => `<div class="wb-bar">
-        ${s.status !== 'approved' && !inEdit ? `<button data-act="enter-edit" class="mini">✏️ 进入编辑</button>` : ''}
+        ${mayEdit && s.status !== 'approved' && !inEdit ? `<button data-act="enter-edit" class="mini">✏️ 进入编辑</button>` : ''}
         ${inEdit ? `<button data-act="save" title="快捷键：Ctrl+S / Command+S">保存草稿（Ctrl/⌘+S）</button>
                     <button data-act="submit">提交审核</button>
                     <button data-act="exit-edit" class="mini">退出编辑（不保存）</button>` : ''}
-        ${s.status === 'filled' && !inEdit ? `<button data-act="approve">审核通过</button>
+        ${mayReview && s.status === 'filled' && !inEdit ? `<button data-act="approve">审核通过</button>
                                               <button data-act="reject" class="danger">驳回</button>` : ''}
-        ${s.status === 'approved' && !inEdit ? `<button data-act="reopen" class="mini">🔓 解除审核</button>` : ''}
+        ${mayReview && s.status === 'approved' && !inEdit ? `<button data-act="reopen" class="mini">🔓 解除审核</button>` : ''}
         ${s.review_comment ? `<span class="muted">${s.review_comment}</span>` : ''}
       </div>`;
       c.innerHTML = renderHeader() + '<div class="ro-body"></div>' + renderBar();
@@ -6021,7 +6028,7 @@ async function renderQuotePage() {
         else if (s.dept === 'assembly') renderAssembly(body, sectionPayload, inEdit, onChangeOther, fxRate);
         installDepartmentExport(body, s.dept, id);
         // 业务/管理员在只读预览中也能看到套啤价入口；已审核时点击仅提示先解除审核。
-        if (s.dept === 'molding' && !inEdit) {
+        if (s.dept === 'molding' && !inEdit && mayEdit) {
           body.querySelector('h3')?.insertAdjacentHTML('beforeend',
             '<small style="margin-left:6px"><button data-act="auto-shot" class="mini" type="button">🔄 自动按机型套啤价</button></small>');
         }

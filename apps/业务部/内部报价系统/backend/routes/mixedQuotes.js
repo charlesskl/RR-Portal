@@ -8,6 +8,7 @@ router.use('/:id/mixed', async (req, res, next) => {
   const acc = await quoteAccess(req.user, Number(req.params.id));
   if (acc.status !== 200) return res.status(acc.status).json({ error: '无权访问该报价单' });
   if (!['sales', 'engineering'].includes(req.user.dept)) return res.status(403).json({ error: '混装整体配置和汇总仅限业务或工程查看' });
+  if (req.method !== 'GET' && !require('../middleware/auth').canEditDepartment(req.user, 'sales')) return res.status(403).json({ error: '没有混装配置的编辑权限' });
   next();
 });
 router.get('/:id/mixed', async (req, res) => {
@@ -18,10 +19,14 @@ router.get('/:id/mixed', async (req, res) => {
   res.json(calculateMixedQuote(quote, sections) || { enabled: false });
 });
 router.put('/:id/mixed', async (req, res) => {
-  const id = Number(req.params.id), config = req.body.config;
+  const id = Number(req.params.id);
+  let config = req.body.config;
+  const disabling = config?.enabled === false;
   try {
-    if (!config?.enabled) throw new Error('此入口用于启用和设置混装报价');
-    validateConfig(config);
+    if (!disabling) {
+      if (config?.enabled !== true) throw new Error('请选择报价类型');
+      validateConfig(config);
+    }
   } catch (e) { return res.status(400).json({ error: e.message }); }
   try {
     await db.transaction(async () => {
@@ -33,6 +38,10 @@ router.put('/:id/mixed', async (req, res) => {
       if (sections.some(s => s.status === 'approved')) throw new Error('修改混装产品或比例前，请先解除各部门审核');
       const previous = getConfig(sections);
       if (JSON.stringify(previous) !== JSON.stringify(req.body.expected_config ?? null)) throw new Error('混装配置已被其他人更新，请刷新后重试');
+      if (disabling) {
+        if (!previous) throw new Error('当前没有混装配置');
+        config = { ...previous, enabled: false };
+      }
       const nextIds = new Set(config.products.map(p => p.id));
       const removed = (previous?.products || []).filter(p => !nextIds.has(p.id));
       if (removed.length) {
@@ -48,7 +57,7 @@ router.put('/:id/mixed', async (req, res) => {
       for (const section of sections) {
         const payload = require('../services/removeMixedProducts').removeMixedProducts(JSON.parse(section.payload_json || '{}'), removed.map(p => p.id));
         if (section.dept === 'sales') payload.mixed_quote = config;
-        else if (!previous?.enabled) {
+        else if (!previous && !disabling && config.products.length) {
           // 既有单品完整归入首款，原始根数据留存，但混装计算只读取新结构。
           payload.mixed_products = { [config.products[0].id]: JSON.parse(section.payload_json || '{}') };
           payload.mixed_shared = {};
@@ -67,6 +76,7 @@ router.put('/:id/mixed', async (req, res) => {
 });
 // Save inferred products and their engineering references together.
 router.post('/:id/mixed/import-molds', async (req, res) => {
+  if (!require('../middleware/auth').canEditDepartment(req.user, 'engineering')) return res.status(403).json({ error: '没有工程部编辑权限' });
   const id = Number(req.params.id);
   try {
     const result = await db.transaction(async () => {

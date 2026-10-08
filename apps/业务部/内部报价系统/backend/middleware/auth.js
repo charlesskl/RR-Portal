@@ -64,4 +64,12 @@ async function quoteAccess(user, quoteId) {
   return { status: ok ? 200 : 403 };
 }
 
-module.exports = { requireAuth, loadUserAndPerms, quoteAccess };
+function hasMenuPermission(user, menu, action) {
+  const permission = user?.perms?.[menu];
+  return !!(permission?.can_view && permission['can_' + action]);
+}
+function canEditDepartment(user, dept) {
+  const menu = require('../permissions/menu_catalog').DEPT_TO_MENU[dept];
+  return hasMenuPermission(user, '报价单详情', 'edit') && hasMenuPermission(user, menu, 'edit');
+}
+module.exports = { requireAuth, loadUserAndPerms, quoteAccess, hasMenuPermission, canEditDepartment };

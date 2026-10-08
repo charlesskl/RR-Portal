@@ -218,6 +218,7 @@ router.delete('/:id', async (req, res) => {
 
 // PUT /api/quotes/:id/header  修改表头（产品名/客户/数量）— 业务+工程可改
 router.put('/:id/header', async (req, res) => {
+  if (!require('../middleware/auth').canEditDepartment(req.user, 'sales')) return res.status(403).json({ error: '没有报价基本资料的编辑权限' });
   if (!['sales', 'engineering'].includes(req.user.dept)) {
     return res.status(403).json({ error: '只有业务或工程可改表头' });
   }

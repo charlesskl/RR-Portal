@@ -208,6 +208,7 @@ const server = http.createServer(async (req,res) => {
     if(route==='/api/orders' && req.method==='POST') {
       const d=await body(req), factory=field(d,'factory',true); if(!factories.includes(factory) || !userFactories(u).includes(factory)) fail(403,'不能向该厂区下单');
       const p={}; for(const key of ['workshop','customer','sku','product','material','color','engineer']) p[key]=field(d,key,true);
+      p.printerType=field(d,'printerType'); if(p.printerType && !['光固化','FDM'].includes(p.printerType)) fail(400,'打印机器只能选择光固化或 FDM');
       p.follower=field(d,'follower'); p.notes=field(d,'notes',false,2000); p.dueDate=date(field(d,'dueDate'),true); p.replyDate=date(field(d,'replyDate'));
       p.priority=field(d,'priority')||'普通'; if(!['普通','加急'].includes(p.priority)) fail(400,'优先级无效');
       p.quantity=Number(d.quantity); if(!Number.isSafeInteger(p.quantity) || p.quantity<1 || p.quantity>100000) fail(400,'数量需为 1–100000 的整数');

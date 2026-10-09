@@ -494,7 +494,7 @@ tr:hover{background:#f8f9ff}
     <div class="panel-head"><h2>数据管理</h2></div>
     <div class="panel-body" style="display:flex;gap:12px;flex-wrap:wrap">
       <button class="btn btn-g" onclick="exportAllData()">导出全部数据(JSON备份)</button>
-      <label class="btn btn-o" style="cursor:pointer">导入数据(JSON)<input type="file" accept=".json" style="display:none" onchange="importAllData(event)"></label>
+      <label class="btn btn-o" style="cursor:pointer">导入原系统资料（先预览）<input type="file" accept=".json" style="display:none" onchange="importAllData(event)"></label>
       <button class="btn btn-r" onclick="clearAllData()">清空所有数据</button>
     </div>
   </div>
@@ -3660,35 +3660,20 @@ function exportAllData(){
   setTimeout(()=>URL.revokeObjectURL(a.href),100);
 }
 function importAllData(e){
-  const file=e.target.files[0];
-  if(!file) return;
-  const reader=new FileReader();
-  reader.onload=async ev=>{
-    try{
-      const data=JSON.parse(ev.target.result);
-      if(typeof data !== 'object' || data === null || Array.isArray(data)) throw new Error('数据格式错误，需要JSON对象');
-      if(data.materials && !Array.isArray(data.materials)) throw new Error('materials 必须是数组');
-      if(data.products && !Array.isArray(data.products)) throw new Error('products 必须是数组');
-      if(data.records && (typeof data.records !== 'object' || Array.isArray(data.records))) throw new Error('records 格式错误');
-      if(data.maintenance && !Array.isArray(data.maintenance)) throw new Error('maintenance 必须是数组');
-      if(data.miscExpenses && !Array.isArray(data.miscExpenses)) throw new Error('miscExpenses 必须是数组');
-      if(data.inventory && (typeof data.inventory !== 'object' || Array.isArray(data.inventory))) throw new Error('inventory 格式错误');
-      if(data.stockInLogs && !Array.isArray(data.stockInLogs)) throw new Error('stockInLogs 必须是数组');
-      if(data.schedules && !Array.isArray(data.schedules)) throw new Error('schedules 必须是数组');
-      if(data.settings) S=data.settings;
-      if(data.materials) { materials=data.materials; nextMatId=Math.max(0,...materials.map(m=>m.id))+1; }
-      if(data.products) { products=data.products; nextProdId=products.length?Math.max(0,...products.map(p=>p.id))+1:1; }
-      if(data.records) records=data.records;
-      if(data.maintenance) { maintenance=data.maintenance; nextMaintId=maintenance.length?Math.max(0,...maintenance.map(m=>m.id))+1:1; }
-      if(data.miscExpenses) { miscExpenses=data.miscExpenses; nextMiscId=miscExpenses.length?Math.max(0,...miscExpenses.map(m=>m.id))+1:1; }
-      if(data.inventory) inventory=data.inventory;
-      if(data.stockInLogs) { stockInLogs=data.stockInLogs; nextStockInId=stockInLogs.length?Math.max(0,...stockInLogs.map(l=>l.id))+1:1; }
-      if(data.schedules) { schedules=data.schedules; nextSchedId=schedules.length?Math.max(0,...schedules.map(s=>s.id))+1:1; }
-      await pushNow();
-      alert('数据导入成功！'); location.reload();
-    }catch(err){alert('导入失败: '+err.message)}
-  };
-  reader.readAsText(file);
+ const file=e.target.files[0];if(!file)return;
+ const reader=new FileReader();reader.onload=async ev=>{
+  try{
+   const data=JSON.parse(ev.target.result);
+   const send=async(action,extra={})=>{const res=await fetch('/api/production/legacy-import/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data,...extra})});const result=await res.json();if(!res.ok)throw Error(result.error||'导入失败');return result;};
+   const preview=await send('preview');
+   const labels={products:'产品',materials:'材料',inventory:'库存条目',schedules:'排期',recordDays:'记录天数',recordItems:'生产记录',maintenance:'维修',miscExpenses:'杂费',stockInLogs:'入库记录'};
+   const summary=Object.entries(labels).map(([key,label])=>`${label}：云端 ${preview.summary.before[key]} / 文件 ${preview.summary.incoming[key]} / 合并后 ${preview.summary.after[key]}`).join('\n');
+   if(preview.conflicts.length){alert('未导入，需先处理以下冲突：\n'+preview.conflicts.join('\n')+'\n\n'+summary);return;}
+   if(!confirm('请核对原系统业务资料迁移：\n'+summary+'\n\n仅补充不存在的资料，不覆盖云端记录；导入前自动保留数据库快照。确认导入？'))return;
+   const result=await send('apply',{fingerprint:preview.fingerprint});
+   alert('资料迁移成功。迁移前快照编号：'+result.backupId);location.reload();
+  }catch(err){alert('导入失败：'+err.message);}finally{e.target.value='';}
+ };reader.readAsText(file);
 }
 async function clearAllData(){
   if(!confirm('确定清空所有数据？此操作不可恢复！')) return;

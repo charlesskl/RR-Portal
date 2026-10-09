@@ -1,4 +1,5 @@
 const http = require('http');
+const {planImport}=require('./legacy-import.cjs');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -152,6 +153,20 @@ const handleProductFiles = createProductFileHandler({
 
 const server = http.createServer((req, res) => {
   if (!requireAuth(req,res)) return;
+  if(['/api/legacy-import/preview','/api/legacy-import/apply'].includes(req.url)&&req.method==='POST'){
+    const chunks=[];let size=0,aborted=false;
+    req.on('data',chunk=>{size+=chunk.length;if(size>10*1024*1024){if(!aborted){aborted=true;res.writeHead(413,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'备份超过 10MB，请联系管理员迁移'}));}return;}chunks.push(chunk);});
+    req.on('end',()=>{if(aborted)return;try{
+      const input=JSON.parse(Buffer.concat(chunks).toString('utf8')),current=loadData(),plan=planImport(current,input.data);
+      if(req.url.endsWith('/preview')){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({summary:plan.summary,conflicts:plan.conflicts,fingerprint:plan.fingerprint}));return;}
+      if(plan.conflicts.length||input.fingerprint!==plan.fingerprint){res.writeHead(409,{'Content-Type':'application/json'});res.end(JSON.stringify({error:plan.conflicts.length?'存在冲突，未写入；请核对预览':'云端资料已变化，请重新预览'}));return;}
+      store.exec('CREATE TABLE IF NOT EXISTS import_backups (id TEXT PRIMARY KEY, created TEXT NOT NULL, value TEXT NOT NULL)');
+      const backupId=generateId();store.exec('BEGIN IMMEDIATE');
+      try{store.prepare('INSERT INTO import_backups VALUES (?,?,?)').run(backupId,new Date().toISOString(),JSON.stringify(current));store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(plan.next));store.exec('COMMIT');}catch(e){store.exec('ROLLBACK');throw e;}
+      _cachedData=structuredClone(plan.next);dataVersion=Math.max(Date.now(),dataVersion+1);
+      res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,backupId,summary:plan.summary}));
+    }catch(e){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}));}});return;
+  }
   if (req.url === '/bridge/jobs' && req.method==='POST') {
     let raw=''; req.on('data',c=>{raw+=c;if(raw.length>65536) req.destroy();});
     req.on('end',()=>{try {

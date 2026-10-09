@@ -180,6 +180,26 @@ jobs:
             sync_qc_plan_secret ERP_SA_PASSWORD '${{ secrets.ERP_SA_PASSWORD }}'
             sync_qc_plan_secret ERP_JWT_KEY '${{ secrets.ERP_JWT_KEY }}'
 
+            # PrintLink 采集站配置（清溪 Windows 桥接）：secret 为单行 stations.json 内容
+            # （含站点令牌，不进仓库、不回显）。start.mjs 检测到平台数据目录里的
+            # stations.json 即以其为采集站配置；secret 为空则跳过，保持服务器现状。
+            PRINTLINK_STATIONS='${{ secrets.PRINTLINK_STATIONS_JSON }}'
+            if [ -n "$PRINTLINK_STATIONS" ]; then
+              echo "=== printlink stations.json guard ==="
+              if printf '%s' "$PRINTLINK_STATIONS" | docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production exec -T printlink sh -c 'cat > /app/runtime/stations.json && chmod 600 /app/runtime/stations.json'; then
+                echo "[GUARD] stations.json 已写入数据卷，force-recreate printlink"
+                docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production up -d --no-deps --force-recreate printlink
+                sleep 8
+                docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production exec -T printlink sh -c 'test -s /app/runtime/stations.json' \
+                  && echo "[GUARD] stations.json 已生效" || { echo "[GUARD][ERROR] stations.json 未生效"; exit 1; }
+              else
+                echo "[GUARD][ERROR] 写入 stations.json 失败（printlink 容器未在运行？）"
+                exit 1
+              fi
+            else
+              echo "[GUARD] PRINTLINK_STATIONS_JSON 为空，跳过 printlink 采集站同步"
+            fi
+
             echo "=== Script version check ==="
             git fetch origin main
             DEPLOY_SCRIPT_RUNNER=$(mktemp)

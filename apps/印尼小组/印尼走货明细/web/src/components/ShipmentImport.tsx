@@ -3,6 +3,7 @@ import { Alert, App, Button, Descriptions, Image, InputNumber, Modal, Select, Sp
 import { api, type Dictionaries, type Material } from '../api/client'
 import { importShipmentFile, matchShipmentMaterial, planShipmentImport, type ExistingShipmentImportRow, type ShipmentImportItem, type ShipmentImportRow } from '../utils/shipmentImport'
 import { toolImportDefaults } from '../utils/toolImportDefaults'
+import { createCartonGroupId } from '../utils/cartonGroupId'
 
 const currencies = ['¥', 'US$', 'HK$', 'IDR'].map(value => ({ value, label: value }))
 export default function ShipmentImport({ existing, onImport }: { existing: ExistingShipmentImportRow[]; onImport: (rows: ShipmentImportItem[], targets: number[]) => void }) {
@@ -39,7 +40,7 @@ export default function ShipmentImport({ existing, onImport }: { existing: Exist
           customs_company: row.item.customs_company || enriched.material.customs_company }
         if (item.carton_group) {
           const key = JSON.stringify([item.carton_group, item.supplier || '', item.customs_company || ''])
-          if (!groupIds.has(key)) groupIds.set(key, crypto.randomUUID())
+          if (!groupIds.has(key)) groupIds.set(key, createCartonGroupId())
           item.carton_group = groupIds.get(key)
         }
         return { ...row, item, warnings: [...row.warnings, ...enriched.warnings,

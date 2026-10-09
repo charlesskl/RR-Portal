@@ -12,3 +12,11 @@ test('collector validation blocks malformed setup before loading real drivers an
  const invalid=valid();invalid.bambuPrinters[0].host='https://private-host/';assert.ok(!validateConfig(invalid).join().includes('private-host'));
  assert.deepEqual(validateConfig({mode:'simulation',cloudUrl:'http://127.0.0.1:3100',token:'b'.repeat(64)}),[]);
 });
+
+test('remote HTTP requires an explicit boolean opt-in; other protocols remain rejected',()=>{
+ const config={...valid(),cloudUrl:'http://8.148.146.194:3100'};
+ assert.ok(validateConfig(config).length);
+ assert.ok(validateConfig({...config,allowInsecureHttp:'true'}).length);
+ assert.deepEqual(validateConfig({...config,allowInsecureHttp:true}),[]);
+ assert.ok(validateConfig({...config,allowInsecureHttp:true,cloudUrl:'ftp://remote.test'}).length);
+});

@@ -1,0 +1,16 @@
+{
+  "mode": "bridge",
+  "cloudUrl": "http://8.148.146.194:3100",
+  "token": "REPLACE_WITH_STATION_TOKEN",
+  "bindingsFile": "C:/PrintLinkBridge/runtime/bindings.json",
+  "consolePort": 3103,
+  "legacy": {
+    "url": "http://127.0.0.1:3000",
+    "username": "REPLACE_WITH_LOCAL_USERNAME",
+    "password": "REPLACE_WITH_LOCAL_PASSWORD",
+    "machineMap": {
+      "1": "1"
+    }
+  },
+  "allowInsecureHttp": true
+}

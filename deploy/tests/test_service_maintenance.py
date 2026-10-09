@@ -209,6 +209,10 @@ class NginxTests(unittest.TestCase):
             cls.port = sock.getsockname()[1]
         source = (ROOT / 'nginx/nginx.cloud.conf').read_text()
         source = source.replace('worker_processes auto;', 'worker_processes 1;')
+        source = 'pid "' + str(cls.path / 'nginx.pid') + '";\n' + source
+        temp_paths = '\n'.join(f'    {kind}_temp_path "{cls.path / (kind + "_temp")}";'
+                               for kind in ['client_body', 'proxy', 'fastcgi', 'uwsgi', 'scgi'])
+        source = source.replace('http {', 'http {\n' + temp_paths, 1)
         mime = cls.path / 'mime.types'
         mime.write_text('types { text/html html; image/png png; }\n')
         source = source.replace('include       mime.types;', 'include "' + str(mime) + '";')
@@ -221,7 +225,8 @@ class NginxTests(unittest.TestCase):
         source = re.sub(r'set \$ups "[^"\n]+";', f'set $ups "127.0.0.1:{cls.backend.server_port}";', source)
         cls.config = cls.path / 'nginx.conf'
         cls.config.write_text(source)
-        cls.command = [str(NGINX), '-p', str(cls.path) + '/', '-c', str(cls.config)]
+        cls.command = [str(NGINX), '-p', str(cls.path) + '/', '-c', str(cls.config),
+                       '-e', str(cls.path / 'initial-error.log')]
         result = subprocess.run(cls.command + ['-t'], capture_output=True, text=True)
         if result.returncode:
             cls.backend.shutdown()

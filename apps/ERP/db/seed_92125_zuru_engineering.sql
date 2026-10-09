@@ -28,6 +28,15 @@ BEGIN
   ROLLBACK TRANSACTION;
   RETURN;
 END
+-- 库内已有 ZURU 工程数据（如历史数据恢复后）：seed 只负责首装铺底。
+-- 下面的 DELETE 会撞 生产BOM物料清单 等真实业务数据的 FK 引用（部署实录 exit 139），
+-- 且清空重建会覆盖用户改过的行，故直接跳过。
+IF EXISTS (SELECT 1 FROM [工模表] WHERE [客户] = 'ZURU')
+BEGIN
+  PRINT N'已存在 ZURU 工程数据，跳过 92125 seed（不清空重建）';
+  ROLLBACK TRANSACTION;
+  RETURN;
+END
 -- ----- 工模表: 26 行 -----
 DELETE FROM [工模表] WHERE 客户 = 'ZURU';
 SET IDENTITY_INSERT [工模表] ON;

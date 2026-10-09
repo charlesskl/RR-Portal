@@ -103,3 +103,6 @@ def test_mailbox_connection(credentials: dict) -> dict:
                 client.logout()
             except (imaplib.IMAP4.error, OSError):
                 pass
+
+# Not a test: pytest would otherwise collect this imported helper from tests/.
+test_mailbox_connection.__test__ = False

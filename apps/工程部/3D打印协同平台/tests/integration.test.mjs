@@ -10,7 +10,7 @@ test('cloud production integration: permissions, scheduling, telemetry replay, q
  async function request(route,{auth,data,method,token}={}){const r=await fetch(base+route,{method:method||(data?'POST':'GET'),headers:{'Content-Type':'application/json',...(auth?{Cookie:auth.cookie,'X-CSRF-Token':auth.csrf}:{}),...(token?{Authorization:'Bearer '+token}:{})},body:data?JSON.stringify(data):undefined});const text=await r.text();let body;try{body=JSON.parse(text);}catch{body=text;}return {status:r.status,body,headers:r.headers};}
  async function login(username='admin'){const r=await request('/api/login',{data:{username,password:username==='admin'?'test-secret-123':'member123'}});assert.equal(r.status,200);return {cookie:r.headers.get('set-cookie').split(';')[0],csrf:r.body.csrf};}
  try{
-  await writeFile(path.join(dir,'production-source.json'),JSON.stringify({settings:null,products:[{id:'test-product',name:'测试产品'}],materials:[{id:'test-material',name:'PLA'}],inventory:{PLA:{stockG:1000}},records:{},schedules:[],maintenance:[],stockInLogs:[],miscExpenses:[]}));
+  await writeFile(path.join(dir,'production-source.json'),JSON.stringify({settings:null,products:[{id:'test-product',name:'测试产品',image:'data:image/png;base64,aGVsbG8='}],materials:[{id:'test-material',name:'PLA'}],inventory:{PLA:{stockG:1000}},records:{},schedules:[],maintenance:[],stockInLogs:[],miscExpenses:[]}));
   await launch();let admin=await login();const secrets=JSON.parse(await readFile(path.join(dir,'secrets.json'),'utf8')),token=secrets.collector;
   assert.equal((await request('/api/platform/overview')).status,401);
   assert.equal((await request('/api/collector/jobs',{token:'wrong'})).status,401);
@@ -27,6 +27,13 @@ test('cloud production integration: permissions, scheduling, telemetry replay, q
   }
   const plain=await fetch(base+'/api/production/data',{headers:{Cookie:admin.cookie,'Accept-Encoding':'identity'}});
   assert.equal(plain.headers.get('content-encoding'),null);assert.equal((await plain.json()).products.length,2);
+  const compactData=await request('/api/production/data?view=compact',{auth:admin});
+  assert.equal(compactData.headers.get('content-encoding'),'gzip');
+  const picture=compactData.body.products[0].image;
+  assert.ok(picture.startsWith('/api/production/data-images/'));
+  assert.equal((await request(picture)).status,401);
+  assert.equal((await request(picture,{auth:member})).status,403);
+  const image=await request(picture,{auth:admin});assert.equal(image.body,'hello');assert.equal(image.headers.get('content-type'),'image/png');
   const verifyImport=(await request('/api/production/data',{auth:admin})).body;assert.equal(verifyImport.records['2026-09-01'].items.length,1);
   const again=await request('/api/production/legacy-import/preview',{auth:admin,data:{data:legacySource}});assert.equal(again.body.summary.after.products,2);
   assert.equal((await request('/api/production/legacy-import/apply',{auth:admin,data:{data:legacySource,fingerprint:again.body.fingerprint}})).status,200);

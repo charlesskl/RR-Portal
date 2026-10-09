@@ -59,6 +59,8 @@ const { DatabaseSync } = require('node:sqlite');
 const store = new DatabaseSync(process.env.PRODUCTION_DB || path.join(__dirname,'../data/production.sqlite'));
 store.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS snapshot (id INTEGER PRIMARY KEY, value TEXT NOT NULL)');
 if (!store.prepare('SELECT id FROM snapshot WHERE id=1').get()) { const source=process.env.PRODUCTION_SOURCE || path.join(__dirname,'../data/production-source.json'); store.prepare('INSERT INTO snapshot VALUES (1,?)').run(fs.existsSync(source)?fs.readFileSync(source,'utf8'):JSON.stringify({settings:null,materials:[],products:[],records:{},schedules:[],maintenance:[],inventory:{},stockInLogs:[],miscExpenses:[]})); }
+const dataImages=require('./data-images.cjs')(store);
+let compactCache=null,compactVersion=null;
 let _cachedData = null;
 function loadData() { _cachedData=JSON.parse(store.prepare('SELECT value FROM snapshot WHERE id=1').get().value); return structuredClone(_cachedData); }
 function requireAuth(req,res) {
@@ -138,11 +140,12 @@ function repairCorruptedData(data) {
 
 function deductInventory(data,name,grams){if(!name||!Number.isFinite(grams)||grams<=0)return;data.inventory||={};data.inventory[name]||={stockG:0,minStockG:3000};if(data.inventory[name].stockG<grams)throw Error('材料库存不足，请先核实入库');data.inventory[name].stockG-=grams;data.inventory[name]._updatedAt=Date.now();data._snapshotUpdatedAt=Date.now();}
 function saveData(data) {
+  data=dataImages.restore(data);
   // Linked orders are owned by the cloud task workflow, not legacy forms.
   const current=loadData(),existing=current.schedules||[];
   for(const [date,day]of Object.entries(current.records||{})){const linked=(day.items||[]).filter(i=>i.cloudJobId);if(linked.length){data.records||={};data.records[date]||={off:false,items:[]};data.records[date].items=(data.records[date].items||[]).filter(i=>!i.cloudJobId).concat(linked);}}
   data.schedules=(data.schedules||[]).filter(x=>!x.cloudJobId).concat(existing.filter(x=>x.cloudJobId));
-  dataVersion=Date.now(); _cachedData=structuredClone(data);
+  dataVersion=Math.max(Date.now(),dataVersion+1); _cachedData=structuredClone(data);
   store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));
 }
 const printerStatus={}, _remotePrinterStatus={},printerPrevState={};
@@ -185,7 +188,7 @@ const server = http.createServer((req, res) => {
           data.records[q.date].items.push({_id:'cloud-'+job.cloudJobId,cloudJobId:job.cloudJobId,_updatedAt:Date.now(),createdAt:q.checkedAt,machine:job.machine,status:'running',productName:job.productName,material:q.material,weight:q.weight,qty:q.qty,time:q.time,price:q.price,designFee:0,customer:job.customer,remark:job.remark+'；质检人：'+q.checkedBy+'；'+q.notes});
         }
       }
-      dataVersion=Date.now(); store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));
+      dataVersion=Math.max(Date.now(),dataVersion+1); store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));
       res.writeHead(200,{'Content-Type':'application/json'});res.end('{"ok":true}');
     } catch(e) {res.writeHead(400);res.end(JSON.stringify({error:e.message}));}}); return;
   }
@@ -253,6 +256,19 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({error: e.message}));
       }
     });
+  }
+  else if (req.url.startsWith('/api/data-images/') && req.method === 'GET') {
+    const image=dataImages.image(req.url.slice('/api/data-images/'.length));
+    if(!image){res.writeHead(404);res.end('Image not found');return;}
+    res.writeHead(200,{'Content-Type':image.type,'X-Content-Type-Options':'nosniff','Cache-Control':'private, max-age=86400'});
+    res.end(image.body);
+  }
+  else if (req.url === '/api/data?view=compact' && req.method === 'GET') {
+    if(compactVersion!==dataVersion){
+      const data=dataImages.compact(loadData());data._version=dataVersion;
+      compactCache=JSON.stringify(data);compactVersion=dataVersion;
+    }
+    res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(compactCache);
   }
   else if (req.url === '/api/data' && req.method === 'GET') {
     const data = loadData();

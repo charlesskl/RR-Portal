@@ -621,7 +621,7 @@ function patchMoldProductGroups(ws, payloads) {
   const molds = (payloads.engineering && payloads.engineering.molds) || [];
   if (!molds.some(mold => mold.product_group_id)) return;
   const titleRow = findRow(ws, '一、模具部分');
-  if (!titleRow) return;
+  if (!titleRow || ws.getCell(titleRow + 1, 1).value === '模号') return;
   ws.getCell(titleRow + 1, 1).value = '产品 / 序号';
   const counters = {};
   let previousGroup = '';
@@ -656,7 +656,7 @@ function patchMoldingProductGroups(ws, payloads) {
   const rows = (payloads.molding && payloads.molding.injection) || [];
   if (!rows.some(item => item.product_group_id || item.product_group_name)) return;
   const titleRow = findRow(ws, '二、注塑部分');
-  if (!titleRow) return;
+  if (!titleRow || ws.getCell(titleRow + 1, 1).value === '模号') return;
   ws.getCell(titleRow + 1, 1).value = '产品 / 序号';
   const counters = {};
   const groupNumbers = {};

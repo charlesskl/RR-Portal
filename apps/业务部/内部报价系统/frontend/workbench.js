@@ -1859,6 +1859,9 @@ function renderSummaryPane(host, sections, quote, me) {
   };
   const freightCalcSum = sales.freight_calc;
   const freightMapSum = computeFreightMap(freightCalcSum, eCartonSum);
+  if (window.JazwaresFreight?.matches(quote.customer)) {
+    freightMapSum.externalRegions = window.JazwaresFreight.calculate(freightCalcSum.jazwares || {}, eCartonSum, salesHeader).regions;
+  }
   const canEditShip = canEditDepartment(me, 'sales') && hasPerm(me, '汇总分析', 'edit');
   // 模具分摊传美金（与「生产模具费用」表同口径），出货价算价直接在 USD 层加
   // 统一保存业务 section（同步本地缓存，避免重渲染按旧 payload 还原）
@@ -5276,6 +5279,26 @@ function computeFreightMap(f, eCarton) {
   return map;
 }
 
+function renderJazwaresFreight(host, settings, carton, header, canEdit, onChange) {
+  const fields=[['usd_rate','HKD→USD 汇率',7.75],['divisor','找数除数',0.98],['markup','加价倍数',1.25]];
+  host.innerHTML=`<div class="card"><h4>JAZWARES · 浙江 / 广东运费</h4><div class="wb-grid2">${fields.map(([key,label,value])=>`<label>${label}<input data-jazwares="${key}" type="number" min="0" step="any" value="${escapeHtml(settings[key]??value)}" ${canEdit?'':'disabled'}></label>`).join('')}</div><p class="muted">运费 HKD＝运费 RMB ÷ 上方人民币汇率；单个运费＝运费 HKD ÷ 手填装载数量。理论装载量仅供参考。</p><div id="jazwares-results"></div></div>`;
+  const editable=(key,value,label)=>canEdit?`<input data-jazwares-inline="${key}" aria-label="${label}" type="number" min="0" step="any" value="${value}" style="width:150px;max-width:100%">`:String(value);
+  const paint=()=>{
+    const m=JazwaresFreight.calculate(settings,carton,header);
+    const fmt=(v,d=3)=>v===null?'待补参数':Number(v).toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d});
+    host.querySelector('#jazwares-results').innerHTML=m.regions.map(r=>`<h4>${r.name}</h4><table class="wb-table"><thead><tr><th>项目</th><th>数值</th><th>换算 / 参考</th></tr></thead><tbody><tr><td>运费</td><td>RMB ${editable(r.key+'_rmb',r.rmb,r.name+'运费 RMB')}</td><td>HK$ ${fmt(r.hkd,2)}</td></tr><tr><td>体积 CBM</td><td>每箱 ${fmt(m.cbm,4)}</td><td>每个 ${fmt(m.unitCbm,4)}</td></tr><tr><td>3吨车 / ${editable('capacity_cbm',m.capacity,r.name+'车辆容量 CBM')} 方</td><td>手填 ${editable(r.key+'_quantity',r.quantity,r.name+'装载数量 PCS')} PCS</td><td>理论 ${fmt(m.theoreticalQuantity,0)} PCS</td></tr><tr><td>单个运费 HKD</td><td colspan="2">${fmt(r.perPiece)}</td></tr><tr><td>USD 价</td><td>含加价 ${fmt(r.usdMarkup)}</td><td>不加价 ${fmt(r.usdPlain)}</td></tr></tbody></table>`).join('')+`<p class="muted">USD（含加价）＝单个运费 ÷ ${m.divisor} × ${m.markup} ÷ ${m.usd}；不加价时不乘加价倍数。</p>`;
+    if(canEdit)host.querySelectorAll('[data-jazwares-inline]').forEach(input=>input.onchange=()=>{
+      if(input.value.trim()===''||!Number.isFinite(Number(input.value))||Number(input.value)<0){input.setCustomValidity('请输入非负数');input.reportValidity();return;}
+      input.setCustomValidity('');settings[input.dataset.jazwaresInline]=Number(input.value);onChange();paint();
+    });
+  };
+  host.jazwaresPaint=paint; paint();
+  if(canEdit)host.querySelectorAll('[data-jazwares]').forEach(input=>input.oninput=()=>{
+    if(!Number.isFinite(Number(input.value))||Number(input.value)<0)return;
+    settings[input.dataset.jazwares]=input.value===''?0:Number(input.value);onChange();paint();
+  });
+}
+
 function renderFreightCalc(host, f, eCarton, canEdit, onChange) {
   const ro = canEdit ? '' : 'readonly';
   const inputCell = (id, key, unit) =>
@@ -5321,6 +5344,7 @@ function renderFreightCalc(host, f, eCarton, canEdit, onChange) {
       ${resultTable('集装柜', FREIGHT_TYPES.slice(0, 4))}
       ${resultTable('卡车', FREIGHT_TYPES.slice(4))}
     </div>`;
+  host.freightPaint = paint;
   paint();
   if (!canEdit) return;
 
@@ -5414,7 +5438,8 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       const sewDivisor = sewMarkup / num(s.divisor);
       const elecMarkup = elecBase * elecMarkupValue();
       const elecDivisor = elecMarkup / num(s.divisor);
-      const totalHKD = afterDivisor + sewDivisor + elecDivisor;
+      const markedTotal = afterMarkup + sewMarkup + elecMarkup;
+      const totalHKD = markedTotal / num(s.divisor);
       const totalRMB = totalHKD * fxRH;
       const totalUSD = totalHKD / fxHU;
       const moldShareUSD = num(topData.mold_share);
@@ -5427,10 +5452,14 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       const surtaxMarkup = surtaxUsd * num(s.surtax_markup_x ?? s.markup_x);
       const surtaxDivided = surtaxMarkup / num(s.divisor);
       const quotedUSD = finalUSD + surtaxDivided;
-      return { freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalRMB, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, customerSuppliedUSD, finalUSD,
+      return { freight, lifting, afterShip, afterMarkup, afterDivisor, markedTotal, totalHKD, totalRMB, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, customerSuppliedUSD, finalUSD,
         surtaxUsd, surtaxMarkup, surtaxDivided, quotedUSD,
-        mainTotal: afterDivisor, sewBase, sewMarkup, sewDivisor, sewTotal: sewDivisor,
-        elecBase, elecMarkup, elecDivisor, elecTotal: elecDivisor };
+        ...Object.fromEntries((freightMap.externalRegions || []).flatMap(region => [
+          [region.key + 'Freight', region.usdMarkup],
+          [region.key + 'Delivered', region.usdMarkup == null ? null : quotedUSD + region.usdMarkup],
+        ])),
+        mainTotal: afterMarkup, sewBase, sewMarkup, sewDivisor, sewTotal: sewMarkup,
+        elecBase, elecMarkup, elecDivisor, elecTotal: elecMarkup };
     });
     const target = num(s.target_usd);
     // 报客货价 = 第一个非"出厂价"场景（默认 盐田40柜）；若全是出厂价则取最小
@@ -5439,7 +5468,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
     const customerTotalHkd = (customerIdx >= 0 && rows[customerIdx])
       ? rows[customerIdx].totalHKD
       : (rows.length ? Math.min(...rows.map(r => r.totalHKD)) : 0);
-    const customerBeforeDivisorHkd = customerTotalHkd * num(s.divisor);
+    const customerBeforeDivisorHkd = customerUSD * num(s.divisor) * fxHU;
     const customerSurtaxHkd = (customerIdx >= 0 && rows[customerIdx])
       ? rows[customerIdx].surtaxUsd * fxHU
       : (rows.length ? Math.min(...rows.map(r => r.surtaxUsd)) * fxHU : 0);
@@ -5461,6 +5490,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       setC('afterShip', fmt(r.afterShip));
       setC('afterMarkup', fmt(r.afterMarkup));
       setC('afterDivisor', fmt(r.afterDivisor));
+      setC('markedTotal', fmt(r.markedTotal));
       setC('mainTotal', fmt(r.mainTotal));
       setC('sewBase', fmt(r.sewBase));
       setC('sewMarkup', fmt(r.sewMarkup));
@@ -5482,6 +5512,10 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       setC('surtaxMarkup', fmt(r.surtaxMarkup));
       setC('surtaxDivided', fmt(r.surtaxDivided));
       setC('quotedUSD', fmt(r.quotedUSD));
+      (freightMap.externalRegions || []).forEach(region => {
+        setC(region.key + 'Freight', r[region.key + 'Freight'] == null ? '待补参数' : r[region.key + 'Freight'].toFixed(3));
+        setC(region.key + 'Delivered', fmt(r[region.key + 'Delivered']));
+      });
       // 出货底价 input：matched 则同步 + 禁用 + 上色
       const baseInp = host.querySelector(`.sc-base[data-i="${i}"]`);
       if (baseInp) {
@@ -5538,7 +5572,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       </tr>`).join('');
     host.innerHTML = `
       <p class="muted" style="font-size:12px;margin:0 0 10px 0">
-        出货底价 = 出厂价（九、合计小计） <b style="color:#7c2d12" id="sh-top-total">${fmt(num(topData.total_hkd))}</b> HK$（各场景统一用它，再 ×码点 ÷找数；附加税 0.4% 在下方 USD 层计提）
+        出货底价 = 出厂价（九、合计小计） <b style="color:#7c2d12" id="sh-top-total">${fmt(num(topData.total_hkd))}</b> HK$（主体、车缝、电子分别乘码点，合计后统一除找数；附加税 0.4% 在下方 USD 层计提）
         <span id="sh-top-combined" style="display:none">${fmt(num(topData.combined))}</span>
         <span id="sh-top-mold" style="display:none">${fmt(num(topData.mold_share))}</span>
       </p>
@@ -5554,16 +5588,15 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
           <tr><td>吊柜费 (${canEdit ? `<input id="sh-lifting" type="number" step="any" value="${s.lifting_pct}" style="width:60px">` : s.lifting_pct}%)</td>${rows.map((r, i) => cellTd(i, 'lifting', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr class="hi"><td>含运 HK$</td>${rows.map((r, i) => cellTd(i, 'afterShip', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>码点 × (${canEdit ? `<input id="sh-markup" type="number" step="any" value="${s.markup_x}" style="width:60px">` : s.markup_x})</td>${rows.map((r, i) => cellTd(i, 'afterMarkup', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
-          <tr><td>找数 ÷ (${canEdit ? `<input id="sh-divisor" type="number" step="any" value="${s.divisor}" style="width:60px">` : s.divisor})</td>${rows.map((r, i) => cellTd(i, 'afterDivisor', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr class="hi" style="background:#FEF3C7;color:#92400E;font-weight:700"><td>TOTAL (HK$)</td>${rows.map((r, i) => cellTd(i, 'mainTotal', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>车缝</td>${rows.map((r, i) => cellTd(i, 'sewBase', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>码点 × (${canEdit ? `<input id="sh-sew-markup" type="number" step="any" value="${sewMarkupValue()}" style="width:60px">` : sewMarkupValue()})</td>${rows.map((r, i) => cellTd(i, 'sewMarkup', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
-          <tr><td>找数 ÷ ${s.divisor}</td>${rows.map((r, i) => cellTd(i, 'sewDivisor', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr class="hi" style="background:#FEF3C7;color:#92400E;font-weight:700"><td>TOTAL (HK$)</td>${rows.map((r, i) => cellTd(i, 'sewTotal', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>电子</td>${rows.map((r, i) => cellTd(i, 'elecBase', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>码点 × (${canEdit ? `<input id="sh-elec-markup" type="number" step="any" value="${elecMarkupValue()}" style="width:60px">` : elecMarkupValue()})</td>${rows.map((r, i) => cellTd(i, 'elecMarkup', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
-          <tr><td>找数 ÷ ${s.divisor}</td>${rows.map((r, i) => cellTd(i, 'elecDivisor', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr class="hi" style="background:#FEF3C7;color:#92400E;font-weight:700"><td>TOTAL (HK$)</td>${rows.map((r, i) => cellTd(i, 'elecTotal', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr class="hi"><td>码点后合计 (HK$)</td>${rows.map((r, i) => cellTd(i, 'markedTotal', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>找数 ÷ (${canEdit ? `<input id="sh-divisor" type="number" step="any" value="${s.divisor}" style="width:60px">` : s.divisor})</td>${rows.map((r, i) => cellTd(i, 'totalHKD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr class="hi" style="background:#DBEAFE;color:#1E40AF;font-weight:700"><td>TOTAL (HK$)</td>${rows.map((r, i) => cellTd(i, 'totalHKD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>(USD) = HK$/${fxHU}</td>${rows.map((r, i) => cellTd(i, 'totalUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>模具分摊 (USD)</td>${rows.map((r, i) => cellTd(i, 'moldShareUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
@@ -5575,10 +5608,14 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
           <tr><td>码点 × ${canEdit ? `<input id="sh-surtax-markup" aria-label="附加税码点" type="number" min="0" step="any" value="${s.surtax_markup_x ?? s.markup_x}" style="width:80px">` : (s.surtax_markup_x ?? s.markup_x)}</td>${rows.map((r, i) => cellTd(i, 'surtaxMarkup', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>找数 ÷ ${s.divisor}</td>${rows.map((r, i) => cellTd(i, 'surtaxDivided', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr class="hi" style="background:#DBEAFE;color:#1E40AF;font-weight:700"><td>TOTAL (USD)</td>${rows.map((r, i) => cellTd(i, 'quotedUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          ${(freightMap.externalRegions || []).map(region => `
+            <tr><td>${region.key === 'zhejiang' ? '浙江' : '广东'}运费 (USD)</td>${rows.map((r, i) => `<td class="ro" data-i="${i}" data-k="${region.key}Freight">${region.usdMarkup == null ? '待补参数' : region.usdMarkup.toFixed(3)}</td>`).join('')}${canEdit ? '<td></td>' : ''}</tr>
+            <tr class="hi"><td>${region.key === 'zhejiang' ? '浙江' : '广东'}合计 (USD)</td>${rows.map((r, i) => cellTd(i, region.key + 'Delivered', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          `).join('')}
         </tbody>
       </table>
       <div class="ship-foot">
-        <label>报客货价 (USD) <input class="sh-customer" value="${fmt(customerUSD)}" disabled style="width:100px;background:#f0f9ff;font-weight:600"></label>
+        <label>报客货价${freightMap.externalRegions ? '（未含送外厂运费）' : ''} (USD) <input class="sh-customer" value="${fmt(customerUSD)}" disabled style="width:100px;background:#f0f9ff;font-weight:600"></label>
         <label>目标价 (USD) ${canEdit ? `<input id="sh-target" type="number" step="any" value="${s.target_usd}" style="width:100px">` : `<span>${s.target_usd}</span>`}</label>
         <label>相差 % <input class="sh-diff" value="${target > 0 ? diffPct.toFixed(2) + '%' : '-'}" disabled style="width:90px;background:${diffPct >= 0 ? '#fef3c7' : '#dcfce7'};font-weight:600"></label>
         ${canEdit ? `<button class="mini" id="sh-add-customer-product">+ 客供成品</button><button class="mini" id="sh-add">+ 增加场景</button>` : ''}
@@ -5599,7 +5636,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
     bindNum('.sc-base', 'base_rmb');
     bindNum('.sc-mold', 'mold_share_rmb');
     const globalMap = { freight: 'freight_pct', lifting: 'lifting_pct', markup: 'markup_x', divisor: 'divisor', target: 'target_usd',
-      'sew-markup': 'sew_markup_x', 'elec-markup': 'elec_markup_x' };
+      'surtax-markup': 'surtax_markup_x', 'sew-markup': 'sew_markup_x', 'elec-markup': 'elec_markup_x' };
     Object.entries(globalMap).forEach(([id, key]) => {
       const el = host.querySelector('#sh-' + id);
       if (el) el.oninput = () => { s[key] = num(el.value); onChange(); refresh(); };
@@ -5703,7 +5740,24 @@ function renderSales(host, payload, quote, canEditHeader, canEditPricing, allSec
     hk40: 8000, hk20: 7100, yt40: 7200, yt20: 6000,
     hk10t: 14900, yt10t: 11500, hk5t: 12500, yt5t: 11000,
   };
-  renderFreightCalc(host.querySelector('#wb-freight'), payload.freight_calc, eCarton, true, onChange);
+  renderFreightCalc(host.querySelector('#wb-freight'), payload.freight_calc, eCarton, canEditPricing, onChange);
+  if (JazwaresFreight.matches(quote.customer)) {
+    payload.freight_calc.jazwares = payload.freight_calc.jazwares || {};
+    const jazwaresHost = document.createElement('div');
+    jazwaresHost.id = 'wb-jazwares-freight';
+    host.querySelector('#wb-freight').appendChild(jazwaresHost);
+    renderJazwaresFreight(jazwaresHost, payload.freight_calc.jazwares, eCarton, h, canEditPricing, onChange);
+  }
+  host.dataset.refreshFreight = 'true';
+  host.refreshFreight = () => {
+    const latestSection = (allSections || []).find(section => section.dept === 'engineering');
+    const latest = latestSection?.payload_json ? JSON.parse(latestSection.payload_json) : {};
+    for (const key of Object.keys(eCarton)) delete eCarton[key];
+    Object.assign(eCarton, latest.carton_calc || {});
+    host.querySelector('#wb-freight')?.freightPaint?.();
+    host.querySelector('#wb-jazwares-freight')?.jazwaresPaint?.();
+  };
+
 
   if (canEditHeader) {
     const saveHeader = () => onHeaderChange({
@@ -5714,7 +5768,7 @@ function renderSales(host, payload, quote, canEditHeader, canEditPricing, allSec
   }
   if (canEditPricing) {
     $('h-cy').onchange = () => { h.currency = $('h-cy').value; onChange(); };
-    $('h-fxrh').oninput = () => { h.fx_rmb_hkd = num($('h-fxrh').value); onChange(); };
+    $('h-fxrh').oninput = () => { h.fx_rmb_hkd = num($('h-fxrh').value); onChange(); host.querySelector('#wb-jazwares-freight')?.jazwaresPaint?.(); };
     $('h-fxhu').oninput = () => { h.fx_hkd_usd = num($('h-fxhu').value); onChange(); };
     [['p-ship', 'shipping_per_pcs'], ['p-mgmt', 'mgmt_fee_pct'], ['p-prof', 'profit_pct'], ['p-tax', 'tax_pct'], ['p-amt', 'mold_amortization_qty']]
       .forEach(([id, k]) => $(id).oninput = () => { p[k] = num($(id).value); onChange(); });
@@ -5939,6 +5993,7 @@ async function renderQuotePage() {
       }
       // 汇总不缓存：每次进入都按当前 sections 中已保存的最新数据重新计算。
       if (targetDept === '__summary__' && summaryPane) renderSummaryPane(summaryPane, sections, quote, me);
+      if (targetDept === 'sales') host.querySelectorAll('[data-refresh-freight]').forEach(panel => panel.refreshFreight?.());
       activateTab(tabKey, targetDept);
     };
     visibleDepts.forEach(s => {

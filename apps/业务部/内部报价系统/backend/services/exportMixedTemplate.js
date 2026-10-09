@@ -68,7 +68,7 @@ async function addTemplateDetails(wb,args,result){
    const p=products[index],sections=projectSections(args.sections,p.id,args.quote.qty);
    const sales=sections.find(s=>s.dept==='sales');
    const sp=JSON.parse(sales.payload_json);sp.header ||= {};sp.header.fx_hkd_usd=result.pricing.fx;sp.shipping={...sp.shipping,scenarios:[],surtax_pct:0};sp.pricing_summary={surtax:0};sales.payload_json=JSON.stringify(sp);
-   const source=await require('./exportInternal').buildWorkbook({quote:{...args.quote,quote_no:p.code,product_name:p.name},sections});
+   const source=await require('./exportInternal').buildWorkbook({quote:{...args.quote,_mixedSequence:true,quote_no:p.code,product_name:p.name},sections});
    const names=new Map(source.worksheets.map((ws,i)=>[ws.name,(String(index+1).padStart(2,'0')+'-'+p.code+'-'+ws.name).replace(/[\\/*?:\[\]]/g,'_').slice(0,31)]));
    const images=new Map();(source.model.media||[]).forEach((img,i)=>images.set(i,wb.addImage(img)));
    const copies=[];

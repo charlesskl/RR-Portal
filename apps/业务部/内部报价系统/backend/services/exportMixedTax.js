@@ -1,6 +1,8 @@
 'use strict';
 // Same categories and deduction rates as the single-product internal template.
 function addMixedTax(ws,result,refs,priceRef,options={}){
+ const taxPrice=result.final_usd*result.pricing.divisor*result.pricing.fx;
+ priceRef=`(${priceRef})*${result.pricing.divisor}`;
  const make=(f,v)=>({formula:f,result:v}), val=k=>(result.common_components[k]||0)+result.products.reduce((n,p)=>n+(p.components[k]||0)*p.weight*result.cost_units,0);
  const components=Object.fromEntries(Object.keys(refs).map(k=>[k,make(refs[k],val(k))]));
  components.freight=make(options.freightRef||"'混装算价参数'!B10",result.components.freight);
@@ -10,10 +12,10 @@ function addMixedTax(ws,result,refs,priceRef,options={}){
  const block=(title,cols)=>{section(title);const h=ws.addRow(cols.map(c=>c[0]));h.height=42;h.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFDCEAF4'}};h.font={bold:true,name:'Microsoft YaHei',size:11};const r=ws.addRow(cols.map(c=>c[1])).number;return Object.fromEntries(cols.map((c,i)=>[c[2]||c[0],{ref:ws.getColumn(i+1).letter+r,v:typeof c[1]==='object'?c[1].result:c[1]}]));};
  const select=entries=>entries.map(([label,key])=>[label,components[key],key]);
  section('减税明细 / 成本汇总');
- const a=block('一、出厂货价核',[['货价',make(priceRef,result.final_hkd),'price'],...select([['进口料','imp_mat'],['国内料','dom_mat'],['吹气','blow'],['搪胶','slush'],['车发','sewing_hair'],['车衣','sewing_cloth'],['五金','hardware'],['电子','electronic'],['马达','motor'],['吸塑','suction'],['胶袋','glue_bag']])]);
+ const a=block('一、出厂货价核',[['货价',make(priceRef,taxPrice),'price'],...select([['进口料','imp_mat'],['国内料','dom_mat'],['吹气','blow'],['搪胶','slush'],['车发','sewing_hair'],['车衣','sewing_cloth'],['五金','hardware'],['电子','electronic'],['马达','motor'],['吸塑','suction'],['胶袋','glue_bag']])]);
  const b=block('二、包装 / 外购',[['彩盒/内咭',components.color_box,'color_box'],['未减税前码数',0,'before'],['减税后码数',0,'after'],...select([['电池','battery'],['利宝','libao'],['电镀','plating'],['植绒','flocking'],['其他外购','other_buy'],['纸箱','carton'],['运费','freight'],['吊柜费','cabinet'],['杂项','misc']])]);
  const laborKeys=['injection_labor','painting_labor','assembly_labor'];
- const all=Object.keys(components), cost=all.reduce((n,k)=>n+components[k].result,0),labor=laborKeys.reduce((n,k)=>n+val(k),0),non=cost-labor,price=result.final_hkd;
+ const all=Object.keys(components), cost=all.reduce((n,k)=>n+components[k].result,0),labor=laborKeys.reduce((n,k)=>n+val(k),0),non=cost-labor,price=taxPrice;
  const nonRefs=all.filter(k=>!laborKeys.includes(k)).map(k=>'('+components[k].formula+')').join('+');
  const c=block('三、人工 & 成本汇总',[...select([['啤工','injection_labor'],['喷油工','painting_labor'],['油漆','paint_material'],['装配工','assembly_labor']]),['不含人工成本',make(nonRefs,non),'non'],['人工比例',make(`IFERROR((${laborKeys.map(k=>'('+refs[k]+')').join('+')})/${a.price.ref},0)`,price?labor/price:0),'laborRate'],['毛利',make(`${a.price.ref}-(${nonRefs})`,price-non),'gross'],['毛利率',make(`IFERROR((${a.price.ref}-(${nonRefs}))/${a.price.ref},0)`,price?(price-non)/price:0),'grossRate'],['利润',make(`${a.price.ref}-(${all.map(k=>'('+components[k].formula+')').join('+')})`,price-cost),'profit'],['利润率',make(`IFERROR((${a.price.ref}-(${all.map(k=>'('+components[k].formula+')').join('+')}))/${a.price.ref},0)`,price?(price-cost)/price:0),'profitRate'],['总成本',make(all.map(k=>'('+components[k].formula+')').join('+'),cost),'cost']]);
  // Use the visible cost cells, matching the single-product calculation chain.

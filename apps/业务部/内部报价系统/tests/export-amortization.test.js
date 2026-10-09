@@ -653,7 +653,7 @@ test('internal export keeps mold rows separated by product group', async () => {
   assert.notEqual(rows['NO.03'].getCell(18).fill?.fgColor?.argb, 'FFE0F2FE');
 });
 
-test('internal export keeps molding rows separated by engineering product group', async () => {
+test('internal export shows mold numbers instead of product sequence', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'MOLDING-PRODUCT-GROUPS', product_name: '多产品注塑', qty: 1000 },
     sections: [
@@ -661,9 +661,9 @@ test('internal export keeps molding rows separated by engineering product group'
         dept: 'molding',
         payload_json: JSON.stringify({
           injection: [
-            { name: '产品一外壳', product_group_id: 'product-1', product_group_name: '1#产品', weight_g: 10 },
-            { name: '产品一配件', product_group_id: 'product-1', product_group_name: '1#产品', weight_g: 5 },
-            { name: '产品二外壳', product_group_id: 'product-2', product_group_name: '2#产品', weight_g: 12 },
+            { mold_no: '001', name: '产品一外壳', product_group_id: 'product-1', product_group_name: '1#产品', weight_g: 10 },
+            { mold_no: '002', name: '产品一配件', product_group_id: 'product-1', product_group_name: '1#产品', weight_g: 5 },
+            { mold_no: '003', name: '产品二外壳', product_group_id: 'product-2', product_group_name: '2#产品', weight_g: 12 },
           ],
         }),
       },
@@ -683,12 +683,12 @@ test('internal export keeps molding rows separated by engineering product group'
     const name = String(row.getCell(2).value || '');
     if (name) rows[name] = row;
   });
-  assert.equal(rows['产品一外壳'].getCell(1).value, '1#产品\n1.1');
-  assert.equal(rows['产品一配件'].getCell(1).value, '1.2');
-  assert.equal(rows['产品二外壳'].getCell(1).value, '2#产品\n2.1');
+  assert.equal(rows['产品一外壳'].getCell(1).value, '001');
+  assert.equal(rows['产品一配件'].getCell(1).value, '002');
+  assert.equal(rows['产品二外壳'].getCell(1).value, '003');
   assert.equal(rows['产品一外壳'].getCell(2).value, '产品一外壳');
   assert.equal(rows['产品二外壳'].getCell(2).value, '产品二外壳');
-  assert.equal(worksheet.getCell(rows['产品一外壳'].number - 1, 1).value, '产品 / 序号');
+  assert.equal(worksheet.getCell(rows['产品一外壳'].number - 1, 1).value, '模号');
 });
 
 test('export keeps prototype and testing amortization when mold items are empty', async () => {
@@ -840,13 +840,13 @@ test('export tax-summary base price uses the live page formula result instead of
   });
   const basePriceCell = worksheet.getCell(titleRow + 2, 1).value;
 
-  assert.equal(Number(basePriceCell.result.toFixed(4)), 4.2);
+  assert.equal(Number(basePriceCell.result.toFixed(4)), 4.2206);
   assert.doesNotMatch(basePriceCell.formula, /SUM/);
 });
 
-test('page base price uses customer TOTAL HKD multiplied by divisor', () => {
+test('page base price uses final USD multiplied by divisor and exchange rate', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'workbench.js'), 'utf8');
-  assert.match(source, /customerBeforeDivisorHkd\s*=\s*customerTotalHkd\s*\*\s*num\(s\.divisor\)/);
+  assert.match(source, /customerBeforeDivisorHkd\s*=\s*customerUSD\s*\*\s*num\(s\.divisor\)\s*\*\s*fxHU/);
   assert.match(source, /base_price:\s*shippingCalc\.customerBeforeDivisorHkd/);
   assert.match(source, /codeBefore\s*=\s*totalCost\s*>\s*0\s*\?\s*basePrice\s*\/\s*totalCost\s*:\s*0/);
 });

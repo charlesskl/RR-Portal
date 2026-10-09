@@ -45,7 +45,7 @@ function referenceDetails(wb,quote){
  extract('总表模具源','一、模具部分',r=>r.getCell(1).value==='一、模具部分',r=>String(r.getCell(1).value||'').startsWith('小计'));
  function department(name,title,onlyPresent=false){
    const src=wb.getWorksheet(name);
-   const compact=src?.getCell('A1').value==='模号'||['序号','模号'].includes(src?.getCell('C1').value);
+   const compact=src?.getCell('B1').value==='模号'||src?.getCell('A1').value==='模号'||['序号','模号'].includes(src?.getCell('C1').value);
    const amount=cell=>Number(cell.formula?cell.result:cell.value)||0;
    // NA ratios alone do not indicate a department cost. Compact sheets retain real
    // detail records even when their current calculated cost is zero.

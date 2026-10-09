@@ -109,7 +109,7 @@ async function completionReport(req, res, next) {
     const report=aggregateCompletion(rows);
     if (!req.path.endsWith('/xlsx')) return res.json(report);
     const buffer=await buildCompletionWorkbook(report).xlsx.writeBuffer();
-    const filename=encodeURIComponent(`内部报价完成情况_${report.as_of}.xlsx`);
+    const filename=encodeURIComponent(`AI系统内部报价汇总_${report.as_of}.xlsx`);
     res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
     res.send(Buffer.from(buffer));

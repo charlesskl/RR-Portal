@@ -6,7 +6,7 @@ function esc(value) {
 }
 
 function num(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
-function money(value) { return num(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 }); }
+function money(value) { return num(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function dateOnly(value) {
   if (!value) return '—';
   const date = new Date(String(value).includes('T') ? value : `${String(value).replace(' ', 'T')}Z`);
@@ -43,7 +43,7 @@ function totalColumns() { return 8 + state.summaryColumns.length + 3; }
 
 function formatted(value, format) {
   if (format === 'percent') return `${(num(value) * 100).toFixed(2)}%`;
-  if (format === 'qty') return num(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+  if (format === 'qty') return num(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return money(value);
 }
 
@@ -256,7 +256,7 @@ $('completion-export').onclick = async () => {
     const response=await fetch('/api/quote-summary/completion/xlsx',{credentials:'include'});
     if(!response.ok) { const error=await response.json(); throw new Error(error.error||'导出失败'); }
     const url=URL.createObjectURL(await response.blob());
-    const link=document.createElement('a'); link.href=url; link.download='内部报价完成情况.xlsx'; link.click();
+    const link=document.createElement('a'); link.href=url; link.download='AI系统内部报价汇总.xlsx'; link.click();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   } catch(e) { alert(e.message); } finally { button.disabled=false; }
 };

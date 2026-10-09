@@ -18,6 +18,8 @@ test('混装导出沿用单品模板，封穴计算引用进入明细及最终�
  assert.match(categories.getCell('E8').formula,/SUMPRODUCT/);
  assert.match(copy.worksheets[0].getCell('C7').formula,/内部分类汇总/);
  assert.equal(copy.getWorksheet('啤机明细').getCell('I2').numFmt,'0.0000');
+ assert.equal(copy.getWorksheet('啤机明细').getCell('A1').value,'模号');
+ assert.equal(copy.getWorksheet('啤机明细').getCell('A2').value,'M');
  assert.ok(!copy.worksheets.some(s=>/^\d+-/.test(s.name)));
  const finalRow=copy.worksheets[0].getRows(1,40).find(r=>r.getCell(1).value==='TOTAL 报客价 USD');
  assert.ok(Math.abs(finalRow.getCell(3).result-.09/7.8)<1e-10);

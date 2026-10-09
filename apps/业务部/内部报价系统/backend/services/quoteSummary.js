@@ -66,7 +66,10 @@ const BASE_SUMMARY_COLUMNS = [
   ['qty', '实际接单数量', 'qty'], ['quoted_price', '货价 (HK$)', 'price'],
 ];
 
-const SUMMARY_COLUMNS = [];
+const SUMMARY_COLUMNS = [
+  ['cost_with_labor', '成本（含人工）', 'unit'],
+  ['cost_without_labor', '成本（不含人工）', 'unit'],
+];
 function addComponentColumns(key, label, options = {}) {
   SUMMARY_COLUMNS.push([key, label, 'unit']);
   if (options.afterTax !== false) SUMMARY_COLUMNS.push([`${key}_after_tax`, `退税后${label}`, 'unit']);
@@ -155,6 +158,8 @@ function calculateSummaryValues(before, after, qty, price, absMaterialCost = 0) 
   values.surtax_04 = price * 0.004;
   const laborBefore = num(before.injection_labor)+num(before.assembly_labor)+num(before.painting_labor);
   const totalBefore = Object.values(before).reduce((s,v)=>s+num(v),0);
+  values.cost_with_labor = totalBefore;
+  values.cost_without_labor = totalBefore - laborBefore;
   values.rmb_purchase_cost = num(before.misc)+num(before.other_buy)+num(before.paint_material)+num(before.sewing_cloth)+num(before.sewing_hair)+num(before.hardware)+num(before.battery)+num(before.electronic)+num(before.plating)+num(before.flocking)+num(before.carton)+num(before.libao)+num(before.color_box)+num(before.dom_mat);
   values.rmb_purchase_share = price ? values.rmb_purchase_cost/price : 0;
   values.gross_before_tax = price-(totalBefore-laborBefore); values.gross_before_tax_rate = price ? values.gross_before_tax/price : 0;
@@ -254,7 +259,8 @@ function buildQuoteSummary(quote, sections) {
     component_basis: 'after_tax',
     abs_material_cost: calculated.hasSourceData
       ? num(calculated.components.abs_material) : num(pricing.t3?.abs_cost),
-    summary_values: calculateSummaryValues(beforeTaxComponents, components, qty, quotedPrice, calculated.components.abs_material),
+    summary_values: calculateSummaryValues(beforeTaxComponents, components, qty, quotedPrice,
+      calculated.hasSourceData ? calculated.components.abs_material : pricing.t3?.abs_cost),
   };
 }
 
@@ -378,7 +384,7 @@ function buildSummaryWorkbook(rows, filters = {}) {
     });
     ws.getCell(targetRow, 6).numFmt = 'yyyy-mm-dd';
     ws.getCell(targetRow, 7).numFmt = '#,##0';
-    ws.getCell(targetRow, 8).numFmt = '#,##0.0000';
+    ws.getCell(targetRow, 8).numFmt = '#,##0.00';
     QUOTE_COMPONENTS.forEach((_, componentIndex) => {
       const startColumn = 9 + componentIndex * 4;
       const beforeTaxCell = ws.getCell(targetRow, startColumn);
@@ -389,12 +395,12 @@ function buildSummaryWorkbook(rows, filters = {}) {
       const beforeTax = num(row.components_before_tax?.[key]);
       const afterTax = num(row.components?.[key]);
       const rate = num(TAX_DEDUCTION_RATES[key]);
-      beforeTaxCell.numFmt = '#,##0.0000';
+      beforeTaxCell.numFmt = '#,##0.00';
       afterTaxCell.value = {
         formula: rate ? `${beforeTaxCell.address}*(1-${rate}%)` : beforeTaxCell.address,
         result: afterTax,
       };
-      afterTaxCell.numFmt = '#,##0.0000';
+      afterTaxCell.numFmt = '#,##0.00';
       amountCell.value = {
         formula: `${afterTaxCell.address}*$G${targetRow}`,
         result: afterTax * num(qty),
@@ -441,7 +447,7 @@ function buildSummaryWorkbook(rows, filters = {}) {
       formula: `SUM(H${groupStartRow}:H${groupEndRow})`,
       result: group.rows.reduce((sum, row) => sum + num(row.confirmation?.confirmed_price ?? row.quoted_price), 0),
     };
-    ws.getCell(subtotalRow, 8).numFmt = '#,##0.0000';
+    ws.getCell(subtotalRow, 8).numFmt = '#,##0.00';
     QUOTE_COMPONENTS.forEach(([key], componentIndex) => {
       const startColumn = 9 + componentIndex * 4;
       const beforeTaxCell = ws.getCell(subtotalRow, startColumn);
@@ -456,12 +462,12 @@ function buildSummaryWorkbook(rows, filters = {}) {
         formula: `SUM(${detailBeforeTaxColumn}${groupStartRow}:${detailBeforeTaxColumn}${groupEndRow})`,
         result: componentBeforeTaxTotals[key],
       };
-      beforeTaxCell.numFmt = '#,##0.0000';
+      beforeTaxCell.numFmt = '#,##0.00';
       afterTaxCell.value = {
         formula: `SUM(${detailAfterTaxColumn}${groupStartRow}:${detailAfterTaxColumn}${groupEndRow})`,
         result: componentAfterTaxTotals[key],
       };
-      afterTaxCell.numFmt = '#,##0.0000';
+      afterTaxCell.numFmt = '#,##0.00';
       amountCell.value = {
         formula: `SUM(${detailAmountColumn}${groupStartRow}:${detailAmountColumn}${groupEndRow})`,
         result: componentAmountTotals[key],
@@ -508,6 +514,9 @@ function buildSummaryWorkbook(rows, filters = {}) {
   });
   ws.getColumn(totalShareColumn).width = 14;
   [13, 14, 19, 26].forEach((width, index) => { ws.getColumn(totalShareColumn + 1 + index).width = width; });
+  ws.eachRow(row => row.eachCell(cell => {
+    cell.alignment = { ...cell.alignment, horizontal: 'center', vertical: 'middle' };
+  }));
   return wb;
 }
 
@@ -520,6 +529,7 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
   const columns = [...BASE_SUMMARY_COLUMNS, ...SUMMARY_COLUMNS, ...workflow];
   const columnByKey = Object.fromEntries(columns.map(([key], index) => [key, index + 1]));
   const headerFillFor = (key, index) => {
+    if (key === 'cost_with_labor' || key === 'cost_without_labor') return 'FFFFFFFF';
     if (index < BASE_SUMMARY_COLUMNS.length) return 'FFFFFFFF';
     if (workflow.some(([workflowKey]) => workflowKey === key)) return 'FFFFE699';
     if (/^(injection_labor|assembly_labor|painting_labor)/.test(key)) return 'FFD9EAF7';
@@ -537,6 +547,8 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
     const qty=ref('qty',row), price=ref('quoted_price',row);
     const rawSum=`SUM(${rawKeys.map(k=>ref(k,row)).join(',')})+${num(source.components_before_tax?.blow)+num(source.components_before_tax?.glue_bag)+num(source.components_before_tax?.motor)}`;
     const labor=`SUM(${ref('injection_labor',row)},${ref('assembly_labor',row)},${ref('painting_labor',row)})`;
+    if (key === 'cost_with_labor') return rawSum;
+    if (key === 'cost_without_labor') return `${ref('cost_with_labor',row)}-${labor}`;
     const componentAfter = key.match(/^(.+)_after_tax$/);
     if (componentAfter && columnByKey[componentAfter[1]]) {
       const base=componentAfter[1], rate=num(TAX_DEDUCTION_RATES[base]);
@@ -589,9 +601,22 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
   };
   ws.pageSetup = { orientation:'landscape', paperSize:9, fitToPage:true, fitToWidth:1, fitToHeight:0,
     margins:{left:.2,right:.2,top:.35,bottom:.35,header:.1,footer:.1} };
-  ws.mergeCells(1, 2, 1, columns.length); ws.getCell(1,1).value=`${new Date().getFullYear()}年`;
-  ws.getCell(1,2).value='各客产品报价汇总表'; ws.getCell(1,2).font={bold:true,size:16,name:'Microsoft YaHei'};
-  ws.mergeCells(2,1,2,columns.length); ws.getCell(2,1).value=`客户：${filters.customer||'全部'}    导出日期：${new Date().toLocaleDateString('zh-CN')}`;
+  const exportDate = new Intl.DateTimeFormat('sv-SE', { timeZone:'Asia/Shanghai' }).format(new Date());
+  // Keep the title within the first screen of this very wide cost table.
+  ws.mergeCells('A1:H1');
+  ws.getCell('A1').value = `${exportDate.slice(0,4)}年 · 各客产品报价汇总表`;
+  ws.getCell('A1').font = { bold:true, size:18, name:'Microsoft YaHei', color:{argb:'FF153A5B'} };
+  ws.getCell('A1').fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFE7F1FA'} };
+  ws.getRow(1).height = 38;
+  ws.mergeCells('A2:D2'); ws.mergeCells('E2:H2');
+  ws.getCell('A2').value = `客户：${filters.customer || '全部客户'}`;
+  ws.getCell('E2').value = `导出日期：${exportDate.replaceAll('-', '/')}`;
+  for (const address of ['A2','E2']) {
+    ws.getCell(address).font = { name:'Microsoft YaHei', size:11, color:{argb:'FF52647A'} };
+    ws.getCell(address).alignment = { wrapText:true };
+  }
+  ws.getRow(2).height = Math.max(28, wrappedLineCount(filters.customer || '全部客户', 42)*16);
+  ws.getRow(3).height = 10;
   const border = { top:{style:'thin',color:{argb:'FF94A3B8'}}, left:{style:'thin',color:{argb:'FF94A3B8'}}, bottom:{style:'thin',color:{argb:'FF94A3B8'}}, right:{style:'thin',color:{argb:'FF94A3B8'}} };
   columns.forEach(([key,label],i)=>{ const c=ws.getCell(4,i+1); c.value=label; c.font={bold:true,color:{argb:'FF153A5B'},name:'Microsoft YaHei'}; c.alignment={horizontal:'center',vertical:'middle',wrapText:true}; c.border=border; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:headerFillFor(key,i)}}; });
   ws.getRow(4).height=52;
@@ -612,12 +637,12 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
         c.value=formula?{formula,result:num(value)}:value;
         c.font={name:'Microsoft YaHei',size:9}; c.alignment={vertical:'middle',wrapText:true}; c.border=border;
         c.fill={type:'pattern',pattern:'solid',fgColor:{argb:index%2?'FFF7FAFC':'FFFFFFFF'}};
-        if(type==='percent') c.numFmt='0.00%'; else if(['unit','price','number'].includes(type)) c.numFmt='#,##0.0000'; else if(['amount','qty'].includes(type)) c.numFmt='#,##0.00'; else if(type==='date') c.numFmt='yyyy-mm-dd';
+        if(type==='percent') c.numFmt='0.00%'; else if(['unit','price','number'].includes(type)) c.numFmt='#,##0.00'; else if(['amount','qty'].includes(type)) c.numFmt='#,##0.00'; else if(type==='date') c.numFmt='yyyy-mm-dd';
       });
       const statusCell=ws.getCell(rowNo,columnByKey.confirmation_status);
       statusCell.fill={type:'pattern',pattern:'solid',fgColor:{argb:confirmation.status==='confirmed'?'FFC6EFCE':'FFFFEB9C'}};
       statusCell.font={name:'Microsoft YaHei',size:9,bold:true,color:{argb:confirmation.status==='confirmed'?'FF006100':'FF9C6500'}};
-      ws.getRow(rowNo).height=Math.max(24,wrappedLineCount(row.customer,18)*15,wrappedLineCount(row.product_name,22)*15); rowNo++;
+      ws.getRow(rowNo).height=Math.max(24,wrappedLineCount(row.customer,18)*15,wrappedLineCount(row.quote_no,24)*15,wrappedLineCount(row.product_name,16)*15); rowNo++;
     });
     const end=rowNo-1, subtotal=rowNo;
     ws.getCell(subtotal,1).value=''; ws.getCell(subtotal,2).value=group.customer; ws.getCell(subtotal,4).value='客户总计'; ws.mergeCells(subtotal,4,subtotal,5);
@@ -629,11 +654,19 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
         c.value={formula:`SUM(${letter}${start}:${letter}${end})`,result};
       }
       c.font={name:'Microsoft YaHei',size:9,bold:true,color:{argb:'FF0B4369'}}; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFDDEBFA'}}; c.border=border; c.alignment={vertical:'middle',wrapText:true};
-      if(type==='percent') c.numFmt='0.00%'; else if(['unit','price','number'].includes(type)) c.numFmt='#,##0.0000'; else if(['amount','qty'].includes(type)) c.numFmt='#,##0.00';
+      if(type==='percent') c.numFmt='0.00%'; else if(['unit','price','number'].includes(type)) c.numFmt='#,##0.00'; else if(['amount','qty'].includes(type)) c.numFmt='#,##0.00';
     }); ws.getRow(subtotal).height=Math.max(24,wrappedLineCount(group.customer,18)*15); rowNo++;
   });
-  columns.forEach(([,,type],i)=>{ ws.getColumn(i+1).width=i===1?20:i===2?16:i===4?22:type==='percent'?12:type==='amount'?15:13; });
+  columns.forEach(([,,type],i)=>{ ws.getColumn(i+1).width=i===1?20:i===2?16:i===3?24:i===4?16:type==='percent'?12:type==='amount'?15:13; });
   ws.autoFilter={from:{row:4,column:1},to:{row:Math.max(4,rowNo-1),column:columns.length}};
+  const noLaborColumn = columnByKey.cost_without_labor;
+  for (let row = 4; row < rowNo; row++) {
+    const cell = ws.getCell(row, noLaborColumn);
+    cell.font = { ...cell.font, bold: true, color: { argb: 'FF0000FF' } };
+  }
+  ws.eachRow(row => row.eachCell(cell => {
+    cell.alignment = { ...cell.alignment, horizontal: 'center', vertical: 'middle' };
+  }));
   return wb;
 }
 

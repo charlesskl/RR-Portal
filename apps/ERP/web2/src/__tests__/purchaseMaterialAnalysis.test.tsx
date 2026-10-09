@@ -278,7 +278,7 @@ describe("详情模式", () => {
     // M1 已下满 → 供应商甲组可追加下单(订单同时进行),不再禁用
     const gA = screen.getByRole("button", { name: /供应商甲.*已全部下单·可追加/ });
     expect(gA).not.toBeDisabled();
-    expect(screen.getByRole("button", { name: /供应商乙.*1 行.*需订90/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /供应商乙.*1 行.*需订80/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /未绑定供应商.*1 行.*需订20/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /供应商乙/ }));
     await waitFor(() => {
@@ -287,6 +287,22 @@ describe("详情模式", () => {
       expect(loc).toContain("供应商编号=S2");
       expect(loc).toContain("供应商名称=供应商乙");
     });
+  });
+
+  it("后补库存冲抵需订:已订≥需订−实时库存即下满,chip 转「已全部下单·可追加」;不足按剩余量显示", async () => {
+    // 场景还原(SC20261007002 报修):需订是制单时点快照(当时库存 0),之后到货 50,
+    // 用户按实时缺口下单 50 —— 已订(50) ≥ 需订(100) − 实时库存(50) → 下满,不再误报绿色需订
+    setup(PERMS_FULL, "/purchase-material-analysis", [
+      { ID: 1, 生产单号: "MO-OK", 物料编号: "M1", 物料名称: "粉白猫", 单位: "PCS", 总数量: 100, 可用库存: 50, 需订数量: 100, 预算单价: 1, 金额: 100, 供应商编号: "S1", 供应商名称: "供应商甲", 已订数量: 50 },
+      { ID: 2, 生产单号: "MO-OK", 物料编号: "M2", 物料名称: "说明书", 单位: "PCS", 总数量: 100, 可用库存: 30, 需订数量: 100, 预算单价: 1, 金额: 100, 供应商编号: "S2", 供应商名称: "供应商乙", 已订数量: 50 },
+    ]);
+    await openDetail("恐龙", "MO-OK", "粉白猫");
+    // M1 已订50+实时库存50 覆盖需订100 → 「已下单」徽标 + chip 全下满
+    expect(screen.getByText("已下单")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /供应商甲.*已全部下单·可追加/ })).toBeInTheDocument();
+    // M2 剩余 100−30−50=20 → chip 按剩余量显示;行徽标显示部分已订
+    expect(screen.getByRole("button", { name: /供应商乙.*1 行.*需订20/ })).toBeInTheDocument();
+    expect(screen.getByText("已订50")).toBeInTheDocument();
   });
 
   it("已下满行可追加下单:手勾后点供应商 chip 带已下满行跳采购订单(订单同时进行,不用等物料回来)", async () => {

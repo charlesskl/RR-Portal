@@ -912,7 +912,7 @@ const MACHINE_CONFIG = {
   21:{name:'#21', type:'Lite 600HD-D', process:'resin', model:'UTSLAC600', ratedKva:2.6, kwh:null},
 };
 function getMachineLabel(i){ const mc=MACHINE_CONFIG[i]; return mc ? `#${i} ${mc.type}` : `#${i}`; }
-function getMachineType(i){ const mc=MACHINE_CONFIG[i]; return mc ? mc.type : '未知'; }
+function getMachineType(i){ const source=liveStatus[i]?.sourceMachine; const mc=MACHINE_CONFIG[source||i]; return mc ? mc.type : '未知'; }
 let materials = [
   {id:1,name:'PLA基础黑',type:'PLA',priceKg:32},{id:2,name:'PLA基础白',type:'PLA',priceKg:32},
   {id:3,name:'PETG基础黑',type:'PETG',priceKg:19},{id:4,name:'PETG基础白',type:'PETG',priceKg:19},
@@ -1308,7 +1308,7 @@ function loadDay(){
     const mn=i.machine;
     if(!machineStatus[mn]||i.status==='running') machineStatus[mn]={status:i.status,product:i.productName||''};
   });
-  for(let i=1;i<=s.machineCount;i++){
+  for(const i of displayMachineIds(s.machineCount,day.items)){
     // 优先显示实时数据（仅Bambu 1-5号）
     const liveHtml = !day.off ? renderLiveCard(i) : null;
     if(liveHtml){
@@ -1738,7 +1738,7 @@ function renderMachinePage(){
 
   const isToday = date === today();
   let ghtml='';
-  for(let i=1;i<=s.machineCount;i++){
+  for(const i of displayMachineIds(s.machineCount,day.items)){
     // 如果是今天，优先显示实时数据
     const liveHtml = (isToday && !day.off) ? renderLiveCard(i) : null;
     if(liveHtml){
@@ -1755,7 +1755,7 @@ function renderMachinePage(){
   document.getElementById('machGrid').innerHTML=ghtml;
 
   let thtml='<table><tr><th>机台</th><th>机型</th><th>运行(h)</th><th>空闲(h)</th><th>故障(h)</th><th>使用率</th><th>产品</th></tr>';
-  for(let i=1;i<=s.machineCount;i++){
+  for(const i of displayMachineIds(s.machineCount,day.items)){
     const h=mh[i]||{running:0,idle:0,fault:0};
     const total=h.running+h.idle+h.fault;
     const util=total>0?h.running/12:0;
@@ -3739,11 +3739,22 @@ function reRenderCurrent(){
 // 打印机实时状态
 // ═══════════════════════════════════════════════════════
 let liveStatus = {};
+function displayMachineIds(count,items=[]){
+ const active=Object.keys(liveStatus).filter(id=>/^[1-9]\d*$/.test(id)).map(Number);
+ if(!active.length)return Array.from({length:count},(_,i)=>i+1);
+ return [...new Set([...active,...items.filter(x=>!x._deleted).map(x=>Number(x.machine)).filter(x=>Number.isSafeInteger(x)&&x>0)])].sort((a,b)=>a-b);
+}
+function deviceLabel(id){const source=liveStatus[id]?.sourceMachine;return source&&String(source)!==String(id)?`现场 #${escHtml(source)} · 平台 #${id}`:`#${id}`;}
+
 
 async function pollPrinterStatus(){
   try{
     const res = await fetch('/api/production/printers');
-    liveStatus = await res.json();
+    if(!res.ok)throw Error('设备状态读取失败');
+    const data=await res.json();
+    const changed=Object.keys(liveStatus).sort().join(',')!==Object.keys(data).sort().join(',');
+    liveStatus=data;
+    if(changed){if(document.getElementById('recDate').value)loadDay();renderMachinePage();}
     updateLiveCards();
   }catch(e){}
 }
@@ -3774,11 +3785,11 @@ function renderLiveCard(machineId){
 
   // ── 离线状态 ──
   if(!ps.connected){
-    const isFF = machineId >= 6 && machineId <= 10;
+    const isFF = false; // Cloud display is read-only; rescan remains in the local system.
     const errText = ps.error || '未连接';
     const isScanning = errText.includes('搜索');
     let html = `<div class="machine-card idle">`;
-    html += `<div class="m-no">#${machineId}<span class="offline-badge">离线</span></div>`;
+    html += `<div class="m-no">${deviceLabel(machineId)}<span class="offline-badge">离线</span></div>`;
     html += `<div class="m-type">${getMachineType(machineId)}</div>`;
     html += `<span class="m-status idle">离线</span>`;
     html += `<div class="m-product" style="color:var(--r);font-size:10px;margin-top:2px">${escHtml(errText)}</div>`;
@@ -3805,7 +3816,7 @@ function renderLiveCard(machineId){
   }
   const displayName = ps.jobName || (matchedProd ? matchedProd.name : fileName);
   let html = `<div class="machine-card ${stClass}">`;
-  html += `<div class="m-no">#${machineId}<span class="live-badge">实时</span></div>`;
+  html += `<div class="m-no">${deviceLabel(machineId)}<span class="live-badge">实时</span></div>`;
   html += `<div class="m-type">${getMachineType(machineId)}</div>`;
   html += `<span class="m-status ${stClass}">${stText}</span>`;
   if(ps.gcodeState==='RUNNING'){
@@ -3934,7 +3945,7 @@ function checkFilamentAlerts(){
     const failK = `${mid}_failed`;
     if(ps.gcodeState === 'FAILED'){
       if(!_dismissedKeys.has(failK))
-        _showAlert(failK, true, `#${mid} 打印失败`, ps.gcodeFile || '', '请检查打印机状态');
+        _showAlert(failK, true, `${deviceLabel(mid)} 打印失败`, ps.gcodeFile || '', '请检查打印机状态');
     } else {
       _removeAlert(failK); _dismissedKeys.delete(failK);
     }

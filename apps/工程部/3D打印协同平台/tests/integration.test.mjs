@@ -28,8 +28,9 @@ test('cloud production integration: permissions, scheduling, telemetry replay, q
   assert.equal((await request('/api/production/module/save',{auth:admin,data:{module:'schedule',id:linked.id,record:{status:'done'}}})).status,400);
   assert.equal((await request('/api/production/printers/1/rescan',{auth:admin,data:{}})).status,403);
   assert.equal((await request('/api/collector/events',{token,data:{id:randomUUID(),sequence:1,observedAt:new Date().toISOString(),devices:[{machine:'999',connected:true,state:'IDLE',progress:0}]}})).status,400);
-  assert.equal((await request('/api/collector/events',{token,data:{id:randomUUID(),sequence:1,observedAt:new Date().toISOString(),devices:[{machine:'1',connected:true,state:'IDLE',progress:0}]}})).status,200);
+  assert.equal((await request('/api/collector/events',{token,data:{id:randomUUID(),sequence:1,observedAt:new Date().toISOString(),devices:[{machine:'1',connected:true,state:'IDLE',progress:0,sourceMachine:'14',gcodeFile:'test.3mf',nozzleTemp:215,remainingTime:12,accessCode:'must-not-forward'}]}})).status,200);
   assert.equal((await request('/api/production/printers',{auth:admin})).body['1'].connected,true);
+  const device=(await request('/api/production/printers',{auth:admin})).body['1'];assert.equal(device.sourceMachine,'14');assert.equal(device.gcodeFile,'test.3mf');assert.equal(device.nozzleTemp,215);assert.equal(device.accessCode,undefined);
   const overview=async()=> (await request('/api/platform/overview',{auth:admin})).body;
   const emit=(sequence,state,extra={})=>request('/api/collector/events',{token,data:{id:randomUUID(),jobId:id,machine:'1',attempt:1,sequence,state,progress:state==='FINISH'?100:45,observedAt:new Date().toISOString(),...extra}});
   assert.equal((await emit(1,'FINISH')).status,200);assert.equal((await overview()).jobs[0].status,'待打印','finish without start must not finish unrelated job');

@@ -1,3 +1,4 @@
+import {deviceDetails} from '../shared/device-details.mjs';
 import {readLegacy} from './bridge.mjs';
 import {loadConfig} from './config.mjs';
 import {startConsole} from './console.mjs';
@@ -56,7 +57,7 @@ async function tick(){if(busy)return;busy=true;try{
 console.log(`本地采集程序已启动（${config.mode==='simulation'?'模拟设备':'真实设备只读采集'}）`);
 await tick();setInterval(tick,3000);
 
-function deviceSnapshot(){return config.mode==='simulation'?known.map(j=>({machine:j.machine,connected:true,state:j.requestedState||'IDLE',progress:j.requestedState==='FINISH'?100:j.requestedState==='RUNNING'?45:0})):Object.entries(statuses).map(([machine,s])=>({machine,connected:!!s.connected,state:s.gcodeState==='ERROR'?'FAILED':['RUNNING','FINISH','FAILED','PAUSE','IDLE'].includes(s.gcodeState)?s.gcodeState:'UNKNOWN',progress:Math.min(100,Math.max(0,Number(s.printProgress)||0))}));}
+function deviceSnapshot(){return config.mode==='simulation'?known.map(j=>({machine:j.machine,connected:true,state:j.requestedState||'IDLE',progress:j.requestedState==='FINISH'?100:j.requestedState==='RUNNING'?45:0})):Object.entries(statuses).map(([machine,s])=>({...deviceDetails(s),machine,connected:!!s.connected,state:s.gcodeState==='ERROR'?'FAILED':['RUNNING','FINISH','FAILED','PAUSE','IDLE'].includes(s.gcodeState)?s.gcodeState:'UNKNOWN',progress:Math.min(100,Math.max(0,Number(s.printProgress)||0))}));}
 
 if(process.env.COLLECTOR_CONSOLE_PORT||config.consolePort)startConsole({port:Number(process.env.COLLECTOR_CONSOLE_PORT||config.consolePort),
  status:()=>({mode:config.mode,sourceError,paused,lastSuccess,connected:!paused&&!!lastSuccess&&Date.now()-Date.parse(lastSuccess)<20000,pending:db.prepare('SELECT COUNT(*) n FROM outbox').get().n,rejected:db.prepare('SELECT COUNT(*) n FROM rejected').get().n,devices:deviceSnapshot(),jobs:known.map(j=>({...j,bound:readBindings()[j.machine]?.jobId===j.id&&readBindings()[j.machine]?.attempt===(j.attempt||1)}))}),

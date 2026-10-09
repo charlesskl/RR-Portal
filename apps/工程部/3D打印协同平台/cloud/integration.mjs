@@ -1,3 +1,4 @@
+import {deviceDetails} from '../shared/device-details.mjs';
 import http from 'node:http';
 import {createHash,randomUUID,timingSafeEqual} from 'node:crypto';
 import {createReadStream} from 'node:fs';
@@ -40,7 +41,7 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
    try {
     db.prepare('INSERT INTO collector_events VALUES (?,?,?)').run(e.id,station,stamp());
     db.prepare('INSERT INTO collector_stations VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET last_seen=excluded.last_seen,sequence=MAX(sequence,excluded.sequence)').run(station,stamp(),e.sequence);
-    for(const d of e.devices||[])db.prepare('INSERT INTO collector_devices VALUES (?,?,?,?) ON CONFLICT(station,machine) DO UPDATE SET payload=excluded.payload,observed=excluded.observed WHERE excluded.observed>collector_devices.observed').run(station,d.machine,JSON.stringify({state:d.state,progress:d.progress,connected:d.connected}),e.observedAt);
+    for(const d of e.devices||[])db.prepare('INSERT INTO collector_devices VALUES (?,?,?,?) ON CONFLICT(station,machine) DO UPDATE SET payload=excluded.payload,observed=excluded.observed WHERE excluded.observed>collector_devices.observed').run(station,d.machine,JSON.stringify({...deviceDetails(d),state:d.state,progress:d.progress,connected:d.connected}),e.observedAt);
     if(j&&e.sequence>j.sequence&&e.attempt===(JSON.parse(j.payload).attempt||1)){
      db.prepare('UPDATE production_jobs SET telemetry=?,sequence=? WHERE id=?').run(JSON.stringify({state:e.state,progress:e.progress,observedAt:e.observedAt,simulated:DEMO}),e.sequence,j.id);
      if(Date.parse(e.observedAt)>=Date.parse(JSON.parse(j.payload).attemptStarted||j.created)){
@@ -133,7 +134,7 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
    if(target.startsWith('/api/printers/'))fail(403,'采集程序只读，远程控制已禁用');
    if(target==='/api/printers'){
     const devices=db.prepare('SELECT * FROM collector_devices').all();
-    return json(res,200,Object.fromEntries(devices.map(d=>{const p=JSON.parse(d.payload);return [d.machine,{id:Number(d.machine),name:`#${d.machine} 采集机台`,connected:p.connected&&Date.now()-Date.parse(d.observed)<20000,gcodeState:p.state,printProgress:p.progress,lastUpdate:Date.parse(d.observed)}];}))),true;
+    return json(res,200,Object.fromEntries(devices.map(d=>{const p=JSON.parse(d.payload);return [d.machine,{...deviceDetails(p),id:Number(d.machine),name:p.name||`#${d.machine} 采集机台`,connected:p.connected&&Date.now()-Date.parse(d.observed)<20000,gcodeState:p.state,printProgress:p.progress,lastUpdate:Date.parse(d.observed)}];}))),true;
    }
    const proxy=http.request({hostname:'127.0.0.1',port:process.env.PRODUCTION_PORT||3102,path:target,method:req.method,headers:{'content-type':req.headers['content-type']||'application/json','x-internal-token':process.env.INTERNAL_TOKEN,...(req.headers['content-length']?{'content-length':req.headers['content-length']}:{})}},r=>{res.writeHead(r.statusCode,{'Content-Type':r.headers['content-type']||'application/json','Cache-Control':'no-store',...(r.headers['content-disposition']?{'Content-Disposition':r.headers['content-disposition']}:{})});r.pipe(res);});
    proxy.on('error',()=>{if(!res.headersSent)json(res,502,{error:'生产服务暂时不可用'});else res.destroy();});req.pipe(proxy);return true;

@@ -54,6 +54,7 @@ import type {
   MaterialLabelOrderSave,
   MaterialLabelSummaryRow,
   MaterialStockRow,
+  PersonalInventoryBatchRow,
   MenuPermRow,
   MessageRow,
   MoLine,
@@ -1168,6 +1169,12 @@ export const inventoryApi = {
   list: (p: { 仓库?: string; keyword?: string; 物料类别?: string; 含零库存?: boolean }) =>
     api<MaterialStockRow[]>(`/material-inventory${qs(p)}`),
   categories: () => api<MaterialCategoryNode[]>("/material-inventory/categories"),
+};
+
+// 个人库存金额表:剩余库存按批次倒推 FIFO 归到下单人
+export const personalInventoryApi = {
+  list: (范围?: string) =>
+    api<PersonalInventoryBatchRow[]>(`/personal-inventory${qs({ 范围: 范围 || undefined })}`),
 };
 
 // ---------- 消息中心(URL/中文字段照抄老系统 web/src/api/messages.ts;参数 onlyUnread/page/size 与后端 MessageController 一致) ----------

@@ -139,8 +139,8 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
     return json(res,200,Object.fromEntries(devices.map(d=>{const p=JSON.parse(d.payload);return [d.machine,{...deviceDetails(p),id:Number(d.machine),name:p.name||`#${d.machine} 采集机台`,connected:p.connected&&Date.now()-Date.parse(d.observed)<20000,gcodeState:p.state,printProgress:p.progress,lastUpdate:Date.parse(d.observed)}];}))),true;
    }
    const proxy=http.request({hostname:'127.0.0.1',port:process.env.PRODUCTION_PORT||3102,path:target,method:req.method,headers:{'content-type':req.headers['content-type']||'application/json','x-internal-token':process.env.INTERNAL_TOKEN,...(req.headers['content-length']?{'content-length':req.headers['content-length']}:{})}},r=>{
-    const compress=req.method==='GET' && target==='/api/data' && /\bgzip\b(?!\s*;\s*q=0(?:[.,;\s]|$))/.test(req.headers['accept-encoding']||'');
-    res.writeHead(r.statusCode,{'Content-Type':r.headers['content-type']||'application/json','Cache-Control':'no-store','Vary':'Accept-Encoding',...(compress?{'Content-Encoding':'gzip'}:{}),...(r.headers['content-disposition']?{'Content-Disposition':r.headers['content-disposition']}:{})});
+    const compress=req.method==='GET' && target.split('?')[0]==='/api/data' && /\bgzip\b(?!\s*;\s*q=0(?:[.,;\s]|$))/.test(req.headers['accept-encoding']||'');
+    res.writeHead(r.statusCode,{'Content-Type':r.headers['content-type']||'application/json','Cache-Control':target.startsWith('/api/data-images/')&&r.statusCode===200?'private, max-age=86400':'no-store','Vary':'Accept-Encoding',...(compress?{'Content-Encoding':'gzip'}:{}),...(r.headers['content-disposition']?{'Content-Disposition':r.headers['content-disposition']}:{})});
     pipeline(...(compress?[r,createGzip(),res]:[r,res]),()=>{});
    });
    proxy.on('error',()=>{if(!res.headersSent)json(res,502,{error:'生产服务暂时不可用'});else res.destroy();});req.pipe(proxy);return true;

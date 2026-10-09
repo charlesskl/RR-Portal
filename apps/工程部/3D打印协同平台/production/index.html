@@ -2266,7 +2266,7 @@ function renderProductImageCell(dataUri){
     const el = document.getElementById(id);
     if(el) el.onclick = () => showProductImage(dataUri);
   }, 0);
-  return `<td class="prod-image-cell"><img id="${id}" src="${dataUri}" class="prod-thumb"></td>`;
+  return `<td class="prod-image-cell"><img id="${id}" src="${escHtml(dataUri)}" loading="lazy" decoding="async" class="prod-thumb"></td>`;
 }
 // 处理上传的图片文件（来自文件选择/粘贴/拖入），压缩成 base64
 async function handleProductImageFile(file){
@@ -3658,14 +3658,18 @@ async function saveSettings(){
 }
 
 // 导出/导入JSON
-function exportAllData(){
-  const data={settings:S, materials, products, records, maintenance, miscExpenses, inventory, stockInLogs, schedules, exportDate:new Date().toISOString()};
+async function exportAllData(){
+ try{
+  const response=await fetch('/api/production/data',{signal:AbortSignal.timeout(120000)});
+  if(!response.ok)throw Error('服务器返回 '+response.status);
+  const data=await response.json();data.exportDate=new Date().toISOString();
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download=`3D打印数据备份_${today()}.json`;
   a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),100);
+ }catch(e){alert('导出失败：'+e.message);}
 }
 function importAllData(e){
  const file=e.target.files[0];if(!file)return;
@@ -3696,7 +3700,7 @@ async function clearAllData(){
 // 初始化 - 从服务器加载数据 + 定时同步
 // ═══════════════════════════════════════════════════════
 async function pullFromServer(){
-  const res=await fetch('/api/production/data',{cache:'no-store',signal:AbortSignal.timeout(120000)});
+  const res=await fetch('/api/production/data?view=compact',{cache:'no-store',signal:AbortSignal.timeout(120000)});
   if(!res.ok) throw new Error('服务器返回 ' + res.status);
   const data=await res.json();
   if(!data||!Array.isArray(data.products)||!data.records)throw Error('服务器返回的资料格式不正确');

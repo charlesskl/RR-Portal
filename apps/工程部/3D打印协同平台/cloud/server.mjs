@@ -249,6 +249,24 @@ const server = http.createServer(async (req,res) => {
       } catch(e) {db.exec('ROLLBACK');throw e;}
       return json(res,200,orderJSON(getOrder(u,f.order_id)));
     }
+    const applicationMatch=route.match(/^\/api\/orders\/([a-f0-9-]+)\/application$/);
+    if(applicationMatch && req.method==='PATCH') {
+      const d=await body(req), o=getOrder(u,applicationMatch[1]);
+      if(u.role!=='admin' && o.owner!==u.id) fail(403,'只有下单人或管理员可修改申请');
+      if(o.status!=='待接单' || db.prepare('SELECT id FROM production_jobs WHERE order_id=?').get(o.id)) fail(409,'订单已接单或关联生产，请刷新后联系管理员处理');
+      if(d.updated!==o.updated) fail(409,'申请已被其他人修改，请重新打开订单后再编辑');
+      const factory=field(d,'factory',true); if(!factories.includes(factory)||!userFactories(u).includes(factory)) fail(403,'不能向该厂区下单');
+      const p={...JSON.parse(o.payload)}; for(const key of ['workshop','customer','sku','product','material','color','engineer']) p[key]=field(d,key,true);
+      p.printerType=field(d,'printerType'); if(p.printerType && !['光固化','FDM'].includes(p.printerType)) fail(400,'打印机器只能选择光固化或 FDM');
+      p.follower=field(d,'follower'); p.notes=field(d,'notes',false,2000); p.dueDate=date(field(d,'dueDate'),true);
+      p.priority=field(d,'priority')||'普通'; if(!['普通','加急'].includes(p.priority)) fail(400,'优先级无效');
+      p.quantity=Number(d.quantity); if(!Number.isSafeInteger(p.quantity) || p.quantity<1 || p.quantity>100000) fail(400,'数量需为 1–100000 的整数');
+      db.exec('BEGIN IMMEDIATE'); try {
+        db.prepare('UPDATE orders SET factory=?,payload=?,updated=? WHERE id=?').run(factory,JSON.stringify(p),now(),o.id);
+        recordEvent(o.id,u.name,'修改打印申请信息'); db.exec('COMMIT');
+      } catch(e) {db.exec('ROLLBACK');throw e;}
+      return json(res,200,orderJSON(getOrder(u,o.id)));
+    }
     const match=route.match(/^\/api\/orders\/([a-f0-9-]+)$/);
     if(match && req.method==='PATCH') {
       if(u.role!=='admin') fail(403,'只有管理员可更新订单进度');

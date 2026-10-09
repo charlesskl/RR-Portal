@@ -121,11 +121,15 @@ ensure_service_base_images() { :; }
         result = self.run_shell('maintenance_on qc-plan-api; maintenance_off qc-plan-api', services)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.flags / 'qc-plan').exists())
+        result = self.run_shell('require_maintenance_cleared qc-plan-api', services)
+        self.assertNotEqual(result.returncode, 0)
         self.states.write_text(json.dumps({'qc-plan-api': 'running/0/unless-stopped/healthy',
                                           'qc-plan-web': 'running/0/unless-stopped/healthy'}))
         result = self.run_shell('recover_maintenance_flags', services)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.flags / 'qc-plan').exists())
+        result = self.run_shell('require_maintenance_cleared qc-plan-api', services)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_recovery_preserves_an_unhealthy_flag_and_other_systems(self):
         self.states.write_text(json.dumps({'paiji': 'running/0/unless-stopped/unhealthy',

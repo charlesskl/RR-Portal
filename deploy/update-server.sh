@@ -566,6 +566,18 @@ for i in $(seq 1 15); do
   sleep 2
 done
 
+# 多容器系统可能在中途保留标志等待下一服务；全部部署后仍有标志必须报失败。
+# 只检查本次部署的系统，不扩大为其他系统的维护。
+if [[ "$COMPOSE_CHANGED" -eq 1 ]]; then
+  while IFS= read -r svc; do
+    require_maintenance_cleared "$svc"
+  done <<< "$MAINT_COMPOSE_SERVICES"
+else
+  for svc in "${AFFECTED_SERVICES[@]}"; do
+    require_maintenance_cleared "$svc"
+  done
+fi
+
 echo "[OK] Update complete."
 echo "=== Container Status ==="
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null || true

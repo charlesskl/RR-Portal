@@ -75,6 +75,16 @@ recover_maintenance_flags() {
   done <<< "$MAINT_COMPOSE_SERVICES"
 }
 
+require_maintenance_cleared() {
+  local key
+  key=$(maintenance_key "$1")
+  [[ -n "$key" ]] || return 0
+  if [[ -f "$MAINT_FLAG_DIR/services/$key" ]]; then
+    echo "  [ERROR] $key 仍有未就绪服务，保留单系统维护提示；部署未完成"
+    return 1
+  fi
+}
+
 # 构建镜像时旧容器继续服务。标志仅在单个系统切换容器前创建，
 # 该服务健康后立即撤除；失败也只影响该系统，不留下全站维护开关。
 deploy_service() {

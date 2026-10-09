@@ -103,8 +103,8 @@ function field(data,key,required=false,max=120) { const v=data[key]; if (v!==und
 const labels={factory:'厂区',workshop:'车间',customer:'客名',sku:'货号',product:'产品名称',engineer:'跟进工程师',material:'耗材',color:'颜色',dueDate:'需交板时间'};
 function date(value,required=false) { if (!value && !required) return ''; if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0,10)!==value) fail(400,'请填写有效日期'); return value; }
 const attempts = new Map();
-const staticFiles = { '/':'index.html','/app.js':'app.js','/style.css':'style.css','/favicon.svg':'favicon.svg','/manifest.webmanifest':'manifest.webmanifest','/platform':'platform.html','/platform.js':'platform.js','/platform.css':'platform.css' };
-const mime = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.webmanifest':'application/manifest+json'};
+const staticFiles = { '/mobile-order.png':'mobile-order.png','/mobile-order.html':'mobile-order.html', '/':'index.html','/app.js':'app.js','/style.css':'style.css','/favicon.svg':'favicon.svg','/manifest.webmanifest':'manifest.webmanifest','/platform':'platform.html','/platform.js':'platform.js','/platform.css':'platform.css' };
+const mime = {'.png':'image/png','.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.webmanifest':'application/manifest+json'};
 const integrate=integration({db,body,json,fail,recordEvent,DEMO,ROOT});
 const server = http.createServer(async (req,res) => {
   res.setHeader('X-Content-Type-Options','nosniff'); res.setHeader('X-Frame-Options','DENY'); res.setHeader('Referrer-Policy','same-origin');

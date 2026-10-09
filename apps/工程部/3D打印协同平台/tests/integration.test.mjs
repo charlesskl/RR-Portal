@@ -21,6 +21,12 @@ test('cloud production integration: permissions, scheduling, telemetry replay, q
   const preview=await request('/api/production/legacy-import/preview',{auth:admin,data:{data:legacySource}});assert.equal(preview.status,200);assert.deepEqual(preview.body.conflicts,[]);
   assert.equal((await request('/api/production/legacy-import/apply',{auth:admin,data:{data:legacySource,fingerprint:'stale'}})).status,409);
   const imported=await request('/api/production/legacy-import/apply',{auth:admin,data:{data:legacySource,fingerprint:preview.body.fingerprint}});assert.equal(imported.status,200);assert.ok(imported.body.backupId);
+  for(let refresh=0;refresh<3;refresh++){
+   const r=await fetch(base+'/api/production/data',{headers:{Cookie:admin.cookie,'Accept-Encoding':'gzip'}});
+   assert.equal(r.headers.get('content-encoding'),'gzip');assert.equal((await r.json()).records['2026-09-01'].items.length,1);
+  }
+  const plain=await fetch(base+'/api/production/data',{headers:{Cookie:admin.cookie,'Accept-Encoding':'identity'}});
+  assert.equal(plain.headers.get('content-encoding'),null);assert.equal((await plain.json()).products.length,2);
   const verifyImport=(await request('/api/production/data',{auth:admin})).body;assert.equal(verifyImport.records['2026-09-01'].items.length,1);
   const again=await request('/api/production/legacy-import/preview',{auth:admin,data:{data:legacySource}});assert.equal(again.body.summary.after.products,2);
   assert.equal((await request('/api/production/legacy-import/apply',{auth:admin,data:{data:legacySource,fingerprint:again.body.fingerprint}})).status,200);

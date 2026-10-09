@@ -2,9 +2,10 @@
 <html lang="zh-CN">
 <head><script>
 const originalFetch=window.fetch.bind(window);let csrf='';
-const authReady=originalFetch('/api/me').then(r=>r.json()).then(d=>{csrf=d.csrf||'';});
-window.fetch=async (url,options={})=>{await authReady;return originalFetch(url,{...options,headers:{...options.headers,'X-CSRF-Token':csrf}});};
-const originalSend=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(body){const xhr=this;authReady.then(()=>{xhr.setRequestHeader('X-CSRF-Token',csrf);originalSend.call(xhr,body);});};
+let authReady;
+function getAuth(){return authReady||(authReady=originalFetch('/api/me',{signal:AbortSignal.timeout(15000)}).then(r=>{if(!r.ok)throw Error('登录已失效，请重新登录');return r.json();}).then(d=>{csrf=d.csrf||'';}).catch(e=>{authReady=null;throw e;}));}
+window.fetch=async (url,options={})=>{if(!['GET','HEAD'].includes((options.method||'GET').toUpperCase()))await getAuth();return originalFetch(url,{...options,headers:{...options.headers,'X-CSRF-Token':csrf}});};
+const originalSend=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(body){const xhr=this;getAuth().then(()=>{xhr.setRequestHeader('X-CSRF-Token',csrf);originalSend.call(xhr,body);});};
 </script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -196,6 +197,12 @@ tr:hover{background:#f8f9ff}
   <div class="bottom" id="syncStatus">多人协作模式<br>数据实时同步</div>
 </div>
 
+<div id="dataLoadGate" role="status" style="position:fixed;inset:0;z-index:10000;background:#f8f9faf5;display:flex;align-items:center;justify-content:center;padding:24px">
+  <div style="max-width:560px;background:white;padding:32px;border:1px solid #dadce0;border-radius:12px">
+    <h2>正在加载生产资料</h2><p id="dataLoadMessage" style="margin:16px 0">正在读取云端资料，大文件可能需要一些时间，请勿重复导入。</p>
+    <button id="dataLoadRetry" hidden onclick="loadBusinessData()">重新加载</button>
+  </div>
+</div>
 <div class="main">
 
 <!-- ═══ 仪表盘 ═══ -->
@@ -840,9 +847,10 @@ tr:hover{background:#f8f9ff}
 // ═══════════════════════════════════════════════════════
 // 数据层 - 服务器同步 (多人协作)
 // ═══════════════════════════════════════════════════════
-let _syncTimer=null, _serverVer=0, _dirty=false;
+let _syncTimer=null, _serverVer=0, _dirty=false, _dataLoaded=false, _loadingData=false;
 
 async function pushNow(){
+  if(!_dataLoaded){alert('资料尚未加载成功，请先重新加载。');return false;}
   try{
     const res=await fetch('/api/production/data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_version:_serverVer,settings:S,materials,products,records,maintenance,miscExpenses,inventory,stockInLogs,schedules})});
     if(res.status===409){
@@ -1202,7 +1210,7 @@ function renderDashboard(){
 
   Object.values(dashCharts).forEach(c=>c.destroy()); dashCharts={};
 
-  if(!dayLabels.length) return;
+  if(!dayLabels.length || typeof Chart==='undefined') return;
 
   const dayExps = dates.filter(d=>!_summaryCache[d].isOff).map(d=>{
     const extraMaint=maintenance.filter(item=>item.date===d).reduce((sum,item)=>sum+(Number(item.cost)||0),0);
@@ -3688,9 +3696,10 @@ async function clearAllData(){
 // 初始化 - 从服务器加载数据 + 定时同步
 // ═══════════════════════════════════════════════════════
 async function pullFromServer(){
-  const res=await fetch('/api/production/data');
+  const res=await fetch('/api/production/data',{cache:'no-store',signal:AbortSignal.timeout(120000)});
   if(!res.ok) throw new Error('服务器返回 ' + res.status);
   const data=await res.json();
+  if(!data||!Array.isArray(data.products)||!data.records)throw Error('服务器返回的资料格式不正确');
   if(data._version) _serverVer=data._version;
   if(data.settings) { S=data.settings; if(S.machines<21){S.machines=21;} }
   if(data.materials&&data.materials.length) { materials=data.materials; nextMatId=Math.max(0,...materials.map(m=>m.id))+1; }
@@ -3989,16 +3998,32 @@ function updateLiveCards(){
   });
 }
 
-async function boot(){
+async function loadBusinessData(){
+  if(_loadingData)return;
+  _loadingData=true;
+  const gate=document.getElementById('dataLoadGate'),message=document.getElementById('dataLoadMessage'),retry=document.getElementById('dataLoadRetry');
+  gate.style.display='flex';retry.hidden=true;
   try{
-    await pullFromServer();
+    for(let attempt=1;attempt<=3;attempt++){
+      message.textContent=`正在读取云端资料（第 ${attempt}/3 次），大文件可能需要一些时间，请勿重复导入。`;
+      try{await pullFromServer();break;}
+      catch(e){if(attempt===3)throw e;await new Promise(resolve=>setTimeout(resolve,1000*attempt));}
+    }
+    updateDashCustomInputs();
+    reRenderCurrent();
+    _dataLoaded=true;
     updateSyncUI('ok');
+    gate.style.display='none';
   }catch(e){
-    console.log('服务器未连接，使用默认数据');
     updateSyncUI('err');
-  }
-  updateDashCustomInputs();
-  renderDashboard();
+    message.textContent='生产资料加载失败：'+(e.name==='TimeoutError'?'读取超时':e.message)+'。这不代表云端数据已丢失，请点击重新加载；暂时不要重复导入。';
+    retry.hidden=false;
+    console.error('生产资料加载失败',e);
+  }finally{_loadingData=false;}
+}
+async function boot(){
+  // Independent of the large business snapshot: device polling must keep running.
+  loadBusinessData();
 
   // 拉取打印机实时状态
   pollPrinterStatus();
@@ -4006,7 +4031,7 @@ async function boot(){
   // 每5分钟检查服务器是否有新数据（其他用户的修改）
   setInterval(async()=>{
     // 有未保存修改 或 模态框打开时跳过拉取，防止覆盖用户输入
-    if(_dirty) return;
+    if(!_dataLoaded || _loadingData || _dirty) return;
     if(document.querySelector('.modal-bg.show')) return;
     try{
       const res=await fetch('/api/production/version');

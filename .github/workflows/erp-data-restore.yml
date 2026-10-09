@@ -1,0 +1,85 @@
+name: ERP Data Restore
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '加密快照所在的 Release tag'
+        required: true
+        default: 'erp-data-snapshot-20261009'
+      expected_sha256:
+        description: '解密后 .gz 的 SHA-256(防篡改/防传错文件)'
+        required: true
+        default: '49201a248da9c524a68eddcb1ec042e74dfa417e67aada0b01f607f3e4fa1cd0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout selected ref
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Restore ERP data via SSH
+        env:
+          ERP_DATA_SNAPSHOT_KEY: ${{ secrets.ERP_DATA_SNAPSHOT_KEY }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 40m
+          envs: ERP_DATA_SNAPSHOT_KEY,EXPECTED_COMMIT,RELEASE_TAG,EXPECTED_SHA256
+          script: |
+            set -euo pipefail
+            cd /opt/rr-portal
+            git fetch origin main
+            test "$(git rev-parse origin/main)" = "$EXPECTED_COMMIT"
+            test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+            git ls-files --error-unmatch -- deploy/erp-restore-data.sh > /dev/null
+            test -z "$(git status --porcelain --untracked-files=all -- deploy/erp-restore-data.sh)"
+
+            ENC=/tmp/full_data_snapshot.sql.gz.enc
+            GZ=/tmp/full_data_snapshot.sql.gz
+            trap 'rm -f "$ENC" "$GZ"' EXIT
+
+            echo "下载加密快照(release: $RELEASE_TAG)..."
+            curl -fL --retry 3 -o "$ENC" \
+              "https://github.com/charlesskl/RR-Portal/releases/download/${RELEASE_TAG}/full_data_snapshot.sql.gz.enc"
+
+            echo "解密..."
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+              -pass pass:"$ERP_DATA_SNAPSHOT_KEY" -in "$ENC" -out "$GZ"
+            rm -f "$ENC"
+
+            echo "校验 SHA-256..."
+            echo "$EXPECTED_SHA256  $GZ" | sha256sum -c -
+
+            bash deploy/erp-restore-data.sh "$GZ"

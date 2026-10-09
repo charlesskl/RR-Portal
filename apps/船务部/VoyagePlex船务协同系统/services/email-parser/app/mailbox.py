@@ -19,15 +19,18 @@ def received_at_from_fetch(parts: list) -> str:
     return received.astimezone(timezone.utc).isoformat()
 
 
-def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08") -> dict:
+def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: str = "Xingxin", credentials: dict | None = None) -> dict:
+    if company not in {"Xingxin", "Huadeng"}:
+        raise ValueError("公司板块无效")
+    prefix = "VOYAGEPLEX_HUADENG_MAIL_" if company == "Huadeng" else "VOYAGEPLEX_MAIL_"
     first_day = date.fromisoformat(start_date)
-    address = os.environ.get("VOYAGEPLEX_MAIL_ADDRESS", "").strip()
-    secret = os.environ.get("VOYAGEPLEX_MAIL_AUTH_CODE", "")
+    address = (credentials.get("address", "") if credentials is not None else os.environ.get(prefix + "ADDRESS", "")).strip()
+    secret = credentials.get("auth_code", "") if credentials is not None else os.environ.get(prefix + "AUTH_CODE", "")
     if not address or not secret:
         return {"configured": False, "messages": []}
 
-    host = os.environ.get("VOYAGEPLEX_MAIL_IMAP_HOST", "imaphz.qiye.163.com")
-    folder = os.environ.get("VOYAGEPLEX_MAIL_FOLDER", "INBOX")
+    host = credentials.get("host", "imap.exmail.qq.com") if credentials is not None else os.environ.get(prefix + "IMAP_HOST", "imaphz.qiye.163.com")
+    folder = credentials.get("folder", "INBOX") if credentials is not None else os.environ.get(prefix + "FOLDER", "INBOX")
     client = imaplib.IMAP4_SSL(host, 993, timeout=30)
     try:
         client.login(address, secret)
@@ -36,6 +39,8 @@ def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08") -> dict:
             raise RuntimeError("无法读取指定邮箱文件夹")
         status, response = client.response("UIDVALIDITY")
         validity = int(response[0]) if status == "UIDVALIDITY" and response and response[0] else 0
+        # IMAP SINCE uses server internal dates; search one day earlier and let
+        # the API apply the exact China-time boundary to each fetched message.
         since = (first_day - timedelta(days=1)).strftime("%d-%b-%Y")
         status, found = client.uid("SEARCH", None, "SINCE", since)
         if status != "OK":
@@ -65,3 +70,36 @@ def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08") -> dict:
             client.logout()
         except (imaplib.IMAP4.error, OSError):
             pass
+
+
+def test_mailbox_connection(credentials: dict) -> dict:
+    """Validate login and read-only folder access without searching or fetching mail."""
+    address = credentials.get("address", "").strip()
+    secret = credentials.get("auth_code", "")
+    if not address or not secret:
+        return {"connected": False, "message": "请填写邮箱地址和授权码"}
+    client = None
+    try:
+        try:
+            client = imaplib.IMAP4_SSL(credentials.get("host", ""), 993, timeout=30)
+        except (OSError, imaplib.IMAP4.error):
+            return {"connected": False, "message": "无法连接邮箱服务器，请检查服务器地址和网络"}
+        try:
+            client.login(address, secret)
+        except imaplib.IMAP4.error:
+            return {"connected": False, "message": "邮箱登录失败，请检查授权码，并确认邮箱已开启IMAP"}
+        try:
+            status, _ = client.select(credentials.get("folder", "INBOX"), readonly=True)
+            if status != "OK":
+                return {"connected": False, "message": "已登录，但无法打开收件文件夹，请检查文件夹名称和权限"}
+        except imaplib.IMAP4.error:
+            return {"connected": False, "message": "已登录，但无法打开收件文件夹，请检查文件夹名称和权限"}
+        return {"connected": True, "message": "测试连接成功，可登录邮箱并读取指定文件夹。请保存配置。"}
+    except (OSError, ValueError):
+        return {"connected": False, "message": "连接测试失败，请检查服务器地址和网络"}
+    finally:
+        if client is not None:
+            try:
+                client.logout()
+            except (imaplib.IMAP4.error, OSError):
+                pass

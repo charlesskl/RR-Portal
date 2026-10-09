@@ -12,33 +12,56 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
     private static readonly SemaphoreSlim SyncLock = new(1, 1);
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var nextSync = new Dictionary<string, DateTime>();
         while (!stoppingToken.IsCancellationRequested)
         {
-            var enabled = true; var intervalMinutes = 5;
-            using (var scope = scopeFactory.CreateScope())
+            using (var inventoryScope = scopeFactory.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var setting = await db.MailSystemSettings.AsNoTracking().FirstOrDefaultAsync(value => value.Id == 1, stoppingToken);
-                if (setting is not null) { enabled = setting.SyncEnabled; intervalMinutes = Math.Clamp(setting.SyncIntervalMinutes, 1, 1440); }
+                var inventoryDb = inventoryScope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var owners = await inventoryDb.Users.AsNoTracking().Where(value => value.IsActive && value.MailboxAddress != "" && value.MailboxSecretProtected != "" && (value.CompanyAccess == "Huadeng" || value.CompanyAccess == "Both" || value.Role == "admin"))
+                    .Select(value => value.Id).ToListAsync(stoppingToken);
+                var mailboxes = new List<(string Company, long? Owner)> { ("Xingxin", null) };
+                mailboxes.AddRange(owners.Select(id => ("Huadeng", (long?)id)));
+                foreach (var mailbox in mailboxes)
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    db.Company = mailbox.Company; db.MailOwnerId = mailbox.Owner;
+                    var setting = await db.MailSystemSettings.FirstOrDefaultAsync(stoppingToken);
+                    if (setting is null)
+                    {
+                        setting = new MailSystemSetting { Id = db.CompanySettingId, DailyWorkflowVersion = DailyMailRules.WorkflowVersion };
+                        db.MailSystemSettings.Add(setting); await db.SaveChangesAsync(stoppingToken);
+                    }
+                    var key = $"{mailbox.Company}:{mailbox.Owner}";
+                    if (nextSync.GetValueOrDefault(key) > DateTime.UtcNow) continue;
+                    nextSync[key] = DateTime.UtcNow.AddMinutes(Math.Clamp(setting.SyncIntervalMinutes, 1, 1440));
+                    try { if (setting.SyncEnabled) await SyncAsync(stoppingToken, mailbox.Company, mailbox.Owner); }
+                    catch (Exception error) when (error is not OperationCanceledException)
+                    { logger.LogWarning("邮箱 {Mailbox} 同步失败：{ErrorType}", key, error.GetType().Name); }
+                }
             }
-            try { if (enabled) await SyncAsync(stoppingToken); }
-            catch (Exception error) when (error is not OperationCanceledException)
-            {
-                logger.LogWarning(error, "邮箱同步失败");
-            }
-            await Task.Delay(TimeSpan.FromMinutes(intervalMinutes), stoppingToken);
+            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
         }
     }
 
-    public async Task<object> SyncAsync(CancellationToken cancellationToken)
+    public async Task<object> SyncAsync(CancellationToken cancellationToken, string company = "Xingxin", long? ownerId = null)
     {
         await SyncLock.WaitAsync(cancellationToken);
         try
         {
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Company = company; db.MailOwnerId = ownerId;
+            AppUser? owner = null;
+            if (company == "Huadeng")
+            {
+                if (ownerId is null or <= 0) return new { configured = false, imported = 0, error = "请先选择船务员邮箱" };
+                owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(value => value.Id == ownerId && value.IsActive && (value.CompanyAccess == "Huadeng" || value.CompanyAccess == "Both" || value.Role == "admin"), cancellationToken);
+                if (owner is null || owner.MailboxAddress == "" || owner.MailboxSecretProtected == "") return new { configured = false, imported = 0 };
+            }
             var parser = scope.ServiceProvider.GetRequiredService<EmailParserClient>();
-            var setting = await db.MailSystemSettings.AsNoTracking().FirstAsync(value => value.Id == 1, cancellationToken);
+            var setting = await db.MailSystemSettings.AsNoTracking().FirstAsync(value => value.Id == db.CompanySettingId, cancellationToken);
             var startDate = setting.StartDate;
             if (string.CompareOrdinal(MailboxDateRules.ReceivedDate(DateTime.UtcNow.ToString("O")), startDate) < 0)
                 return new { configured = true, imported = 0, waitingUntil = startDate };
@@ -47,7 +70,7 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             if (db.Entry(state).State == EntityState.Detached) db.MailSyncStates.Add(state);
             try
             {
-                var response = await parser.PollMailboxAsync(state.LastUid, startDate, cancellationToken);
+                var response = await parser.PollMailboxAsync(state.LastUid, startDate, cancellationToken, company, owner);
                 if (response.StatusCode is < 200 or >= 300)
                     throw new InvalidOperationException("邮箱连接或读取失败");
                 var payload = JsonNode.Parse(response.Body)?.AsObject()
@@ -65,7 +88,7 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                     state.LastUid = 0;
                     if (hadCursor)
                     {
-                        response = await parser.PollMailboxAsync(0, startDate, cancellationToken);
+                        response = await parser.PollMailboxAsync(0, startDate, cancellationToken, company, owner);
                         if (response.StatusCode is < 200 or >= 300) throw new InvalidOperationException("邮箱读取失败");
                         payload = JsonNode.Parse(response.Body)?.AsObject()
                             ?? throw new InvalidOperationException("邮箱服务返回了无效数据");
@@ -81,7 +104,7 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                     if (node is not JsonObject item) continue;
                     var uid = item["mailbox_uid"]?.GetValue<long>() ?? 0;
                     if (uid <= 0) continue;
-                    var key = $"{address}:{validity}:{uid}";
+                    var key = company == "Huadeng" ? $"Huadeng:{ownerId}:{address}:{validity}:{uid}" : $"{address}:{validity}:{uid}";
                     if (await db.ImportEmailItems.AnyAsync(value => value.MailboxKey == key, cancellationToken))
                     {
                         state.LastUid = Math.Max(state.LastUid, uid);
@@ -92,37 +115,24 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                         .AsNoTracking().Where(value => value.Fingerprint == fingerprint)
                         .OrderBy(value => value.Id).FirstOrDefaultAsync(cancellationToken);
                     var failed = item["status"]?.ToString() == "failed";
-                    var itemError = item["error"]?.ToString() ?? "";
                     var receivedAt = item["mailbox_received_at"]?.ToString() ?? "";
                     string receivedDate;
-                    try
-                    {
-                        receivedDate = MailboxDateRules.ReceivedDate(receivedAt);
-                    }
-                    catch (FormatException)
-                    {
-                        // 单封邮件收件时间无效不能中断整批，否则断点永远停在同一 UID 反复重试；
-                        // 记为失败项归入“未知日期”批次，断点照常推进
-                        failed = true;
-                        itemError = string.IsNullOrEmpty(itemError) ? "邮件缺少有效收件时间" : itemError;
-                        receivedDate = "";
-                    }
-                    if (receivedDate != "" && string.CompareOrdinal(receivedDate, startDate) < 0)
+                    try { receivedDate = MailboxDateRules.ReceivedDate(receivedAt); }
+                    catch (FormatException error) { throw new InvalidOperationException($"邮件 {uid} 缺少有效收件时间", error); }
+                    if (string.CompareOrdinal(receivedDate, startDate) < 0)
                     {
                         state.LastUid = Math.Max(state.LastUid, uid);
                         continue;
                     }
-                    var batchKey = string.IsNullOrEmpty(receivedDate) ? "未知日期" : receivedDate;
-                    if (!batchesByDate.TryGetValue(batchKey, out var batch))
+                    if (!batchesByDate.TryGetValue(receivedDate, out var batch))
                     {
                         batch = new ImportBatch
                         {
-                            Kind = "Email",
-                            FileName = string.IsNullOrEmpty(receivedDate) ? "收件时间未知的邮件" : $"{receivedDate} 收到的邮件",
+                            Kind = "Email", FileName = $"{receivedDate} 收到的邮件",
                             MailReceivedDate = receivedDate, Status = "PendingConfirmation",
                             ParserVersion = "mailbox-imap",
                         };
-                        batchesByDate.Add(batchKey, batch);
+                        batchesByDate.Add(receivedDate, batch);
                     }
                     var sender = item["message"]?["sender"]?.ToString() ?? "";
                     var contactEmail = MailClassificationRules.NormalizeEmail(sender);
@@ -152,9 +162,9 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                         ShipmentMode = classification.Mode,
                         WorkCategory = classification.Category, ClassificationConfidence = classification.Confidence,
                         ClassificationSource = classification.Source, NeedsClassificationReview = classification.NeedsReview,
-                        Fingerprint = fingerprint, Status = failed ? "failed" : duplicate is null ? "pending" : "duplicate",
+                        BusinessFingerprint = item["business_fingerprint"]?.ToString() ?? "", Fingerprint = fingerprint, Status = failed ? "failed" : duplicate is null ? "pending" : "duplicate",
                         DuplicateOfItemId = duplicate?.Id, ResultJson = item.ToJsonString(),
-                        Error = itemError,
+                        Error = item["error"]?.ToString() ?? "",
                     });
                     state.LastUid = Math.Max(state.LastUid, uid);
                     imported++;
@@ -170,14 +180,12 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
-                logger.LogError(error, "邮箱同步写入失败，内部错误：{InnerError}", error.GetBaseException().Message);
+                logger.LogError("邮箱同步写入失败：{ErrorType}", error.GetType().Name);
                 db.ChangeTracker.Clear();
                 var errorState = await db.MailSyncStates.FirstOrDefaultAsync(cancellationToken);
                 errorState ??= new MailSyncState();
                 if (db.Entry(errorState).State == EntityState.Detached) db.MailSyncStates.Add(errorState);
-                errorState.LastError = error.GetBaseException() is SqliteException sqlite
-                    ? $"数据库写入失败（SQLite {sqlite.SqliteErrorCode}）：{sqlite.Message}"
-                    : error.Message;
+                errorState.LastError = "邮箱同步失败，请检查邮箱设置或联系管理员";
                 await db.SaveChangesAsync(cancellationToken);
                 throw;
             }

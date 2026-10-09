@@ -6,6 +6,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../VoyagePlex.Api/Services/CargoNotificationRules.cs" Link="CargoNotificationRules.cs" />
+    <Compile Include="../VoyagePlex.Api/Services/ExportTemplateRules.cs" Link="ExportTemplateRules.cs" />
+    <Compile Include="../VoyagePlex.Api/Entities/ExportTemplate.cs" Link="ExportTemplate.cs" />
+    <Compile Include="../VoyagePlex.Api/Entities/ICompanyEntity.cs" Link="ICompanyEntity.cs" />
     <Compile Include="../VoyagePlex.Api/Services/DailyMailRules.cs" Link="DailyMailRules.cs" />
     <Compile Include="../VoyagePlex.Api/Services/ShipmentWorkflowRules.cs" Link="ShipmentWorkflowRules.cs" />
     <Compile Include="../VoyagePlex.Api/Services/ProductImportRules.cs" Link="ProductImportRules.cs" />

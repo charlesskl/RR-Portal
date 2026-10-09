@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireRole } from "@/lib/backend-proxy";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 const parser = process.env.EMAIL_PARSER_BASE_URL || "http://127.0.0.1:8091";
 
 export async function POST(request: NextRequest) {
+  const auth=await requireRole(request,["admin","warehouse"]); if(auth.response)return auth.response;
   try {
     const response = await fetch(`${parser}/v1/local-inventory-files/writeback`, {
       method:"POST", body:await request.formData(), signal:AbortSignal.timeout(300_000),

@@ -78,7 +78,6 @@ class QcHandler(http.server.BaseHTTPRequestHandler):
 
 
 def main():
-    base_path = os.environ.get("QC_SMOKE_BASE_PATH", "")
     api_port, web_port = free_port(), free_port()
     qc = http.server.ThreadingHTTPServer(("127.0.0.1", 0), QcHandler)
     threading.Thread(target=qc.serve_forever, daemon=True).start()
@@ -90,9 +89,9 @@ def main():
                 api_env = {**os.environ, "ASPNETCORE_URLS": f"http://127.0.0.1:{api_port}", "ConnectionStrings__Default": f"Data Source={directory}/ship.db"}
                 processes.append(subprocess.Popen(["dotnet", str(API_DLL)], cwd=ROOT / "server/VoyagePlex.Api", env=api_env, stdout=log, stderr=subprocess.STDOUT))
                 wait_for(f"http://127.0.0.1:{api_port}/api/health")
-                web_env = {**os.environ, "NEXT_DIST_DIR": ".next-build", "NEXT_PUBLIC_BASE_PATH": base_path, "VOYAGEPLEX_API_BASE_URL": f"http://127.0.0.1:{api_port}", "QC_SYSTEM_API_URL": f"http://127.0.0.1:{qc.server_port}/api/integrations/shipping/results", "QC_SYSTEM_API_TOKEN": KEY}
+                web_env = {**os.environ, "NEXT_DIST_DIR": ".next-build", "VOYAGEPLEX_API_BASE_URL": f"http://127.0.0.1:{api_port}", "QC_SYSTEM_API_URL": f"http://127.0.0.1:{qc.server_port}/api/integrations/shipping/results", "QC_SYSTEM_API_TOKEN": KEY}
                 processes.append(subprocess.Popen(["npm", "run", "start", "--", "--port", str(web_port), "--hostname", "127.0.0.1"], cwd=ROOT, env=web_env, stdout=log, stderr=subprocess.STDOUT))
-                base = f"http://127.0.0.1:{web_port}{base_path}"
+                base = f"http://127.0.0.1:{web_port}"
                 wait_for(base)
                 item = {"contractNumber": "4500186208", "customerPo": "269326", "itemNumber": "77711-S005-NA-PKC"}
                 assert request(base + "/api/qc/results", {"items": [item]})[0] == 401

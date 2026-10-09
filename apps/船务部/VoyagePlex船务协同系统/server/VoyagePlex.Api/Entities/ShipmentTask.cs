@@ -1,7 +1,11 @@
 namespace VoyagePlex.Api.Entities;
 
-public sealed class ShipmentTask
+public sealed class ShipmentTask : ICompanyEntity
 {
+    public long ResponsibleUserId { get; set; }
+    public string ResponsibleUserName { get; set; } = "";
+    public string SourceMailboxAddress { get; set; } = "";
+    public string Company { get; set; } = "Xingxin";
     public long Id { get; set; }
     public string Customer { get; set; } = string.Empty;
     public string EmailSubject { get; set; } = string.Empty;
@@ -15,6 +19,7 @@ public sealed class ShipmentTask
     public string TransportReference { get; set; } = string.Empty;
     public string SpecialRequirements { get; set; } = string.Empty;
     public string WarehouseGroupsJson { get; set; } = "[]";
+    public string ExportDetailsJson { get; set; } = "{}";
     public string ItemsJson { get; set; } = "[]";
     public string SourceEmailsJson { get; set; } = "[]";
     public long? SourceImportItemId { get; set; }

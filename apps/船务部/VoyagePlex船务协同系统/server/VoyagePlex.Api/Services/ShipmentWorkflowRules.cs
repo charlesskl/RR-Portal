@@ -47,8 +47,11 @@ public static class ShipmentWorkflowRules
     public static bool CanTransitionStatus(string currentStatus, string nextStatus) =>
         (currentStatus, nextStatus) switch
         {
+            ("WaitingNotification", "PendingReview") => true,
+            ("WaitingNotification", "Cancelled") => true,
             ("PendingReview", "PendingShipment") => true,
             ("PendingReview", "Cancelled") => true,
+            ("PendingShipment", "PendingReview") => true,
             ("PendingShipment", "Completed") => true,
             ("PendingShipment", "Cancelled") => true,
             _ => false,

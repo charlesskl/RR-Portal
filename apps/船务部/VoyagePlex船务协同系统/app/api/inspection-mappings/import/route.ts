@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 const run = promisify(execFile);
 
 export async function POST(request: NextRequest) {
-  const auth=await requireRole(request,["admin","shipping"]); if(auth.response)return auth.response;
+  const auth=await requireRole(request,["admin"]); if(auth.response)return auth.response;
   let tempDir = "";
   try {
     const form=await request.formData(); const file=form.get("file");

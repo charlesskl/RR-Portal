@@ -70,6 +70,16 @@ def parse_excel(path: Path) -> dict:
         rows = _read_sheet_rows(sheet)
     finally:
         wb.close()
+    # Load merge metadata only for a recognized Huadeng form; ordinary packing
+    # lists retain the cloud parser's streaming read path.
+    from .huadeng_forms import parse_huadeng_form
+    if parse_huadeng_form(rows, []):
+        merged_book = openpyxl.load_workbook(path, data_only=True, read_only=False)
+        try:
+            merged_sheet = merged_book[sheet_title]
+            return parse_huadeng_form(rows, [(cell.min_row-1, cell.max_row, cell.min_col-1, cell.max_col) for cell in merged_sheet.merged_cells.ranges])
+        finally:
+            merged_book.close()
     header_row, headers = _find_header(rows)
     columns = _column_map(headers)
     _apply_measurement_columns(headers, columns)
@@ -115,9 +125,13 @@ def parse_excel(path: Path) -> dict:
 def parse_xls(path: Path) -> dict:
     """Parse legacy Excel files without modifying or converting the source."""
     import xlrd
-    wb = xlrd.open_workbook(path)
+    wb = xlrd.open_workbook(path, formatting_info=True)
     sheet = wb.sheet_by_index(0)
     rows = [[sheet.cell_value(row, col) for col in range(sheet.ncols)] for row in range(sheet.nrows)]
+    from .huadeng_forms import parse_huadeng_form
+    huadeng = parse_huadeng_form(rows, sheet.merged_cells)
+    if huadeng:
+        return huadeng
     flat = "\n".join(" | ".join(_text(value) for value in row) for row in rows)
 
     # Container Loading Plan/出货明细表 is a form, not a Packing List.
@@ -199,7 +213,7 @@ def parse_word(path: Path) -> dict:
 def _parse_yax(wb) -> Optional[dict]:
     values = []
     for ws in wb.worksheets[:3]:
-        for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row or 80, 80), values_only=True):
+        for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 80), values_only=True):
             values.append(["" if value is None else str(value).strip() for value in row])
     flat = "\n".join(" | ".join(row) for row in values)
     if not re.search(r"\bYAX\d{5,}\b", flat, re.I) and "并柜拖车通知单" not in flat:

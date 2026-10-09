@@ -1,0 +1,21 @@
+const fs = require('fs');
+const vm = require('vm');
+const ts = require('typescript');
+const assert = require('assert/strict');
+const source = ts.transpileModule(fs.readFileSync('lib/backend-proxy.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText;
+let user;
+const context = {exports:{},process,Headers,fetch:async()=>({ok:true,json:async()=>user}),require:()=>({NextResponse:{json:(body,options)=>({body,status:options.status})}})};
+vm.runInNewContext(source,context);
+const request = company=>({headers:new Headers(),cookies:{get:()=>({value:company})}});
+(async()=>{
+ const check=async(role,companyAccess,company,roles,status)=>{user={role,companyAccess};const result=await context.exports.requireRole(request(company),roles);assert.equal(result.response?.status||200,status);};
+ await check('admin','Xingxin','Huadeng',['admin'],200);
+ await check('supervisor','Huadeng','Huadeng',['admin'],200);
+ await check('supervisor','Huadeng','Xingxin',['admin'],403);
+ await check('warehouse','Huadeng','Huadeng',['admin','warehouse'],200);
+ await check('warehouse','Huadeng','Xingxin',['admin','warehouse'],403);
+ await check('warehouse','Both','Xingxin',['admin','warehouse'],403);
+ await check('shipping','Huadeng','Huadeng',['admin'],403);
+ await check('shipping','Huadeng','Huadeng',['admin','shipping'],200);
+ console.log('Frontend role/company permission checks passed.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

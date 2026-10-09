@@ -2,24 +2,33 @@
 
 import email
 import hashlib
+import json
 import html
 import re
 from email import policy
 from email.header import decode_header
 from pathlib import Path
+from .carrier_schedule import carrier_tables
 
 
 def parse_eml(raw: bytes, workdir: Path) -> dict:
     msg = email.message_from_bytes(raw, policy=policy.default)
     workdir.mkdir(parents=True, exist_ok=True)
+    attachments = save_attachments(msg, workdir)
+    body = extract_body(msg)
+    business = {"sender": decode_header_value(msg.get("From", "")).strip().lower(),
+                "subject": decode_header_value(msg.get("Subject", "")), "date": str(msg.get("Date", "")),
+                "body": body, "attachments": sorted((part["filename"], part["sha256"]) for part in attachments)}
     return {
+        "business_fingerprint": hashlib.sha256(json.dumps(business, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest(),
         "fingerprint": hashlib.sha256(raw).hexdigest(),
         "message_id": str(msg.get("Message-ID", "")),
         "subject": decode_header_value(msg.get("Subject", "")),
         "sender": decode_header_value(msg.get("From", "")),
         "received_at": str(msg.get("Date", "")),
-        "body_text": extract_body(msg),
-        "attachments": save_attachments(msg, workdir),
+        "body_text": body,
+        "body_tables": carrier_tables(msg),
+        "attachments": attachments,
     }
 
 
@@ -86,5 +95,6 @@ def save_attachments(msg, workdir: Path) -> list[dict]:
             "stored_path": str(path),
             "content_type": part.get_content_type(),
             "size": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
         })
     return saved

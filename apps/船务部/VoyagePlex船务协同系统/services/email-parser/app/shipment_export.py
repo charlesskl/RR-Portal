@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .factory_mapping import chinese_factory_name
+
 from datetime import date, datetime
 from io import BytesIO
 import re
@@ -81,13 +83,17 @@ def _base_product_code(value: Any) -> str:
     return match.group(1) if match else ""
 
 
-def _factory_note(item: dict) -> str:
+def _factory_note(item: dict, mappings: list[dict] | None = None) -> str:
+    source_factory = _text(_item_value(item, "supplier", "loading_factory", "factory_remark"))
+    mapped_factory = chinese_factory_name(source_factory, mappings)
+    if mapped_factory != source_factory:
+        return mapped_factory
     product_code = _base_product_code(_item_value(item, "product_code", "productCode"))
     if product_code in HUADENG_PRODUCT_CODES:
         return "华登"
     if product_code in HUAKANG_PRODUCT_CODES:
         return "华康"
-    return _text(_item_value(item, "supplier", "loading_factory", "factory_remark"))
+    return mapped_factory
 
 
 def _container_loading_factory(items: list[dict]) -> str:
@@ -166,6 +172,9 @@ def _split_shipment_notes(notes: str, items: list[dict]) -> tuple[str, str]:
 
 def build_shipment_workbook(task: dict) -> tuple[bytes, str]:
     """Create one cabinet sheet per task, following the existing ZURU/TOMY layout."""
+    if task.get("company") == "Huadeng":
+        from .huadeng_export import build_huadeng_workbook
+        return build_huadeng_workbook(task, build_shipment_workbook)
     customer_key = _customer_key(task)
     consignee, consignee_code = CONSIGNEES[customer_key]
     items = list(task.get("items") or [])
@@ -239,7 +248,7 @@ def build_shipment_workbook(task: dict) -> tuple[bytes, str]:
     for offset, item in enumerate(items):
         row = first_item_row + offset
         values = [
-            _factory_note(item), offset + 1,
+            _factory_note(item, task.get("factoryMappings") or None), offset + 1,
             customer_key, _item_value(item, "contract_number", "contractNumber"),
             _item_value(item, "product_code", "productCode"), _product_name_spec(item),
             destination_country, item.get("category", ""), _number(item.get("quantity")),

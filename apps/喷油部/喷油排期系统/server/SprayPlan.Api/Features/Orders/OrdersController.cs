@@ -579,6 +579,8 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                     if (part is not null && line.UnitPrice > 0) part.UnitCost = line.UnitPrice;
                 }
             }
+            var partError = await EnsureImportedParts(product, group.Lines, req.SavePricing);
+            if (partError is not null) return BadRequest(new { error = partError });
             order.ProductId ??= product.Id; // 兼容已有单款号字段；每个部位另有真实 SourcePartId。
             foreach (var line in group.Lines)
             {
@@ -691,6 +693,8 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                 }
             }
 
+            var partError = await EnsureImportedParts(product, req.Lines, req.SavePricing);
+            if (partError is not null) return BadRequest(new { error = partError });
             order.ProductId = product.Id;
             order.Product = product;
             order.PartQtys = BuildPartQtys(req.Lines, product);
@@ -705,6 +709,25 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             warning = existing is null ? null : (req.AsPendingProduct && !req.SavePricing
                 ? "重复订单号，已保留原订单；本次尚无数量明细，请补全产品后再导入叠加。"
                 : "重复订单号，数量已叠加到原订单，请检查排期是否需要补排。") });
+    }
+
+    private async Task<string?> EnsureImportedParts(Product product, IEnumerable<ImportConfirmLine> lines, bool savePricing)
+    {
+        foreach (var line in lines)
+        {
+            var name = line.MatchedItemName.Trim();
+            if (product.Parts.Any(p => p.PartName.Trim() == name)) continue;
+            if (!line.CreatePart) return $"款号 {product.ProductNo} 中没有部位“{name}”，请选择新增部件或匹配已有部件";
+            product.Parts.Add(new ProductPart
+            {
+                PartName = name,
+                PartOrder = product.Parts.Count == 0 ? 0 : product.Parts.Max(p => p.PartOrder) + 1,
+                UnitCost = savePricing ? Math.Max(0, line.UnitPrice) : 0,
+            });
+        }
+        await db.SaveChangesAsync();
+        PartProcessRules.AssignGroupIds(product.Parts);
+        return null;
     }
 
     private Order MergeImportedOrder(Order incoming, Order? existing)

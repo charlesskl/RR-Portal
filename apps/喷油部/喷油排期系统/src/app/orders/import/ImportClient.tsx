@@ -17,6 +17,7 @@ type Draft = {
 };
 
 const SKIP = "__skip__";
+const NEW_PART = "__new_part__";
 
 export default function ImportClient() {
   const router = useRouter();
@@ -78,19 +79,20 @@ export default function ImportClient() {
     if (draft && !draft.productFound) return (newNames[i] ?? ln.matchedItemName ?? ln.pdfItemName).trim() || null;
     if (ln.matchedItemName) return ln.matchedItemName;
     const p = picks[i];
+    if (p === NEW_PART) return (newNames[i] ?? ln.pdfItemName).trim() || null;
     return !p || p === SKIP ? null : p;
   }
   // 还有红行没处理（既没选子件也没标跳过）→ 不能入库
-  const redPending = !!draft?.productFound && draft.lines.some((ln, i) => !ln.matchedItemName && !picks[i]);
+  const redPending = !!draft?.productFound && draft.lines.some((ln, i) => !ln.matchedItemName && (!picks[i] || (picks[i] === NEW_PART && !resolved(i, ln))));
   const redCount = draft?.lines.filter((ln) => !ln.matchedItemName).length ?? 0;
 
   async function doConfirm(asPending: boolean) {
     if (!draft || !head) return;
     setBusy(true); setErr("");
     const lines = asPending ? [] : draft.lines
-      .map((ln, i) => ({ name: resolved(i, ln), totalQty: ln.totalQty, unitPrice: ln.unitPrice }))
+      .map((ln, i) => ({ name: resolved(i, ln), totalQty: ln.totalQty, unitPrice: ln.unitPrice, createPart: picks[i] === NEW_PART }))
       .filter((x) => x.name)   // 跳过未匹配/已标跳过的红行
-      .map((x) => ({ matchedItemName: x.name as string, totalQty: x.totalQty, unitPrice: x.unitPrice }));
+      .map((x) => ({ matchedItemName: x.name as string, totalQty: x.totalQty, unitPrice: x.unitPrice, createPart: x.createPart }));
     const body = { head, pdfToken: draft.pdfToken, asPendingProduct: asPending, savePricing, lines };
     try {
       const res = await apiFetch("/api/orders/import-confirm", {
@@ -113,9 +115,12 @@ export default function ImportClient() {
       productNo: product.productNo, isMa: product.isMa,
       lines: product.lines.map((line, lineIndex) => ({
         matchedItemName: product.productFound
-          ? (line.matchedItemName || multiPicks[`${productIndex}-${lineIndex}`] || "")
+          ? (line.matchedItemName || (multiPicks[`${productIndex}-${lineIndex}`] === NEW_PART
+              ? (multiNames[`${productIndex}-${lineIndex}`] ?? line.pdfItemName).trim()
+              : multiPicks[`${productIndex}-${lineIndex}`]) || "")
           : (multiNames[`${productIndex}-${lineIndex}`] ?? line.matchedItemName ?? ""),
         totalQty: line.totalQty, unitPrice: line.unitPrice,
+        createPart: multiPicks[`${productIndex}-${lineIndex}`] === NEW_PART,
       })).filter(line => line.matchedItemName && line.matchedItemName !== SKIP),
     }));
     if (products.some(product => product.lines.length === 0)) { setErr("每个款号至少保留一条部件明细"); return; }
@@ -150,7 +155,8 @@ export default function ImportClient() {
           <p className="text-text-secondary text-sm my-3">将 PDF 或清晰图片拖到这里，或选择文件；识别后请逐项核对</p>
           <input ref={fileRef} type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" className="block mx-auto text-sm" onChange={event => chooseFile(event.target.files?.[0] ?? null)} />
           {selectedFile && <p className="mt-3 text-sm text-mint-700">已选择：{selectedFile.name}</p>}
-          {err && <p className="text-rose text-sm mt-3">{err}</p>}
+          <p className="text-xs text-text-secondary mt-2">选择“新增部件”后将加入对应款号；勾选更新核价时同时保存订单单价。</p>
+      {err && <p className="text-rose text-sm mt-3">{err}</p>}
           <div className="flex justify-center gap-3 mt-5">
             <Link href="/orders" className="text-sm border border-app-border rounded-btn px-4 py-2 text-text-secondary">取消</Link>
             <button disabled={busy || !selectedFile} onClick={doUpload}
@@ -166,7 +172,7 @@ export default function ImportClient() {
   if (draft.products && draft.products.length > 1) {
     const hasUnknown = draft.products.some(product => !product.productFound);
     const hasUnmatched = draft.products.some((product, pi) => product.lines.some((line, li) =>
-      product.productFound ? (!line.matchedItemName && !multiPicks[`${pi}-${li}`])
+      product.productFound ? (!line.matchedItemName && (!multiPicks[`${pi}-${li}`] || (multiPicks[`${pi}-${li}`] === NEW_PART && !(multiNames[`${pi}-${li}`] ?? line.pdfItemName).trim())))
         : !(multiNames[`${pi}-${li}`] ?? line.matchedItemName ?? "").trim()));
     return <Card title="📥 多款号订单导入 · 核对" sub={`同一合同号 ${head.externalOrderNo} · ${draft.products.length} 个款号`}>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
@@ -179,11 +185,12 @@ export default function ImportClient() {
           {!product.productFound && <span className="ml-3 text-rose text-sm">产品库无此款号，将建立草稿核价</span>}</div>
         <table className="w-full text-sm"><thead><tr className="text-left text-text-secondary"><th className="px-3 py-2">PDF 部件</th><th className="px-3 py-2">产品库匹配</th><th className="px-3 py-2 text-right">数量</th><th className="px-3 py-2 text-right">单价</th></tr></thead>
           <tbody>{product.lines.map((line, li) => <tr key={li} className="border-t border-app-border-light"><td className="px-3 py-2">{line.pdfItemName}</td>
-            <td className="px-3 py-2">{!product.productFound ? <input className={inp} aria-label={`${product.productNo} 部件名`} value={multiNames[`${pi}-${li}`] ?? line.matchedItemName ?? ""} onChange={e => setMultiNames(current => ({ ...current, [`${pi}-${li}`]: e.target.value }))} /> : line.matchedItemName ?? <select className={inp} value={multiPicks[`${pi}-${li}`] ?? ""} onChange={e => setMultiPicks(current => ({ ...current, [`${pi}-${li}`]: e.target.value }))}>
-              <option value="">选择对应部件…</option>{product.availableItems.map(item => <option key={item} value={item}>{item}</option>)}<option value={SKIP}>跳过本行</option>
-            </select>}</td><td className="px-3 py-2 text-right">{line.totalQty.toLocaleString("zh-CN")}</td><td className="px-3 py-2 text-right">{line.unitPrice.toFixed(4)}</td></tr>)}</tbody></table>
+            <td className="px-3 py-2">{!product.productFound ? <input className={inp} aria-label={`${product.productNo} 部件名`} value={multiNames[`${pi}-${li}`] ?? line.matchedItemName ?? ""} onChange={e => setMultiNames(current => ({ ...current, [`${pi}-${li}`]: e.target.value }))} /> : line.matchedItemName ?? <><select className={inp} value={multiPicks[`${pi}-${li}`] ?? ""} onChange={e => setMultiPicks(current => ({ ...current, [`${pi}-${li}`]: e.target.value }))}>
+              <option value="">选择对应部件…</option>{product.availableItems.map(item => <option key={item} value={item}>{item}</option>)}<option value={NEW_PART}>＋ 新增部件</option><option value={SKIP}>跳过本行</option>
+            </select>{multiPicks[`${pi}-${li}`] === NEW_PART && <input className={inp + " mt-2"} aria-label={`${product.productNo} 新部件名称`} value={multiNames[`${pi}-${li}`] ?? line.pdfItemName} onChange={e => setMultiNames(current => ({ ...current, [`${pi}-${li}`]: e.target.value }))} />}</>}</td><td className="px-3 py-2 text-right">{line.totalQty.toLocaleString("zh-CN")}</td><td className="px-3 py-2 text-right">{line.unitPrice.toFixed(4)}</td></tr>)}</tbody></table>
       </div>)}
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={savePricing} disabled={hasUnknown} onChange={e => setSavePricing(e.target.checked)} />{hasUnknown ? "建立缺失款号的草稿核价" : "把订单单价更新到产品核价库"}</label>
+      <p className="text-xs text-text-secondary mt-2">选择“新增部件”后将加入对应款号；勾选更新核价时同时保存订单单价。</p>
       {err && <p className="text-rose text-sm mt-3">{err}</p>}
       <div className="flex justify-end gap-3 mt-5"><button className="border border-app-border rounded-btn px-4 py-2 text-sm" onClick={() => { setDraft(null); setErr(""); }}>重新上传</button>
         <button className="bg-mint-400 text-white rounded-btn px-5 py-2 text-sm disabled:opacity-50" disabled={busy || hasUnmatched || !head.externalOrderNo || !head.orderDate || (hasUnknown && !savePricing)} onClick={doConfirmMulti}>{busy ? "保存中…" : "确认导入一张订单"}</button></div>
@@ -261,8 +268,10 @@ export default function ImportClient() {
                             className="h-[34px] border border-[#fca5a5] rounded-btn px-2 text-[12.5px] text-rose bg-white min-w-[190px]">
                             <option value="">选择对应部件…</option>
                             {draft.availableItems.map((a) => <option key={a} value={a}>{a}</option>)}
+                            <option value={NEW_PART}>＋ 新增部件</option>
                             <option value={SKIP}>✗ 跳过本行（不导入）</option>
                           </select>
+                          {picks[i] === NEW_PART && <input className={inp} aria-label={`新部件 ${i + 1} 名称`} value={newNames[i] ?? ln.pdfItemName} onChange={e => setNewNames(current => ({ ...current, [i]: e.target.value }))} />}
                         </span>
                       )}
                     </td>
@@ -291,7 +300,7 @@ export default function ImportClient() {
       <div className="flex items-center gap-3 mt-6 pt-5 border-t border-app-border-light">
         <div className="text-[12.5px] text-text-tertiary">
           {draft.productFound
-            ? (redPending ? <>还有 <b className="text-rose">{draft.lines.filter((ln, i) => !ln.matchedItemName && !picks[i]).length}</b> 个部件没处理，处理完才能入库</> : "可入库")
+            ? (redPending ? <>还有 <b className="text-rose">{draft.lines.filter((ln, i) => !ln.matchedItemName && (!picks[i] || (picks[i] === NEW_PART && !resolved(i, ln)))).length}</b> 个部件没处理，处理完才能入库</> : "可入库")
             : "新货号 · 可从订单直接建立核价"}
         </div>
         <div className="ml-auto flex gap-3">

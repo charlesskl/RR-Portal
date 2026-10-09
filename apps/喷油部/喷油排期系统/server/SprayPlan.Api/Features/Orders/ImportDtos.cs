@@ -15,7 +15,7 @@ public record ImportDraft(ImportDraftHead Head, bool ProductFound, int? ProductI
 public record ImportProductDraft(string ProductNo, bool IsMa, bool ProductFound, List<ImportDraftLine> Lines, List<string> AvailableItems);
 
 // import-confirm 入参里的确认行：已匹配子件名 + 合计数量（该子件每个部位都填此数）。
-public record ImportConfirmLine(string MatchedItemName, int TotalQty, double UnitPrice = 0);
+public record ImportConfirmLine(string MatchedItemName, int TotalQty, double UnitPrice = 0, bool CreatePart = false);
 
 // import-confirm 入参：抬头 + token + 是否作为待补产品（货号找不到时 true）+ 确认行。
 public record ImportConfirmRequest(ImportDraftHead Head, string PdfToken, bool AsPendingProduct, bool SavePricing, List<ImportConfirmLine> Lines);

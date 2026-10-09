@@ -8,6 +8,7 @@ import { api, type Dictionaries, type Material } from '../api/client'
 import { toolShipmentFields } from '../utils/toolShipment'
 import { sortShipmentItems, cartonLayout, cartonGroupKey, shipmentScope } from '../utils/shipmentOrder'
 import { withShipmentInvoicePrices } from '../utils/shipmentInvoice'
+import { createCartonGroupId } from '../utils/cartonGroupId'
 import { shipmentPurchaseAmount } from '../utils/shipmentPurchase'
 import ShipmentImport from '../components/ShipmentImport'
 import type { ShipmentImportItem } from '../utils/shipmentImport'
@@ -251,7 +252,7 @@ export default function ShipmentsPage() {
   }
   function mergeCartons() {
     if (!sharedCartons || !Number.isInteger(sharedCartons) || sharedCartons < 1) return
-    const group = crypto.randomUUID()
+    const group = createCartonGroupId()
     setItems(current => current.map(it => cartonSelection.includes(it._rowKey!)
       ? { ...it, carton_group: group, cartons: sharedCartons } : it))
     setEditorDirty(true); setMergeOpen(false); setCartonSelection([])

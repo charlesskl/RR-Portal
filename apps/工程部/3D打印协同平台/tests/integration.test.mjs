@@ -42,11 +42,12 @@ test('cloud production integration: permissions, scheduling, telemetry replay, q
   const input={factory:'清溪',workshop:'A',customer:'测试',sku:'INTEGRATION',product:'整合测试件',quantity:2,material:'PLA',color:'白色',dueDate:'2026-12-01',engineer:'测试',follower:'测试',fileIds:[file.id]};
   const created=await request('/api/orders',{auth:member,data:input});assert.equal(created.status,201,JSON.stringify(created.body));const orderId=created.body.id;
   const sourceCatalog=(await request('/api/platform/catalog',{auth:admin})).body;
+  assert.equal(sourceCatalog.products[0].image,undefined,'scheduling selector does not download full product images');
   const assigned=await request('/api/platform/jobs',{auth:admin,data:{orderId,machineNumber:1,date:'2026-11-30',weight:12,productId:sourceCatalog.products[0].id,materialId:sourceCatalog.materials[0].id}});assert.equal(assigned.status,201,JSON.stringify(assigned.body));const id=assigned.body.id;
   assert.equal((await request('/api/platform/jobs',{auth:admin,data:{orderId,machineNumber:2,date:'2026-11-30',weight:12}})).status,409);
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'simulate',state:'FINISH'}})).status,403);
   assert.equal((await request('/api/orders/'+orderId,{auth:admin,method:'PATCH',data:{status:'打印中'}})).status,409);
-  let legacy=await request('/api/production/data',{auth:admin});assert.equal(legacy.status,200);assert.equal(legacy.body.products.length,2);const linked=legacy.body.schedules.find(x=>x.cloudJobId===id);assert.ok(linked);assert.equal(linked.productName,sourceCatalog.products[0].name);assert.equal(linked.material,sourceCatalog.materials[0].name);
+  let legacy=await request('/api/production/data',{auth:admin});assert.equal(legacy.status,200);assert.equal(legacy.body.products.length,2);const linked=legacy.body.schedules.find(x=>x.cloudJobId===id);assert.ok(linked);assert.equal(linked.orderId,orderId);assert.equal(linked.orderNumber,created.body.number);assert.equal((await request('/api/orders',{auth:member})).body.find(o=>o.id===orderId).production.id,id);assert.equal(linked.productName,sourceCatalog.products[0].name);assert.equal(linked.material,sourceCatalog.materials[0].name);
   assert.equal((await request('/api/production/module/save',{auth:admin,data:{module:'schedule',id:linked.id,record:{status:'done'}}})).status,400);
   assert.equal((await request('/api/production/printers/1/rescan',{auth:admin,data:{}})).status,403);
   assert.equal((await request('/api/collector/events',{token,data:{id:randomUUID(),sequence:1,observedAt:new Date().toISOString(),devices:[{machine:'999',connected:true,state:'IDLE',progress:0}]}})).status,400);
@@ -77,6 +78,21 @@ test('cloud production integration: permissions, scheduling, telemetry replay, q
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'deliver',notes:'测试接收人签收 2 件'}})).status,200);
   const orders=(await request('/api/orders',{auth:member})).body;assert.equal(orders[0].status,'已完成');
   await stop();await launch();admin=await login();assert.equal((await overview()).jobs[0].status,'待交付');
+  // An order manually marked as printing can be explicitly linked without regression.
+  const extraUpload=await fetch(base+'/api/uploads',{method:'POST',headers:{Cookie:admin.cookie,'X-CSRF-Token':admin.csrf,'X-File-Name':'link.stl'},body:'solid link\nendsolid link'});
+  assert.equal(extraUpload.status,201);const extraFile=await extraUpload.json();
+  const extraOrder=await request('/api/orders',{auth:admin,data:{...input,fileIds:[extraFile.id]}});assert.equal(extraOrder.status,201);
+  for(const status of ['待排产','打印中'])assert.equal((await request('/api/orders/'+extraOrder.body.id,{auth:admin,method:'PATCH',data:{status,follower:'测试',replyDate:'2026-11-30'}})).status,200);
+  assert.ok((await overview()).orders.some(o=>o.id===extraOrder.body.id));
+  const linkBody={orderId:extraOrder.body.id,machineNumber:2,date:'2026-11-30',weight:12};
+  assert.equal((await request('/api/platform/jobs',{auth:member,data:linkBody})).status,403);
+  const extraJob=await request('/api/platform/jobs',{auth:admin,data:linkBody});assert.equal(extraJob.status,201,JSON.stringify(extraJob.body));
+  const linkedOrder=(await request('/api/orders',{auth:admin})).body.find(o=>o.id===extraOrder.body.id);
+  assert.equal(linkedOrder.status,'打印中');assert.equal(linkedOrder.production.status,'打印中');
+  const extraSchedule=(await request('/api/production/data',{auth:admin})).body.schedules.find(x=>x.orderId===extraOrder.body.id);
+  assert.equal(extraSchedule.status,'printing');assert.equal(extraSchedule.orderNumber,extraOrder.body.number);
+  assert.equal((await request('/api/platform/jobs',{auth:admin,data:linkBody})).status,409);
+  assert.equal((await request('/api/orders',{auth:admin})).body.find(o=>o.id===orderId).status,'已完成','same-name products do not link unrelated orders');
   // A persisted outbox created while offline must replay and be cleared by the real agent process.
   const agentDir=path.join(dir,'agent');await mkdir(agentDir);const q=new DatabaseSync(path.join(agentDir,'outbox.sqlite'));q.exec('CREATE TABLE outbox(sequence INTEGER PRIMARY KEY AUTOINCREMENT,payload TEXT NOT NULL)');const replay=randomUUID();q.prepare('INSERT INTO outbox(payload) VALUES (?)').run(JSON.stringify({id:replay,observedAt:new Date().toISOString()}));q.close();
   const conf=path.join(dir,'collector-test.json');await writeFile(conf,JSON.stringify({mode:'simulation',cloudUrl:base,token}));

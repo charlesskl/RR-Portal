@@ -2693,9 +2693,9 @@ function renderSchedule(){
   renderSchedBudget(budgetMap);
 
   // 排期表格
-  let html='<table><thead><tr><th>#</th><th>日期</th><th>产品</th><th>图片</th><th>客户</th><th>材料</th><th>料重/件</th><th>数量</th><th>总用料</th><th>机台</th><th>优先级</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>';
+  let html='<table><thead><tr><th>#</th><th>日期</th><th>关联订单</th><th>产品</th><th>图片</th><th>客户</th><th>材料</th><th>料重/件</th><th>数量</th><th>总用料</th><th>机台</th><th>优先级</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>';
   if(!list.length){
-    html+='<tr><td colspan="14" style="text-align:center;padding:30px;color:#999">暂无排期，点击「+ 添加排期」</td></tr>';
+    html+='<tr><td colspan="15" style="text-align:center;padding:30px;color:#999">暂无排期，点击「+ 添加排期」</td></tr>';
   } else {
     list.forEach((s,i)=>{
       const totalG=(s.weight||0)*(s.qty||0);
@@ -2705,9 +2705,9 @@ function renderSchedule(){
       if(s.status==='pending') acts+='<button class="btn btn-g btn-sm" onclick="markSchedulePrinting('+s.id+')">开始</button> ';
       if(s.status==='printing') acts+='<button class="btn btn-g btn-sm" onclick="markScheduleDone('+s.id+')">完成</button> ';
       if(s.status!=='done'&&s.status!=='cancelled') acts+='<button class="btn btn-r btn-sm" onclick="deleteSchedule('+s.id+')">删除</button>';
-      if(s.cloudJobId) acts='<a class="btn btn-p btn-sm" href="/platform">关联订单 · 前往处理</a>';
+      if(s.cloudJobId) acts='<a class="btn btn-p btn-sm" target="_top" href="/platform'+(s.orderId?'?order='+encodeURIComponent(s.orderId):'')+'">关联订单 · 前往处理</a>';
       html+=`<tr>
-        <td>${i+1}</td><td>${s.date}</td>
+        <td>${i+1}</td><td>${s.date}</td><td>${s.orderId?`<a target="_top" href="/?order=${encodeURIComponent(s.orderId)}">${escHtml(s.orderNumber||"查看订单")}</a>`:(s.cloudJobId?"已关联订单":"独立排期")}</td>
         <td style="text-align:left">${escHtml(s.productName)}</td>
         ${renderProductImageCell(lookupProductImage(s.productName))}
         <td>${escHtml(s.customer||'-')}</td>
@@ -4036,7 +4036,7 @@ async function boot(){
   // 拉取打印机实时状态
   pollPrinterStatus();
 
-  // 每5分钟检查服务器是否有新数据（其他用户的修改）
+  // 每15秒检查业务版本，使关联排期及时显示。
   setInterval(async()=>{
     // 有未保存修改 或 模态框打开时跳过拉取，防止覆盖用户输入
     if(!_dataLoaded || _loadingData || _dirty) return;
@@ -4045,14 +4045,13 @@ async function boot(){
       const res=await fetch('/api/production/version');
       const {version}=await res.json();
       if(version>_serverVer){
-        _serverVer=version;
         updateSyncUI('pull');
         await pullFromServer();
         reRenderCurrent();
         updateSyncUI('ok');
       }
     }catch(e){}
-  }, 300000);
+  }, 15000);
 
   // 每5秒刷新打印机实时状态
   setInterval(pollPrinterStatus, 5000);

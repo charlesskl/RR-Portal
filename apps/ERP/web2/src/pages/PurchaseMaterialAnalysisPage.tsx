@@ -64,8 +64,14 @@ interface AnalysisEditRow {
   orig供应商名称: string;
   勾选: boolean; // 下单行选择:库存不足默认勾;库存够可手勾(防库存时点误差);已下满默认不勾,可手勾追加下单
   锁定: boolean; // 库存为 0=必须订:锁定勾选不可取消
-  已订数量: number; // 该生产单下此物料已累计下单数量(>=需订=已下满,显示「已下单」徽标;订单同时进行,可手勾追加下单)
+  已订数量: number; // 该生产单下此物料已累计下单数量(已订≥需订−实时可用库存=已下满,显示「已下单」徽标;订单同时进行,可手勾追加下单)
 }
+
+// 下满判定：已订数量 ≥ 需订数量 − 实时可用库存。
+// 需订数量是制单时点快照（按当时库存算出）；之后到货的库存应能冲抵需求，
+// 与采购下单页「库存够默认不勾选」的实时口径一致——否则按实时缺口下单后，
+// 分析页会一直误报「需订」。
+const coveredByOrdersAndStock = (需订: number, 可用: number, 已订: number) => 已订 >= 需订 - 可用;
 
 const toEditRow = (r: PurchaseAnalysisRow): AnalysisEditRow => {
   const q = r.需订数量 != null ? String(Math.round(Number(r.需订数量))) : "";
@@ -73,7 +79,7 @@ const toEditRow = (r: PurchaseAnalysisRow): AnalysisEditRow => {
   const 可用 = Number(r.可用库存 ?? 0);
   const 需订 = Number(r.需订数量 ?? 0);
   const 已订 = Number(r.已订数量 ?? 0);
-  const 下满 = 已订 > 0 && 已订 >= 需订;
+  const 下满 = coveredByOrdersAndStock(需订, 可用, 已订);
   const 锁定 = !下满 && 需订 > 0 && 可用 <= 0;
   return {
     ID: r.ID,
@@ -521,11 +527,24 @@ export default function PurchaseMaterialAnalysisPage() {
           <div className="f-panel flex flex-wrap items-center gap-2 px-4 py-3">
             <span className="text-xs font-semibold text-[#8a94a6]">按供应商下单:</span>
             {supplierGroups.map((g) => {
-              // 需订合计只算未下满的行;已下满组不禁用——订单同时进行,勾选要追加的行后点 chip 追加下单(采购订单保存时再确认)
+              // 需订合计只算未下满的行（扣实时库存与已订后的剩余量）;已下满组不禁用——订单同时进行,勾选要追加的行后点 chip 追加下单(采购订单保存时再确认)
               const 未下满行 = g.rows.filter(
-                (r) => !(r.已订数量 > 0 && r.已订数量 >= (Number(r.需订数量) || 0)),
+                (r) =>
+                  !coveredByOrdersAndStock(
+                    Number(r.需订数量) || 0,
+                    Number(r.可用库存) || 0,
+                    r.已订数量,
+                  ),
               );
-              const 需订合计 = 未下满行.reduce((s, r) => s + (Number(r.需订数量) || 0), 0);
+              const 需订合计 = 未下满行.reduce(
+                (s, r) =>
+                  s +
+                  Math.max(
+                    0,
+                    (Number(r.需订数量) || 0) - (Number(r.可用库存) || 0) - r.已订数量,
+                  ),
+                0,
+              );
               const 全下满 = 未下满行.length === 0;
               return (
                 <button
@@ -613,7 +632,11 @@ export default function PurchaseMaterialAnalysisPage() {
                     const enough =
                       r.可用库存 != null &&
                       Number(r.可用库存) >= (Number(r.需订数量) || 0);
-                    const 下满 = r.已订数量 > 0 && r.已订数量 >= (Number(r.需订数量) || 0);
+                    const 下满 = coveredByOrdersAndStock(
+                      Number(r.需订数量) || 0,
+                      Number(r.可用库存) || 0,
+                      r.已订数量,
+                    );
                     return (
                       <tr key={r.ID} className="border-b border-black/6 last:border-0">
                         <td className="px-3 py-2 text-center">
@@ -628,7 +651,7 @@ export default function PurchaseMaterialAnalysisPage() {
                                 r.锁定
                                   ? "库存为 0，必须订购"
                                   : 下满
-                                    ? "已下满(已订≥需订);订单同时进行,勾选=追加下单,采购订单保存时会再确认防重复采购"
+                                    ? "已下满(已订+实时库存已覆盖需订);订单同时进行,勾选=追加下单,采购订单保存时会再确认防重复采购"
                                     : enough
                                       ? "库存已够需求;为避免库存时点误差也可勾选下单"
                                       : "库存不足，按需勾选"
@@ -637,18 +660,19 @@ export default function PurchaseMaterialAnalysisPage() {
                                 !r.锁定 && patchEditRow(r.ID, { 勾选: e.target.checked })
                               }
                             />
-                            {下满 ? (
+                            {下满 && r.已订数量 > 0 ? (
                               <span
                                 className="inline-flex rounded-full border border-[#16a34a]/50 bg-[#16a34a]/10 px-2 py-0.5 text-xs font-semibold text-[#15803d]"
-                                title={`已累计下单 ${r.已订数量} ≥ 需订 ${r.需订数量};勾选左侧框可追加下单`}
+                                title={`已订 ${r.已订数量} + 实时库存 ${Number(r.可用库存) || 0} 已覆盖需订 ${r.需订数量};勾选左侧框可追加下单`}
                               >
                                 已下单
                               </span>
                             ) : (
+                              !下满 &&
                               r.已订数量 > 0 && (
                                 <span
                                   className="text-[10px] font-semibold text-[#b26a00]"
-                                  title={`已下单 ${r.已订数量},还需 ${(Number(r.需订数量) || 0) - r.已订数量}`}
+                                  title={`已下单 ${r.已订数量},还需 ${Math.max(0, (Number(r.需订数量) || 0) - (Number(r.可用库存) || 0) - r.已订数量)}`}
                                 >
                                   已订{r.已订数量}
                                 </span>

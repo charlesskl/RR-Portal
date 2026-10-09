@@ -118,6 +118,7 @@ export const MENU_TREE: MenuGroup[] = [
       M("退料单", "/material-returns"),
       M("报废单", "/material-scraps"),
       M("库存统计表", "/material-inventory"),
+      M("个人库存金额表", "/personal-inventory"),
       M("库存月报表", "/month-end"),
       M("订购单查询", "/purchase-order-query"),
     ],

@@ -222,6 +222,26 @@ export interface MaterialCategoryNode {
   父级?: string | null;
 }
 
+// ---------- 个人库存金额表(批次倒推 FIFO 归属;与 PersonalInventoryController 对齐) ----------
+
+export interface PersonalInventoryBatchRow {
+  范围?: string; // 来料 / 塑胶
+  下单人: string;
+  入仓单号?: string | null;
+  订单单号?: string | null;
+  日期?: string | null;
+  仓库?: string | null;
+  物料编号?: string;
+  物料名称?: string;
+  规格?: string;
+  颜色?: string;
+  单位?: string;
+  批次数量: number;
+  剩余数量: number;
+  单价?: number | null; // 无「单价」权限位时后端返回 null
+  金额?: number | null; // 剩余x单价;无「金额」权限位时 null
+}
+
 // ---------- 采购订单(来料仓;照抄老系统 web/src/api/purchaseOrders.ts) ----------
 
 // 采购物料分析带出的待采购物料行(按生产单BOM展开)

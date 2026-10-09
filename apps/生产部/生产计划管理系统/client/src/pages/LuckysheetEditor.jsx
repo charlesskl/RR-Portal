@@ -386,6 +386,9 @@ function LuckysheetEditor({
   // 不再在保存时去读 Luckysheet 内部 data（避免 flush 时序问题）
   // 结构: { [orderId]: { fields: { col_data_key: 新值 }, fmt: { col_data_key: 格式对象 } } }
   const pendingChangesRef = useRef({});
+  // 粘贴新行/加行等「还没订单 id」的改动：recordCellChange 记不进 pending（没 id），
+  // 单独用脏标记兜住，否则复制粘贴后没保存就切页签/关页面会静默丢失
+  const structuralDirtyRef = useRef(false);
   // 初始化期间禁止钩子（避免 luckysheet.create() 加载数据时误记一堆变化）
   const suppressHookRef = useRef(true);
   const layoutSaveTimerRef = useRef(null);
@@ -406,14 +409,17 @@ function LuckysheetEditor({
 
   const buildSheetSettings = (sheet) => {
     const cfg = (sheet && sheet.config) || {};
+    // 行/列隐藏（rowhidden/colhidden）不持久化：隐藏是临时查看操作，
+    // 之前存在设置里会全车间所有拉生效，且 A~E 这类首列藏掉后界面里没有还原入口。
+    // 现在隐藏只对当前会话有效，刷新即恢复。
     return {
       columnlen: cfg.columnlen || {},
       rowlen: cfg.rowlen || {},
-      frozen: (sheet && sheet.frozen) || null,
+      frozen: (sheet && sheet.frozen && sheet.frozen.type !== 'cancel') ? sheet.frozen : null,
+      // ↑ Luckysheet 取消冻结后 frozen={type:'cancel'}（truthy），直接存/直接套会被当成有效冻结，
+      //   重新加载后滚动行为异常（往右滚自动弹回左）。'cancel' 一律归一成 null。
       merge: cfg.merge || {},
       borderInfo: cfg.borderInfo || [],
-      rowhidden: cfg.rowhidden || {},
-      colhidden: cfg.colhidden || {},
     };
   };
 
@@ -459,7 +465,7 @@ function LuckysheetEditor({
       if (suppressHookRef.current) { dbg('[钩子] (r,c)=(' + r + ',' + c + ') 被 suppress 跳过'); return; }
       if (r == null || r === 0) { dbg('[钩子] (r,c)=(' + r + ',' + c + ') 表头跳过'); return; }       // 跳过表头
       const orderId = rowMapRef.current[r - 1];
-      if (!orderId) { dbg('[钩子] (r,c)=(' + r + ',' + c + ') 找不到 orderId'); return; }
+      if (!orderId) { dbg('[钩子] (r,c)=(' + r + ',' + c + ') 找不到 orderId（新行）→ 标脏'); structuralDirtyRef.current = true; return; }
       const colData = ORDER_COLUMNS[c]?.data;
       if (!colData || colData === 'quantity_sum') { dbg('[钩子] (r,c)=(' + r + ',' + c + ') 列', colData, '跳过'); return; }
       // days 列由 quantity/daily_target 改动时显式 push，不经钩子（避免 Luckysheet 异步 cellUpdated 把自动算的天数批量入 pending）
@@ -835,6 +841,7 @@ function LuckysheetEditor({
       }
       // 清空 pending（已经入库了，下一轮重新记）
       pendingChangesRef.current = {};
+      structuralDirtyRef.current = false;
 
       console.log('[saveAll-钩子版]',
         '钩子命中 =', hookHits,
@@ -865,11 +872,31 @@ function LuckysheetEditor({
     const editBox = document.querySelector('#luckysheet-input-box');
     const editing = editBox && editBox.style.display && editBox.style.display !== 'none';
     return Boolean(editing)
+      || structuralDirtyRef.current
       || Object.keys(pendingChangesRef.current).length > 0;
   };
 
   // 暴露保存与脏状态给父组件，避免筛选或外部刷新静默丢失编辑
   useImperativeHandle(ref, () => ({ saveAll, hasPendingChanges }), [workshop, data, lineName, orderStatus]);
+
+  // 未保存防护：
+  // 1) 关闭/刷新页面时浏览器拦截提示（复制粘贴的行没保存就关页面 = 数据丢失，踩过坑）
+  // 2) 挂到 window 上，App 切换车间/拉页签前先问一句
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (hasPendingChanges()) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    window.__rrPendingChanges = hasPendingChanges;
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      if (window.__rrPendingChanges === hasPendingChanges) delete window.__rrPendingChanges;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workshop, data, lineName, orderStatus]);
 
   useEffect(() => {
     // 等待 sheetSettings 加载完成后才初始化
@@ -891,7 +918,7 @@ function LuckysheetEditor({
     const savedColWidths = (sheetSettings && sheetSettings.columnlen) || {};
     const colWidths = { ...defaultColWidths, ...migrateSavedWidths(savedColWidths, ORDER_COLUMNS) };
     const rowLen = (sheetSettings && sheetSettings.rowlen) || {};
-    const savedFrozen = sheetSettings && sheetSettings.frozen;
+    const savedFrozen = sheetSettings && sheetSettings.frozen && sheetSettings.frozen.type !== 'cancel' ? sheetSettings.frozen : null;
 
     const sheetConfig = {
       name: '生产计划',
@@ -903,8 +930,7 @@ function LuckysheetEditor({
         rowlen: rowLen,
         merge: (sheetSettings && sheetSettings.merge) || {},
         borderInfo: (sheetSettings && sheetSettings.borderInfo) || [],
-        rowhidden: (sheetSettings && sheetSettings.rowhidden) || {},
-        colhidden: (sheetSettings && sheetSettings.colhidden) || {},
+        // 行/列隐藏不持久化（见 buildSheetSettings 注释）， legacy 设置也不再应用
       },
       ...(savedFrozen ? { frozen: savedFrozen } : {}),
     };
@@ -1014,6 +1040,7 @@ function LuckysheetEditor({
       initializedRef.current = false;
       suppressHookRef.current = true;
       pendingChangesRef.current = {};
+      structuralDirtyRef.current = false;
       if (layoutSaveTimerRef.current) clearTimeout(layoutSaveTimerRef.current);
       document.removeEventListener('mouseup', handleLayoutMouseUp, true);
       document.removeEventListener('keydown', handleKeyDelete, true);
@@ -1045,7 +1072,7 @@ function LuckysheetEditor({
       const savedColWidths = (sheetSettings && sheetSettings.columnlen) || {};
       const colWidths = { ...defaultColWidths, ...migrateSavedWidths(savedColWidths, ORDER_COLUMNS) };
       const rowLen = (sheetSettings && sheetSettings.rowlen) || {};
-      const savedFrozen = sheetSettings && sheetSettings.frozen;
+      const savedFrozen = sheetSettings && sheetSettings.frozen && sheetSettings.frozen.type !== 'cancel' ? sheetSettings.frozen : null;
       luckysheet.destroy && luckysheet.destroy();
       luckysheet.create({
         container: containerId,
@@ -1071,8 +1098,7 @@ function LuckysheetEditor({
             rowlen: rowLen,
             merge: (sheetSettings && sheetSettings.merge) || {},
             borderInfo: (sheetSettings && sheetSettings.borderInfo) || [],
-            rowhidden: (sheetSettings && sheetSettings.rowhidden) || {},
-            colhidden: (sheetSettings && sheetSettings.colhidden) || {},
+            // 行/列隐藏不持久化（见 buildSheetSettings 注释）
           },
           ...(savedFrozen ? { frozen: savedFrozen } : {}),
         }],
@@ -1101,6 +1127,7 @@ function LuckysheetEditor({
       });
       // 重建后清空 pending 并解锁 hook（数据已重新加载，避免误记）
       pendingChangesRef.current = {};
+      structuralDirtyRef.current = false;
       suppressHookRef.current = true;
       // 两个批量任务都结束才释放 suppress：公式恢复分块后可能跑很久，
       // 天数任务先结束就释放会让公式恢复的 setCellValue 触发 cellUpdated，

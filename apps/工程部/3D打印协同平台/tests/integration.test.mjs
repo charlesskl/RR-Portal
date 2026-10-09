@@ -16,6 +16,15 @@ test('cloud production integration: permissions, scheduling, telemetry replay, q
   assert.equal((await request('/api/collector/jobs',{token:'wrong'})).status,401);
   assert.equal((await request('/api/users',{auth:admin,data:{username:'member',name:'测试成员',password:'member123',role:'member',factory:'清溪',factories:['清溪']}})).status,201);
   const member=await login('member');assert.equal((await request('/api/platform/overview',{auth:member})).status,403);assert.equal((await request('/production/',{auth:member})).status,403);
+  const legacySource={settings:null,products:[{id:'import-product',name:'历史产品'}],materials:[],inventory:{},records:{'2026-09-01':{off:false,items:[{_id:'import-record',machine:1,qty:2}]}},schedules:[],maintenance:[],stockInLogs:[],miscExpenses:[]};
+  assert.equal((await request('/api/production/legacy-import/preview',{auth:member,data:{data:legacySource}})).status,403);
+  const preview=await request('/api/production/legacy-import/preview',{auth:admin,data:{data:legacySource}});assert.equal(preview.status,200);assert.deepEqual(preview.body.conflicts,[]);
+  assert.equal((await request('/api/production/legacy-import/apply',{auth:admin,data:{data:legacySource,fingerprint:'stale'}})).status,409);
+  const imported=await request('/api/production/legacy-import/apply',{auth:admin,data:{data:legacySource,fingerprint:preview.body.fingerprint}});assert.equal(imported.status,200);assert.ok(imported.body.backupId);
+  const verifyImport=(await request('/api/production/data',{auth:admin})).body;assert.equal(verifyImport.records['2026-09-01'].items.length,1);
+  const again=await request('/api/production/legacy-import/preview',{auth:admin,data:{data:legacySource}});assert.equal(again.body.summary.after.products,2);
+  assert.equal((await request('/api/production/legacy-import/apply',{auth:admin,data:{data:legacySource,fingerprint:again.body.fingerprint}})).status,200);
+  const snapDB=new DatabaseSync(path.join(dir,'production.sqlite'));assert.ok(snapDB.prepare('SELECT value FROM import_backups WHERE id=?').get(imported.body.backupId));snapDB.close();
   const upload=await fetch(base+'/api/uploads',{method:'POST',headers:{Cookie:member.cookie,'X-CSRF-Token':member.csrf,'X-File-Name':'test.stl'},body:'solid test\nendsolid test'});assert.equal(upload.status,201);const file=await upload.json();
   const input={factory:'清溪',workshop:'A',customer:'测试',sku:'INTEGRATION',product:'整合测试件',quantity:2,material:'PLA',color:'白色',dueDate:'2026-12-01',engineer:'测试',follower:'测试',fileIds:[file.id]};
   const created=await request('/api/orders',{auth:member,data:input});assert.equal(created.status,201,JSON.stringify(created.body));const orderId=created.body.id;
@@ -24,7 +33,7 @@ test('cloud production integration: permissions, scheduling, telemetry replay, q
   assert.equal((await request('/api/platform/jobs',{auth:admin,data:{orderId,machineNumber:2,date:'2026-11-30',weight:12}})).status,409);
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'simulate',state:'FINISH'}})).status,403);
   assert.equal((await request('/api/orders/'+orderId,{auth:admin,method:'PATCH',data:{status:'打印中'}})).status,409);
-  let legacy=await request('/api/production/data',{auth:admin});assert.equal(legacy.status,200);assert.equal(legacy.body.products.length,1);const linked=legacy.body.schedules.find(x=>x.cloudJobId===id);assert.ok(linked);assert.equal(linked.productName,sourceCatalog.products[0].name);assert.equal(linked.material,sourceCatalog.materials[0].name);
+  let legacy=await request('/api/production/data',{auth:admin});assert.equal(legacy.status,200);assert.equal(legacy.body.products.length,2);const linked=legacy.body.schedules.find(x=>x.cloudJobId===id);assert.ok(linked);assert.equal(linked.productName,sourceCatalog.products[0].name);assert.equal(linked.material,sourceCatalog.materials[0].name);
   assert.equal((await request('/api/production/module/save',{auth:admin,data:{module:'schedule',id:linked.id,record:{status:'done'}}})).status,400);
   assert.equal((await request('/api/production/printers/1/rescan',{auth:admin,data:{}})).status,403);
   assert.equal((await request('/api/collector/events',{token,data:{id:randomUUID(),sequence:1,observedAt:new Date().toISOString(),devices:[{machine:'999',connected:true,state:'IDLE',progress:0}]}})).status,400);

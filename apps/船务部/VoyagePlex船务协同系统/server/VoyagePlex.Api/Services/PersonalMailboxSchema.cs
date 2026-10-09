@@ -17,7 +17,8 @@ public static class PersonalMailboxSchema
             ["ImportEmailItems"] = new() { ["MailOwnerId"] = "INTEGER NOT NULL DEFAULT 0", ["BusinessFingerprint"] = "TEXT NOT NULL DEFAULT ''" },
             ["MailContacts"] = new() { ["MailOwnerId"] = "INTEGER NOT NULL DEFAULT 0" },
             ["Users"] = new() { ["MailboxAddress"] = "TEXT NOT NULL DEFAULT ''", ["MailboxHost"] = "TEXT NOT NULL DEFAULT 'imap.exmail.qq.com'", ["MailboxFolder"] = "TEXT NOT NULL DEFAULT 'INBOX'", ["MailboxSecretProtected"] = "TEXT NOT NULL DEFAULT ''", ["MailboxTestStatus"] = "TEXT NOT NULL DEFAULT 'Unknown'", ["MailboxTestedAt"] = "TEXT NULL" },
-            ["ShipmentTasks"] = new() { ["ResponsibleUserId"] = "INTEGER NOT NULL DEFAULT 0", ["ResponsibleUserName"] = "TEXT NOT NULL DEFAULT ''", ["SourceMailboxAddress"] = "TEXT NOT NULL DEFAULT ''" },
+            ["ProductInfos"] = new() { ["NetNetWeightPerBox"] = "TEXT NULL", ["MeasurementPerBox"] = "TEXT NULL", ["VolumePerBox"] = "TEXT NULL", ["BoxDimensions"] = "TEXT NOT NULL DEFAULT ''", ["Brand"] = "TEXT NOT NULL DEFAULT ''" },
+            ["ShipmentTasks"] = new() { ["BatchRootId"] = "INTEGER NOT NULL DEFAULT 0", ["BatchSequence"] = "INTEGER NOT NULL DEFAULT 0", ["ResponsibleUserId"] = "INTEGER NOT NULL DEFAULT 0", ["ResponsibleUserName"] = "TEXT NOT NULL DEFAULT ''", ["SourceMailboxAddress"] = "TEXT NOT NULL DEFAULT ''" },
         };
         foreach (var (table, fields) in additions)
         {

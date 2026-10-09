@@ -8,7 +8,9 @@ from app.eml import parse_eml
 import unittest
 from unittest.mock import patch, MagicMock
 import openpyxl
-from app.shipment_export import build_shipment_workbook
+from app.shipment_export import build_shipment_workbook as ordinary_builder
+from app.huadeng_export import build_huadeng_workbook
+def build_shipment_workbook(task): return build_huadeng_workbook(task, ordinary_builder)
 from app.mailbox import fetch_mailbox, test_mailbox_connection
 from app.main import scan_local_inventory
 

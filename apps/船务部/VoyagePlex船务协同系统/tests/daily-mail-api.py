@@ -390,6 +390,23 @@ def run():
                 request("/api/shipments")
                 request("/api/mail/dates",expected=403)
                 request("/api/users",expected=403)
+            request("/api/auth/login", {"username":"mailtest","password":password})
+            for scope in ["Xingxin", "Huadeng"]:
+                jar.set_cookie(http.cookiejar.Cookie(0,"voyageplex_company",scope,None,False,"127.0.0.1",False,False,"/",True,False,None,True,None,None,{}))
+                plan={"status":"parsed","fingerprint":"multi-"+scope,"fields":{"multi_container":"true","export_template":"sky-castle-multi","customer":"Sky Castle"},"items":[{"product_code":"MULTI-SKU","spec":12,"quantity":20016,"pieces":1668,"net_net_weight":7806.24,"order_total_pieces":1668}],"shipment_groups":[{"group_key":"container-"+str(i+1),"so_number":"MULTI-SO-"+str(i+1),"container_type":"40HQ","si_deadline":"2026-09-24T10:00" if i<2 else "2026-09-29T15:00","cutoff_date":"2026-09-27T09:00" if i<2 else "2026-10-02T12:00"} for i in range(7)],"so_numbers":["MULTI-SO-"+str(i+1) for i in range(7)]}
+                preview=request("/api/imports/email/split-preview",plan)["cabinets"]
+                assert len(preview)==7 and sum(int(item["pieces"]) for cabinet in preview for item in cabinet["items"])==1668
+                request("/api/imports/email/split-preview",{"fields":{"multi_container":"true"},"shipment_groups":[None,None]},expected=400)
+                request("/api/imports/email/confirm",{"items":[plan],"total":1,"parsed":1})
+                tasks=[task for task in request("/api/shipments") if (task.get("soNumber") or "").startswith("MULTI-SO-")]
+                assert len(tasks)==7
+                assert sum(float(item["pieces"]) for task in tasks for item in task["items"])==1668
+                assert sum(float(item["quantity"]) for task in tasks for item in task["items"])==20016
+                assert len({task["batchRootId"] for task in tasks})==1
+                assert sorted(task["batchSequence"] for task in tasks)==list(range(1,8))
+                assert all(len(task["relatedBatchTasks"])==7 and task["exportDetails"]["templateKey"]=="sky-castle-multi" for task in tasks)
+                assert all(item["order_total_pieces"]==1668 for task in tasks for item in task["items"])
+            print("Multi-container: seven linked tasks, company-neutral rules, carton/quantity conservation and PO totals passed.")
             print("Role permissions: supervisors scoped to company, user grants protected, warehouse company isolation passed.")
             print("Personal mail: encrypted binding, duplicate binding rejection, owner isolation, cookie tamper rejection, shared tasks, private source redaction and independent settings passed.")
             print("Company isolation: same-SO tasks, shared products, independent settings, scoped IDs and user permissions passed.")

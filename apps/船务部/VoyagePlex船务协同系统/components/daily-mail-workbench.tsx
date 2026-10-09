@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { CargoExtraDetails } from "@/components/cargo-extra-details";
+import { ContainerSplitPreview } from "@/components/container-split-preview";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Check, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -12,7 +14,8 @@ type WorkCategory = "Unclassified"|"Shipment"|"Change"|"FollowUp"|"Other";
 type Cargo = Record<string,unknown>;
 type WarehouseGroup = {warehouse:string;references:string[];items:Cargo[];container_type?:string};
 type MailItem = {id:number;mailSubject:string;mailSender:string;mailReceivedAt:string;mailReceivedDate:string;workCategory:WorkCategory;shipmentMode:string;status:string;error:string;handlingStatus:string;handlingOutcome:string;needsClassificationReview:boolean;taskIdsJson:string};
-type Parsed = {fields?:Record<string,string>;items?:Cargo[];warehouse_groups?:WarehouseGroup[];so_numbers?:string[];message?:{body_text?:string};attachments?:Array<{filename:string}>;warnings?:string[]};
+type ContainerPlan = {group_key:string;so_number:string;container_type:string;vessel_name?:string;si_deadline?:string;cutoff_date?:string;capacity_boxes?:string};
+type Parsed = {shipment_groups?:ContainerPlan[];fields?:Record<string,string>;items?:Cargo[];warehouse_groups?:WarehouseGroup[];so_numbers?:string[];message?:{body_text?:string};attachments?:Array<{filename:string}>;warnings?:string[]};
 type Detail = MailItem & {duplicateTaskIds?:number[];parsed?:Parsed;relatedTasks?:Array<{id:number;soNumber:string;plannedShipDate?:string;containerType:string;cutoffDate:string;siDeadline:string;port:string}>};
 type Day = {date:string;total:number;pending:number};
 type Dates = {startDate:string;days:Day[]};
@@ -79,8 +82,10 @@ export function DailyMailWorkbench({route=""}:{route?:string}){
   function toggle(id:number,checked:boolean){setSelected(previous=>{const next=new Set(previous);checked?next.add(id):next.delete(id);return next;});}
   function editField(key:string,value:string){setDetail(current=>current?{...current,parsed:{...current.parsed,fields:{...current.parsed?.fields,[key]:value}}}:current);setDirty(true);}
   function editCargo(index:number,key:string,value:string){setDetail(current=>current?{...current,parsed:{...current.parsed,items:current.parsed?.items?.map((item,i)=>i===index?{...item,[key]:value}:item)}}:current);setDirty(true);}
+  function editContainer(index:number,value:string){setDetail(current=>current?{...current,parsed:{...current.parsed,shipment_groups:current.parsed?.shipment_groups?.map((group,i)=>i===index?{...group,capacity_boxes:value}:group)}}:current);setDirty(true);}
+  function addCargo(){setDetail(current=>current?{...current,parsed:{...current.parsed,items:[...(current.parsed?.items||[]),{product_code:"",spec:"",quantity:"",pieces:"",customer_po:"",contract_number:""}]}}:current);setDirty(true);}
   async function save(){if(!detail||!dirty)return;setWorking(true);setError("");try{
-    await readResponse(await apiFetch(`/api/mail/candidates/${detail.id}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({fields:detail.parsed?.fields||{},items:detail.parsed?.items||[],warehouseGroups:detail.parsed?.warehouse_groups||[]})}));
+    await readResponse(await apiFetch(`/api/mail/candidates/${detail.id}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({fields:detail.parsed?.fields||{},items:detail.parsed?.items||[],warehouseGroups:detail.parsed?.warehouse_groups||[],shipmentGroups:detail.parsed?.shipment_groups||[]})}));
     setDirty(false);setNotice("核对资料已保存，可勾选确认。");setRefresh(value=>value+1);
   }catch(reason){setError(reason instanceof Error?reason.message:"保存失败");}finally{setWorking(false);}}
   async function act(action:"confirm"|"acknowledge",ids:number[]){
@@ -107,6 +112,7 @@ export function DailyMailWorkbench({route=""}:{route?:string}){
   const pending=result.items.filter(item=>item.handlingStatus==="Pending");const chosen=result.items.filter(item=>selected.has(item.id));
   const days=Array.from(new Set([dates.startDate,...(chinaToday()>=dates.startDate?[chinaToday()]:[]),...dates.days.map(day=>day.date)])).sort().reverse();
   const summary=dates.days.find(day=>day.date===date);const parsed=detail?.parsed;const editable=!!detail&&canConfirm(detail);
+  const visibleCargoLabels=cargoLabels;
   const relatedFieldKeys:Record<string,string>={ship_date:"plannedShipDate",container_type:"containerType",cutoff_date:"cutoffDate",si_deadline:"siDeadline",port:"port"};
   return <section className="daily-mail">
     {(error||notice)&&<div className={error?"form-error":"notice"} role={error?"alert":"status"}>{error||notice}</div>}
@@ -123,8 +129,9 @@ export function DailyMailWorkbench({route=""}:{route?:string}){
       {!!detail.duplicateTaskIds?.length&&<div className="notice">同一邮件已建立任务 {detail.duplicateTaskIds.map(id=>`#${id}`).join("、")}，确认时将关联已有任务，不会重复建立。</div>}
       {detail.relatedTasks?.map(task=><div className="daily-mail-related" key={task.id}><Link href={`/shipments/${task.id}`}>关联任务 #{task.id} · SO {task.soNumber}</Link>{detail.workCategory==="Change"&&Object.entries(relatedFieldKeys).map(([field,key])=>{const previous=String(task[key as keyof typeof task]??"");const current=parsed?.fields?.[field];return current&&current!==previous?<p key={field}>{fieldLabels[field]}：<del>{previous||"空"}</del> → <strong>{current}</strong></p>:null;})}</div>)}
       <div className="form-grid">{Object.entries(fieldLabels).map(([key,label])=><label key={key} className={key==="special_requirements"?"full-width":""}><span>{label}</span>{key==="special_requirements"?<textarea rows={4} value={parsed?.fields?.[key]||""} disabled={!editable||working} onChange={event=>editField(key,event.target.value)}/>:<input value={parsed?.fields?.[key]||""} disabled={!editable||working} onChange={event=>editField(key,event.target.value)}/>}</label>)}</div>
+      {parsed?.fields?.multi_container==="true"&&<div className="review-section"><h3>分柜安排 · {parsed.shipment_groups?.length} 个任务</h3><p>同款产品优先集中装柜；同柜型容量留空时按总箱数均衡分配。没有产品资料时只建立柜安排，导出普通模板。</p>{parsed.shipment_groups?.map((group,index)=><label className="cargo-scope-row" key={group.group_key}><span>{index+1}. {group.so_number} · {group.container_type} · {group.vessel_name} · SI {group.si_deadline} · 截关 {group.cutoff_date}</span><input aria-label={`柜${index+1}容量箱数`} type="number" min="1" step="1" disabled={!editable||working} value={group.capacity_boxes||""} placeholder="可装箱数（选填）" onChange={event=>editContainer(index,event.target.value)}/></label>)}{editable&&<button className="secondary-button" disabled={working} onClick={addCargo}>补充整批产品</button>}<ContainerSplitPreview payload={parsed}/></div>}
       {!!parsed?.warehouse_groups?.length&&<div className="warehouse-grid">{parsed.warehouse_groups.map((group,index)=><article key={index}><strong>{group.warehouse||"仓库待识别"}</strong><small>{group.container_type} · {group.references?.join("、")||"—"} · {group.items.length} 条明细</small></article>)}</div>}
-      {!!parsed?.items?.length&&<div className="review-section"><h3>货物明细 <small>共 {parsed.items.length} 条，可在确认前修改</small></h3><div className="review-items editable"><div>{Object.values(cargoLabels).map(label=><b key={label}>{label}</b>)}</div>{parsed.items.map((item,index)=><div key={index}>{Object.keys(cargoLabels).map(key=><input key={key} aria-label={`${cargoLabels[key]} ${index+1}`} value={String(item[key]??"")} disabled={!editable||working} onChange={event=>editCargo(index,key,event.target.value)}/>)}</div>)}</div></div>}
+      {!!parsed?.items?.length&&<div className="review-section"><h3>货物明细 <small>共 {parsed.items.length} 条，可在确认前修改</small></h3><div className="review-items editable"><div>{Object.values(visibleCargoLabels).map(label=><b key={label}>{label}</b>)}{parsed.fields?.export_template==="sky-castle-multi"&&<b>补充资料</b>}</div>{parsed.items.map((item,index)=><div key={index}>{Object.keys(visibleCargoLabels).map(key=><input key={key} aria-label={`${visibleCargoLabels[key]} ${index+1}`} value={String(item[key]??"")} disabled={!editable||working} onChange={event=>editCargo(index,key,event.target.value)}/>)}<CargoExtraDetails item={item} specialTemplate={parsed.fields?.export_template==="sky-castle-multi"} disabled={!editable||working} onChange={(key,value)=>editCargo(index,key,value)}/></div>)}</div></div>}
       {parsed?.fields?.cargo_split_required==="true"&&<div className="review-section"><h3>本次出运 / 等待通知分配</h3>{parsed.items?.map((item,index)=><label className="cargo-scope-row" key={index}><span>{String(item.product_code||"")} · {String(item.customer_po||"")} · {String(item.quantity||0)} 个</span><select disabled={!editable||working} value={String(item.shipment_scope||"unassigned")} onChange={event=>editCargo(index,"shipment_scope",event.target.value)}><option value="unassigned">请选择</option><option value="current">本次出运</option><option value="waiting">剩余散货，等待客户通知</option></select></label>)}</div>}
       {!!parsed?.warnings?.length&&<div className="notice">{parsed.warnings.join("；")}</div>}
       <details className="daily-mail-body"><summary>邮件正文及附件（{parsed?.attachments?.length||0}）</summary><pre>{parsed?.message?.body_text||"无正文"}</pre>{parsed?.attachments?.map((attachment,index)=><p key={index}>{attachment.filename}</p>)}</details>

@@ -91,5 +91,10 @@ describe("PersonalInventoryPage", () => {
         calls.some((c) => c.url.includes("/api/personal-inventory") && c.url.includes("%E8%83%B6")),
       ).toBe(true),
     );
+    // 半成品页签同样带参
+    fireEvent.click(screen.getByRole("button", { name: "半成品" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.includes("%E5%8D%8A%E6%88%90%E5%93%81"))).toBe(true),
+    );
   });
 });

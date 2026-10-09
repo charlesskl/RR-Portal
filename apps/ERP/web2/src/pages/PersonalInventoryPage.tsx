@@ -20,7 +20,7 @@ interface PersonRow {
   库存金额: number | null;
 }
 
-const SCOPES = ["全部", "来料", "塑胶"] as const;
+const SCOPES = ["全部", "来料", "塑胶", "半成品"] as const;
 
 function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (

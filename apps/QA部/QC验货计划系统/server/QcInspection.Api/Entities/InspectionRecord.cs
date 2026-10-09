@@ -6,6 +6,7 @@ public sealed class InspectionRecord
     public HashSet<string> ImportFields { get; set; } = [];
 
     public long Id { get; set; }
+    public long? ReinspectionOfId { get; set; }
     public string PlanId { get; set; } = string.Empty;
     public string ScheduleKey { get; set; } = string.Empty;
     public string ScheduleSource { get; set; } = string.Empty;

@@ -85,7 +85,7 @@ describe('deployment base paths', () => {
     expect(effectiveCustomsCompany({ customs_company: '其他报关公司' }, { customs_company: '' })).toBe('其他报关公司')
   })
 
-  it('writes the Huashengyi formula for legacy rows with a blank customs company', async () => {
+  it('legacy rows with a blank customs company and US$ prices keep invoice prices unchanged', async () => {
     const templateBytes = readFileSync(resolve(projectRoot, 'public', 'template-customs-rri.xlsx'))
     const output = await buildCustomsWorkbook({
       templateBuffer: Uint8Array.from(templateBytes).buffer,
@@ -104,8 +104,9 @@ describe('deployment base paths', () => {
     const workbook = XLSX.read(await output.arrayBuffer(), { type: 'array', cellFormula: true })
     const sheet = workbook.Sheets['FORMULA-TEST']
     expect(sheet.AR4?.v).toBe('深圳市华胜益出口贸易有限公司')
-    expect(sheet.Z4).toMatchObject({ f: 'AO4*1.05/7.2', v: (0.04 * 1.05) / 7.2 })
-    expect(sheet.Z5).toMatchObject({ f: 'IFERROR((AO5*1.05+1248/K5)/7.2,AO5*1.05/7.2)', v: (0.45 * 1.05 + 1248 / 0.174) / 7.2 })
+    // 发票计算不再把空白报关公司按华胜益处理；US$ 采购价不加价也不重复换汇（仅展示分组沿用默认色）
+    expect(sheet.Z4).toMatchObject({ f: 'AO4', v: 0.04 })
+    expect(sheet.Z5).toMatchObject({ f: 'AO5', v: 0.45 })
     expect(sheet.AB4?.f).toBe('SUM(AA4:AA5)')
     expect(sheet.AB5?.f).toBeUndefined()
     expect(sheet.AB5?.v || '').toBe('')

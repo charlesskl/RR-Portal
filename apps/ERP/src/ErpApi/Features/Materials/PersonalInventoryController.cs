@@ -11,6 +11,7 @@ namespace ErpApi.Features.Materials;
 // 剩余库存优先占最新入仓批次(等价于先进先出消耗);批次下单人取 订单.操作员,无订单回落入仓单.操作员。
 // 库存超出批次总量的部分(期初/盘点盈余等)归为「期初结余」。
 // 单价/金额受权限位控制:无「单价」位单价返回 null,无「金额」位金额返回 null。
+// 批次单价为 0 视为未填,回落物料主档单价(来料=物料资料,塑胶=塑胶物料资料;半成品无单价主档只用批次价)。
 [ApiController]
 [Authorize]
 [Route("api/personal-inventory")]
@@ -45,7 +46,7 @@ SELECT d.[物料编号], ISNULL(CAST(d.[盈亏数量] AS decimal(18,4)),0)
 SELECT d.[ID] AS bid, d.[物料编号], d.[物料名称], d.[规格], d.[颜色], d.[单位], d.[仓库],
        d.[单号] AS 入仓单号, d.[订单单号], COALESCE(d.[日期],h.[日期]) AS 日期,
        ISNULL(d.[数量],0)+ISNULL(d.[备品数量],0) AS 批次数量,
-       COALESCE(d.[单价], m.[单价], 0) AS 单价,
+       COALESCE(NULLIF(d.[单价],0), NULLIF(m.[单价],0), 0) AS 单价,
        COALESCE(NULLIF(o.[操作员],''), NULLIF(h.[操作员],''), N'未知') AS 下单人
   FROM [采购入仓明细单] d
   JOIN [采购入仓单] h ON h.[单号]=d.[单号]
@@ -55,7 +56,7 @@ SELECT d.[ID] AS bid, d.[物料编号], d.[物料名称], d.[规格], d.[颜色]
 UNION ALL
 SELECT d.[ID] + 1000000000, d.[物料编号], d.[物料名称], d.[规格], d.[颜色], d.[单位], d.[仓库],
        d.[单号], NULL, COALESCE(d.[日期],h.[日期]), ISNULL(d.[数量],0),
-       COALESCE(d.[单价], m.[单价], 0),
+       COALESCE(NULLIF(d.[单价],0), NULLIF(m.[单价],0), 0),
        COALESCE(NULLIF(h.[操作员],''), N'未知')
   FROM [退料明细单] d
   JOIN [退料单] h ON h.[单号]=d.[单号]
@@ -90,7 +91,7 @@ SELECT d.[物料编号], ISNULL(CAST(d.[盈亏数量] AS decimal(18,4)),0)
 SELECT d.[ID] AS bid, d.[物料编号], d.[物料名称], d.[规格], d.[颜色], d.[单位], d.[仓库],
        d.[单号] AS 入仓单号, d.[订单单号], COALESCE(d.[日期],h.[日期]) AS 日期,
        ISNULL(d.[数量],0) AS 批次数量,
-       COALESCE(d.[单价], m.[单价], 0) AS 单价,
+       COALESCE(NULLIF(d.[单价],0), NULLIF(m.[单价],0), 0) AS 单价,
        COALESCE(NULLIF(o.[操作员],''), NULLIF(h.[操作员],''), N'未知') AS 下单人
   FROM [塑胶入仓明细单] d
   JOIN [塑胶入仓单] h ON h.[单号]=d.[单号]
@@ -100,7 +101,7 @@ SELECT d.[ID] AS bid, d.[物料编号], d.[物料名称], d.[规格], d.[颜色]
 UNION ALL
 SELECT d.[ID] + 1000000000, d.[物料编号], d.[物料名称], d.[规格], d.[颜色], d.[单位], d.[仓库],
        d.[单号], NULL, COALESCE(d.[日期],h.[日期]), ISNULL(d.[数量],0),
-       COALESCE(d.[单价], m.[单价], 0),
+       COALESCE(NULLIF(d.[单价],0), NULLIF(m.[单价],0), 0),
        COALESCE(NULLIF(h.[操作员],''), N'未知')
   FROM [塑胶退料明细单] d
   JOIN [塑胶退料单] h ON h.[单号]=d.[单号]

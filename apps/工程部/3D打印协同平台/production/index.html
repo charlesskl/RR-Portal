@@ -1316,7 +1316,7 @@ function loadDay(){
     const mn=i.machine;
     if(!machineStatus[mn]||i.status==='running') machineStatus[mn]={status:i.status,product:i.productName||''};
   });
-  for(const i of displayMachineIds(s.machineCount,day.items)){
+  for(const i of displayMachineIds()){
     // 优先显示实时数据（仅Bambu 1-5号）
     const liveHtml = !day.off ? renderLiveCard(i) : null;
     if(liveHtml){
@@ -1329,7 +1329,7 @@ function loadDay(){
       ghtml+=`<div class="machine-card ${st}" data-live-id="${i}"><div class="m-no">#${i}${offlineBadge}</div><div class="m-type">${getMachineType(i)}</div><span class="m-status ${st}">${stText}</span><div class="m-product">${escHtml(ms.product||'-')}</div></div>`;
     }
   }
-  grid.innerHTML=ghtml;
+  grid.innerHTML=ghtml||'<p style="color:var(--gray);padding:16px">暂无采集设备，等待 Windows 桥接上报。</p>';
 
   // 表格（过滤已删除的记录，保留原始索引用于编辑/删除）
   const allItems = day.items||[];
@@ -1746,7 +1746,7 @@ function renderMachinePage(){
 
   const isToday = date === today();
   let ghtml='';
-  for(const i of displayMachineIds(s.machineCount,day.items)){
+  for(const i of displayMachineIds()){
     // 如果是今天，优先显示实时数据
     const liveHtml = (isToday && !day.off) ? renderLiveCard(i) : null;
     if(liveHtml){
@@ -1760,10 +1760,10 @@ function renderMachinePage(){
       ghtml+=`<div class="machine-card ${day.off?'idle':st}" data-live-id="${i}"><div class="m-no">#${i}</div><div class="m-type">${getMachineType(i)}</div><span class="m-status ${day.off?'idle':st}">${day.off?'休息':stText}</span><div class="m-product">运行${fmt(h.running,1)}h | 使用率${util}%</div></div>`;
     }
   }
-  document.getElementById('machGrid').innerHTML=ghtml;
+  document.getElementById('machGrid').innerHTML=ghtml||'<p style="color:var(--gray);padding:16px">暂无采集设备，等待 Windows 桥接上报。</p>';
 
   let thtml='<table><tr><th>机台</th><th>机型</th><th>运行(h)</th><th>空闲(h)</th><th>故障(h)</th><th>使用率</th><th>产品</th></tr>';
-  for(const i of displayMachineIds(s.machineCount,day.items)){
+  for(const i of historyMachineIds(s.machineCount,day.items)){
     const h=mh[i]||{running:0,idle:0,fault:0};
     const total=h.running+h.idle+h.fault;
     const util=total>0?h.running/12:0;
@@ -3737,7 +3737,11 @@ function reRenderCurrent(){
 // 打印机实时状态
 // ═══════════════════════════════════════════════════════
 let liveStatus = {};
-function displayMachineIds(count,items=[]){
+// Device cards are sourced only from the bridge. Imported records are not devices.
+function displayMachineIds(){
+ return Object.keys(liveStatus).filter(id=>/^[1-9]\d*$/.test(id)).map(Number).sort((a,b)=>a-b);
+}
+function historyMachineIds(count,items=[]){
  const active=Object.keys(liveStatus).filter(id=>/^[1-9]\d*$/.test(id)).map(Number);
  if(!active.length)return Array.from({length:count},(_,i)=>i+1);
  return [...new Set([...active,...items.filter(x=>!x._deleted).map(x=>Number(x.machine)).filter(x=>Number.isSafeInteger(x)&&x>0)])].sort((a,b)=>a-b);

@@ -61,6 +61,8 @@ ORDER BY TABLE_NAME";
             w.WriteLine("-- 注意: 目标库需已有表结构(先执行 db/ 下建表/迁移脚本, 再执行本快照恢复数据)。");
             w.WriteLine("-- ============================================================");
             w.WriteLine("SET NOCOUNT ON;");
+            // sqlcmd 默认 QUOTED_IDENTIFIER OFF,带筛选索引/计算列索引的表 DELETE 会报 Msg 1934
+            w.WriteLine("SET QUOTED_IDENTIFIER ON;");
             w.WriteLine("EXEC sp_MSforeachtable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL';");
             w.WriteLine("GO");
 

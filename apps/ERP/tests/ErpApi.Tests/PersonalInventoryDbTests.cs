@@ -117,4 +117,45 @@ public class PersonalInventoryDbTests(DbFixture fx)
         }
         finally { Clean(c); }
     }
+
+    // 半成品:入仓批次挂委托加工单(ZP)则下单人=订单操作员;半成品领料出库后剩余按 FIFO 倒推
+    private static void SeedSemi(SqlConnection c)
+    {
+        CleanSemi(c);
+        c.Execute("INSERT INTO [物料资料]([物料编号],[物料名称],[规格],[单位]) VALUES(N'SM-M1',N'SM底座',N'规格S',N'个')");
+        c.Execute("INSERT INTO [装配加工采购单]([单号],[操作员]) VALUES(N'ZP-TEST1',N'李四')");
+        c.Execute("INSERT INTO [半成品入仓单]([单号],[仓库],[审核],[操作员],[日期]) VALUES(N'SMRK1',N'半成品仓','1',N'admin','2026-03-01')");
+        c.Execute(@"INSERT INTO [半成品入仓明细单]([单号],[订单单号],[仓库],[物料编号],[物料名称],[名称],[规格],[颜色],[单位],[数量],[单价],[日期])
+                    VALUES(N'SMRK1',N'ZP-TEST1',N'半成品仓',N'SM-M1',N'SM底座',N'SM底座',N'规格S',N'红',N'个',80,0.5,'2026-03-01')");
+        c.Execute("INSERT INTO [半成品领料单]([单号],[仓库],[审核]) VALUES(N'SMLL1',N'半成品仓','1')");
+        c.Execute(@"INSERT INTO [半成品领料明细单]([单号],[仓库],[物料编号],[物料名称],[规格],[颜色],[单位],[数量])
+                    VALUES(N'SMLL1',N'半成品仓',N'SM-M1',N'SM底座',N'规格S',N'红',N'个',30)");
+    }
+
+    private static void CleanSemi(SqlConnection c)
+    {
+        c.Execute("DELETE FROM [半成品入仓明细单] WHERE [物料编号]=N'SM-M1'");
+        c.Execute("DELETE FROM [半成品入仓单] WHERE [单号]=N'SMRK1'");
+        c.Execute("DELETE FROM [半成品领料明细单] WHERE [物料编号]=N'SM-M1'");
+        c.Execute("DELETE FROM [半成品领料单] WHERE [单号]=N'SMLL1'");
+        c.Execute("DELETE FROM [装配加工采购单] WHERE [单号]=N'ZP-TEST1'");
+        c.Execute("DELETE FROM [物料资料] WHERE [物料编号]=N'SM-M1'");
+    }
+
+    [SkippableFact]
+    public async Task Semi_fifo_and_person_from_assembly_order()
+    {
+        using var c = fx.Open(); SeedSemi(c);
+        try
+        {
+            var rows = await Call(Ctrl(), "半成品");
+            var row = Assert.Single(rows.Where(r => r.物料编号 == "SM-M1").ToList());
+            Assert.Equal("半成品", row.范围);
+            Assert.Equal("李四", row.下单人); // 订单操作员优先于入仓单操作员
+            Assert.Equal(50m, row.剩余数量);  // 80 - 领料 30
+            Assert.Equal(0.5m, row.单价);
+            Assert.Equal(25m, row.金额);
+        }
+        finally { CleanSemi(c); }
+    }
 }

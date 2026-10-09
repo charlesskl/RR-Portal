@@ -52,7 +52,7 @@ uvicorn app.main:app --reload --port 8091
 
 ### 华登个人邮箱
 
-华登邮箱在系统的「用户管理 → 编辑 → 华登个人邮箱」中绑定，每个账号绑定一个邮箱；填写邮箱地址、IMAP服务器、文件夹和邮箱授权码。授权码由API使用ASP.NET Core Data Protection加密保存，接口不会返回授权码。部署或迁移服务器时必须保留API运行用户的Data Protection密钥目录（默认 `~/.aspnet/DataProtection-Keys`），否则需要重新填写授权码。
+华登邮箱在系统的「用户管理 → 编辑 → 华登个人邮箱」中绑定，每个账号绑定一个邮箱；填写邮箱地址、IMAP服务器、文件夹和邮箱授权码。授权码由API使用ASP.NET Core Data Protection加密保存，接口不会返回授权码。部署或迁移服务器时必须保留API运行用户的Data Protection密钥目录（数据库所在目录的 `data-protection-keys` 子目录，云端为 `/app/data/data-protection-keys`），否则需要重新填写授权码。
 
 华登同步按有效用户分别运行，不再使用公司的统一环境变量邮箱。API向内部解析服务通过POST请求体传递解密后的连接资料，不放入URL；解析服务应只允许API在内网访问。每位船务员只能查看、修改和确认自己的邮件；管理员可筛选人员或查看全部。UID断点、读取起始日期和同步设置分别记录。同一邮箱不能同时绑定两个账号。
 

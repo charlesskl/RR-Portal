@@ -11,6 +11,7 @@ function uniqueMoldingDetails(wb,parts){
  rows.set(source.rowCount,owners.length+2);
  const plain={name:dest.name,rows,colOffset:-2},mapping=new Map([[source.name,plain]]);
  const copy=(r,t)=>source.getRow(r).eachCell((c,col)=>{if(col<3)return;const d=dest.getCell(t,col-2);d.style=structuredClone(c.style);d.value=c.formula?{formula:relocateFormula(c.formula,plain,mapping),result:c.result}:structuredClone(c.value);});
+ source.columns.slice(2).forEach((c,i)=>{dest.getColumn(i+1).width=c.width||16;});
  copy(1,1);dest.getCell('A1').value='模号';dest.getCell('B1').value='零件名称';
  owners.forEach(([r,p])=>{
   const t=rows.get(r),usage=Number(p.catalog_usage??1);copy(r,t);

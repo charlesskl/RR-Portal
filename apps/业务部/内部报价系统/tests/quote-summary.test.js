@@ -139,7 +139,7 @@ test('报价汇总项目按参考表顺序排列，系统新增项目插入同�
 
 test('导出表横向展开报价项目并保留客户确认和实际生产车间', async () => {
   const row = {
-    id: 1, customer: 'Sky Castle', quote_no: 'SC-1', product_name: '产品', version: 'V1', qty: 100,
+    id: 1, customer: 'Sky Castle', quote_no: 'SC-1', product_name: '产品', version: 'X1', qty: 100,
     quoted_price: 10, created_at: '2026-09-08T09:00:00Z',
     components_before_tax: { injection_labor: 1.5, dom_mat: 2 },
     components: { injection_labor: 1.5, dom_mat: 1.77 },
@@ -154,17 +154,17 @@ test('导出表横向展开报价项目并保留客户确认和实际生产车�
   assert.equal(sheet.getCell(4, 3).value, '实际生产车间');
   assert.equal(sheet.getCell(5, 3).value, '兴信A');
   assert.equal(sheet.getCell(4, 4).value, '货号');
-  assert.equal(sheet.getCell(4, 9).value, '啤工');
-  assert.equal(sheet.getCell(4, 10).value, '退税后啤工');
-  assert.equal(sheet.getCell(4, 11).value, '啤工金额');
-  assert.equal(sheet.getCell(4, 12).value, '啤工占比');
-  assert.equal(sheet.getCell(5, 9).value, 1.5);
-  assert.deepEqual(sheet.getCell(5, 10).value, { formula: 'I5', result: 1.5 });
-  assert.deepEqual(sheet.getCell(5, 11).value, { formula: 'J5*G5', result: 150 });
-  assert.equal(sheet.getCell(5, 12).value.formula, 'IF(H5=0,0,J5/H5)');
-  assert.ok(Math.abs(sheet.getCell(5, 12).value.result - 0.15) < 1e-12);
-  assert.equal(sheet.getCell(4, 23).value, '退税后原料');
-  assert.equal(sheet.getCell(4, 28).value, '总采购价');
+  assert.equal(sheet.getCell(4, 11).value, '啤工');
+  assert.equal(sheet.getCell(4, 12).value, '退税后啤工');
+  assert.equal(sheet.getCell(4, 13).value, '啤工金额');
+  assert.equal(sheet.getCell(4, 14).value, '啤工占比');
+  assert.equal(sheet.getCell(5, 11).value, 1.5);
+  assert.deepEqual(sheet.getCell(5, 12).value, { formula: 'K5', result: 1.5 });
+  assert.deepEqual(sheet.getCell(5, 13).value, { formula: 'L5*G5', result: 150 });
+  assert.equal(sheet.getCell(5, 14).value.formula, 'IF(H5=0,0,L5/H5)');
+  assert.ok(Math.abs(sheet.getCell(5, 14).value.result - 0.15) < 1e-12);
+  assert.equal(sheet.getCell(4, 25).value, '退税后原料');
+  assert.equal(sheet.getCell(4, 30).value, '总采购价');
   assert.equal(sheet.getCell(4, workflowStart).value, '客价确认');
   assert.equal(sheet.getCell(5, workflowStart).value, '已确认');
   assert.equal(sheet.getCell(5, 8).value, 10);
@@ -179,16 +179,16 @@ test('导出表横向展开报价项目并保留客户确认和实际生产车�
   assert.equal(sheet.getCell(6, 2).border.right.style, 'thin');
   assert.equal(sheet.getCell(6, 7).value.formula, 'SUM(G5:G5)');
   assert.equal(sheet.getCell(6, 8).value.formula, 'SUM(H5:H5)');
-  assert.equal(sheet.getCell(6, 9).value.formula, 'SUM(I5:I5)');
-  assert.equal(sheet.getCell(6, 10).value.formula, 'SUM(J5:J5)');
   assert.equal(sheet.getCell(6, 11).value.formula, 'SUM(K5:K5)');
   assert.equal(sheet.getCell(6, 12).value.formula, 'SUM(L5:L5)');
+  assert.equal(sheet.getCell(6, 13).value.formula, 'SUM(M5:M5)');
+  assert.equal(sheet.getCell(6, 14).value.formula, 'SUM(N5:N5)');
   const buffer = await workbook.xlsx.writeBuffer();
   assert.ok(buffer.byteLength > 1000);
   const reopened = new (require('exceljs').Workbook)();
   await reopened.xlsx.load(buffer);
-  assert.equal(reopened.getWorksheet('各客报价汇总').getCell('J5').value.formula, 'I5');
-  assert.equal(reopened.getWorksheet('各客报价汇总').getCell('K5').value.formula, 'J5*G5');
+  assert.equal(reopened.getWorksheet('各客报价汇总').getCell('L5').value.formula, 'K5');
+  assert.equal(reopened.getWorksheet('各客报价汇总').getCell('M5').value.formula, 'L5*G5');
 });
 
 test('报价汇总按客户排序分组，序号由每个客户组内重新开始', () => {
@@ -232,10 +232,10 @@ test('客户总计逐列汇总货价、单价和占比，即使接单数量为�
   ]);
   const sheet = workbook.getWorksheet('各客报价汇总');
   assert.deepEqual(sheet.getCell('H7').value, { formula: 'SUM(H5:H6)', result: 30 });
-  assert.deepEqual(sheet.getCell('I7').value, { formula: 'SUM(I5:I6)', result: 3 });
-  assert.deepEqual(sheet.getCell('J7').value, { formula: 'SUM(J5:J6)', result: 3 });
-  assert.equal(sheet.getCell('K7').value.formula, 'SUM(K5:K6)');
-  assert.deepEqual(sheet.getCell('L7').value, { formula: 'SUM(L5:L6)', result: 0.2 });
+  assert.deepEqual(sheet.getCell('K7').value, { formula: 'SUM(K5:K6)', result: 3 });
+  assert.deepEqual(sheet.getCell('L7').value, { formula: 'SUM(L5:L6)', result: 3 });
+  assert.equal(sheet.getCell('M7').value.formula, 'SUM(M5:M6)');
+  assert.deepEqual(sheet.getCell('N7').value, { formula: 'SUM(N5:N6)', result: 0.2 });
 });
 
 test('导出表长内容自动换行并增加行高', () => {
@@ -291,7 +291,7 @@ test('汇总导出在当前页面内下载并按业务分区显示不同颜色',
 
 test('完整汇总栏目严格按参考表顺序', () => {
   const labels = SUMMARY_COLUMNS.map(([, label]) => label);
-  assert.deepEqual(labels.slice(0, 12), ['啤工','退税后啤工','啤工金额','啤工占比','装工','退税后装工','装工金额','装工占比','喷印工','退税后喷印工','喷印工金额','喷印工占比']);
+  assert.deepEqual(labels.slice(0, 14), ['成本（含人工）','成本（不含人工）','啤工','退税后啤工','啤工金额','啤工占比','装工','退税后装工','装工金额','装工占比','喷印工','退税后喷印工','喷印工金额','喷印工占比']);
   assert.ok(labels.indexOf('料价进口料') < labels.indexOf('彩盒'));
   assert.ok(labels.indexOf('总退税可减少成本') < labels.indexOf('退税及返点后总成本（含人工）'));
   assert.deepEqual(labels.slice(-5), ['总退税后料成本','总未退税前料成本占比','总退税后人工成本','总退税后人工成本占比','各金额占比求和']);

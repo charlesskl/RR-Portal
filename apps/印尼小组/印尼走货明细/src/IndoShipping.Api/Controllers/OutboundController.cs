@@ -399,7 +399,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
                 GROUP BY outbound_id
             )
             SELECT o.id AS outbound_id, o.po_item_id, o.po_no, o.material_id,
-                   m.product_code AS code, COALESCE(i.material_name, m.name_zh) AS name_zh,
+                   COALESCE(m.product_code, t.related_product_code) AS code, COALESCE(i.material_name, m.name_zh) AS name_zh,
                    i.spec,
                    po.supplier, o.out_date, o.notes,
                    COALESCE(o.qty, 0) AS outbound_qty,
@@ -412,6 +412,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
             LEFT JOIN po_items i ON i.id=o.po_item_id
             LEFT JOIN purchase_orders po ON po.id=i.po_id
             LEFT JOIN materials m ON m.id=o.material_id
+            LEFT JOIN tool_materials t ON t.material_id=m.id
             WHERE COALESCE(o.qty, 0) > COALESCE(a.allocated_other, 0)
             ORDER BY o.out_date, o.id", new { shipmentId = shipment_id });
         return Ok(rows);

@@ -68,6 +68,11 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
         public decimal? kg { get; set; }
         public decimal? qty { get; set; }
         public int? cartons { get; set; }
+        [System.ComponentModel.DataAnnotations.StringLength(64)]
+        public string? carton_group { get; set; }
+        public System.Text.Json.JsonElement? material_snapshot { get; set; }
+        [System.ComponentModel.DataAnnotations.StringLength(256)]
+        public string? carton_no { get; set; }
         public string? qty_per_carton { get; set; }
         public decimal? weighing_qty { get; set; }
         public string? purchase_unit { get; set; }
@@ -123,14 +128,15 @@ RETURNING id",
                 await c.ExecuteAsync(@"
 INSERT INTO shipment_items(shipment_id, outbound_id, material_id, seq, kg, qty, cartons, qty_per_carton, weighing_qty, purchase_unit, pallet, price, currency,
     po_no, po_date, supplier, customs_company, bl_head, contract_no, contract_date,
-    invoice_no, invoice_date, invoice_price, product_use, formula_name)
+    invoice_no, invoice_date, invoice_price, product_use, formula_name, carton_group, material_snapshot, carton_no)
 VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @weighing_qty, @purchase_unit, @pallet, @price, @currency,
     @po_no, @po_date, @supplier, @customs_company, @bl_head, @contract_no, @contract_date,
-    @invoice_no, @invoice_date, @invoice_price, @product_use, @formula_name)",
+    @invoice_no, @invoice_date, @invoice_price, @product_use, @formula_name, @carton_group, CAST(@snapshot AS jsonb), @carton_no)",
                     new
                     {
                         id, it.outbound_id, it.material_id, seq = i + 1,
-                        kg = it.kg ?? 0, qty = it.qty ?? 0, cartons = it.cartons ?? 0,
+                        kg = it.kg ?? 0, qty = it.qty ?? 0, cartons = it.cartons ?? 0, it.carton_group,
+                        snapshot = it.material_snapshot?.GetRawText(), it.carton_no,
                         qty_per_carton = it.qty_per_carton ?? "",
                         weighing_qty = it.weighing_qty ?? 0,
                         purchase_unit = it.purchase_unit ?? "个",
@@ -192,14 +198,15 @@ VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_car
                 await c.ExecuteAsync(@"
 INSERT INTO shipment_items(shipment_id, outbound_id, material_id, seq, kg, qty, cartons, qty_per_carton, weighing_qty, purchase_unit, pallet, price, currency,
     po_no, po_date, supplier, customs_company, bl_head, contract_no, contract_date,
-    invoice_no, invoice_date, invoice_price, product_use, formula_name)
+    invoice_no, invoice_date, invoice_price, product_use, formula_name, carton_group, material_snapshot, carton_no)
 VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @weighing_qty, @purchase_unit, @pallet, @price, @currency,
     @po_no, @po_date, @supplier, @customs_company, @bl_head, @contract_no, @contract_date,
-    @invoice_no, @invoice_date, @invoice_price, @product_use, @formula_name)",
+    @invoice_no, @invoice_date, @invoice_price, @product_use, @formula_name, @carton_group, CAST(@snapshot AS jsonb), @carton_no)",
                     new
                     {
                         id, it.outbound_id, it.material_id, seq = i + 1,
-                        kg = it.kg ?? 0, qty = it.qty ?? 0, cartons = it.cartons ?? 0,
+                        kg = it.kg ?? 0, qty = it.qty ?? 0, cartons = it.cartons ?? 0, it.carton_group,
+                        snapshot = it.material_snapshot?.GetRawText(), it.carton_no,
                         qty_per_carton = it.qty_per_carton ?? "",
                         weighing_qty = it.weighing_qty ?? 0,
                         purchase_unit = it.purchase_unit ?? "个",
@@ -256,6 +263,20 @@ VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_car
         int? shipmentId,
         IReadOnlyCollection<ShItem> items)
     {
+        foreach (var item in items.Where(x => x.material_snapshot.HasValue))
+        {
+            var snapshot = item.material_snapshot!.Value;
+            if (snapshot.ValueKind != System.Text.Json.JsonValueKind.Object || snapshot.GetRawText().Length > 8000000 ||
+                !snapshot.TryGetProperty("name_zh", out var name) || name.ValueKind != System.Text.Json.JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(name.GetString()))
+                return "导入资料必须包含有效物料名称，且单行资料不能超过 8MB";
+            if (item.outbound_id.HasValue) return "导入资料不能自动关联出库记录";
+        }
+        foreach (var group in items.Where(x => !string.IsNullOrWhiteSpace(x.carton_group)).GroupBy(x => x.carton_group))
+        {
+            if (group.Any(x => x.cartons < 1 || x.cartons == null) || group.Select(x => x.cartons).Distinct().Count() != 1)
+                return "同箱合并的明细必须填写相同的正整数箱数";
+        }
         var requested = items
             .Where(x => x.outbound_id is not null)
             .GroupBy(x => x.outbound_id!.Value)

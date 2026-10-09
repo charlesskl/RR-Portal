@@ -172,6 +172,7 @@ const CURR = [
 ]
 
 function spoilageRate(category: string | undefined, materialQty: number): number {
+  if (['工具', '机器设备', '模具', '设备', '耗材'].includes(category || '')) return 0
   if (!String(category ?? '').includes('五金')) return 0.01
   if (materialQty < 10000) return 0.10
   if (materialQty < 20000) return 0.05
@@ -769,15 +770,10 @@ export default function PurchasePage() {
     setTimeout(() => form.setFieldsValue({ status: 'draft', order_date: dayjs().format('YYYY-MM-DD') }), 0)
   }
   async function loadPurchaseMaterials(poItems: PoItem[]) {
-    const codes = [...new Set(poItems.filter(it => it.material_id != null)
-      .map(it => resolveProductCode(String(it.product_code || '').split(/\s*\/\s*/)[0])).filter(Boolean))]
-    const lists = await Promise.all(codes.map(async code => {
-      try {
-        const { data } = await api.get<Material[]>('/materials', { params: { code }, skipErrorToast: true } as any)
-        return Array.isArray(data) ? data : []
-      } catch { return [] }
-    }))
-    return new Map(lists.flat().filter(m => m.id != null).map(m => [Number(m.id), m]))
+    const ids = [...new Set(poItems.map(it => it.material_id).filter(id => id != null))]
+    if (!ids.length) return new Map<number, Material>()
+    const { data } = await api.get<Material[]>('/materials/by-ids', { params: { ids: ids.join(',') } })
+    return new Map(data.filter(m => m.id != null).map(m => [Number(m.id), m]))
   }
   function promptMaterialSync(poItems: PoItem[], materials: Map<number, Material>) {
     const changes = materialChanges(poItems, materials)
@@ -1025,6 +1021,7 @@ export default function PurchasePage() {
     const materials = (await Promise.all(productCodes.map(code =>
       api.get<Material[]>('/materials', { params: { code } }).then(r => r.data || [])
     ))).flat()
+    materials.push(...(await loadPurchaseMaterials(contractItems)).values())
     const materialById = new Map(materials.filter(m => m.id != null).map(m => [Number(m.id), m]))
     const normalize = (value: unknown) => String(value ?? '').trim().toUpperCase().replace(/[×*]/g, 'X').replace(/\s+/g, '')
     const findMaterial = (item: PoItem) => {
@@ -1323,13 +1320,11 @@ export default function PurchasePage() {
   // 回填单个净重和走货单位，用于计算 KGM 走货数量。
   async function backfillNetWeight() {
     let hit = 0
+    const materialMap = await loadPurchaseMaterials(items)
     const next = await Promise.all(items.map(async (it) => {
       if (!it.material_id) return it
       try {
-        // Fetch the material via product code (need to find material by id; backend has no by-id route in legacy, but we get a list and find)
-        if (!it.product_code) return it
-        const { data: mats } = await api.get<any[]>('/materials', { params: { code: it.product_code } })
-        const mat = (mats || []).find(m => m.id === it.material_id)
+        const mat = materialMap.get(it.material_id)
         if (!mat) return it
         const netPerPc = Number(mat.net_per_pc) || 0
         if (netPerPc <= 0) return it

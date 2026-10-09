@@ -10,6 +10,7 @@ const CustomersPage    = lazy(() => import('./pages/CustomersPage'))
 const DictionariesPage = lazy(() => import('./pages/DictionariesPage'))
 const SupplierSummaryPage = lazy(() => import('./pages/SupplierSummaryPage'))
 const ProductsPage     = lazy(() => import('./pages/ProductsPage'))
+const ToolMaterialsPage = lazy(() => import('./pages/ToolMaterialsPage'))
 const QuotesPage       = lazy(() => import('./pages/QuotesPage'))
 const PurchasePage     = lazy(() => import('./pages/PurchasePage'))
 const OutboundPage     = lazy(() => import('./pages/OutboundPage'))
@@ -57,6 +58,7 @@ export default function App() {
               <Route path="dictionaries" element={<ModuleRoute module="products"><DictionariesPage /></ModuleRoute>} />
               <Route path="supplier-summary" element={<ModuleRoute module="products"><SupplierSummaryPage /></ModuleRoute>} />
               <Route path="products"     element={<ModuleRoute module="products"><ProductsPage /></ModuleRoute>} />
+              <Route path="tool-materials" element={<ModuleRoute module="products"><ToolMaterialsPage /></ModuleRoute>} />
               <Route path="quotes"       element={<ModuleRoute module="quotes"><QuotesPage /></ModuleRoute>} />
               <Route path="purchase"     element={<ModuleRoute module="purchase"><PurchasePage /></ModuleRoute>} />
               <Route path="material-alerts" element={<ModuleRoute module="purchase"><MaterialAlertsPage /></ModuleRoute>} />

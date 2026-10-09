@@ -46,7 +46,7 @@ export function inferHsCode(name?: string, userDict?: HsDictEntry[]): { hsCN: st
 
 // 从 xlsx 某个 sheet 提取内嵌图片 → [{row,col,dataUrl}]（row/col 0-indexed）
 // 兼容：① 标准 xdr 锚定图片 ② WPS DISPIMG 单元格图(cellimages.xml)。移植自旧版 extractSheetImages。
-async function extractSheetImages(zip: JSZip, targetSheetName: string): Promise<{ row: number; col: number; dataUrl: string }[]> {
+export async function extractSheetImages(zip: JSZip, targetSheetName: string, rowByCenter = false): Promise<{ row: number; col: number; dataUrl: string }[]> {
   try {
     const wbFile = zip.file('xl/workbook.xml'); if (!wbFile) return []
     const wbXml = await wbFile.async('string')
@@ -57,6 +57,18 @@ async function extractSheetImages(zip: JSZip, targetSheetName: string): Promise<
       if (sheetNodes[i].getAttribute('name') === targetSheetName) { sheetIdx = i + 1; break }
     }
     if (!sheetIdx) return []
+    const rowHeights = new Map<number, number>()
+    let defaultRowHeight = 15 * 12700
+    if (rowByCenter) {
+      const sheetFile = zip.file(`xl/worksheets/sheet${sheetIdx}.xml`)
+      if (sheetFile) {
+        const doc = new DOMParser().parseFromString(await sheetFile.async('string'), 'application/xml')
+        defaultRowHeight = Number(doc.getElementsByTagName('sheetFormatPr')[0]?.getAttribute('defaultRowHeight') || 15) * 12700
+        for (const row of Array.from(doc.getElementsByTagName('row'))) {
+          rowHeights.set(Number(row.getAttribute('r')) - 1, Number(row.getAttribute('ht') || defaultRowHeight / 12700) * 12700)
+        }
+      }
+    }
     const imgList: { row: number; col: number; dataUrl: string }[] = []
     const toDataUrl = async (mediaPath: string): Promise<string | null> => {
       const f = zip.file(mediaPath); if (!f) return null
@@ -98,7 +110,23 @@ async function extractSheetImages(zip: JSZip, targetSheetName: string): Promise<
     for (const anchor of anchors) {
       const fromNode = anchor.getElementsByTagName('xdr:from')[0]; if (!fromNode) continue
       const rowEl = fromNode.getElementsByTagName('xdr:row')[0]; if (!rowEl) continue
-      const row = parseInt(rowEl.textContent || '0', 10)
+      let row = parseInt(rowEl.textContent || '0', 10)
+      if (rowByCenter) {
+        // WPS 可将下行图片锚在上行末尾；按图片中心而不是起点归属。
+        const to = anchor.getElementsByTagName('xdr:to')[0]
+        const fromOffset = Number(fromNode.getElementsByTagName('xdr:rowOff')[0]?.textContent || 0)
+        let height = Number(anchor.getElementsByTagName('xdr:ext')[0]?.getAttribute('cy') || 0)
+        if (to) {
+          const endRow = Number(to.getElementsByTagName('xdr:row')[0]?.textContent || row)
+          height = Number(to.getElementsByTagName('xdr:rowOff')[0]?.textContent || 0) - fromOffset
+          for (let i = row; i < endRow; i++) height += rowHeights.get(i) ?? defaultRowHeight
+        }
+        let offset = fromOffset + Math.max(0, height) / 2
+        while (row < 1048575 && offset >= (rowHeights.get(row) ?? defaultRowHeight)) {
+          offset -= rowHeights.get(row) ?? defaultRowHeight
+          row++
+        }
+      }
       const colEl = fromNode.getElementsByTagName('xdr:col')[0]
       const col = colEl ? parseInt(colEl.textContent || '0', 10) : 0
       const blip = anchor.getElementsByTagName('a:blip')[0]; if (!blip) continue
@@ -119,13 +147,13 @@ async function extractSheetImages(zip: JSZip, targetSheetName: string): Promise<
           embed2target[rel.getAttribute('Id') || ''] = rel.getAttribute('Target') || ''
         }
         const idToData: Record<string, string> = {}
-        const picNodes = ciDoc.getElementsByTagName('etc:cellImage')
+        const picNodes = ciDoc.getElementsByTagNameNS('*', 'cellImage')
         for (let i = 0; i < picNodes.length; i++) {
           const pic = picNodes[i]
-          const id = pic.getElementsByTagName('xdr:cNvPr')[0]?.getAttribute('name') || pic.getAttribute('name') || ''
-          const blip = pic.getElementsByTagName('a:blip')[0]
+          const id = pic.getElementsByTagNameNS('*', 'cNvPr')[0]?.getAttribute('name') || pic.getAttribute('name') || ''
+          const blip = pic.getElementsByTagNameNS('*', 'blip')[0]
           if (!blip || !id) continue
-          const target = embed2target[blip.getAttribute('r:embed') || '']
+          const target = embed2target[blip.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'embed') || blip.getAttribute('r:embed') || '']
           if (!target) continue
           const dataUrl = await toDataUrl(('xl/' + target.replace(/^\.\.\//, '')).replace(/[^/]+\/\.\.\//g, ''))
           if (dataUrl) idToData[id] = dataUrl
@@ -134,13 +162,15 @@ async function extractSheetImages(zip: JSZip, targetSheetName: string): Promise<
         if (sheetFile) {
           const sheetXml = await sheetFile.async('string')
           const colLetterToNum = (s: string) => { let n = 0; for (const c of s) n = n * 26 + (c.charCodeAt(0) - 64); return n - 1 }
-          for (const re of [/<c\s+r="([A-Z]+)(\d+)"[^>]*>[\s\S]*?DISPIMG\(&quot;([^&]+)&quot;[\s\S]*?<\/c>/g,
-                            /<c\s+r="([A-Z]+)(\d+)"[^>]*>[\s\S]*?DISPIMG\("([^"]+)"[\s\S]*?<\/c>/g]) {
-            let m: RegExpExecArray | null
-            while ((m = re.exec(sheetXml)) !== null) {
-              const col = colLetterToNum(m[1]); const row = parseInt(m[2], 10) - 1
-              if (idToData[m[3]]) imgList.push({ row, col, dataUrl: idToData[m[3]] })
-            }
+          // Parse each cell separately: a regex spanning XML could attach AC2's
+          // image to A1 (the first preceding cell), then column filtering loses it.
+          const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml')
+          for (const cell of Array.from(sheetDoc.getElementsByTagNameNS('*', 'c'))) {
+            const address = /^([A-Z]+)(\d+)$/.exec(cell.getAttribute('r') || '')
+            const formula = cell.getElementsByTagNameNS('*', 'f')[0]?.textContent || ''
+            const match = /(?:_xlfn\.)?DISPIMG\s*\(\s*"([^"]+)"/i.exec(formula)
+            if (!address || !match || !idToData[match[1]]) continue
+            imgList.push({ row: Number(address[2]) - 1, col: colLetterToNum(address[1]), dataUrl: idToData[match[1]] })
           }
         }
       }
@@ -149,7 +179,7 @@ async function extractSheetImages(zip: JSZip, targetSheetName: string): Promise<
     // 共用产品照（如加强性胶钉 60/80/90 用同一张、吸塑 A/B/C 共用）出现 2~3 次，需保留。
     const cnt: Record<string, number> = {}
     for (const it of imgList) cnt[it.dataUrl] = (cnt[it.dataUrl] || 0) + 1
-    return imgList.filter(it => cnt[it.dataUrl] < 5)
+    return rowByCenter ? imgList : imgList.filter(it => cnt[it.dataUrl] < 5)
   } catch { return [] }
 }
 

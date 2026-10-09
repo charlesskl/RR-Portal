@@ -25,6 +25,15 @@
     <div class="sidebar-user">
       <span class="avatar">{{ current_user().name[:1] }}</span>
       <span><strong>{{ current_user().name }}</strong><small>{{ '管理员' if current_user().role == 'admin' else 'QC 检验员' }}</small></span>
+      <details class="sys-switch" style="position:relative">
+        <summary class="icon-button" style="list-style:none;cursor:pointer" title="切换系统" aria-label="切换系统">⇄</summary>
+        <div class="sys-switch-menu" style="position:absolute;bottom:110%;left:0;z-index:60;background:#fff;border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.25);overflow:hidden;min-width:180px;text-align:left">
+          <a href="http://localhost:3000/#/jump?app=toyqms" style="display:block;padding:10px 14px;font-size:14px;color:#1f2937;text-decoration:none">玩具质量管理系统</a>
+          <a href="http://localhost:3000/#/jump?app=xingxin-qms" style="display:block;padding:10px 14px;font-size:14px;color:#1f2937;text-decoration:none">品质管理系统</a>
+          <a href="http://localhost:3000/#/jump?app=voyageplex" style="display:block;padding:10px 14px;font-size:14px;color:#1f2937;text-decoration:none">VoyagePlex船务协同</a>
+          <a href="http://localhost:3000/" style="display:block;padding:10px 14px;font-size:14px;color:#475569;text-decoration:none;border-top:1px solid #e5e7eb">← 返回门户首页</a>
+        </div>
+      </details>
       <form method="post" action="{{ url_for('logout') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="icon-button" title="退出登录" aria-label="退出登录">↪</button>
@@ -51,6 +60,15 @@
 </main>
 
 <script>window.CSRF_TOKEN = {{ csrf_token()|tojson }};</script>
+<script>
+// 服务器部署时门户在 /portal/ 子路径（nginx 同源反代），本地开发仍在 localhost:3000
+(function(){
+  if(location.hostname==='localhost'||location.hostname==='127.0.0.1')return;
+  document.querySelectorAll('.sys-switch-menu a').forEach(function(a){
+    a.href=a.href.replace('http://localhost:3000','/portal');
+  });
+})();
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

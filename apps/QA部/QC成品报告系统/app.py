@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import io
 import json
 import mimetypes
@@ -723,6 +724,33 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.before_request
     def open_db_and_protect():
         g.db = app.extensions["db_session"]()
+        # ── 门户 SSO 免登：URL 带 sso_ticket 时验票建会话，随后跳回干净地址 ──
+        ticket = request.args.get("sso_ticket")
+        if ticket and not current_user():
+            try:
+                claims = verify_portal_ticket(ticket)
+            except Exception:
+                g.db.rollback()  # 票据无效则回落到账号密码登录
+                return redirect(request.path)
+            user = g.db.scalar(select(User).where(User.username == str(claims["sub"])))
+            if user is None:
+                # 门户账号首次进入：自动建档；门户给了「系统管理」全部权限则设为管理员
+                user = User(
+                    username=str(claims["sub"]),
+                    name=str(claims.get("name") or claims["sub"]),
+                    role="admin" if (claims.get("perms") or {}).get("admin") == "full" else "qc",
+                    password_hash=generate_password_hash(secrets.token_urlsafe(24)),
+                )
+                g.db.add(user)
+                g.db.flush()
+            if not user.active:
+                abort(403, "账号已停用，请联系管理员")
+            session.clear()
+            session["user_id"] = user.id
+            session["csrf_token"] = secrets.token_urlsafe(24)
+            audit(g.db, "login", "user", user.id, "门户SSO免登")
+            g.db.commit()
+            return redirect(request.path)
         if "csrf_token" not in session:
             session["csrf_token"] = secrets.token_urlsafe(24)
         if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.endpoint != "static":
@@ -754,6 +782,30 @@ def create_app(test_config: dict | None = None) -> Flask:
         with app.app_context():
             seed_database(app.extensions["db_session"]())
     return app
+
+
+def verify_portal_ticket(ticket: str) -> dict:
+    """校验门户签发的 SSO 票据（HS256 JWT，与门户/其它系统的 SSO_SECRET 一致）。"""
+    parts = str(ticket or "").split(".")
+    if len(parts) != 3:
+        raise ValueError("票据格式不正确")
+    secret = os.getenv("SSO_SECRET", "dev-sso-secret-change-me")
+    expected = hmac.new(secret.encode(), f"{parts[0]}.{parts[1]}".encode(), hashlib.sha256).digest()
+
+    def b64url_decode(seg: str) -> bytes:
+        return base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))
+
+    actual = b64url_decode(parts[2])
+    if not hmac.compare_digest(actual, expected):
+        raise ValueError("票据校验失败")
+    payload = json.loads(b64url_decode(parts[1]).decode("utf-8"))
+    if not payload.get("exp") or int(payload["exp"]) < int(datetime.now(UTC).timestamp() * 1000):
+        raise ValueError("票据已过期")
+    if payload.get("app") != "qc-report":
+        raise ValueError("票据不属于本系统")
+    if not payload.get("sub"):
+        raise ValueError("票据缺少账号")
+    return payload
 
 
 def current_user() -> User | None:

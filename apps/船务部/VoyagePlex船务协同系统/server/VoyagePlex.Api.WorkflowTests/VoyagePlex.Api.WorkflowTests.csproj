@@ -28,5 +28,6 @@
     <Compile Include="../VoyagePlex.Api/Entities/MailContact.cs" Link="MailContact.cs" />
     <Compile Include="../VoyagePlex.Api/Entities/ImportEmailItem.cs" Link="ImportEmailItem.cs" />
     <Compile Include="../VoyagePlex.Api/Entities/ImportBatch.cs" Link="ImportBatch.cs" />
+    <Compile Include="../VoyagePlex.Api/Services/MultiContainerRules.cs" Link="MultiContainerRules.cs" />
   </ItemGroup>
 </Project>

@@ -879,6 +879,12 @@ app.MapPatch("/api/mail/candidates/{itemId:long}", async (long itemId, JsonObjec
         }
     }
     stored["fields"] = fields.DeepClone(); stored["items"] = cargoItems.DeepClone(); stored["warehouse_groups"] = warehouseGroups.DeepClone();
+    if (stored["fields"]?["multi_container"]?.ToString() == "true" && payload["shipmentGroups"] is JsonArray plan)
+    {
+        var originalPlan = stored["shipment_groups"]?.AsArray() ?? [];
+        if (plan.Count != originalPlan.Count) return Results.BadRequest(new { error = "柜安排数量不能改变" });
+        for (var index = 0; index < plan.Count; index++) originalPlan[index]!["capacity_boxes"] = plan[index]?["capacity_boxes"]?.DeepClone();
+    }
     var soNumber = fields["so_number"]?.ToString().Trim() ?? "";
     if (soNumber != "") stored["so_numbers"] = new JsonArray(soNumber.Split(',', '，').Select(value => value.Trim()).Where(value => value != "").Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
     entity.ResultJson = stored.ToJsonString(); entity.ReviewedAt = DateTime.UtcNow;
@@ -1029,14 +1035,34 @@ app.MapPost("/api/imports/email/mailbox/sync", async (HttpContext context, Mailb
     { return Results.Json(new { error = error.GetBaseException().Message }, statusCode: 502); }
 });
 
+app.MapPost("/api/imports/email/split-preview", (JsonObject payload) =>
+{
+    try
+    {
+        if (payload["fields"]?["multi_container"]?.ToString() != "true")
+            return Results.BadRequest(new { error = "当前邮件没有多柜安排" });
+        var cabinets = MultiContainerRules.Split(payload);
+        return Results.Ok(new { cabinets = cabinets.Select(c => new { fields = c.Payload["fields"], items = c.Payload["items"] }) });
+    }
+    catch (Exception error) when (error is InvalidOperationException or OverflowException or ArgumentException)
+    { return Results.BadRequest(new { error = error.Message }); }
+});
+
 app.MapPost("/api/imports/email/confirm", async (JsonObject payload, AppDbContext db, CancellationToken cancellationToken) =>
 {
     var submitted = payload["items"]?.AsArray();
     if (submitted is null || submitted.Count == 0)
         return Results.BadRequest(new { error = "没有可确认的邮件结果" });
     foreach (var reviewed in submitted.OfType<JsonObject>())
-        if (reviewed["status"]?.ToString() != "failed" && CargoNotificationRules.Validate(reviewed) is string splitError)
-            return Results.BadRequest(new { error = splitError });
+    {
+        if (reviewed["status"]?.ToString() == "failed") continue;
+        if (CargoNotificationRules.Validate(reviewed) is string splitError) return Results.BadRequest(new { error = splitError });
+        if (reviewed["fields"]?["multi_container"]?.ToString() == "true")
+        {
+            try { MultiContainerRules.Split(reviewed); }
+            catch (Exception error) when (error is InvalidOperationException or OverflowException) { return Results.BadRequest(new { error = error.Message }); }
+        }
+    }
 
     await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
     var batch = new ImportBatch
@@ -1097,6 +1123,13 @@ app.MapPost("/api/imports/email/confirm", async (JsonObject payload, AppDbContex
         }
     }
     await db.SaveChangesAsync(cancellationToken);
+    foreach (var linked in affectedTasks.Where(t => t.SourceGroupKey.StartsWith("container-", StringComparison.Ordinal)).GroupBy(t => t.SourceImportItemId))
+    {
+        if (linked.Count() < 2) continue;
+        var ordered = linked.ToArray(); var root = ordered.First().BatchRootId > 0 ? ordered.First().BatchRootId : ordered.First().Id;
+        for (var index = 0; index < ordered.Length; index++) { ordered[index].BatchRootId = root; ordered[index].BatchSequence = index + 1; }
+    }
+    await db.SaveChangesAsync(cancellationToken);
     await transaction.CommitAsync(cancellationToken);
     return Results.Ok(new { batch_id = batch.Id, status = batch.Status, confirmed_at = DateTime.UtcNow, shipment_task_ids = affectedTasks.Select(task => task.Id).Distinct() });
 });
@@ -1112,8 +1145,15 @@ app.MapPost("/api/imports/email/{batchId:long}/confirm", async (long batchId, Js
     if (submitted is null || submitted.Count == 0)
         return Results.BadRequest(new { error = "没有可确认的邮件结果" });
     foreach (var reviewed in submitted.OfType<JsonObject>())
-        if (reviewed["status"]?.ToString() != "failed" && CargoNotificationRules.Validate(reviewed) is string splitError)
-            return Results.BadRequest(new { error = splitError });
+    {
+        if (reviewed["status"]?.ToString() == "failed") continue;
+        if (CargoNotificationRules.Validate(reviewed) is string splitError) return Results.BadRequest(new { error = splitError });
+        if (reviewed["fields"]?["multi_container"]?.ToString() == "true")
+        {
+            try { MultiContainerRules.Split(reviewed); }
+            catch (Exception error) when (error is InvalidOperationException or OverflowException) { return Results.BadRequest(new { error = error.Message }); }
+        }
+    }
 
     var affectedTasks = new List<ShipmentTask>();
     foreach (var node in submitted)
@@ -1129,6 +1169,7 @@ app.MapPost("/api/imports/email/{batchId:long}/confirm", async (long batchId, Js
         stored["fields"] = reviewed["fields"]?.DeepClone();
         stored["warehouse_groups"] = reviewed["warehouse_groups"]?.DeepClone();
         stored["items"] = reviewed["items"]?.DeepClone();
+        if (reviewed["shipment_groups"] is JsonArray reviewedPlan) stored["shipment_groups"] = reviewedPlan.DeepClone();
         await EnrichEmailProducts(stored, db, true, cancellationToken);
         stored["reviewed_at"] = DateTime.UtcNow;
         entity.ResultJson = stored.ToJsonString();
@@ -1150,6 +1191,13 @@ app.MapPost("/api/imports/email/{batchId:long}/confirm", async (long batchId, Js
         }
     }
     batch.Status = "Confirmed";
+    await db.SaveChangesAsync(cancellationToken);
+    foreach (var linked in affectedTasks.Where(t => t.SourceGroupKey.StartsWith("container-", StringComparison.Ordinal)).GroupBy(t => t.SourceImportItemId))
+    {
+        if (linked.Count() < 2) continue;
+        var ordered = linked.ToArray(); var root = ordered.First().BatchRootId > 0 ? ordered.First().BatchRootId : ordered.First().Id;
+        for (var index = 0; index < ordered.Length; index++) { ordered[index].BatchRootId = root; ordered[index].BatchSequence = index + 1; }
+    }
     await db.SaveChangesAsync(cancellationToken);
     return Results.Ok(new { batch_id = batch.Id, status = batch.Status, confirmed_at = DateTime.UtcNow, shipment_task_ids = affectedTasks.Select(task => task.Id).Distinct() });
 });
@@ -1270,8 +1318,8 @@ app.MapPost("/api/product-infos/workbooks/preview", async (HttpRequest request, 
     var files = form.Files.GetFiles("files");
     if (files.Count == 0 || files.Count > 20) return Results.BadRequest(new { error = "请选择 1 至 20 份走柜表" });
     if (files.Any(file => file.Length == 0 || file.Length > 20 * 1024 * 1024 ||
-        !file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase)))
-        return Results.BadRequest(new { error = "仅支持不超过 20MB 的 xlsx 走柜表" });
+        !new[] { ".xlsx", ".xls", ".xlsm" }.Contains(Path.GetExtension(file.FileName).ToLowerInvariant())))
+        return Results.BadRequest(new { error = "仅支持不超过20MB的xls、xlsx或xlsm走柜表" });
     var response = await parser.ParseProductWorkbooksAsync(files, cancellationToken);
     if (response.StatusCode is < 200 or >= 300)
         return Results.Content(response.Body, response.ContentType, statusCode: response.StatusCode);
@@ -1313,7 +1361,7 @@ app.MapPost("/api/product-infos/workbooks/commit", async (ProductWorkbookCommitR
     foreach (var row in request.Rows)
     {
         var candidate = new ProductInfo { ProductCode = row.ProductCode, QuantityPerBox = row.QuantityPerBox,
-            GrossWeightPerBox = row.GrossWeightPerBox, NetWeightPerBox = row.NetWeightPerBox };
+            GrossWeightPerBox = row.GrossWeightPerBox, NetWeightPerBox = row.NetWeightPerBox, NetNetWeightPerBox = row.NetNetWeightPerBox };
         var error = ValidateProductInfo(candidate);
         if (error is not null) return Results.BadRequest(new { error = $"{row.Filename} 第 {row.RowNumber} 行：{error}" });
         var key = $"{row.ProductCode.Trim()}\0{row.QuantityPerBox}";
@@ -1347,6 +1395,11 @@ app.MapPost("/api/product-infos/workbooks/commit", async (ProductWorkbookCommitR
         if (existing is null || !string.IsNullOrWhiteSpace(row.ToyCategory)) product.ToyCategory = row.ToyCategory.Trim();
         if (existing is null || row.GrossWeightPerBox.HasValue) product.GrossWeightPerBox = row.GrossWeightPerBox;
         if (existing is null || row.NetWeightPerBox.HasValue) product.NetWeightPerBox = row.NetWeightPerBox;
+        if (existing is null || row.NetNetWeightPerBox.HasValue) product.NetNetWeightPerBox = row.NetNetWeightPerBox;
+        if (!string.IsNullOrWhiteSpace(row.BoxDimensions)) product.BoxDimensions = row.BoxDimensions.Trim();
+        if (!string.IsNullOrWhiteSpace(row.Brand)) product.Brand = row.Brand.Trim();
+        if (row.MeasurementPerBox.HasValue) product.MeasurementPerBox = row.MeasurementPerBox;
+        if (row.VolumePerBox.HasValue) product.VolumePerBox = row.VolumePerBox;
         product.Source = $"走柜表:{Path.GetFileName(row.Filename)}"; product.UpdatedAt = DateTime.UtcNow;
         if (existing is null) { db.ProductInfos.Add(product); added++; } else updated++;
     }
@@ -1371,7 +1424,7 @@ app.MapPut("/api/product-infos/{id:long}", async (long id, ProductInfo value, Ap
     if (await ProductInfoExists(db, value.ProductCode, value.QuantityPerBox, id, cancellationToken)) return Results.Conflict(new { error = "相同货号和装箱规格已存在" });
     existing.Customer=value.Customer.Trim(); existing.ProductCode=value.ProductCode.Trim(); existing.ProductName=value.ProductName.Trim(); existing.QuantityPerBox=value.QuantityPerBox;
     existing.ToyCategory=value.ToyCategory.Trim(); existing.FactoryRemark=value.FactoryRemark.Trim(); existing.GrossWeightPerBox=value.GrossWeightPerBox;
-    existing.NetWeightPerBox=value.NetWeightPerBox; existing.Source=value.Source.Trim(); existing.UpdatedAt=DateTime.UtcNow;
+    existing.NetNetWeightPerBox=value.NetNetWeightPerBox; existing.BoxDimensions=value.BoxDimensions.Trim(); existing.Brand=value.Brand.Trim(); existing.MeasurementPerBox=value.MeasurementPerBox; existing.VolumePerBox=value.VolumePerBox; existing.NetWeightPerBox=value.NetWeightPerBox; existing.Source=value.Source.Trim(); existing.UpdatedAt=DateTime.UtcNow;
     await db.SaveChangesAsync(cancellationToken); return Results.Ok(existing);
 });
 
@@ -1507,6 +1560,7 @@ app.MapGet("/api/shipments/{id:long}/export", async (long id, AppDbContext db, E
     var payload = JsonNode.Parse(JsonSerializer.Serialize(
         ToShipmentResponse(task, db), new JsonSerializerOptions(JsonSerializerDefaults.Web)))!.AsObject();
     await EnrichShipmentCategories(payload, db, cancellationToken);
+    await EnrichSpecialExportProducts(payload, db, cancellationToken);
     ShipmentOrderTotals.Apply(payload, relatedTasks);
     payload["factoryMappings"] = JsonSerializer.SerializeToNode(await db.FactoryMappings.AsNoTracking().ToListAsync(cancellationToken), new JsonSerializerOptions(JsonSerializerDefaults.Web));
     var exported = await parserClient.ExportShipmentAsync(payload, cancellationToken);
@@ -1527,6 +1581,7 @@ app.MapGet("/api/shipments/{id:long}/export/warehouse", async (long id, AppDbCon
     payload["exportVariant"] = "warehouse";
     var relatedTasks = await db.ShipmentTasks.AsNoTracking().ToListAsync(cancellationToken);
     await EnrichShipmentCategories(payload, db, cancellationToken);
+    await EnrichSpecialExportProducts(payload, db, cancellationToken);
     ShipmentOrderTotals.Apply(payload, relatedTasks);
     payload["factoryMappings"] = JsonSerializer.SerializeToNode(await db.FactoryMappings.AsNoTracking().ToListAsync(cancellationToken), new JsonSerializerOptions(JsonSerializerDefaults.Web));
     var exported = await parserClient.ExportShipmentAsync(payload, cancellationToken);
@@ -1645,6 +1700,7 @@ app.MapPatch("/api/shipments/{id:long}", async (long id, JsonObject payload, Htt
     if (payload["items"] is JsonArray items)
     {
         await EnrichShipmentCategories(payload, db, cancellationToken);
+    await EnrichSpecialExportProducts(payload, db, cancellationToken);
         task.ItemsJson = SanitizeShipmentItems(items).ToJsonString();
     }
     if (payload["status"] is JsonValue statusNode && statusNode.TryGetValue<string>(out var nextStatus))
@@ -1668,7 +1724,7 @@ app.MapExportTemplates();
 app.MapFactoryMappings();
 app.Run();
 
-static string? ValidateProductInfo(ProductInfo value) => string.IsNullOrWhiteSpace(value.ProductCode) ? "货号不能为空" : value.QuantityPerBox is <= 0 ? "每箱个数必须大于0" : value.GrossWeightPerBox is <= 0 || value.NetWeightPerBox is <= 0 ? "毛重和净重必须大于0" : null;
+static string? ValidateProductInfo(ProductInfo value) => string.IsNullOrWhiteSpace(value.ProductCode) ? "货号不能为空" : value.QuantityPerBox is <= 0 ? "每箱个数必须大于0" : value.GrossWeightPerBox is <= 0 || value.NetWeightPerBox is <= 0 || value.NetNetWeightPerBox is <= 0 ? "毛重和净重必须大于0" : null;
 static Task<bool> ProductInfoExists(AppDbContext db, string productCode, int? quantityPerBox, long? excludedId, CancellationToken cancellationToken)
 {
     var normalized = productCode.Trim().ToUpper();
@@ -1697,7 +1753,8 @@ static object ToShipmentResponse(ShipmentTask task, AppDbContext db)
     static JsonNode ParseJson(string value, string fallback) => JsonNode.Parse(string.IsNullOrWhiteSpace(value) ? fallback : value) ?? JsonNode.Parse(fallback)!;
     return new
     {
-        task.Id, task.Company, CanEdit = true, task.Customer, EmailSubject = task.Company == "Huadeng" ? "" : task.EmailSubject, task.ResponsibleUserId, task.ResponsibleUserName, task.SourceMailboxAddress, task.SoNumber, task.ContainerType, task.PlannedShipDate,
+        task.Id, task.BatchRootId, task.BatchSequence, DisplayNumber = task.BatchRootId > 0 ? $"{task.BatchRootId}-{task.BatchSequence}" : task.Id.ToString(),
+        RelatedBatchTasks = task.BatchRootId > 0 ? db.ShipmentTasks.AsNoTracking().Where(other => other.BatchRootId == task.BatchRootId).OrderBy(other => other.BatchSequence).Select(other => new { other.Id, other.BatchSequence, other.SoNumber }).ToArray() : [], task.Company, CanEdit = true, task.Customer, EmailSubject = task.Company == "Huadeng" ? "" : task.EmailSubject, task.ResponsibleUserId, task.ResponsibleUserName, task.SourceMailboxAddress, task.SoNumber, task.ContainerType, task.PlannedShipDate,
         task.CutoffDate, task.SiDeadline, task.Port, task.DestinationCountry, task.TransportReference, task.SpecialRequirements,
         task.Status, task.CompletedDate, task.SourceImportItemId,
         CreatedAt = UtcDateTime.Normalize(task.CreatedAt),
@@ -1793,6 +1850,12 @@ static async Task<long[]> ConfirmMailboxCandidate(ImportEmailItem entity, AppDbC
     }
     if (affected.Count == 0) throw new InvalidOperationException("邮件资料不足，未能生成任务，请补充资料后确认");
     await db.SaveChangesAsync(cancellationToken);
+    if (stored["fields"]?["multi_container"]?.ToString() == "true" && affected.Count > 1)
+    {
+        var rootId = affected.First().BatchRootId > 0 ? affected.First().BatchRootId : affected.First().Id;
+        for (var index = 0; index < affected.Count; index++) { affected[index].BatchRootId = rootId; affected[index].BatchSequence = index + 1; }
+        await db.SaveChangesAsync(cancellationToken);
+    }
     var taskIds = affected.Select(task => task.Id).Distinct().ToArray();
     entity.HandlingOutcome = "Task";
     entity.TaskIdsJson = JsonSerializer.Serialize(taskIds);
@@ -1841,6 +1904,8 @@ static void ApplyReviewedEmailToTask(ShipmentTask task, JsonObject stored, bool 
     task.DestinationCountry = fields["destination_country"]?.ToString() ?? string.Empty;
     task.SpecialRequirements = fields["special_requirements"]?.ToString() ?? string.Empty;
     task.WarehouseGroupsJson = stored["warehouse_groups"]?.ToJsonString() ?? "[]";
+    if (fields["export_template"]?.ToString() == "sky-castle-multi")
+        task.ExportDetailsJson = new JsonObject { ["templateKey"] = "sky-castle-multi", ["vesselName"] = fields["vessel_name"]?.DeepClone() }.ToJsonString();
     task.ItemsJson = SanitizeShipmentItems(stored["items"]?.AsArray() ?? new JsonArray()).ToJsonString();
     task.PlannedShipDate = ShipmentWorkflowRules.ResolvePlannedShipDate(
         fields["ship_date"]?.ToString() ?? string.Empty,
@@ -1858,6 +1923,7 @@ static void ApplyReviewedEmailToTask(ShipmentTask task, JsonObject stored, bool 
 
 static List<(string GroupKey, JsonObject Payload)> ShipmentTaskPayloads(JsonObject stored)
 {
+    if (stored["fields"]?["multi_container"]?.ToString() == "true") return MultiContainerRules.Split(stored);
     var groups = stored["shipment_groups"]?.AsArray();
     if (groups is null || groups.Count == 0) return CargoNotificationRules.Split(string.Empty, stored);
     var result = new List<(string, JsonObject)>();
@@ -1915,6 +1981,7 @@ static void PopulatePreviewPlannedShipDates(JsonObject parsed)
     foreach (var node in parsed["items"]?.AsArray() ?? [])
     {
         if (node is not JsonObject item || item["fields"] is not JsonObject fields) continue;
+        if (fields["multi_container"]?.ToString() == "true") continue;
         if (!string.IsNullOrWhiteSpace(fields["ship_date"]?.ToString())) continue;
         var message = item["message"]?.AsObject();
         var resolved = ShipmentWorkflowRules.ResolvePlannedShipDate(
@@ -1923,6 +1990,28 @@ static void PopulatePreviewPlannedShipDates(JsonObject parsed)
             fields["si_deadline"]?.ToString() ?? string.Empty,
             message?["received_at"]?.ToString());
         if (resolved.HasValue) fields["ship_date"] = resolved.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+}
+
+static async Task EnrichSpecialExportProducts(JsonObject payload, AppDbContext db, CancellationToken cancellationToken)
+{
+    if (payload["exportDetails"]?["templateKey"]?.ToString() != "sky-castle-multi") return;
+    var products = await db.ProductInfos.AsNoTracking().ToListAsync(cancellationToken);
+    foreach (var item in (payload["items"]?.AsArray() ?? []).OfType<JsonObject>())
+    {
+        decimal? spec = decimal.TryParse(item["spec"]?.ToString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var value) ? value : null;
+        var match = ProductInfoMatching.FindExact(item["product_code"]?.ToString() ?? "", spec, products);
+        if (match is null) continue;
+        var product = match.Product;
+        void Fill(string key, JsonNode? value)
+        { if (string.IsNullOrWhiteSpace(item[key]?.ToString()) && value is not null) item[key] = value; }
+        Fill("gross_weight_per_box", JsonValue.Create(product.GrossWeightPerBox));
+        Fill("net_weight_per_box", JsonValue.Create(product.NetWeightPerBox));
+        Fill("net_net_weight_per_box", JsonValue.Create(product.NetNetWeightPerBox));
+        Fill("box_dimensions", JsonValue.Create(product.BoxDimensions));
+        Fill("measurement_per_box", JsonValue.Create(product.MeasurementPerBox));
+        Fill("brand", JsonValue.Create(product.Brand));
+        Fill("product_name", JsonValue.Create(match.ChineseName));
     }
 }
 
@@ -1999,10 +2088,22 @@ static async Task EnrichEmailProducts(JsonObject parsed, AppDbContext db, bool s
                     var pieces = DecimalValue(item["pieces"]);
                     if (pieces is not null)
                     {
-                        item["gross_weight"] = ProductInfoMatching.TotalWeight(pieces.Value, grossPerBox);
-                        item["net_weight"] = ProductInfoMatching.TotalWeight(pieces.Value, netPerBox);
+                        item["gross_weight"] = parsed["fields"]?["multi_container"]?.ToString() == "true" ? pieces.Value * grossPerBox : ProductInfoMatching.TotalWeight(pieces.Value, grossPerBox);
+                        item["net_weight"] = parsed["fields"]?["multi_container"]?.ToString() == "true" ? pieces.Value * netPerBox : ProductInfoMatching.TotalWeight(pieces.Value, netPerBox);
                     }
                 }
+                if (parsed["fields"]?["multi_container"]?.ToString() == "true" && DecimalValue(item["pieces"]) is decimal boxCount)
+                {
+                    if (productMatch.Product.MeasurementPerBox is decimal measurement) { item["measurement_per_box"] = measurement; item["measurement"] = boxCount * measurement; }
+                    if (productMatch.Product.VolumePerBox is decimal volume) item["volume"] = boxCount * volume;
+                }
+                if (productMatch.Product.NetNetWeightPerBox is decimal pure)
+                {
+                    item["net_net_weight_per_box"] = pure;
+                    if (DecimalValue(item["pieces"]) is decimal boxes) item["net_net_weight"] = boxes * pure;
+                }
+                if (string.IsNullOrWhiteSpace(item["box_dimensions"]?.ToString())) item["box_dimensions"] = productMatch.Product.BoxDimensions;
+                if (string.IsNullOrWhiteSpace(item["brand"]?.ToString())) item["brand"] = productMatch.Product.Brand;
                 item["product_info_match"] = "exact";
             }
             else if (savedMapping is not null)

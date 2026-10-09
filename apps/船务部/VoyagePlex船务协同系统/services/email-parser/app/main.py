@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from fastapi.responses import Response
 
 from .factory_workbook import parse_factory_workbook
+from .multi_container import multi_container_plan, order_cargo
 from .eml import parse_eml
 from .carrier_schedule import apply_carrier_schedule
 from .rules import classify_email, filter_items_for_email, normalize_deadline, parse_body, loading_factory_from_text, requires_cargo_split
@@ -84,8 +85,8 @@ async def parse_product_workbooks(files: list[UploadFile] = File(...)):
     rows = []
     for file in files:
         filename = Path(file.filename or "走柜表.xlsx").name
-        if not filename.lower().endswith(".xlsx"):
-            return Response(content=json.dumps({"error": f"{filename} 只支持 xlsx 文件"}, ensure_ascii=False), status_code=400, media_type="application/json")
+        if not filename.lower().endswith((".xlsx", ".xls", ".xlsm")):
+            return Response(content=json.dumps({"error": f"{filename} 只支持xls、xlsx或xlsm文件"}, ensure_ascii=False), status_code=400, media_type="application/json")
         content = await file.read()
         if not content or len(content) > 20 * 1024 * 1024:
             return Response(content=json.dumps({"error": f"{filename} 文件为空或超过 20MB"}, ensure_ascii=False), status_code=400, media_type="application/json")
@@ -502,6 +503,20 @@ def parse_email_entries(entries: list[dict]) -> dict:
                     fields["cargo_split_required"] = "true"
                     items = [{**cargo, "shipment_scope": "unassigned"} for cargo in items]
                     warnings.append("邮件说明剩余货物等待另行通知，请逐行选择本次出运或等待客户通知；未分配完不能确认。体积仅作核对，不自动分柜。")
+                container_plan = multi_container_plan(fields, message.get("body_tables", []),
+                    f'{message["subject"]}\n{message["body_text"]}', message.get("received_at", ""))
+                if container_plan:
+                    real_items = [cargo for cargo in items if not re.search(r"模[板版]|template", str(cargo.get("source_file", "")), re.I)
+                                  and str(cargo.get("product_code", "")).upper() not in {"CTN#", "SEAL#"}]
+                    items = order_cargo(message.get("body_tables", [])) or real_items
+                    shipment_groups = container_plan
+                    fields["si_deadline"] = ""
+                    fields["cutoff_date"] = ""
+                    warehouse_groups = []
+                    fields["export_template"] = "sky-castle-multi" if re.search(r"skycastle|sky castle|sticki rolls", message["body_text"], re.I) else ""
+                    if fields["export_template"]:
+                        fields["customer"] = "Sky Castle"
+                    warnings.append("已识别多柜安排；请核对整批产品和箱数，相同产品优先集中装柜。")
                 item.update({
                     "status": "parsed",
                     "fingerprint": message["fingerprint"],

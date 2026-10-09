@@ -172,9 +172,9 @@ def _split_shipment_notes(notes: str, items: list[dict]) -> tuple[str, str]:
 
 def build_shipment_workbook(task: dict) -> tuple[bytes, str]:
     """Create one cabinet sheet per task, following the existing ZURU/TOMY layout."""
-    if task.get("company") == "Huadeng":
-        from .huadeng_export import build_huadeng_workbook
-        return build_huadeng_workbook(task, build_shipment_workbook)
+    if (task.get("exportDetails") or {}).get("templateKey") == "sky-castle-multi" and task.get("items"):
+        from .sky_castle_export import build_sky_castle_workbook
+        return build_sky_castle_workbook(task)
     customer_key = _customer_key(task)
     consignee, consignee_code = CONSIGNEES[customer_key]
     items = list(task.get("items") or [])

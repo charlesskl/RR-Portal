@@ -11,14 +11,25 @@ class ScheduleTables(HTMLParser):
         self.stack = []
         self.cell = None
         self.row = None
+        self.spans = {}
+        self.row_index = -1
+        self.cell_span = (1, 1)
 
     def handle_starttag(self, tag, attrs):
         if tag == "table":
             self.stack.append([])
+            self.spans = {}
+            self.row_index = -1
         elif tag == "tr":
             self.row = []
+            self.row_index += 1
         elif tag in ("td", "th"):
             self.cell = []
+            attributes = dict(attrs)
+            try:
+                self.cell_span = (max(1, min(100, int(attributes.get("rowspan", 1)))), max(1, min(100, int(attributes.get("colspan", 1)))))
+            except ValueError:
+                self.cell_span = (1, 1)
         elif tag == "br" and self.cell is not None:
             self.cell.append(" ")
 
@@ -29,9 +40,19 @@ class ScheduleTables(HTMLParser):
     def handle_endtag(self, tag):
         if tag in ("td", "th") and self.cell is not None:
             if self.row is not None:
-                self.row.append(re.sub(r"\s+", " ", "".join(self.cell)).strip())
+                while len(self.row) in self.spans and self.spans[len(self.row)][0] > self.row_index:
+                    self.row.append(self.spans[len(self.row)][1])
+                value = re.sub(r"\s+", " ", "".join(self.cell)).strip()
+                rowspan, colspan = self.cell_span
+                for _ in range(colspan):
+                    column = len(self.row)
+                    self.row.append(value)
+                    if rowspan > 1:
+                        self.spans[column] = (self.row_index + rowspan, value)
             self.cell = None
         elif tag == "tr" and self.row is not None:
+            while len(self.row) in self.spans and self.spans[len(self.row)][0] > self.row_index:
+                self.row.append(self.spans[len(self.row)][1])
             if self.stack:
                 self.stack[-1].append(self.row)
             self.row = None

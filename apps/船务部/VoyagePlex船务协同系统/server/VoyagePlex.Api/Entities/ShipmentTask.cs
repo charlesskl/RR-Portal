@@ -7,6 +7,8 @@ public sealed class ShipmentTask : ICompanyEntity
     public string SourceMailboxAddress { get; set; } = "";
     public string Company { get; set; } = "Xingxin";
     public long Id { get; set; }
+    public long BatchRootId { get; set; }
+    public int BatchSequence { get; set; }
     public string Customer { get; set; } = string.Empty;
     public string EmailSubject { get; set; } = string.Empty;
     public string? SoNumber { get; set; }

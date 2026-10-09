@@ -273,3 +273,19 @@ Console.WriteLine("Cargo waiting-notification, explicit ship-date and template v
 if (!ExportTemplateRules.CanManage("admin") || !ExportTemplateRules.CanManage("supervisor") || ExportTemplateRules.CanManage("shipping") || ExportTemplateRules.CanManage("warehouse"))
     throw new InvalidOperationException("模板管理必须允许管理员和主管，拒绝普通船务和仓管");
 Console.WriteLine("Export template role permission tests passed.");
+
+var multiPlan = JsonNode.Parse("""{"fields":{"multi_container":"true","export_template":"sky-castle-multi"},"shipment_groups":[{"group_key":"container-1","so_number":"SO111111","container_type":"40HQ","cutoff_date":"2026-09-27T09:00"},{"group_key":"container-2","so_number":"SO222222","container_type":"40HQ","cutoff_date":"2026-10-02T12:00"}],"items":[{"product_code":"A","pieces":3,"quantity":36,"net_net_weight":14.04,"order_total_pieces":10},{"product_code":"B","pieces":7,"quantity":84,"net_net_weight":32.76,"order_total_pieces":10}]}""")!.AsObject();
+var cabinets = MultiContainerRules.Split(multiPlan);
+if (cabinets.Count != 2 || cabinets.Sum(c => c.Payload["items"]!.AsArray().Sum(i => decimal.Parse(i!["pieces"]!.ToString()))) != 10 ||
+    cabinets.Sum(c => c.Payload["items"]!.AsArray().Sum(i => decimal.Parse(i!["net_net_weight"]!.ToString()))) != 46.80m ||
+    cabinets.SelectMany(c => c.Payload["items"]!.AsArray()).Any(i => i!["order_total_pieces"]!.ToString() != "10") ||
+    cabinets[1].Payload["fields"]!["cutoff_date"]!.ToString() != "2026-10-02T12:00") throw new InvalidOperationException("分柜数量、重量、PO整批口径或SO日期错误");
+var inferredPoPlan = multiPlan.DeepClone().AsObject();
+foreach (var item in inferredPoPlan["items"]!.AsArray()) { item!.AsObject().Remove("order_total_pieces"); item["customer_po"] = "PO-SAME"; }
+if (MultiContainerRules.Split(inferredPoPlan).SelectMany(c => c.Payload["items"]!.AsArray()).Any(i => i!["order_total_pieces"]!.ToString() != "10"))
+    throw new InvalidOperationException("同PO多个产品须保留整批PO总箱数");
+var emptyPlan = multiPlan.DeepClone().AsObject(); emptyPlan["items"] = new JsonArray();
+if (MultiContainerRules.Split(emptyPlan).Any(c => c.Payload["fields"]?["export_template"] is not null)) throw new InvalidOperationException("无产品邮件必须导出普通模板");
+var invalidPlan = multiPlan.DeepClone().AsObject(); invalidPlan["items"]![0]!["pieces"] = 1.5;
+try { MultiContainerRules.Split(invalidPlan); throw new Exception("不应允许小数箱数"); } catch (InvalidOperationException) { }
+Console.WriteLine("Multi-container carton/weight conservation, PO context and no-cargo rules passed.");

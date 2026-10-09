@@ -42,7 +42,9 @@ const PAGES: Record<string, string> = {
   "/assembly-purchases": "委托加工单",
   "/scheduling": "客户排期表",
   "/material-inventory": "物料库存查询",
-  "/personal-inventory": "个人库存金额表",
+  "/personal-inventory": "来料个人库存金额表",
+  "/personal-inventory-plastic": "塑胶个人库存金额表",
+  "/personal-inventory-semi": "半成品个人库存金额表",
   "/accounts": "账号权限管理",
   "/online-users": "在线人员",
   "/messages": "消息中心",
@@ -146,7 +148,12 @@ const PAGE_LOADERS: Record<string, () => Promise<{ default: ComponentType }>> = 
   "/assembly-purchases": () => import("@/pages/AssemblyPurchasePage"),
   "/scheduling": () => import("@/pages/SchedulingPage"),
   "/material-inventory": () => import("@/pages/InventoryPage"),
-  "/personal-inventory": () => import("@/pages/PersonalInventoryPage"),
+  "/personal-inventory": () =>
+    import("@/pages/PersonalInventoryPage").then((m) => ({ default: m.PersonalInventoryReceivePage })),
+  "/personal-inventory-plastic": () =>
+    import("@/pages/PersonalInventoryPage").then((m) => ({ default: m.PersonalInventoryPlasticPage })),
+  "/personal-inventory-semi": () =>
+    import("@/pages/PersonalInventoryPage").then((m) => ({ default: m.PersonalInventorySemiPage })),
   "/accounts": () => import("@/pages/AccountsPage"),
   "/online-users": () => import("@/pages/OnlineUsersPage"),
   "/messages": () => import("@/pages/MessagesPage"),

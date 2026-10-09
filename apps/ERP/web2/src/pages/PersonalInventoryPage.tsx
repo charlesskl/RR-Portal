@@ -150,8 +150,9 @@ const exportCols: ExportCol[] = [
   { title: "仓库", key: "仓库" },
 ];
 
-export default function PersonalInventoryPage() {
-  const [scope, setScope] = useState<(typeof SCOPES)[number]>("全部");
+export default function PersonalInventoryPage({ scope: fixedScope }: { scope?: string }) {
+  const [scopeState, setScope] = useState<(typeof SCOPES)[number]>("全部");
+  const scope = fixedScope ?? scopeState;
   const [person, setPerson] = useState<string | null>(null);
 
   const q = useQuery({
@@ -190,8 +191,10 @@ export default function PersonalInventoryPage() {
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="mr-2 text-lg font-bold text-[#1a2330]">个人库存金额表</h1>
-        {SCOPES.map((s) => (
+        <h1 className="mr-2 text-lg font-bold text-[#1a2330]">
+          {fixedScope ? `${fixedScope}个人库存金额表` : "个人库存金额表"}
+        </h1>
+        {!fixedScope && SCOPES.map((s) => (
           <button
             key={s}
             type="button"
@@ -277,3 +280,8 @@ export default function PersonalInventoryPage() {
     </div>
   );
 }
+
+// 按仓固定范围的包装页(三个菜单入口各看各仓;权限菜单同名:来料/塑胶/半成品个人库存金额表)
+export const PersonalInventoryReceivePage = () => <PersonalInventoryPage scope="来料" />;
+export const PersonalInventoryPlasticPage = () => <PersonalInventoryPage scope="塑胶" />;
+export const PersonalInventorySemiPage = () => <PersonalInventoryPage scope="半成品" />;

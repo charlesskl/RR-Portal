@@ -22,5 +22,6 @@ public sealed class 人事档案 : MasterEntity
     [Column("基本工资"), PriceField] public decimal? 基本工资 { get; set; }
     [Column("在职")] public string? 在职 { get; set; }
     [Column("默认班次")] public string? 默认班次 { get; set; }
+    [Column("所属仓库")] public string? 所属仓库 { get; set; }
     [Column("备注")] public string? 备注 { get; set; }
 }

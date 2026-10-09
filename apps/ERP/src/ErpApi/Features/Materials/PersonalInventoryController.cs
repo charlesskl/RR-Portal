@@ -12,12 +12,13 @@ namespace ErpApi.Features.Materials;
 // 库存超出批次总量的部分(期初/盘点盈余等)归为「期初结余」。
 // 单价/金额受权限位控制:无「单价」位单价返回 null,无「金额」位金额返回 null。
 // 批次单价为 0 视为未填,回落物料主档单价(来料=物料资料,塑胶=塑胶物料资料;半成品无单价主档只用批次价)。
+// 权限按仓拆三个菜单:来料/塑胶/半成品个人库存金额表,各自 打开/单价/金额 位独立;
+// 不传范围时只返回有权仓的合集,一个权都没有则 403。
 [ApiController]
 [Authorize]
 [Route("api/personal-inventory")]
 public sealed class PersonalInventoryController(ISqlConnectionFactory factory, IPermissionService perms) : ControllerBase
 {
-    private const string Menu = "个人库存金额表";
     private string CurrentUser => User?.FindFirstValue(ClaimTypes.NameIdentifier) ?? User?.FindFirstValue("sub") ?? "";
 
     // 来料仓:净库存台账(与 MaterialInventoryService.LedgerUnion 同口径,仅取 物料编号+数量)
@@ -213,33 +214,47 @@ u AS (
 )
 SELECT N'{3}' AS [范围], u.* FROM u ORDER BY u.[物料编号], u.[日期] DESC";
 
+    private static string ScopeMenu(string scope) => scope + "个人库存金额表";
+
     [HttpGet]
     public async Task<IActionResult> List([FromQuery(Name = "范围")] string? 范围 = null)
     {
-        if (!await perms.HasAsync(CurrentUser, Menu, PermissionAction.打开)) return Forbid();
-        var canPrice = await perms.HasAsync(CurrentUser, Menu, PermissionAction.单价);
-        var canAmount = await perms.HasAsync(CurrentUser, Menu, PermissionAction.金额);
+        // 每仓一个权限菜单(来料/塑胶/半成品个人库存金额表);不指定范围=返回有权仓的合集
+        var defs = new[]
+        {
+            (scope: "来料", sql: string.Format(FifoSql, MaterialLedger, MaterialBatches, "物料资料", "来料")),
+            (scope: "塑胶", sql: string.Format(FifoSql, PlasticLedger, PlasticBatches, "塑胶物料资料", "塑胶")),
+            (scope: "半成品", sql: string.Format(SemiFifoSql, SemiLedger, SemiBatches)),
+        };
 
         var rows = new List<PersonalInventoryBatchRow>();
         using var c = factory.Create();
-        if (范围 is null or "" or "全部" or "来料")
-            rows.AddRange(await c.QueryAsync<PersonalInventoryBatchRow>(
-                string.Format(FifoSql, MaterialLedger, MaterialBatches, "物料资料", "来料")));
-        // 塑胶批次 bid 与来料可能重叠(不同表),前端不用 bid 做 key,无需再偏移
-        if (范围 is null or "" or "全部" or "塑胶")
-            rows.AddRange(await c.QueryAsync<PersonalInventoryBatchRow>(
-                string.Format(FifoSql, PlasticLedger, PlasticBatches, "塑胶物料资料", "塑胶")));
-        if (范围 is null or "" or "全部" or "半成品")
-            rows.AddRange(await c.QueryAsync<PersonalInventoryBatchRow>(
-                string.Format(SemiFifoSql, SemiLedger, SemiBatches)));
-
-        foreach (var r in rows)
+        var any = false;
+        foreach (var d in defs)
         {
-            // 金额=剩余x单价,先算后按权限位遮罩(单价位只管单价列)
-            r.金额 = Math.Round((r.单价 ?? 0) * r.剩余数量, 2);
-            if (!canPrice) r.单价 = null;
-            if (!canAmount) r.金额 = null;
+            var menu = ScopeMenu(d.scope);
+            var allow = await perms.HasAsync(CurrentUser, menu, PermissionAction.打开);
+            var wanted = 范围 is null or "" or "全部" || 范围 == d.scope;
+            if (!wanted) continue;
+            if (!allow)
+            {
+                if (范围 == d.scope) return Forbid(); // 明确点了无权的仓
+                continue;                              // 全部=跳过无权仓
+            }
+            any = true;
+            var canPrice = await perms.HasAsync(CurrentUser, menu, PermissionAction.单价);
+            var canAmount = await perms.HasAsync(CurrentUser, menu, PermissionAction.金额);
+            var part = await c.QueryAsync<PersonalInventoryBatchRow>(d.sql);
+            foreach (var r in part)
+            {
+                // 金额=剩余x单价,先算后按权限位遮罩(单价位只管单价列)
+                r.金额 = Math.Round((r.单价 ?? 0) * r.剩余数量, 2);
+                if (!canPrice) r.单价 = null;
+                if (!canAmount) r.金额 = null;
+            }
+            rows.AddRange(part);
         }
+        if (!any) return Forbid();
         return Ok(rows);
     }
 }

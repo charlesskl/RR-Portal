@@ -6,7 +6,7 @@
 // 权限菜单:人员=人事档案、部门=部门信息(MenuCatalog.cs:11-12 实证:基础资料组)。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CaretLeft, CaretRight, Pencil, Plus, Prohibit, Trash, X } from "@phosphor-icons/react";
-import { masterDataApi } from "@/api/endpoints";
+import { masterDataApi, warehouseLocationApi } from "@/api/endpoints";
 import type { MasterRow } from "@/api/types";
 import { usePerms } from "@/hooks/usePerms";
 import { ConfirmDialog } from "@/components/doc/ConfirmDialog";
@@ -69,6 +69,14 @@ export default function DepartmentPersonnelPage() {
 
   const [editing, setEditing] = useState<Row | null>(null); // null=不显示;ID=0 表示新增
   const [form, setForm] = useState<Record<string, string>>({});
+  // 所属仓库下拉(仓库位置主数据,登录即可读)
+  const [warehouses, setWarehouses] = useState<string[]>([]);
+  useEffect(() => {
+    warehouseLocationApi
+      .options()
+      .then((r) => setWarehouses(r.map((w) => w.名称 ?? w.编号 ?? "").filter(Boolean)))
+      .catch(() => {});
+  }, []);
   const [saving, setSaving] = useState(false);
 
   const [deptEditing, setDeptEditing] = useState<Row | null>(null); // null=关;ID=0=新增部门
@@ -322,6 +330,7 @@ export default function DepartmentPersonnelPage() {
     { title: "基本工资", key: "基本工资", right: true, money: true },
     { title: "备注", key: "备注" },
     { title: "在职", key: "在职" },
+    { title: "所属仓库", key: "所属仓库" },
   ];
 
   return (
@@ -633,6 +642,18 @@ export default function DepartmentPersonnelPage() {
               value={form.在职 ?? "在职"}
               options={["在职", "离职"].map((v) => ({ value: v, label: v }))}
               onChange={(v) => setForm((f) => ({ ...f, 在职: v }))}
+            />
+          </label>
+          <label className="block">
+            <span className="f-label">所属仓库</span>
+            <SearchSelect
+              ariaLabel="所属仓库"
+              className="mt-1.5"
+              value={form.所属仓库 ?? ""}
+              options={warehouses.map((v) => ({ value: v, label: v }))}
+              placeholder="不属仓库"
+              clearLabel="不属仓库"
+              onChange={(v) => setForm((f) => ({ ...f, 所属仓库: v }))}
             />
           </label>
           {TEXT_FIELDS.slice(9).map((f) => (

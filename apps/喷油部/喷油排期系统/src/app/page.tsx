@@ -8,7 +8,7 @@ import { dotnetGet } from "@/lib/dotnet";
 // 对应 server/.../Dashboard/DashboardController.cs 的 DashboardStats 记录。
 type DashboardStats = {
   ordersTotal: number;
-  ordersActive: number;
+  inProductionQty: number;
   overdue: number;
   productsCount: number;
 };
@@ -23,20 +23,20 @@ export default async function Dashboard() {
   //  - 甘特图数据 → GET /api/schedule?today=YYYY-MM-DD（替代原 buildGanttData(now)，
   //    today 沿用页面本地日期字符串以保持 expectedOutDate 计算口径一致）
   const stats = await dotnetGet<DashboardStats>("/api/dashboard");
-  const { ordersTotal, ordersActive, overdue, productsCount } = stats;
+  const { ordersTotal, inProductionQty, overdue, productsCount } = stats;
 
   const dateStr = now.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
   const weekday = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][now.getDay()];
 
   const STATS = [
     { label: "订单总数（张）",   value: ordersTotal,   dot: "bg-mint-400" },
-    { label: "在产订单（张）",   value: ordersActive,  dot: "bg-sky",     hint: "状态=在产" },
+    { label: "在产数量（件）",   value: inProductionQty,  dot: "bg-sky",     hint: "在产订单剩余数量合计" },
     { label: "已逾期订单（张）", value: overdue,       dot: "bg-rose",    hint: "交货日已过且未作废" },
     { label: "产品款数（款）",   value: productsCount, dot: "bg-purple" },
   ];
 
   const CARDS = [
-    { href: "/orders/new", icon: "📝", chips: ["订单", "录入"], title: "新建订单",     desc: "选款号→按子件的部位填数量", ready: true },
+    { href: "/orders",     icon: "📝", chips: ["订单", "总览"], title: "订单总览",     desc: "查看订单数量、生产进度与交期风险", ready: true },
     { href: "/schedule",   icon: "📅", chips: ["排期"],         title: "订单排期",     desc: "选日期+拉别 → 机台联动指派 → 填计划数 → 生成待录单", ready: true },
     { href: "/recording",  icon: "✏️", chips: ["实绩"],         title: "每日实绩录入", desc: "填实际生产数 → 算产值 / 余下数 / 完工 → 导出明细表", ready: true },
     { href: "/products",   icon: "📇", chips: ["产品", "核价"], title: "产品核价表",   desc: "款号→子件→部位 4 价 下钻维护",       ready: true },

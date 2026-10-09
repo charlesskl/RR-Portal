@@ -207,19 +207,53 @@ public class ImportApiTests : IAsyncLifetime
 
     // ─── import-confirm 撞号 ───
     [Fact]
-    public async Task ImportConfirm_DuplicateOrderNo_Returns409()
+    public async Task ImportConfirm_DuplicateOrderNo_AddsQuantitiesAndKeepsOneOrder()
     {
         await LoginAsync("clerk", "clerk123");
-        await SeedOrderAsync("ORD-DUP");
+        await SeedProductAsync("TEST01", ("body", new[] { "头", "脚" }));
         var req = new
         {
-            head = new { externalOrderNo = "ORD-DUP", orderDate = "2026-06-10", deliveryDate = (string?)null, productNo = "TEST01", isMa = false },
-            pdfToken = "tok.pdf",
-            asPendingProduct = true,
-            lines = Array.Empty<object>()
+            head = new { externalOrderNo = " ORD-DUP ", orderDate = "2026-06-10", deliveryDate = (string?)null, productNo = "TEST01", isMa = false },
+            pdfToken = "tok.pdf", asPendingProduct = false,
+            lines = new[] { new { matchedItemName = "头", totalQty = 100 } }
         };
+        var first = await _client.PostAsJsonAsync("/api/orders/import-confirm", req);
+        first.EnsureSuccessStatusCode();
+        var id = (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
         var r = await _client.PostAsJsonAsync("/api/orders/import-confirm", req);
-        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        r.EnsureSuccessStatusCode();
+        var result = await r.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(result.GetProperty("merged").GetBoolean());
+        Assert.Equal(id, result.GetProperty("id").GetInt32());
+        var order = await LoadOrderAsync("ORD-DUP");
+        Assert.Single(order.PartQtys);
+        Assert.Equal(200, order.PartQtys[0].Qty);
+        Assert.Equal("draft", order.Status);
+    }
+
+    [Fact]
+    public async Task ImportConfirmMulti_Duplicate_AddsMatchingPartsAndNewProducts()
+    {
+        await LoginAsync("clerk", "clerk123");
+        await SeedProductAsync("A", ("body", new[] { "头" }));
+        await SeedProductAsync("B", ("body", new[] { "头" }));
+        var head = new { externalOrderNo = "MULTI-DUP", orderDate = "2026-06-10", productNo = "A", isMa = false };
+        (await _client.PostAsJsonAsync("/api/orders/import-confirm", new {
+            head, pdfToken = "tok.pdf", asPendingProduct = false,
+            lines = new[] { new { matchedItemName = "头", totalQty = 100 } }
+        })).EnsureSuccessStatusCode();
+        var req = new { head, pdfToken = "tok.pdf", savePricing = false,
+            products = new[] {
+                new { productNo = "A", isMa = false, lines = new[] { new { matchedItemName = "头", totalQty = 30 } } },
+                new { productNo = "B", isMa = false, lines = new[] { new { matchedItemName = "头", totalQty = 50 } } }
+            }
+        };
+        for (var i = 0; i < 2; i++)
+            (await _client.PostAsJsonAsync("/api/orders/import-confirm-multi", req)).EnsureSuccessStatusCode();
+        var order = await LoadOrderAsync("MULTI-DUP");
+        Assert.Equal(2, order.PartQtys.Count);
+        Assert.Equal(160, order.PartQtys.Single(q => q.PartName == "头").Qty);
+        Assert.Equal(100, order.PartQtys.Single(q => q.PartName == "B · 头").Qty);
     }
 
     // 种一个回收站（archived）产品，返回产品 id。

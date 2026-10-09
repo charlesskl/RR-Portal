@@ -79,7 +79,7 @@ export default function OrdersTable({ orders, isAdmin }: { orders: OrderRow[]; i
         <MetricCard label="未完工订单" value={stats.active} tone="mint" sub={`总数 ${stats.total} 张`} />
         <MetricCard label="未排期" value={stats.unscheduled} tone={stats.unscheduled > 0 ? "blue" : "muted"} sub="需要填写工序排期" />
         <MetricCard label="交期风险" value={stats.risk} tone={stats.risk > 0 ? "red" : "muted"} sub={`已超 ${stats.overdue} · 预计超 ${stats.late}`} />
-        <MetricCard label="急单" value={stats.urgent} tone={stats.urgent > 0 ? "rose" : "muted"} sub={`7天内交货 ${stats.dueSoon} 张`} />
+        <MetricCard label="在产数量（件）" value={stats.inProductionQty} tone="blue" sub="在产订单剩余数量合计" />
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4">
@@ -250,6 +250,7 @@ function buildStats(orders: OrderRow[]) {
   const overdue = active.filter((o) => o.riskLevel === "overdue").length;
   const late = active.filter((o) => o.riskLevel === "late").length;
   return {
+    inProductionQty: orders.filter(o => o.status === "in_production").reduce((sum, o) => sum + (o.inProductionRemainingQty ?? 0), 0),
     total: orders.filter((o) => o.status !== "archived").length,
     active: active.length,
     unscheduled: active.filter((o) => o.scheduled === false).length,

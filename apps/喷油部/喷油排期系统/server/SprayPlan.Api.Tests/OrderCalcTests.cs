@@ -14,6 +14,21 @@ public class OrderCalcTests
     }
 
     [Fact]
+    public void RemainingQty_UsesSlowestStepAndIgnoresDeletedPlansAndOverproduction()
+    {
+        var order = new Order {
+            PartQtys = new() { new() { PartName = "头", Qty = 100 }, new() { PartName = "脚", Qty = 100 } },
+            Plans = new() {
+                new() { PartName = "头", StepNo = 1, GoodQty = 80 },
+                new() { PartName = "头", StepNo = 2, GoodQty = 30 },
+                new() { PartName = "头", StepNo = 2, GoodQty = 60, DeletedAt = DateTime.UtcNow },
+                new() { PartName = "脚", GoodQty = 120 }
+            }
+        };
+        Assert.Equal(70, OrderCalc.RemainingQty(order));
+    }
+
+    [Fact]
     public void PartComprehensivePrice_SumsThreePrices()
         => Assert.Equal(6.0, OrderCalc.PartComprehensivePrice(1, 2, 3));
 

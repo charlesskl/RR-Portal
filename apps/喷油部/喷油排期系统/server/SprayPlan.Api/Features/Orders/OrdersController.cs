@@ -120,7 +120,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                 plans.Count == 0 ? null : ScheduleCalc.Ymd(plans.Min(p => p.PlanDate)),
                 covered ? finishDate : null, covered,
                 plans.Sum(p => p.PlannedQty), recordedQty, demandQty, progressPct,
-                productionDays, recordedQty, Math.Max(0, demandQty - recordedQty));
+                productionDays, recordedQty, Math.Max(0, demandQty - recordedQty), OrderCalc.RemainingQty(o));
         }).ToList();
         return Ok(result);
     }
@@ -516,8 +516,10 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         if (req.Products.Select(p => p.ProductNo.Trim()).Distinct().Count() != req.Products.Count)
             return BadRequest(new { error = "同一款号不能重复提交" });
         var targetFactory = db.CurrentFactoryId == "ALL" ? "XINGXIN" : db.CurrentFactoryId;
-        if (await db.Orders.IgnoreQueryFilters().AnyAsync(o => o.FactoryId == targetFactory && o.ExternalOrderNo == req.Head.ExternalOrderNo))
-            return Conflict(new { error = "该订单编号已存在" });
+        if (string.IsNullOrWhiteSpace(req.Head.ExternalOrderNo))
+            return BadRequest(new { error = "请填写订单编号" });
+        var existing = await db.Orders.IgnoreQueryFilters().Include(o => o.PartQtys)
+            .FirstOrDefaultAsync(o => o.FactoryId == targetFactory && o.ExternalOrderNo == req.Head.ExternalOrderNo.Trim());
         var now = DateTime.UtcNow;
         await using var transaction = await db.Database.BeginTransactionAsync();
         var order = new Order
@@ -589,10 +591,11 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                 });
             }
         }
-        db.Orders.Add(order);
+        order = MergeImportedOrder(order, existing);
         await db.SaveChangesAsync();
         await transaction.CommitAsync();
-        return CreatedAtAction(nameof(Get), new { id = order.Id }, new { id = order.Id });
+        return CreatedAtAction(nameof(Get), new { id = order.Id }, new { id = order.Id, merged = existing is not null,
+            warning = existing is null ? null : "重复订单号，数量已叠加到原订单，请检查排期是否需要补排。" });
     }
 
     [HttpPost("import-confirm")]
@@ -600,13 +603,16 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
     public async Task<IActionResult> ImportConfirm([FromBody] ImportConfirmRequest req)
     {
         var targetFactory = db.CurrentFactoryId == "ALL" ? "XINGXIN" : db.CurrentFactoryId;
-        if (await db.Orders.IgnoreQueryFilters().AnyAsync(o => o.FactoryId == targetFactory && o.ExternalOrderNo == req.Head.ExternalOrderNo))
-            return Conflict(new { error = "该订单编号已存在" });
+        if (string.IsNullOrWhiteSpace(req.Head.ExternalOrderNo))
+            return BadRequest(new { error = "请填写订单编号" });
+        var existing = await db.Orders.IgnoreQueryFilters().Include(o => o.PartQtys)
+            .FirstOrDefaultAsync(o => o.FactoryId == targetFactory && o.ExternalOrderNo == req.Head.ExternalOrderNo.Trim());
 
+        await using var transaction = await db.Database.BeginTransactionAsync();
         var now = DateTime.UtcNow;
         var order = new Order
         {
-            ExternalOrderNo = req.Head.ExternalOrderNo,
+            ExternalOrderNo = req.Head.ExternalOrderNo.Trim(), FactoryId = targetFactory,
             OrderDate = string.IsNullOrEmpty(req.Head.OrderDate) ? now : DateUtil.ParseUtc(req.Head.OrderDate),
             DeliveryDate = string.IsNullOrEmpty(req.Head.DeliveryDate) ? null : DateUtil.ParseUtc(req.Head.DeliveryDate),
             IsMA = req.Head.IsMa,
@@ -626,7 +632,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         {
             // 防御：前端应只回传绿行（MatchedItemName 已匹配），若 null/空白则说明有未匹配行混入，
             // 降级为 400 而非让 BuildLines 里的 .Trim() 抛 NPE → 500。
-            if (req.Lines.Any(l => string.IsNullOrWhiteSpace(l.MatchedItemName)))
+            if (req.Lines.Any(l => string.IsNullOrWhiteSpace(l.MatchedItemName) || l.TotalQty < 0))
                 return BadRequest(new { error = "存在未匹配子件，请先处理后再入库" });
 
             // 货号统一去首尾空格：查询与插入用同一值，避免 "ABC " 查不到已有 "ABC"，
@@ -686,14 +692,49 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             }
 
             order.ProductId = product.Id;
+            order.Product = product;
             order.PartQtys = BuildPartQtys(req.Lines, product);
             order.PendingProduct = false;
         }
 
-        db.Orders.Add(order);
+        order = MergeImportedOrder(order, existing);
         await db.SaveChangesAsync();
+        await transaction.CommitAsync();
         // 详情 action 名为 Get（见上方 [HttpGet("{id:int}")] Get）。
-        return CreatedAtAction(nameof(Get), new { id = order.Id }, new { id = order.Id });
+        return CreatedAtAction(nameof(Get), new { id = order.Id }, new { id = order.Id, merged = existing is not null,
+            warning = existing is null ? null : (req.AsPendingProduct && !req.SavePricing
+                ? "重复订单号，已保留原订单；本次尚无数量明细，请补全产品后再导入叠加。"
+                : "重复订单号，数量已叠加到原订单，请检查排期是否需要补排。") });
+    }
+
+    private Order MergeImportedOrder(Order incoming, Order? existing)
+    {
+        if (existing is null) { db.Orders.Add(incoming); return incoming; }
+        var nextOrder = existing.PartQtys.Count == 0 ? 0 : existing.PartQtys.Max(q => q.PartOrder) + 1;
+        foreach (var qty in incoming.PartQtys)
+        {
+            var match = existing.PartQtys.FirstOrDefault(q => qty.SourcePartId.HasValue
+                ? q.SourcePartId == qty.SourcePartId
+                : q.SourcePartId == null && q.PartName == qty.PartName);
+            if (match is not null) match.Qty = checked(match.Qty + qty.Qty);
+            else
+            {
+                qty.PartOrder = nextOrder++;
+                // 多款号的部位名称必须区分，已有部位名保持不变以保留排期关联。
+                if (existing.ProductId.HasValue && incoming.ProductId != existing.ProductId &&
+                    !qty.PartName.Contains(" · ")) qty.PartName = $"{incoming.Product?.ProductNo ?? incoming.ProductId?.ToString()} · {qty.PartName}";
+                existing.PartQtys.Add(qty);
+            }
+        }
+        existing.ProductId ??= incoming.ProductId;
+        if (incoming.PartQtys.Count > 0)
+        {
+            existing.PendingProduct = false;
+            if (existing.Status == "completed" || existing.Status == "archived") existing.Status = "received";
+        }
+        existing.UpdatedAt = DateTime.UtcNow;
+        existing.LastUpdatedBy = CurrentUser();
+        return existing;
     }
 
     // POST /api/orders/{id}/continue-parse — 待补产品订单补上款号后，重解析原 PDF 补明细。

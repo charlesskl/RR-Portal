@@ -6,6 +6,7 @@ import { useRef, useState, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/apiFetch";
+import { invalidateClientCache } from "@/lib/clientCache";
 
 type DraftHead = { externalOrderNo: string; orderDate: string; deliveryDate: string | null; productNo: string; isMa: boolean };
 type DraftLine = { pdfItemName: string; totalQty: number; mergedRows: number; matchedItemName: string | null; unitPrice: number; existingUnitCost: number | null };
@@ -96,7 +97,10 @@ export default function ImportClient() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       if (!res.ok) { setErr((await res.json().catch(() => ({})))?.error ?? "入库失败，请重试"); return; }
-      alert(asPending ? "已登记订单（待补产品），可在订单总览「待补产品」标签补全。" : "导入成功！");
+      const result = await res.json();
+      alert(result.warning || (asPending ? "已登记订单（待补产品），可在订单总览「待补产品」标签补全。" : "导入成功！"));
+      invalidateClientCache("/api/orders");
+      invalidateClientCache("/api/schedule");
       router.push("/orders"); router.refresh();
     } catch { setErr("网络错误，请确认后端服务是否运行后重试"); }
     finally { setBusy(false); }
@@ -122,6 +126,10 @@ export default function ImportClient() {
         body: JSON.stringify({ head, pdfToken: draft.pdfToken, savePricing, products }),
       });
       if (!res.ok) { setErr((await res.json().catch(() => ({})))?.error ?? "导入失败"); return; }
+      const result = await res.json();
+      alert(result.warning || "导入成功！");
+      invalidateClientCache("/api/orders");
+      invalidateClientCache("/api/schedule");
       router.push("/orders"); router.refresh();
     } catch { setErr("网络错误，请稍后重试"); }
     finally { setBusy(false); }

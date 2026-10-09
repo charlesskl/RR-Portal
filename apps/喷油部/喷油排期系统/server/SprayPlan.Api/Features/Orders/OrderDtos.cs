@@ -20,7 +20,7 @@ public record RevokeActualsResult(int ClearedPlans, int ProductionQty, int Inbou
 public record OrderListItem(int Id, string ExternalOrderNo, string ProductNo, DateTime OrderDate, DateTime? DeliveryDate, string Status, bool IsMA, bool IsUrgent, int TotalQty, bool PendingProduct);
 public record OrderOverviewSummary(int Id, bool Scheduled, string? FirstPlanDate, string? ScheduleFinishDate,
     bool ScheduleCovered, int PlannedQty, int RecordedQty, int DemandQty, int ProgressPct,
-    int PlanProductionDays, int FinishedQty, int RemainingQty);
+    int PlanProductionDays, int FinishedQty, int RemainingQty, int InProductionRemainingQty);
 public record OrderCreated(int Id, string ExternalOrderNo, string Status, bool IsMA, bool IsUrgent);
 public record OrderHeadUpdated(int Id, string ExternalOrderNo, string Status, bool IsMA, bool IsUrgent);
 public record OrderIdStatus(int Id, string Status);

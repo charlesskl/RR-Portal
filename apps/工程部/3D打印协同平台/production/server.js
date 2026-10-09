@@ -8,6 +8,9 @@ const crypto = require('crypto');
 const { createProductFileHandler } = require('./product-files');
 
 const PORT = Number(process.env.PRODUCTION_PORT || 3102);
+const businessLimitMB=Number(process.env.PRODUCTION_JSON_LIMIT_MB||64);
+if(!Number.isInteger(businessLimitMB)||businessLimitMB<1||businessLimitMB>256)throw Error('PRODUCTION_JSON_LIMIT_MB 必须是 1–256 的整数');
+const businessLimitBytes=businessLimitMB*1024*1024;
 const DATA_FILE = path.join(__dirname, 'data.json');
 const HTML_FILE = path.join(__dirname, 'index.html');
 const CONFIG_FILE = path.join(__dirname, 'config.json');
@@ -153,9 +156,10 @@ const handleProductFiles = createProductFileHandler({
 
 const server = http.createServer((req, res) => {
   if (!requireAuth(req,res)) return;
+  if(req.url==='/api/legacy-import/limits'&&req.method==='GET'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({maxBytes:businessLimitBytes,maxMB:businessLimitMB}));return;}
   if(['/api/legacy-import/preview','/api/legacy-import/apply'].includes(req.url)&&req.method==='POST'){
     const chunks=[];let size=0,aborted=false;
-    req.on('data',chunk=>{size+=chunk.length;if(size>10*1024*1024){if(!aborted){aborted=true;res.writeHead(413,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'备份超过 10MB，请联系管理员迁移'}));}return;}chunks.push(chunk);});
+    req.on('data',chunk=>{size+=chunk.length;if(size>businessLimitBytes){if(!aborted){aborted=true;chunks.length=0;res.writeHead(413,{'Content-Type':'application/json'});res.end(JSON.stringify({error:`请求超过 ${businessLimitMB}MB，请管理员调整 PRODUCTION_JSON_LIMIT_MB 及反向代理限制`}));}return;}chunks.push(chunk);});
     req.on('end',()=>{if(aborted)return;try{
       const input=JSON.parse(Buffer.concat(chunks).toString('utf8')),current=loadData(),plan=planImport(current,input.data);
       if(req.url.endsWith('/preview')){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({summary:plan.summary,conflicts:plan.conflicts,fingerprint:plan.fingerprint}));return;}
@@ -911,11 +915,11 @@ const server = http.createServer((req, res) => {
     let aborted = false;
     req.on('data', chunk => {
       bodySize += chunk.length;
-      if (bodySize > 10 * 1024 * 1024) {
+      if (bodySize > businessLimitBytes) {
         if (!aborted) {
           aborted = true;
           res.writeHead(413);
-          res.end(JSON.stringify({error: '数据过大'}));
+          res.end(JSON.stringify({error: `业务数据超过 ${businessLimitMB}MB，请调整 PRODUCTION_JSON_LIMIT_MB`}));
           req.destroy();
         }
         return;
@@ -1266,4 +1270,5 @@ server.on('clientError', (err, socket) => {
   }
 });
 
+server.requestTimeout=10*60*1000;
 server.listen(PORT, '127.0.0.1', () => { ensureItemIds(); console.log('生产业务内部服务已启动'); });

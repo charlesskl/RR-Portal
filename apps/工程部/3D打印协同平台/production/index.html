@@ -3664,7 +3664,7 @@ function importAllData(e){
  const reader=new FileReader();reader.onload=async ev=>{
   try{
    const data=JSON.parse(ev.target.result);
-   const send=async(action,extra={})=>{const res=await fetch('/api/production/legacy-import/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data,...extra})});const result=await res.json();if(!res.ok)throw Error(result.error||'导入失败');return result;};
+   const send=async(action,extra={})=>{const res=await fetch('/api/production/legacy-import/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data,...extra})});const raw=await res.text();let result;try{result=JSON.parse(raw);}catch{throw Error(res.status===413?'反向代理拒绝大文件，请管理员同步调整 Nginx 上传限制':'服务器返回异常，请稍后重新预览');}if(!res.ok)throw Error(result.error||'导入失败');return result;};
    const preview=await send('preview');
    const labels={products:'产品',materials:'材料',inventory:'库存条目',schedules:'排期',recordDays:'记录天数',recordItems:'生产记录',maintenance:'维修',miscExpenses:'杂费',stockInLogs:'入库记录'};
    const summary=Object.entries(labels).map(([key,label])=>`${label}：云端 ${preview.summary.before[key]} / 文件 ${preview.summary.incoming[key]} / 合并后 ${preview.summary.after[key]}`).join('\n');

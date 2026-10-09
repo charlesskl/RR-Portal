@@ -18,6 +18,11 @@ on:
         type: string
         required: false
         default: "100"
+      tomy_smoke:
+        description: "仅 TOMY：使用合成文件验证上传核对及 ZIP 下载"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -48,6 +53,7 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           OPS_SERVICE: ${{ inputs.service }}
           OPS_TAIL: ${{ inputs.tail }}
+          TOMY_SMOKE: ${{ inputs.tomy_smoke }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -55,7 +61,7 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 5m
-          envs: OPS_SERVICE,OPS_TAIL
+          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE
           script: |
             set -euo pipefail
             # 服务名只允许字母数字和连字符，防止注入
@@ -87,4 +93,9 @@ jobs:
               docker exec "$CTR" node -e 'console.log(JSON.stringify({nodeOptions:process.env.NODE_OPTIONS,heapLimit:require("v8").getHeapStatistics().heap_size_limit}))' || true
               echo "=== 最近内存终止记录（只读） ==="
               journalctl -k --since '2 hours ago' --no-pager 2>/dev/null | grep -Ei 'oom-kill|killed process|memory cgroup out of memory' | tail -20 || true
+              if [ "${TOMY_SMOKE:-false}" = "true" ]; then
+                echo "=== TOMY 合成上传与下载验证 ==="
+                docker exec "$CTR" node server/upload-smoke.mjs
+                docker inspect --format 'RestartCountAfterSmoke={{.RestartCount}} Health={{.State.Health.Status}}' "$CTR"
+              fi
             fi

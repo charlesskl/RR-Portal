@@ -1,0 +1,48 @@
+name: TOMY upload regression
+
+on:
+  pull_request:
+    paths:
+      - 'apps/业务部/TOMY排期核对系统/**'
+      - '.github/workflows/tomy-upload-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upload-regression:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/业务部/TOMY排期核对系统
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --no-audit --no-fund
+      - name: Regressions within a 384 MiB JavaScript heap
+        env:
+          NODE_OPTIONS: --max-old-space-size=384
+        run: |
+          npx vitest run server/lib/prepareScheduleWorkbook.test.ts server/lib/excelWriter.test.ts server/lib/reconciler.test.ts server/lib/normalize.test.ts server/lib/dateCodeGenerator.test.ts server/lib/summaryReport.test.ts server/lib/zipBuilder.test.ts --maxWorkers=1
+          npx tsc --noEmit --strict --module NodeNext --moduleResolution NodeNext --target ES2022 --esModuleInterop --skipLibCheck server/lib/prepareScheduleWorkbook.ts
+      - name: Upload PDFs, reconcile both workbooks and download ZIP twice
+        env:
+          NODE_OPTIONS: --max-old-space-size=384
+          PORT: 13206
+          TOMY_SMOKE_BASE: http://127.0.0.1:13206
+        run: |
+          npx tsx server/index.ts > /tmp/tomy-upload-server.log 2>&1 &
+          TOMY_TEST_PID=$!
+          trap 'kill "$TOMY_TEST_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS "$TOMY_SMOKE_BASE/health" >/dev/null; then break; fi
+            sleep 1
+          done
+          node server/upload-smoke.mjs
+      - name: Build the production frontend
+        run: |
+          npm ci --prefix client --no-audit --no-fund
+          npm run build --prefix client

@@ -75,8 +75,16 @@ jobs:
 
             echo ""
             echo "=== 最近 ${OPS_TAIL} 行日志 ==="
-            docker logs --tail "$OPS_TAIL" "$CTR" 2>&1 || true
+            docker logs --timestamps --tail "$OPS_TAIL" "$CTR" 2>&1 || true
 
             echo ""
             echo "=== 重启次数 ==="
             docker inspect --format 'RestartCount={{.RestartCount}} StartedAt={{.State.StartedAt}}' "$CTR" 2>/dev/null || true
+
+            if [ "$OPS_SERVICE" = "tomy-paiqi" ]; then
+              echo "=== TOMY 实际内存配置（只读） ==="
+              docker inspect --format 'Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}} OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}}' "$CTR" || true
+              docker exec "$CTR" node -e 'console.log(JSON.stringify({nodeOptions:process.env.NODE_OPTIONS,heapLimit:require("v8").getHeapStatistics().heap_size_limit}))' || true
+              echo "=== 最近内存终止记录（只读） ==="
+              journalctl -k --since '2 hours ago' --no-pager 2>/dev/null | grep -Ei 'oom-kill|killed process|memory cgroup out of memory' | tail -20 || true
+            fi

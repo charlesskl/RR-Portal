@@ -8,7 +8,7 @@ import OrdersTable from "./OrdersTable";
 type Summary = {
   id: number; scheduled: boolean; firstPlanDate: string | null; scheduleFinishDate: string | null;
   scheduleCovered: boolean; plannedQty: number; recordedQty: number; demandQty: number; progressPct: number;
-  planProductionDays: number; finishedQty: number; remainingQty: number;
+  planProductionDays: number; finishedQty: number; remainingQty: number; inProductionRemainingQty: number;
 };
 
 function enrich(row: OrderRow, summary: Summary | undefined, today: string): OrderRow {
@@ -35,6 +35,7 @@ function enrich(row: OrderRow, summary: Summary | undefined, today: string): Ord
     planProductionDays: summary.planProductionDays,
     finishedQty: summary.finishedQty,
     remainingQty: summary.remainingQty,
+    inProductionRemainingQty: summary.inProductionRemainingQty,
     riskLevel,
     riskText,
   };

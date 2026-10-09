@@ -20,14 +20,14 @@ public record RevokeActualsResult(int ClearedPlans, int ProductionQty, int Inbou
 public record OrderListItem(int Id, string ExternalOrderNo, string ProductNo, DateTime OrderDate, DateTime? DeliveryDate, string Status, bool IsMA, bool IsUrgent, int TotalQty, bool PendingProduct);
 public record OrderOverviewSummary(int Id, bool Scheduled, string? FirstPlanDate, string? ScheduleFinishDate,
     bool ScheduleCovered, int PlannedQty, int RecordedQty, int DemandQty, int ProgressPct,
-    int PlanProductionDays, int FinishedQty, int RemainingQty);
+    int PlanProductionDays, int FinishedQty, int RemainingQty, int InProductionRemainingQty);
 public record OrderCreated(int Id, string ExternalOrderNo, string Status, bool IsMA, bool IsUrgent);
 public record OrderHeadUpdated(int Id, string ExternalOrderNo, string Status, bool IsMA, bool IsUrgent);
 public record OrderIdStatus(int Id, string Status);
 
 // 详情嵌套
 public record OrderPartQtyDto(int Id, string PartName, int? SourcePartId, int Qty, int PartOrder);
-public record OrderProductPartDto(int Id, string PartName, string Craft, int PartGroupId, double UnitCost, double LaborPrice, double PaintCost, double QuotedPrice);
+public record OrderProductPartDto(int Id, string PartName, string Craft, int PartGroupId, double UnitCost, double LaborPrice, double PaintCost, double QuotedPrice, int DailyCapacity = 0);
 public record OrderProductDto(int Id, string ProductNo, List<OrderProductPartDto> Parts);
 // QtyEditable：数量是否可改 = 已接单(received) 且 无未删排期计划。前端据此决定明细数量是否可编辑，与后端 PATCH 校验同口径。
 public record OrderDetail(int Id, string ExternalOrderNo, int? ProductId, DateTime OrderDate, DateTime? DeliveryDate, string Status, bool IsMA, bool IsUrgent, string? Remark, string CreatedBy, OrderProductDto? Product, List<OrderPartQtyDto> PartQtys, bool QtyEditable,

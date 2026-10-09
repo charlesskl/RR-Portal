@@ -28,6 +28,8 @@ public static class PdfTableExtractor
 
     // 视觉行聚类容差（同一视觉行的 Top 差不超过此值）。真实行内词 Top 差 < 3。
     private const double RowClusterTol = 3.0;
+    // 采购单表头存在垂直居中与顶端对齐混用（单价/金额高出约 5），只放宽表头带。
+    private const double HeaderBandTol = 8.0;
 
     // ─────────────────────────────────────────────────────────────────────────
     // 内部：表格几何上下文（列边界 + 表头/表尾 Y），一次算好供各抽取函数复用。
@@ -136,8 +138,9 @@ public static class PdfTableExtractor
         // 真机里同一表头行各词 Top 有亚像素抖动（如 款号 628.14、物料名称/数量 628.10），
         // 用平均值会把低于均值的表头词（物料名称/数量）误判成表体 → 表头文字窜进首行子件名。
         // 取 Min 后所有表头词都 >= 表头线，InBody 能把它们全部排除；数据行 Top 远低于此，不受影响。
-        geo.HeaderTop = headerCluster.items.Min(x => x.w.Top);
-        foreach (var (idx, w) in headerCluster.items)
+        var headerItems = candidates.Where(c => Math.Abs(c.w.Top - headerCluster.top) <= HeaderBandTol).ToList();
+        geo.HeaderTop = headerItems.Min(x => x.w.Top);
+        foreach (var (idx, w) in headerItems)
         {
             // 同一表头文本若簇内重复，取第一个即可。
             geo.ColBox[idx] ??= (w.Left, w.Right);

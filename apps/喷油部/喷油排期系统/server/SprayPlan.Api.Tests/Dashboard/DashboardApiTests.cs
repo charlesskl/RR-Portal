@@ -48,6 +48,28 @@ public class DashboardApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Dashboard_InProductionQuantity_MatchesOverviewRemainingParts()
+    {
+        await LoginAsync("clerk", "clerk123");
+        await _factory.WithDbAsync(async db => {
+            db.Orders.Add(new SprayPlan.Api.Entities.Order {
+                ExternalOrderNo = "ACTIVE", Status = "in_production", OrderDate = DateTime.UtcNow,
+                PartQtys = new() { new() { PartName = "头", Qty = 100 }, new() { PartName = "脚", Qty = 100 } },
+                Plans = new() { new() { PartName = "头", GoodQty = 40, LineId = 1, PlanDate = DateTime.UtcNow } }
+            });
+            db.Orders.Add(new SprayPlan.Api.Entities.Order {
+                ExternalOrderNo = "RECEIVED", Status = "received", OrderDate = DateTime.UtcNow,
+                PartQtys = new() { new() { PartName = "头", Qty = 500 } }
+            });
+            await db.SaveChangesAsync();
+        });
+        var stats = await _client.GetFromJsonAsync<JsonElement>("/api/dashboard");
+        Assert.Equal(160, stats.GetProperty("inProductionQty").GetInt32());
+        var overview = await _client.GetFromJsonAsync<JsonElement>("/api/orders/overview");
+        Assert.Contains(overview.EnumerateArray(), o => o.GetProperty("inProductionRemainingQty").GetInt32() == 160);
+    }
+
+    [Fact]
     public async Task Dashboard_CountsOrdersProductsAndOverdue()
     {
         await LoginAsync("clerk", "clerk123");

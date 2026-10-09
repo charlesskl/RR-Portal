@@ -8,6 +8,24 @@ namespace SprayPlan.Api.Tests;
 public class PdfTableExtractorTests
 {
     [Fact]
+    public void XingxinPurchasePriceChange_OffsetHeaders_RecognizesAllPricesAndProducts()
+    {
+        var words = JsonSerializer.Deserialize<List<PdfWord>>(File.ReadAllText(
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "words_xingxin_purchase_price_change.json")))!;
+        var rows = PdfTableExtractor.ExtractProductRows(words);
+        Assert.Collection(rows,
+            row => { Assert.Equal("995159", row.ProductNo); Assert.Equal("喷射套装马里奥身体", row.ItemRaw); Assert.Equal(3700, row.Qty); Assert.Equal(2.5, row.UnitPrice, 6); },
+            row => { Assert.Equal("096283", row.ProductNo); Assert.Equal("喷射套装问答块", row.ItemRaw); Assert.Equal(3300, row.Qty); Assert.Equal(0.45, row.UnitPrice, 6); },
+            row => { Assert.Equal("096283", row.ProductNo); Assert.Equal("喷射套装搪胶花朵", row.ItemRaw); Assert.Equal(3300, row.Qty); Assert.Equal(0.25, row.UnitPrice, 6); });
+        var plainRows = PdfTableExtractor.ExtractRows(words);
+        Assert.Equal(rows.Select(r => r.UnitPrice), plainRows.Select(r => r.UnitPrice));
+        var head = PdfTableExtractor.ExtractHead(words);
+        Assert.Equal("2026092101", head.ExternalOrderNo);
+        Assert.Equal(new DateTime(2026, 9, 21), head.OrderDate);
+        Assert.Equal(new DateTime(2026, 10, 30), head.DeliveryDate);
+    }
+
+    [Fact]
     public void ExtractHuadengSprayPurchaseOrder_RecognizesTwoProductsAndHead()
     {
         static PdfWord W(string text, double x, double y, double width = 40) =>

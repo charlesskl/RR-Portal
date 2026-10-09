@@ -145,6 +145,24 @@ public class OrderPricingAndProcessScheduleTests : IAsyncLifetime
         Assert.Equal(0.34, savedRules.Single(part => part.Craft == "UV").LaborPrice, 6);
         Assert.All(savedRules, part => Assert.Equal(2, part.CraftPasses));
         Assert.Equal(0.2, savedRules.Sum(part => part.UnitCost), 6);
+        // 下一张同产品订单必须能读取上次排期保存的人工与目标数。
+        var nextOrderResponse = await _client.PostAsJsonAsync("/api/orders", new {
+            externalOrderNo = "NEXT-DEFAULTS", productId,
+            partQtys = new[] { new { partName = savedRules[0].PartName, sourcePartId = savedRules[0].Id, qty = 300 } }
+        });
+        nextOrderResponse.EnsureSuccessStatusCode();
+        var nextId = (await nextOrderResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        var nextDetail = await _client.GetFromJsonAsync<JsonElement>($"/api/orders/{nextId}");
+        foreach (var productField in new[] { nextDetail.GetProperty("product"), nextDetail.GetProperty("products")[0] })
+        {
+            var parts = productField.GetProperty("parts").EnumerateArray().ToList();
+            var padPrint = parts.Single(part => part.GetProperty("craft").GetString() == "移印");
+            var uv = parts.Single(part => part.GetProperty("craft").GetString() == "UV");
+            Assert.Equal(100, padPrint.GetProperty("dailyCapacity").GetInt32());
+            Assert.Equal(0.12, padPrint.GetProperty("laborPrice").GetDouble(), 6);
+            Assert.Equal(125, uv.GetProperty("dailyCapacity").GetInt32());
+            Assert.Equal(0.34, uv.GetProperty("laborPrice").GetDouble(), 6);
+        }
     }
 
     [Fact]

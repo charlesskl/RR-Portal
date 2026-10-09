@@ -74,3 +74,7 @@ apps/*/dist/
 apps/*/build/
 .gstack/
 .superpowers/
+
+# Runtime maintenance flags must stay on the server.
+deploy/maintenance/ON
+deploy/maintenance/services/

@@ -44,6 +44,20 @@ test('production: login, uploads, persistence, permissions and order workflow', 
     assert.equal((await request('/api/files/'+file.data.id,{},hy)).res.status,404);
     const downloaded=await fetch(base+'/api/files/'+file.data.id,{headers:{Cookie:hn.cookie}});assert.equal(downloaded.status,200);assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()),bytes);
     assert.equal((await request('/api/orders/'+id,{method:'PATCH',body:JSON.stringify({status:'待排产'})},hn)).res.status,403);
+    const editApplication=(data,auth=hn)=>request('/api/orders/'+id+'/application',{method:'PATCH',body:JSON.stringify(data)},auth);
+    const editInput={...input,updated:created.data.updated,product:'修改后的模型',quantity:22};
+    assert.equal((await editApplication({...editInput,quantity:0})).res.status,400);
+    assert.equal((await editApplication({...editInput,factory:'河源'})).res.status,403);
+    assert.equal((await editApplication(editInput,hy)).res.status,404);
+    await request('/api/users',{method:'POST',body:JSON.stringify({username:'colleague',name:'同厂区同事',password:'test1234',factory:'湖南',role:'member'})},admin);
+    const colleague=await login('colleague','test1234');
+    assert.equal((await editApplication(editInput,colleague)).res.status,403);
+    const editedApplication=await editApplication(editInput);assert.equal(editedApplication.res.status,200);
+    assert.equal(editedApplication.data.quantity,22);assert.equal(editedApplication.data.product,'修改后的模型');
+    assert.equal(editedApplication.data.status,'待接单');assert.equal(editedApplication.data.number,created.data.number);assert.equal(editedApplication.data.created,created.data.created);
+    assert.deepEqual(editedApplication.data.files,created.data.files);assert.ok(editedApplication.data.events.some(e=>e.text==='修改打印申请信息'));
+    assert.equal((await editApplication({...editInput,updated:'stale'})).res.status,409);
+    const adminEdit=await editApplication({...input,updated:editedApplication.data.updated},admin);assert.equal(adminEdit.res.status,200);
     const sendFeedback=(auth, content='表面有层纹，希望改善打磨')=>request('/api/orders/'+id+'/feedback',{method:'POST',body:JSON.stringify({category:'质量问题',rating:'一般',content})},auth);
     assert.equal((await sendFeedback(hn)).res.status,400,'unfinished order cannot receive feedback');
     const update=d=>request('/api/orders/'+id,{method:'PATCH',body:JSON.stringify(d)},admin);
@@ -51,6 +65,7 @@ test('production: login, uploads, persistence, permissions and order workflow', 
     assert.equal((await update({status:'待排产'})).res.status,400);
     for(const status of ['待排产','打印中','待交付','已完成']) assert.equal((await update({status,follower:'打印工程师',replyDate:'2026-10-07'})).res.status,200);
     assert.equal((await update({status:'打印中',follower:'打印工程师',replyDate:'2026-10-07'})).res.status,400);
+    assert.equal((await editApplication({...editInput,updated:adminEdit.data.updated})).res.status,409,'accepted orders cannot be edited');
     assert.equal((await sendFeedback(hy)).res.status,404);
     assert.equal((await sendFeedback(admin)).res.status,403,'admin cannot impersonate order owner');
     assert.equal((await sendFeedback(hn,'   ')).res.status,400);
@@ -61,7 +76,7 @@ test('production: login, uploads, persistence, permissions and order workflow', 
     assert.equal((await respond(hn)).res.status,403);
     assert.equal((await respond(admin)).res.status,200);
     await stop();await launch();admin=await login('admin','test-admin-secret-123');
-    const saved=(await request('/api/orders',{},admin)).data;assert.equal(saved.length,1);assert.equal(saved[0].status,'已完成');assert.equal(saved[0].feedback[0].status,'已处理');assert.equal(saved[0].feedback[0].content,'表面有层纹，希望改善打磨');assert.equal(saved[0].events.length,7);assert.equal(saved[0].files.length,1);
+    const saved=(await request('/api/orders',{},admin)).data;assert.equal(saved.length,1);assert.equal(saved[0].status,'已完成');assert.equal(saved[0].feedback[0].status,'已处理');assert.equal(saved[0].feedback[0].content,'表面有层纹，希望改善打磨');assert.equal(saved[0].events.length,9);assert.equal(saved[0].files.length,1);
     const accounts=(await request('/api/users',{},admin)).data;
     const memberId=accounts.find(x=>x.username==='hunan').id;
     const reset=(auth,id,password='newpass8',confirmation=password)=>request('/api/users/'+id+'/password',{method:'PATCH',body:JSON.stringify({password,confirmation})},auth);

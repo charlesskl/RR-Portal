@@ -33,22 +33,6 @@ class FakeImap:
 
 
 class MailboxTests(unittest.TestCase):
-    def test_unconfigured_mailbox_does_not_connect(self):
-        with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(fetch_mailbox(), {"configured": False, "messages": []})
-
-    def test_reads_only_new_messages_without_marking_seen(self):
-        fake = FakeImap()
-        with patch.dict(os.environ, {
-            "VOYAGEPLEX_MAIL_ADDRESS": "shipping@example.com",
-            "VOYAGEPLEX_MAIL_AUTH_CODE": "test-code",
-        }, clear=True), patch("app.mailbox.imaplib.IMAP4_SSL", return_value=fake):
-            result = fetch_mailbox(after_uid=10)
-        self.assertEqual(result["uid_validity"], 123)
-        self.assertEqual([item["uid"] for item in result["messages"]], [11, 12])
-        self.assertEqual(fake.requested, [11, 12])
-        self.assertEqual(result["messages"][0]["received_at"], "2026-09-17T16:30:00+00:00")
-
     def test_single_message_fetch_failure_does_not_abort_batch(self):
         class FlakyImap(FakeImap):
             def uid(self, command, *args):
@@ -69,6 +53,23 @@ class MailboxTests(unittest.TestCase):
         self.assertIsNotNone(ok["raw"])
 
 
+
+    def test_unconfigured_mailbox_does_not_connect(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(fetch_mailbox(), {"configured": False, "messages": []})
+
+    def test_reads_only_new_messages_without_marking_seen(self):
+        fake = FakeImap()
+        with patch.dict(os.environ, {
+            "VOYAGEPLEX_MAIL_ADDRESS": "shipping@example.com",
+            "VOYAGEPLEX_MAIL_AUTH_CODE": "test-code",
+        }, clear=True), patch("app.mailbox.imaplib.IMAP4_SSL", return_value=fake):
+            result = fetch_mailbox(after_uid=10)
+        self.assertEqual(result["uid_validity"], 123)
+        self.assertEqual([item["uid"] for item in result["messages"]], [11, 12])
+        self.assertEqual(fake.requested, [11, 12])
+        self.assertEqual(result["messages"][0]["received_at"], "2026-09-17T16:30:00+00:00")
+
     def test_search_starts_one_day_before_china_boundary(self):
         fake = FakeImap()
         original_uid = fake.uid
@@ -86,25 +87,6 @@ class MailboxTests(unittest.TestCase):
         }, clear=True), patch("app.mailbox.imaplib.IMAP4_SSL", return_value=fake):
             fetch_mailbox(after_uid=12, start_date="2026-08-01")
         self.assertEqual(searches, [(None, "SINCE", "31-Jul-2026")])
-
-    def test_search_starts_one_day_before_china_boundary(self):
-        fake = FakeImap()
-        original_uid = fake.uid
-        searches = []
-
-        def capture_uid(command, *args):
-            if command == "SEARCH":
-                searches.append(args)
-            return original_uid(command, *args)
-
-        fake.uid = capture_uid
-        with patch.dict(os.environ, {
-            "VOYAGEPLEX_MAIL_ADDRESS": "shipping@example.com",
-            "VOYAGEPLEX_MAIL_AUTH_CODE": "test-code",
-        }, clear=True), patch("app.mailbox.imaplib.IMAP4_SSL", return_value=fake):
-            fetch_mailbox(after_uid=12, start_date="2026-08-01")
-        self.assertEqual(searches, [(None, "SINCE", "31-Jul-2026")])
-
 
 
 if __name__ == "__main__":

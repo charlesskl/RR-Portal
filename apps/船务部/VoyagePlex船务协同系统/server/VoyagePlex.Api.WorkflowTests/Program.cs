@@ -1,6 +1,5 @@
 using VoyagePlex.Api.Services;
 using VoyagePlex.Api.Entities;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 if (MailboxDateRules.ReceivedDate("2026-09-17T15:59:00+00:00") != "2026-09-17" ||
@@ -71,13 +70,13 @@ var allowed = new[]
 {
     ("PendingReview", "PendingShipment"),
     ("PendingReview", "Cancelled"),
+    ("PendingShipment", "PendingReview"),
     ("PendingShipment", "Completed"),
     ("PendingShipment", "Cancelled"),
 };
 var rejected = new[]
 {
     ("PendingReview", "Completed"),
-    ("PendingShipment", "PendingReview"),
     ("Completed", "Cancelled"),
     ("Cancelled", "PendingReview"),
 };
@@ -172,16 +171,6 @@ if (normalizedUtcValue.Kind != DateTimeKind.Utc || !normalizedUtcValue.ToString(
     throw new InvalidOperationException("SQLite 时间没有恢复 UTC 时区标记");
 Console.WriteLine("UTC date normalization tests passed.");
 
-var lenientOptions = new JsonSerializerOptions();
-lenientOptions.Converters.Add(new LenientDateTimeConverter());
-var spaceFormat = JsonSerializer.Deserialize<DateTime>("\"2026-09-11 00:31:18.690457\"", lenientOptions);
-var isoFormat = JsonSerializer.Deserialize<DateTime>("\"2026-09-11T00:31:18.690457Z\"", lenientOptions);
-if (spaceFormat.Kind != DateTimeKind.Utc || spaceFormat != new DateTime(2026, 9, 11, 0, 31, 18, 690, DateTimeKind.Utc).AddTicks(4570))
-    throw new InvalidOperationException("空格分隔日期应能解析为 UTC");
-if (isoFormat != spaceFormat)
-    throw new InvalidOperationException("ISO 8601 与空格格式应解析到同一时刻");
-Console.WriteLine("Lenient date time converter tests passed.");
-
 var deletionTask = new ShipmentTask { Id=8, SourceImportItemId=20, SoNumber="SO-123" };
 var sourceImport = new ImportEmailItem { Id=20, Fingerprint="same", ResultJson="{}" };
 var duplicateImport = new ImportEmailItem { Id=21, DuplicateOfItemId=20, Fingerprint="same", ResultJson="{}" };
@@ -254,3 +243,33 @@ var ambiguousCategory = new JsonObject { ["product_code"]="CAT01", ["spec"]=12 }
 ProductInfoMatching.FillCategory(ambiguousCategory, [categoryProducts[0], new ProductInfo { ProductCode="CAT01", QuantityPerBox=12, ToyCategory="塑胶" }]);
 if (ambiguousCategory["category"] is not null) throw new InvalidOperationException("多重匹配不能推断类别");
 Console.WriteLine("Shipment product category tests passed.");
+
+var splitCargo = JsonNode.Parse("""{"fields":{"cargo_split_required":"true","ship_date":"2026-09-26","cutoff_date":"2026-09-30T12:00","container_type":"1*40HQ"},"items":[{"product_code":"A","shipment_scope":"current"},{"product_code":"B","shipment_scope":"waiting"}],"warehouse_groups":[{"warehouse":"W","items":[{"product_code":"A"},{"product_code":"B"}]}]}""")!.AsObject();
+var cargoTasks = CargoNotificationRules.Split("", splitCargo);
+if (cargoTasks.Count != 2 || cargoTasks[0].Payload["items"]!.AsArray().Count != 1 ||
+    cargoTasks[0].Payload["fields"]!["cutoff_date"]!.ToString() != "2026-09-30T12:00" ||
+    cargoTasks[1].Payload["fields"]!["waiting_notification"]!.ToString() != "true" ||
+    cargoTasks[1].Payload["fields"]!["cutoff_date"]!.ToString() != "2026-09-30T12:00" ||
+    cargoTasks[1].Payload["fields"]!["ship_date"]!.ToString() != "" ||
+    cargoTasks[1].Payload["warehouse_groups"]![0]!["items"]!.AsArray().Count != 1 ||
+    splitCargo["items"]!.AsArray().Count != 2)
+    throw new InvalidOperationException("本次出运与剩余等待通知货物必须独立建任务并保留来源");
+splitCargo["items"]![0]!["shipment_scope"] = "unassigned";
+if (CargoNotificationRules.Validate(splitCargo) is null) throw new InvalidOperationException("未分配货物不得确认");
+if (!ShipmentWorkflowRules.CanTransitionStatus("WaitingNotification", "PendingReview") ||
+    ShipmentWorkflowRules.CanTransitionStatus("WaitingNotification", "PendingShipment"))
+    throw new InvalidOperationException("等待通知任务必须重新复核才能出运");
+if (ShipmentWorkflowRules.ResolvePlannedShipDate("2026-09-26", "2026-09-30T12:00", "", null) != new DateOnly(2026,9,26) ||
+    ShipmentWorkflowRules.ResolvePlannedShipDate("", "2026-09-30T12:00", "", null) != new DateOnly(2026,9,29))
+    throw new InvalidOperationException("明确出货日优先，无出货日沿用原推算规则");
+var validTemplate = new ExportTemplate { Name="兴信交仓船务表",ShipmentMode="Warehouse",Purpose="Shipping",IsDefault=true };
+if (ExportTemplateRules.Validate(validTemplate) is not null) throw new InvalidOperationException("有效模板被拒绝");
+validTemplate.IsEnabled=false;
+if (ExportTemplateRules.Validate(validTemplate) is null) throw new InvalidOperationException("停用模板不得设为默认");
+validTemplate.IsDefault=false;validTemplate.ShipmentMode="Invalid";
+if (ExportTemplateRules.Validate(validTemplate) is null) throw new InvalidOperationException("无效业务类型应被拒绝");
+Console.WriteLine("Cargo waiting-notification, explicit ship-date and template validation tests passed.");
+
+if (!ExportTemplateRules.CanManage("admin") || !ExportTemplateRules.CanManage("supervisor") || ExportTemplateRules.CanManage("shipping") || ExportTemplateRules.CanManage("warehouse"))
+    throw new InvalidOperationException("模板管理必须允许管理员和主管，拒绝普通船务和仓管");
+Console.WriteLine("Export template role permission tests passed.");

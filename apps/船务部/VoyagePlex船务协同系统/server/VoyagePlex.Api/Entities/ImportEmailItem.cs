@@ -1,11 +1,14 @@
 namespace VoyagePlex.Api.Entities;
 
-public sealed class ImportEmailItem
+public sealed class ImportEmailItem : ICompanyEntity
 {
+    public long MailOwnerId { get; set; }
+    public string Company { get; set; } = "Xingxin";
     public long Id { get; set; }
     public long ImportBatchId { get; set; }
     public ImportBatch? ImportBatch { get; set; }
     public string FileName { get; set; } = string.Empty;
+    public string BusinessFingerprint { get; set; } = "";
     public string Fingerprint { get; set; } = string.Empty;
     public string MailboxKey { get; set; } = string.Empty;
     public string MailSubject { get; set; } = string.Empty;

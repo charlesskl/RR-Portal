@@ -21,6 +21,7 @@ CUTOFF_LABEL = re.compile(
     r"(?:\b(?:CY|CFS)\s*(?:CUT(?:\s*OFF)?|CLOSING)(?:\s*(?:DATE|TIME))?|"
     r"\bPORT\s+CUT[\s-]*OFF|截(?:关|港|数期|重柜)(?:日期|时间)?)", re.I,
 )
+VOUCHER_LABEL = re.compile(r"\b(?:Custom\s+)?Voucher\s*Cut[\s-]*off(?:\s*(?:DATE|TIME))?", re.I)
 REPLY_BOUNDARY = re.compile(r"^(?:From|Sent|发件人|发送时间)[：:]", re.I | re.M)
 MONTHS = {
     "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
@@ -31,9 +32,9 @@ MONTHS = {
 def parse_body(body: str) -> dict:
     current, history = _split_current_message(body)
     current_si = _deadline_candidates(current, SI_LABEL)
-    current_cutoff = _deadline_candidates(current, CUTOFF_LABEL)
+    current_cutoff = (_deadline_candidates(current, VOUCHER_LABEL) or _deadline_candidates(current, CUTOFF_LABEL))
     history_si = _deadline_candidates(history, SI_LABEL)
-    history_cutoff = _deadline_candidates(history, CUTOFF_LABEL)
+    history_cutoff = (_deadline_candidates(history, VOUCHER_LABEL) or _deadline_candidates(history, CUTOFF_LABEL))
     warnings = _candidate_warnings("SI截止", current_si) + _candidate_warnings("截关", current_cutoff)
     return {
         "so_number": _first(body, [
@@ -50,6 +51,7 @@ def parse_body(body: str) -> dict:
         "cutoff_date": _earliest(current_cutoff),
         "_fallback_si_deadline": _earliest(history_si),
         "_fallback_cutoff_date": _earliest(history_cutoff),
+        "_fallback_voucher_cutoff": _earliest(_deadline_candidates(history, VOUCHER_LABEL)),
         "_date_warnings": warnings,
         "ship_date": _ship_date(body),
         "port": _port(body),
@@ -91,6 +93,7 @@ def normalize_deadline(value: str, fallback_year: int | None = None) -> str:
     fallback_year = fallback_year or datetime.now().year
     cleaned = re.sub(r"[，（(].*$", "", str(value or "").replace("\u00a0", " ").strip())
     patterns = (
+        r"(?P<m>\d{1,2})/(?P<d>\d{1,2})/(?P<y>20\d{2})(?:[T\s]+(?P<h>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s*(?P<ampm>AM|PM)?)?",
         r"(?P<y>20\d{2})[/.-](?P<m>\d{1,2})[/.-](?P<d>\d{1,2})(?:[T\s]+(?P<h>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s*(?P<ampm>AM|PM)?)?",
         r"(?P<d>\d{1,2})\s*[-/]\s*(?P<name>[A-Za-z]{3,9})(?:\s*[-/]\s*(?P<y>20\d{2}))?(?:[\s(]+(?P<h>\d{1,2}):(?P<minute>\d{2})\s*(?P<ampm>AM|PM)?)?",
         r"(?P<name>[A-Za-z]{3,9})\s+(?P<d>\d{1,2})(?:,?\s+(?P<y>20\d{2}))?(?:\s+(?P<h>\d{1,2}):(?P<minute>\d{2})\s*(?P<ampm>AM|PM)?)?",
@@ -133,10 +136,36 @@ def _candidate_warnings(label: str, values: list[str]) -> list[str]:
 
 
 def _ship_date(text: str) -> str:
-    match = re.search(r"(?:Pick\s*up|Pickup|出货|取货)\s*Date?[：:\s]*(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})", text, re.I)
-    if not match:
-        return ""
-    return f"{match.group(1)}-{int(match.group(2)):02d}-{int(match.group(3)):02d}"
+    current, history = _split_current_message(text)
+    label = re.compile(r"(?:Pick\s*up|Pickup)\s*(?:Date|Time)|(?:预计)?(?:出货|出貨|走货|走貨|提货|提貨|取货)(?:日期|时间|日)?", re.I)
+    for section in (current, history):
+        for match in label.finditer(section):
+            # A date must immediately follow the instruction, not a later deadline.
+            value = section[match.end():].lstrip(" ：:\t\r\n")
+            if not re.match(r"(?:20\d{2}[/年.-])?\d{1,2}[/月.-]\d{1,2}", value):
+                continue
+            normalized = normalize_deadline(value.replace("年", "-").replace("月", "-"))
+            if normalized:
+                return normalized[:10]
+        # Some instructions place the date before the action: “9月26日出货”.
+        preceding = re.search(r"((?:20\d{2}[/年.-])?\d{1,2}[/月.-]\d{1,2}日?)\s*(?:出货|出貨|走货|走貨|提货|提貨|出(?=\s+\d+\s*[*xX]))", section)
+        if preceding:
+            normalized = normalize_deadline(preceding.group(1).replace("年", "-").replace("月", "-"))
+            if normalized:
+                return normalized[:10]
+    return ""
+
+
+def loading_factory_from_text(text: str) -> str:
+    current, _ = _split_current_message(text)
+    if re.search(r"(?:兴信|新信|HANSON).{0,15}(?:做柜|装柜|拼柜|拖柜|装货)", current, re.I):
+        return "兴信"
+    return ""
+
+
+def requires_cargo_split(text: str) -> bool:
+    current, _ = _split_current_message(text)
+    return bool(re.search(r"(?:剩余|余下|剩下|剩餘).{0,100}(?:另行通知|另通知|等.{0,10}通知|待.{0,10}通知)", current, re.S))
 
 
 def _port(text: str) -> str:
@@ -228,10 +257,10 @@ def filter_items_for_email(items: list[dict], shipment_type: str, loading_factor
     selected = []
     has_factory_information = False
     for item in items:
-        # “Actual factory” is the legacy system's displayed/filtering factory.
-        # Only fall back to the assembly-factory column when it is absent.
+        # Preserve actual production ownership. Cargo assembled at Xingxin also
+        # belongs in its loading task, even when the actual producer is external.
         factory = item.get("supplier") or item.get("factory_remark") or ""
         has_factory_information = has_factory_information or bool(str(factory).strip())
-        if re.search(r"兴信|新信|hanson|华登", str(factory), re.I):
+        if re.search(r"兴信|新信|hanson|华登", str(factory), re.I) or re.search(r"兴信|新信|hanson", str(item.get("factory_remark", "")), re.I):
             selected.append(item)
     return selected if has_factory_information else items

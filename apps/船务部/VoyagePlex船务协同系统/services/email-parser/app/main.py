@@ -4,36 +4,63 @@ import uuid
 import re
 import os
 import json
+from io import BytesIO
 from datetime import datetime
 from urllib.parse import quote
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
+from pydantic import BaseModel, Field
 from fastapi.responses import Response
 
+from .factory_workbook import parse_factory_workbook
 from .eml import parse_eml
-from .rules import classify_email, filter_items_for_email, normalize_deadline, parse_body
+from .carrier_schedule import apply_carrier_schedule
+from .rules import classify_email, filter_items_for_email, normalize_deadline, parse_body, loading_factory_from_text, requires_cargo_split
 from .attachments import parse_attachment
 from .spreadsheets import parse_business_spreadsheet
 from .shipment_export import build_completed_shipment_summary_workbook, build_inventory_adjustment_workbook, build_shipment_workbook
 from .product_workbook import parse_product_workbook
 from .inventory_writeback import build_inventory_writeback
 from .destination_country import infer_destination_country
-from .mailbox import fetch_mailbox
+from .mailbox import fetch_mailbox, test_mailbox_connection
 
-PARSER_VERSION = "voyageplex-rules-0.1.2+destination-country"
+PARSER_VERSION = "voyageplex-rules-0.1.3+cargo-notification"
 app = FastAPI(title="VoyagePlex Email Parser", version=PARSER_VERSION)
 
 
+class PersonalMailboxRequest(BaseModel):
+    after_uid: int = Field(default=0, ge=0)
+    start_date: str = "2026-10-08"
+    company: str = "Huadeng"
+    address: str = Field(max_length=254)
+    auth_code: str = Field(max_length=1024)
+    host: str = Field(default="imap.exmail.qq.com", max_length=253)
+    folder: str = Field(default="INBOX", max_length=100)
+
+
+@app.post("/v1/mailbox/test")
+def test_personal_mailbox(payload: PersonalMailboxRequest):
+    return test_mailbox_connection({"address": payload.address, "auth_code": payload.auth_code,
+                                    "host": payload.host, "folder": payload.folder})
+
+
 @app.get("/v1/mailbox/poll")
-async def poll_mailbox(after_uid: int = 0, start_date: str = "2026-10-08"):
+async def poll_shared_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: str = "Xingxin"):
+    return await poll_mailbox(after_uid, start_date, company)
+
+
+@app.post("/v1/mailbox/poll")
+async def poll_personal_mailbox(payload: PersonalMailboxRequest):
+    return await poll_mailbox(payload.after_uid, payload.start_date, payload.company,
+                              {"address": payload.address, "auth_code": payload.auth_code, "host": payload.host, "folder": payload.folder})
+
+
+async def poll_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: str = "Xingxin", credentials: dict | None = None):
     if after_uid < 0:
         return Response(content='{"error":"after_uid 无效"}', status_code=400, media_type="application/json")
     try:
-        # IMAP 抓取是阻塞 IO、附件解析（openpyxl/pdfplumber）是 CPU 密集计算，
-        # 二者都必须放到线程里执行：服务以单 worker uvicorn 运行，任何一个阻塞
-        # 事件循环都会让 /health 超时，容器被 autoheal 反复杀死重启。
-        mailbox = await asyncio.to_thread(fetch_mailbox, after_uid, start_date)
+        mailbox = await asyncio.to_thread(fetch_mailbox, after_uid, start_date, company, credentials)
         if not mailbox["configured"]:
             return {"configured": False, "items": []}
         entries = [{"filename": f'mail-{entry["uid"]}.eml', "raw": entry["raw"]}
@@ -186,8 +213,13 @@ def _scan_inventory_paths(paths: list[Path], folder: str) -> dict:
 
 
 @app.get("/v1/local-inventory-scan")
-def scan_local_inventory():
-    root = Path(os.environ.get("VOYAGEPLEX_LOCAL_INVENTORY_DIR", "/Users/josie/Desktop/库存读取写回测试"))
+def scan_local_inventory(company: str = "Xingxin"):
+    if company not in {"Xingxin", "Huadeng"}:
+        return {"error": "公司板块无效"}
+    configured = os.environ.get("VOYAGEPLEX_HUADENG_INVENTORY_DIR" if company == "Huadeng" else "VOYAGEPLEX_LOCAL_INVENTORY_DIR", "" if company == "Huadeng" else "/Users/josie/Desktop/库存读取写回测试")
+    if not configured:
+        return {"error": "华登库存目录尚未配置"}
+    root = Path(configured)
     if not root.is_dir():
         return {"folder": str(root), "exists": False, "files": [], "total_rows": 0,
                 "error": "本地库存文件夹不存在"}
@@ -246,8 +278,13 @@ def _match_inventory_paths(paths: list[Path], payload: dict) -> dict:
 
 
 @app.post("/v1/local-inventory-match")
-def match_local_inventory(payload: dict):
-    root = Path(os.environ.get("VOYAGEPLEX_LOCAL_INVENTORY_DIR", "/Users/josie/Desktop/库存读取写回测试"))
+def match_local_inventory(payload: dict, company: str = "Xingxin"):
+    if company not in {"Xingxin", "Huadeng"}:
+        return {"error": "公司板块无效"}
+    configured = os.environ.get("VOYAGEPLEX_HUADENG_INVENTORY_DIR" if company == "Huadeng" else "VOYAGEPLEX_LOCAL_INVENTORY_DIR", "" if company == "Huadeng" else "/Users/josie/Desktop/库存读取写回测试")
+    if not configured:
+        return {"error": "华登库存目录尚未配置"}
+    root = Path(configured)
     if not root.is_dir():
         return {"error": "本地库存文件夹不存在", "items": []}
     return _match_inventory_paths(_inventory_paths(root), payload)
@@ -292,7 +329,10 @@ async def writeback_uploaded_local_inventory(payload: str = Form(...), files: li
 
 @app.post("/v1/shipment-export")
 async def export_shipment(payload: dict):
-    content, filename = build_shipment_workbook(payload)
+    try:
+        content, filename = build_shipment_workbook(payload)
+    except ValueError as error:
+        return Response(content=json.dumps({"error": str(error)}, ensure_ascii=False), status_code=400, media_type="application/json")
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -325,7 +365,6 @@ async def parse_email_batch(files: list[UploadFile] = File(...)):
 
 
 def parse_email_entries(entries: list[dict]) -> dict:
-    """CPU 密集的整批复解析，同步实现，调用方负责用 asyncio.to_thread 移出事件循环。"""
     batch_id = str(uuid.uuid4())
     results = []
     with tempfile.TemporaryDirectory(prefix=f"voyageplex-{batch_id}-") as root:
@@ -339,10 +378,17 @@ def parse_email_entries(entries: list[dict]) -> dict:
                     raise ValueError("文件为空")
                 message = parse_eml(raw, Path(root) / f"item-{index}")
                 fields = parse_body(f'{message["subject"]}\n{message["body_text"]}')
+                apply_carrier_schedule(fields, message.get("body_tables", []))
+                loading_factory = loading_factory_from_text(f'{message["subject"]}\n{message["body_text"]}')
+                if loading_factory:
+                    fields["loading_factory"] = loading_factory
                 fallback_dates = {
                     "si_deadline": fields.pop("_fallback_si_deadline", ""),
                     "cutoff_date": fields.pop("_fallback_cutoff_date", ""),
                 }
+                voucher_cutoff = fields.pop("_fallback_voucher_cutoff", "")
+                if voucher_cutoff and not fields.get("cutoff_date"):
+                    fields["cutoff_date"] = voucher_cutoff
                 date_warnings = fields.pop("_date_warnings", [])
                 shipment_type = classify_email(message["subject"], message["body_text"])
                 attachment_results = []
@@ -371,8 +417,15 @@ def parse_email_entries(entries: list[dict]) -> dict:
                     if parsed_attachment["kind"] != "amazon_allocation":
                         parsed_attachment["items"] = filter_items_for_email(
                             parsed_attachment["items"], shipment_type,
-                            str(parsed_attachment["fields"].get("loading_factory", "")),
+                            str(parsed_attachment["fields"].get("loading_factory", "")) or loading_factory,
                         )
+                    if parsed_attachment["kind"] == "packing_list":
+                        parsed_attachment["items"] = [{
+                            **cargo,
+                            "loading_factory": cargo.get("loading_factory") or
+                                parsed_attachment["fields"].get("loading_factory") or
+                                loading_factory or cargo.get("factory_remark", ""),
+                        } for cargo in parsed_attachment["items"]]
                     attachment_results.append({
                         "filename": attachment["filename"],
                         "kind": parsed_attachment["kind"],
@@ -401,6 +454,13 @@ def parse_email_entries(entries: list[dict]) -> dict:
                         # attachments; attachments only fill fields missing from that section.
                         if value and not fields.get(target_key):
                             fields[target_key] = value
+                # Target carrier schedules expose the secondary SO as booking_number
+                # in the attached booking sheet; keep it beside the current order SO.
+                if re.search(r"CYO[23].*target PO", message["subject"], re.I) and fields.get("booking_number"):
+                    numbers = fields.get("so_number", "").split(",")
+                    booking = str(fields["booking_number"]).strip()
+                    if re.fullmatch(r"[A-Za-z0-9-]{6,}", booking) and booking not in numbers:
+                        fields["so_number"] = ",".join([*numbers, booking])
                 for key, values in attachment_date_candidates.items():
                     used_attachment = bool(values) and not fields.get(key)
                     if used_attachment:
@@ -438,9 +498,14 @@ def parse_email_entries(entries: list[dict]) -> dict:
                     warehouse_groups = build_warehouse_groups(attachment_details)
                 fields["destination_country"] = infer_destination_country(
                     f'{message["subject"]}\n{message["body_text"]}', attachment_details)
+                if requires_cargo_split(f'{message["subject"]}\n{message["body_text"]}'):
+                    fields["cargo_split_required"] = "true"
+                    items = [{**cargo, "shipment_scope": "unassigned"} for cargo in items]
+                    warnings.append("邮件说明剩余货物等待另行通知，请逐行选择本次出运或等待客户通知；未分配完不能确认。体积仅作核对，不自动分柜。")
                 item.update({
                     "status": "parsed",
                     "fingerprint": message["fingerprint"],
+                    "business_fingerprint": message["business_fingerprint"],
                     "message": {k: message[k] for k in ("message_id", "subject", "sender", "received_at", "body_text")},
                     "attachments": [{k: v for k, v in attachment.items() if k != "stored_path"} for attachment in message["attachments"]],
                     "attachment_results": attachment_results,
@@ -449,7 +514,7 @@ def parse_email_entries(entries: list[dict]) -> dict:
                     "items": items,
                     "warehouse_groups": warehouse_groups,
                     "shipment_groups": shipment_groups,
-                    "so_numbers": [reference for group in warehouse_groups for reference in group["references"]],
+                    "so_numbers": fields["so_number"].split(",") if "," in fields.get("so_number", "") else [reference for group in warehouse_groups for reference in group["references"]],
                     "warnings": warnings,
                 })
             except Exception as exc:
@@ -578,3 +643,18 @@ async def parse_inspection_mapping_file(file: UploadFile = File(...)):
     if not rows:
         raise ValueError("未从跟单负责货号表中识别到货号")
     return {"filename": filename, "total": len(rows), "rows": rows}
+
+
+@app.post("/v1/factory-mappings/parse")
+async def parse_factory_mapping(file: UploadFile = File(...)):
+    if not (file.filename or "").lower().endswith((".xlsx", ".xlsm")):
+        return Response(content=json.dumps({"error": "请选择xlsx或xlsm表格"}, ensure_ascii=False), status_code=400, media_type="application/json")
+    content = await file.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024:
+        return Response(content=json.dumps({"error": "文件不能超过10MB"}, ensure_ascii=False), status_code=400, media_type="application/json")
+    try:
+        return {"rows": parse_factory_workbook(content)}
+    except ValueError as error:
+        return Response(content=json.dumps({"error": str(error)}, ensure_ascii=False), status_code=400, media_type="application/json")
+    except Exception:
+        return Response(content=json.dumps({"error": "表格读取失败，请检查表头、数据和文件格式"}, ensure_ascii=False), status_code=400, media_type="application/json")

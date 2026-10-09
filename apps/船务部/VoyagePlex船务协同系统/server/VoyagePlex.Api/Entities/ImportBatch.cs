@@ -1,7 +1,9 @@
 namespace VoyagePlex.Api.Entities;
 
-public sealed class ImportBatch
+public sealed class ImportBatch : ICompanyEntity
 {
+    public long MailOwnerId { get; set; }
+    public string Company { get; set; } = "Xingxin";
     public long Id { get; set; }
     public string Kind { get; set; } = string.Empty;
     public string FileName { get; set; } = string.Empty; // 批次显示名称，兼容骨架字段

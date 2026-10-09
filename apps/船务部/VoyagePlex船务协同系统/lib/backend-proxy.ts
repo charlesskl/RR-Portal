@@ -27,12 +27,14 @@ export async function proxyResponse(response: Response) {
   return new NextResponse(await response.arrayBuffer(), { status: response.status, headers });
 }
 
-export async function requireRole(request: NextRequest, roles: Array<"admin" | "shipping" | "warehouse">) {
+export async function requireRole(request: NextRequest, roles: Array<"admin" | "supervisor" | "shipping" | "warehouse">) {
   try {
     const response = await backendFetch(request, "/api/auth/me");
     if (!response.ok) return { response: NextResponse.json({ error:"请先登录" }, { status:401 }) };
-    const user = await response.json() as { role:"admin" | "shipping" | "warehouse" };
-    if (!roles.includes(user.role)) return { response: NextResponse.json({ error:"当前账号无权使用此功能" }, { status:403 }) };
+    const user = await response.json() as { companyAccess?:string; role:"admin" | "supervisor" | "shipping" | "warehouse" };
+    const company = request.cookies.get("voyageplex_company")?.value || "Xingxin";
+    if (!["Xingxin","Huadeng"].includes(company) || (user.role!=="admin" && (user.companyAccess||"Xingxin")!==company)) return { response: NextResponse.json({ error:"当前账号无权访问该公司板块" }, {status:403}) };
+    if (user.role!=="supervisor" && !roles.includes(user.role)) return { response: NextResponse.json({ error:"当前账号无权使用此功能" }, { status:403 }) };
     return { user };
   } catch {
     return { response: NextResponse.json({ error:"后台服务连接失败" }, { status:502 }) };

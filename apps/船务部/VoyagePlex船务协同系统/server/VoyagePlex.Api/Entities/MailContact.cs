@@ -1,7 +1,9 @@
 namespace VoyagePlex.Api.Entities;
 
-public sealed class MailContact
+public sealed class MailContact : ICompanyEntity
 {
+    public long MailOwnerId { get; set; }
+    public string Company { get; set; } = "Xingxin";
     public long Id { get; set; }
     public string Email { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;

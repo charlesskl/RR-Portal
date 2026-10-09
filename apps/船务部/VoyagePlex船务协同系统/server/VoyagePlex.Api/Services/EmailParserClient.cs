@@ -1,17 +1,30 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.DataProtection;
+using VoyagePlex.Api.Entities;
 
 namespace VoyagePlex.Api.Services;
 
-public sealed class EmailParserClient(HttpClient httpClient)
+public sealed class EmailParserClient(HttpClient httpClient, VoyagePlex.Api.Data.AppDbContext db, IDataProtectionProvider protection)
 {
-    public async Task<ParserResponse> PollMailboxAsync(long afterUid, string startDate, CancellationToken cancellationToken)
+    public async Task<ParserResponse> PollMailboxAsync(long afterUid, string startDate, CancellationToken cancellationToken, string company = "Xingxin", AppUser? owner = null)
     {
-        using var response = await httpClient.GetAsync($"/v1/mailbox/poll?after_uid={afterUid}&start_date={Uri.EscapeDataString(startDate)}", cancellationToken);
+        using var response = owner is null
+            ? await httpClient.GetAsync($"/v1/mailbox/poll?after_uid={afterUid}&start_date={Uri.EscapeDataString(startDate)}&company={company}", cancellationToken)
+            : await httpClient.PostAsJsonAsync("/v1/mailbox/poll", new { after_uid = afterUid, start_date = startDate, company,
+                address = owner.MailboxAddress, auth_code = protection.CreateProtector("PersonalMailbox.v1").Unprotect(owner.MailboxSecretProtected), host = owner.MailboxHost, folder = owner.MailboxFolder }, cancellationToken);
         return new ParserResponse((int)response.StatusCode,
             response.Content.Headers.ContentType?.ToString() ?? "application/json",
             await response.Content.ReadAsStringAsync(cancellationToken));
     }
+    public async Task<ParserResponse> TestMailboxAsync(string address, string secret, string host, string folder, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(45));
+        using var response = await httpClient.PostAsJsonAsync("/v1/mailbox/test", new { address, auth_code = secret, host, folder }, timeout.Token);
+        return new ParserResponse((int)response.StatusCode, "application/json", await response.Content.ReadAsStringAsync(timeout.Token));
+    }
+
     public async Task<ParserResponse> ParseBatchAsync(
         IReadOnlyList<IFormFile> files,
         CancellationToken cancellationToken)
@@ -62,7 +75,7 @@ public sealed class EmailParserClient(HttpClient httpClient)
 
     public async Task<ParserResponse> ScanLocalInventoryAsync(CancellationToken cancellationToken)
     {
-        using var response = await httpClient.GetAsync("/v1/local-inventory-scan", cancellationToken);
+        using var response = await httpClient.GetAsync($"/v1/local-inventory-scan?company={db.Company}", cancellationToken);
         return new ParserResponse((int)response.StatusCode,
             response.Content.Headers.ContentType?.ToString() ?? "application/json",
             await response.Content.ReadAsStringAsync(cancellationToken));
@@ -70,10 +83,19 @@ public sealed class EmailParserClient(HttpClient httpClient)
 
     public async Task<ParserResponse> MatchLocalInventoryAsync(object payload, CancellationToken cancellationToken)
     {
-        using var response = await httpClient.PostAsJsonAsync("/v1/local-inventory-match", payload, cancellationToken);
+        using var response = await httpClient.PostAsJsonAsync($"/v1/local-inventory-match?company={db.Company}", payload, cancellationToken);
         return new ParserResponse((int)response.StatusCode,
             response.Content.Headers.ContentType?.ToString() ?? "application/json",
             await response.Content.ReadAsStringAsync(cancellationToken));
+    }
+
+    public async Task<ParserResponse> ParseFactoryMappingAsync(IFormFile file, CancellationToken cancellationToken)
+    {
+        using var form = new MultipartFormDataContent();
+        using var content = new StreamContent(file.OpenReadStream());
+        form.Add(content, "file", file.FileName);
+        using var response = await httpClient.PostAsync("/v1/factory-mappings/parse", form, cancellationToken);
+        return new ParserResponse((int)response.StatusCode, response.Content.Headers.ContentType?.ToString() ?? "application/json", await response.Content.ReadAsStringAsync(cancellationToken));
     }
 
     public async Task<ShipmentExportResponse> ExportShipmentAsync(

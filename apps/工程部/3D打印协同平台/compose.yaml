@@ -4,10 +4,11 @@ services:
     restart: unless-stopped
     init: true
     ports:
-      - "127.0.0.1:3100:3100"
+      - "${PLATFORM_BIND_IP:-127.0.0.1}:3100:3100"
     environment:
       APP_MODE: production
       HOST: 0.0.0.0
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set the initial admin password}
     volumes:

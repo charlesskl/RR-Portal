@@ -10,7 +10,8 @@ import {createRequire} from 'node:module';
 const root=path.dirname(fileURLToPath(import.meta.url));
 const config=loadConfig(process.env.COLLECTOR_CONFIG||path.join(root,'../data/collector.json'));
 const url=new URL(config.cloudUrl);
-if(url.protocol!=='https:'&&!['127.0.0.1','localhost'].includes(url.hostname))throw Error('远程上报必须使用 HTTPS');
+// loadConfig applies the same transport policy as the preflight checker.
+if(url.protocol==='http:'&&config.allowInsecureHttp===true)console.warn('已启用 HTTP 上报：令牌与生产信息不加密');
 const dir=process.env.COLLECTOR_DATA_DIR||path.join(root,'../data/collector');mkdirSync(dir,{recursive:true});
 const db=new DatabaseSync(path.join(dir,'outbox.sqlite'));db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS outbox(sequence INTEGER PRIMARY KEY AUTOINCREMENT,payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS readings(machine TEXT PRIMARY KEY,state TEXT NOT NULL); CREATE TABLE IF NOT EXISTS rejected(sequence INTEGER PRIMARY KEY,payload TEXT,error TEXT);');
 let statuses={},sourceError='';
@@ -18,7 +19,7 @@ if(config.mode==='live'){
  if(!process.argv.includes('--live'))throw Error('连接真实设备需要显式 --live 参数');
  statuses=createRequire(import.meta.url)('./drivers.cjs').start(config);
 }else if(config.mode==='bridge'){if(!process.argv.includes('--bridge'))throw Error('桥接需显式 --bridge 参数');}else if(config.mode!=='simulation')throw Error('未知采集模式');
-async function call(route,body){const r=await fetch(new URL(route,url),{method:body?'POST':'GET',headers:{Authorization:'Bearer '+config.token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(5000)});if(!r.ok)throw Object.assign(Error(`上报返回 ${r.status}`),{status:r.status});return r.json();}
+async function call(route,body){const r=await fetch(new URL(route,url),{method:body?'POST':'GET',headers:{Authorization:'Bearer '+config.token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(5000),redirect:'error'});if(!r.ok)throw Object.assign(Error(`上报返回 ${r.status}`),{status:r.status});return r.json();}
 function enqueue(value){if(db.prepare('SELECT COUNT(*) n FROM outbox').get().n>20000){console.error('离线队列已满，暂停采样；恢复连接后继续。');return null;}const e={id:randomUUID(),observedAt:new Date().toISOString(),...value};const id=db.prepare('INSERT INTO outbox(payload) VALUES (?)').run(JSON.stringify(e)).lastInsertRowid;return id;}
 db.exec('CREATE TABLE IF NOT EXISTS assignments (id INTEGER PRIMARY KEY,value TEXT)');
 const bindingPath=config.bindingsFile||path.join(dir,'bindings.json');

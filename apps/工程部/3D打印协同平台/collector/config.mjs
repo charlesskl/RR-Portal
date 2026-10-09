@@ -7,12 +7,13 @@ export function validateConfig(config) {
  if(!['live','simulation','bridge'].includes(config.mode))errors.push('mode 必须是 live、bridge 或 simulation');
  try {
   const url=new URL(config.cloudUrl);
-  if(!['https:','http:'].includes(url.protocol)||(url.protocol==='http:'&&!['127.0.0.1','localhost','[::1]'].includes(url.hostname)))errors.push('远程平台地址必须使用 HTTPS');
+  if(!['https:','http:'].includes(url.protocol)||(url.protocol==='http:'&&!['127.0.0.1','localhost','[::1]'].includes(url.hostname)&&config.allowInsecureHttp!==true))errors.push('远程平台地址必须使用 HTTPS；使用 HTTP 需显式设置 allowInsecureHttp: true');
   if(url.username||url.password||url.search||url.hash||url.pathname!=='/')errors.push('平台地址只填写站点根地址，不包含账号、路径或查询参数');
   if(placeholder(url.hostname)||url.hostname.endsWith('.example'))errors.push('请填写实际平台地址');
  } catch {errors.push('cloudUrl 不是有效地址');}
  if(typeof config.token!=='string'||config.token.length<32||placeholder(config.token))errors.push('请配置至少 32 位的本站专用令牌');
  if(config.consolePort!==undefined&&(!Number.isInteger(config.consolePort)||config.consolePort<1024||config.consolePort>65535))errors.push('consolePort 必须是 1024–65535 的整数');
+ if(config.allowInsecureHttp!==undefined&&typeof config.allowInsecureHttp!=='boolean')errors.push('allowInsecureHttp 必须是布尔值');
  const ids=new Set();let total=0;
  for(const [key,credential]of [['bambuPrinters','accessCode'],['flashForgePrinters','checkCode']]){
   if(config[key]!==undefined&&!Array.isArray(config[key])){errors.push(key+' 必须是数组');continue;}

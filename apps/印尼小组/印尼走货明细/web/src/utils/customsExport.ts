@@ -46,7 +46,7 @@ export function customsFormulaName(item: CustomsItem, material?: Material, custo
   return FORMULA_NAME_PREFIXES.find(prefix => name.startsWith(prefix)) || name
 }
 
-import { customsInvoicePrice } from './shipmentInvoice'
+import { customsInvoicePrice, customsInvoiceFormula, invoiceCustomsCompany } from './shipmentInvoice'
 export { customsInvoicePrice } from './shipmentInvoice'
 
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
@@ -1131,7 +1131,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   const effCustoms = (it: CustomsItem) => {
     const m = matOf(it)
     // 供应商不是报关公司，不能在报关公司留空时拿来代替。
-    // 无明确报关公司的旧数据按华胜益处理，以便套用华胜益的发票单价公式。
+    // 仅用于展示及分组；发票计算另取明确的报关公司，不使用默认值。
     return effectiveCustomsCompany(it, m, tf.exportCompany)
   }
   const sorted = sortShipmentItems(items, materials, tf.exportCompany)
@@ -1229,15 +1229,11 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     if (it.contract_date) setCell(ws, ri, 22, excelDate(it.contract_date), 'n')
     setCell(ws, ri, 23, it.invoice_no || '', 's')
     if (it.invoice_date) setCell(ws, ri, 24, excelDate(it.invoice_date), 'n')
-    const customsCompany = effCustoms(it)
-    const isLastCompanyItem = i === sorted.length - 1 || effCustoms(sorted[i + 1]) !== customsCompany
-    const invoicePrice = customsInvoicePrice(it.price, customsCompany, it.kg, isLastCompanyItem)
+    const customsCompany = invoiceCustomsCompany(it, m)
+    const isLastCompanyItem = !sorted.slice(i + 1).some(next => invoiceCustomsCompany(next, matOf(next)) === customsCompany)
+    const invoicePrice = customsInvoicePrice(it.price, customsCompany, it.kg, isLastCompanyItem, it.currency)
     setCell(ws, ri, 25, invoicePrice, 'n')
-    ws[XLSX.utils.encode_cell({ r: ri, c: 25 })].f = !customsCompany.includes('华胜益')
-      ? `AO${ri + 1}`
-      : isLastCompanyItem
-        ? `IFERROR((AO${ri + 1}*1.05+1248/K${ri + 1})/7.2,AO${ri + 1}*1.05/7.2)`
-        : `AO${ri + 1}*1.05/7.2`
+    ws[XLSX.utils.encode_cell({ r: ri, c: 25 })].f = customsInvoiceFormula(ri + 1, customsCompany, isLastCompanyItem, it.currency)
     // 发票金额 = 发票单价 × 送货 KG 重量。
     setCell(ws, ri, 26, '=Z' + (ri + 1) + '*K' + (ri + 1), 'n')
     setCell(ws, ri, 28, tf.containerNo, 's')

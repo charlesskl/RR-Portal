@@ -27,6 +27,37 @@ public static class DataMigrations
         if (connection.State != ConnectionState.Open)
             await connection.OpenAsync();
 
+        // 独立非生产物料复用全局物料 ID，但不挂入 products/BOM。
+        await using (var tools = connection.CreateCommand())
+        {
+            tools.CommandText = """
+                CREATE TABLE IF NOT EXISTS tool_materials (
+                    material_id INT PRIMARY KEY REFERENCES materials(id) ON DELETE CASCADE,
+                    related_product_code VARCHAR(64) NOT NULL DEFAULT '',
+                    tool_kind VARCHAR(16) NOT NULL CONSTRAINT tool_materials_kind_v2_check CHECK (tool_kind IN ('工具','机器设备')),
+                    revision INT NOT NULL DEFAULT 1
+                );
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                        WHERE conrelid='tool_materials'::regclass AND conname='tool_materials_kind_v2_check') THEN
+                        ALTER TABLE tool_materials DROP CONSTRAINT IF EXISTS tool_materials_tool_kind_check;
+                        UPDATE tool_materials SET tool_kind=CASE WHEN tool_kind='设备' THEN '机器设备' ELSE '工具' END,
+                            revision=revision+1 WHERE tool_kind IN ('模具','耗材','设备');
+                        UPDATE materials m SET category=t.tool_kind FROM tool_materials t
+                            WHERE m.id=t.material_id AND m.category IN ('模具','耗材','设备');
+                        UPDATE po_items p SET category=t.tool_kind FROM tool_materials t
+                            WHERE p.material_id=t.material_id AND p.category IN ('模具','耗材','设备');
+                        ALTER TABLE tool_materials ADD CONSTRAINT tool_materials_kind_v2_check
+                            CHECK (tool_kind IN ('工具','机器设备'));
+                    END IF;
+                END $$;
+                ALTER TABLE tool_materials ADD COLUMN IF NOT EXISTS purchase_price DECIMAL(18,6) NULL;
+                ALTER TABLE tool_materials ADD COLUMN IF NOT EXISTS purchase_currency VARCHAR(3) NULL;
+                """;
+            await tools.ExecuteNonQueryAsync();
+        }
+
         // This is deliberately outside the one-time HS migration below: older databases
         // must receive the translation-memory table even when the HS marker already exists.
         await using (var ensureTranslations = connection.CreateCommand())
@@ -68,7 +99,7 @@ public static class DataMigrations
         // 走货行称重数量：旧数据库启动时幂等补列，避免保存后丢失。
         await using (var ensureWeighingQty = connection.CreateCommand())
         {
-            ensureWeighingQty.CommandText = "ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS weighing_qty DECIMAL(18,4) NULL;";
+            ensureWeighingQty.CommandText = "ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS weighing_qty DECIMAL(18,4) NULL; ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS carton_group VARCHAR(64) NULL; ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS material_snapshot JSONB NULL; ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS carton_no VARCHAR(256) NULL;";
             await ensureWeighingQty.ExecuteNonQueryAsync();
         }
 

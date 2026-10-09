@@ -94,6 +94,16 @@ CREATE TABLE IF NOT EXISTS materials (
 CREATE INDEX IF NOT EXISTS "IX_materials_product" ON materials(product_code);
 CREATE INDEX IF NOT EXISTS "IX_materials_name"    ON materials(name_zh);
 
+-- 工具、模具、设备及耗材共享全局物料 ID，但 product_code 为空，不进入产品 BOM。
+CREATE TABLE IF NOT EXISTS tool_materials (
+    material_id INT PRIMARY KEY REFERENCES materials(id) ON DELETE CASCADE,
+    related_product_code VARCHAR(64) NOT NULL DEFAULT '',
+    tool_kind VARCHAR(16) NOT NULL CONSTRAINT tool_materials_kind_v2_check CHECK (tool_kind IN ('工具','机器设备')),
+    revision INT NOT NULL DEFAULT 1,
+    purchase_price DECIMAL(18,6) NULL,
+    purchase_currency VARCHAR(3) NULL
+);
+
 CREATE TABLE IF NOT EXISTS images (
     id          VARCHAR(64)  NOT NULL PRIMARY KEY,
     mime        VARCHAR(64)  NULL,
@@ -279,6 +289,9 @@ CREATE TABLE IF NOT EXISTS shipment_items (
 CREATE INDEX IF NOT EXISTS "IX_shipment_items_shipment" ON shipment_items(shipment_id);
 CREATE INDEX IF NOT EXISTS "IX_shipment_items_po_no"    ON shipment_items(po_no);
 ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS weighing_qty DECIMAL(18,4) NULL;
+ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS carton_group VARCHAR(64) NULL;
+ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS material_snapshot JSONB NULL;
+ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS carton_no VARCHAR(256) NULL;
 
 -- ============ 设置 ============
 CREATE TABLE IF NOT EXISTS settings (

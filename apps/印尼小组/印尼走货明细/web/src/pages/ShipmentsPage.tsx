@@ -1,10 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   App, AutoComplete, Button, Card, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm,
   Row, Select, Space, Table, Tag, Typography,
 } from 'antd'
 import dayjs from 'dayjs'
-import { api, type Dictionaries } from '../api/client'
+import { api, type Dictionaries, type Material } from '../api/client'
+import { toolShipmentFields } from '../utils/toolShipment'
+import { sortShipmentItems, cartonLayout, cartonGroupKey, shipmentScope } from '../utils/shipmentOrder'
+import { withShipmentInvoicePrices } from '../utils/shipmentInvoice'
+import { shipmentPurchaseAmount } from '../utils/shipmentPurchase'
+import ShipmentImport from '../components/ShipmentImport'
+import type { ShipmentImportItem } from '../utils/shipmentImport'
+import { MATERIAL_CATEGORIES } from '../utils/engineeringImport'
+import { HUASHENGYI_FULL_NAME } from '../utils/supplierProfiles'
 import { publicAsset } from '../deployment'
 import './ShipmentsPage.css'
 import {
@@ -27,6 +35,9 @@ interface ShipmentSummary {
 }
 
 interface ShipmentItem {
+  _rowKey?: number
+  material_snapshot?: Material
+  carton_no?: string
   id?: number
   outbound_id?: number
   material_id?: number
@@ -34,6 +45,7 @@ interface ShipmentItem {
   kg?: number
   qty?: number
   cartons?: number
+  carton_group?: string
   qty_per_carton?: string
   weighing_qty?: number
   purchase_unit?: string
@@ -97,6 +109,7 @@ const STATUS = [
   { value: 'arrived',  label: '已到港',  color: 'success' as const },
 ]
 const CURR = [
+  { value: 'IDR', label: '印尼盾 IDR' },
   { value: '¥',   label: '¥' },
   { value: 'HK$', label: 'HK$' },
   { value: 'US$', label: 'US$' },
@@ -163,12 +176,17 @@ export default function ShipmentsPage() {
   const [loading, setLoading] = useState(false)
   const [editing, setEditing] = useState<ShipmentDetail | null>(null)
   const [creating, setCreating] = useState(false)
-  const [items, setItems] = useState<ShipmentItem[]>([])
+  const [rawItems, setRawItems] = useState<ShipmentItem[]>([])
+  const nextRowKey = useRef(0)
+  const [cartonSelection, setCartonSelection] = useState<React.Key[]>([])
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [sharedCartons, setSharedCartons] = useState<number | null>(1)
   const [form] = Form.useForm<ShipmentForm>()
   const [drawerFull, setDrawerFull] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editorDirty, setEditorDirty] = useState(false)
   const [customers, setCustomers] = useState<string[]>([])
+  const [customsNames, setCustomsNames] = useState<string[]>([])
   const [selKeys, setSelKeys] = useState<React.Key[]>([])
   const [schedRows, setSchedRows] = useState<any[]>([])
   const [schedPickerOpen, setSchedPickerOpen] = useState(false)
@@ -181,6 +199,11 @@ export default function ShipmentsPage() {
   const [outSel, setOutSel] = useState<React.Key[]>([])
   // 按货号选物料（补充）
   const [manOpen, setManOpen] = useState(false)
+  const [toolOpen, setToolOpen] = useState(false)
+  const [toolLoading, setToolLoading] = useState(false)
+  const [toolRows, setToolRows] = useState<Material[]>([])
+  const [toolQuery, setToolQuery] = useState('')
+  const [toolSel, setToolSel] = useState<React.Key[]>([])
   const [manCode, setManCode] = useState('')
   const [manMats, setManMats] = useState<any[]>([])
   const [manSel, setManSel] = useState<React.Key[]>([])
@@ -189,7 +212,59 @@ export default function ShipmentsPage() {
   const [valOpen, setValOpen] = useState(false)
   const [valReport, setValReport] = useState<{ hard: string[]; warn: string[] }>({ hard: [], warn: [] })
   // 物料主数据映射（录入表显示只读列 + 计算列 + 写回尺寸）
-  const [matMap, setMatMap] = useState<Map<number, any>>(new Map())
+  const [baseMatMap, setMatMap] = useState<Map<number, any>>(new Map())
+  const matMap = useMemo(() => {
+    const result = new Map(baseMatMap)
+    for (const item of rawItems) if (item.material_snapshot && item.material_id != null && !result.has(item.material_id))
+      result.set(item.material_id, item.material_snapshot)
+    return result
+  }, [baseMatMap, rawItems])
+  const orderedItems = (values: ShipmentItem[]) => withShipmentInvoicePrices(sortShipmentItems(values, matMap), matMap).map((it, i) => ({ ...it, seq: i + 1 }))
+  const items = useMemo(() => orderedItems(rawItems), [rawItems, matMap])
+  const customsOptions = useMemo(() => [...new Set([
+    HUASHENGYI_FULL_NAME, ...customsNames,
+    ...items.flatMap(item => {
+      const material = matMap.get(item.material_id!)
+      return [item.customs_company, material?.customs_company, item.supplier || material?.supplier]
+    }),
+  ].filter((value): value is string => typeof value === 'string' && !!value.trim()).map(value => value.trim()))]
+    .sort((a, b) => a.localeCompare(b, 'zh-CN')).map(value => ({ value, label: value })), [items, matMap, customsNames])
+  const cartonRows = useMemo(() => cartonLayout(items, matMap), [items, matMap])
+  // All index-based edits, deletion and fill-down operate on the displayed order.
+  function setItems(update: React.SetStateAction<ShipmentItem[]>) {
+    setRawItems(current => {
+      const next = typeof update === 'function' ? update(orderedItems(current)) : update
+      return next.map(it => {
+        const rowKey = it._rowKey ?? ++nextRowKey.current
+        return { ...it, _rowKey: rowKey, material_id: it.material_snapshot ? -rowKey : it.material_id }
+      })
+    })
+  }
+  function requestMergeCartons() {
+    const selected = items.filter(it => cartonSelection.includes(it._rowKey!))
+    if (selected.length < 2) { message.warning('请勾选至少两条明细'); return }
+    if (new Set(selected.map(it => shipmentScope(it, matMap))).size !== 1) {
+      message.warning('仅能合并同一报关公司、同一供应商的明细'); return
+    }
+    if (selected.some(it => it.carton_group)) { message.warning('请先取消已有箱数组合，再重新选择'); return }
+    setSharedCartons(selected[0].cartons || 1); setMergeOpen(true)
+  }
+  function mergeCartons() {
+    if (!sharedCartons || !Number.isInteger(sharedCartons) || sharedCartons < 1) return
+    const group = crypto.randomUUID()
+    setItems(current => current.map(it => cartonSelection.includes(it._rowKey!)
+      ? { ...it, carton_group: group, cartons: sharedCartons } : it))
+    setEditorDirty(true); setMergeOpen(false); setCartonSelection([])
+  }
+  function unmergeCartons() {
+    const groups = new Set(items.filter(it => cartonSelection.includes(it._rowKey!)).map(it => cartonGroupKey(it, matMap)).filter(Boolean))
+    if (!groups.size) { message.warning('请勾选已合并的明细'); return }
+    Modal.confirm({ title: '取消箱数合并？', content: '拆开后每行保留当前箱数，并分别计入合计；请核对各行实际箱数。',
+      onOk: () => {
+        setItems(current => current.map(it => groups.has(cartonGroupKey(it, matMap)) ? { ...it, carton_group: undefined } : it))
+        setEditorDirty(true); setCartonSelection([])
+      } })
+  }
   const [dirtyMatIds, setDirtyMatIds] = useState<Set<number>>(new Set())
   // material_id → 出库总量（按货号选物料时带入数量）
   const outByMat = useMemo(() => {
@@ -222,6 +297,11 @@ export default function ShipmentsPage() {
     } catch {}
   }
   useEffect(() => { load(); loadCustomers(); loadLatestSchedule(); loadOutbound(); loadProductCodes() }, [])
+  useEffect(() => {
+    void api.get<Dictionaries>('/dictionaries').then(({ data }) => {
+      setCustomsNames((data.suppliers || []).flatMap(supplier => [supplier.full || '', supplier.customs || '']))
+    }).catch(() => { message.warning('报关公司字典未加载，仍可选择当前明细中的公司') })
+  }, [])
 
   // 公共：查最近 PO，建 material_id → 最近一张 PO 明细 的映射，回填供应商/单价/PO
   async function buildMatToPo(): Promise<Map<number, { po: any; it: any }>> {
@@ -294,7 +374,7 @@ export default function ShipmentsPage() {
 
   // 加载这些物料的主数据（显示只读列 + 计算 + 写回基准）
   async function loadMatsForItems(idsRaw: (number | undefined)[], force = false) {
-    const ids = [...new Set(idsRaw.filter((x): x is number => x != null))]
+    const ids = [...new Set(idsRaw.filter((x): x is number => x != null && x > 0))]
     const missing = force ? ids : ids.filter(id => !matMap.has(id))
     if (!missing.length) return
     try {
@@ -315,8 +395,8 @@ export default function ShipmentsPage() {
     const netTotal = num(m?.net_per_pc) * weightQty
     const cbmEach = shipmentCbmPerCarton(m?.length, m?.width, m?.height)
     const cbmTotal = cbmEach * num(it.cartons)
-    const invoiceAmount = num(it.invoice_price) * num(it.qty)
-    const purchaseAmount = num(it.price) * num(it.qty)
+    const invoiceAmount = num(it.invoice_price) * num(it.kg)
+    const purchaseAmount = shipmentPurchaseAmount(it)
     return { m, grossTotal, netTotal, cbmEach, cbmTotal, invoiceAmount, purchaseAmount }
   }
 
@@ -381,11 +461,10 @@ export default function ShipmentsPage() {
     const picked = outSel.map(k => outRows.find(o => String(o.outbound_id) === String(k))).filter(Boolean) as OutByMat[]
     if (!picked.length) { message.warning('请先勾选出库物料'); return }
     const matToPo = await buildMatToPo()
-    const matsByCode = await loadMatsByCodes(picked.map(o => o.code ?? ''))
+    const { data: pickedMaterials } = await api.get<any[]>('/materials/by-ids', { params: { ids: picked.map(o => o.material_id).join(',') } })
     const newItems: ShipmentItem[] = []
     for (const o of picked) {
-      const mats = matsByCode.get(o.code ?? '') ?? []
-      const m = mats.find(x => String(x.id) === String(o.material_id))
+      const m = pickedMaterials.find(x => String(x.id) === String(o.material_id))
       if (!m) continue
       const poInfo = {
         po: { po_no: o.po_no, order_date: o.po_date, supplier: o.supplier },
@@ -424,6 +503,25 @@ export default function ShipmentsPage() {
     message.success(`已添加 ${newItems.length} 条物料明细`)
   }
 
+  async function openTools() {
+    setToolOpen(true); setToolSel([]); setToolQuery(''); setToolRows([]); setToolLoading(true)
+    try {
+      const { data } = await api.get<Material[]>('/materials/tools')
+      setToolRows((data || []).filter(m => m.active !== false && m.id != null))
+    } finally { setToolLoading(false) }
+  }
+  function pullTools() {
+    const picked = toolRows.filter(m => toolSel.includes(m.id!) && !items.some(it => it.material_id === m.id))
+    if (!picked.length) { message.warning('请勾选尚未添加的工具'); return }
+    if (picked.some(m => m.purchase_price != null && !m.purchase_currency)) {
+      message.warning('所选工具有采购单价但缺少币种，请先在工具库补充'); return
+    }
+    const newItems = picked.map(m => ({ ...makeItem(m, 0), ...toolShipmentFields(m) }))
+    appendItems(newItems)
+    setToolOpen(false); setToolSel([])
+    message.success(`已添加 ${newItems.length} 条工具，请填写本次送货数量和装箱资料`)
+  }
+
   function openCreate() {
     setCreating(true); setEditing({ id: 0, status: 'draft', rate: 0.93, container_count: 1 })
     setItems([]); setMatMap(new Map()); setDirtyMatIds(new Set())
@@ -454,7 +552,10 @@ export default function ShipmentsPage() {
         rate: data.rate,
         status: data.status,
       })
-      const its = Array.isArray(data.items) ? data.items : []
+      const its = Array.isArray(data.items) ? data.items.map(item => ({
+        ...item,
+        material_snapshot: typeof item.material_snapshot === 'string' ? JSON.parse(item.material_snapshot) : item.material_snapshot,
+      })) : []
       setItems(its)
       loadMatsForItems(its.map(x => x.material_id), true)
       setEditorDirty(false)
@@ -470,6 +571,9 @@ export default function ShipmentsPage() {
       const dOrNull = (x: any) => (x ? x : null)
       const cleanItems = items.map(it => ({
         ...it,
+        _rowKey: undefined,
+        material_id: it.material_snapshot ? it.material_snapshot.id ?? null : it.material_id,
+        material_snapshot: it.material_snapshot ? matMap.get(it.material_id!) : undefined,
         weighing_qty: effectiveWeighingQty(it, matMap.get(it.material_id!)),
         po_date: dOrNull(it.po_date),
         contract_date: dOrNull(it.contract_date),
@@ -510,6 +614,7 @@ export default function ShipmentsPage() {
       // 写回货号库：被改过尺寸/毛净重/单位的物料
       if (dirtyMatIds.size) {
         await Promise.all([...dirtyMatIds].map(id => {
+          if (id < 0) return Promise.resolve()
           const m = matMap.get(id)
           if (!m) return Promise.resolve()
           return api.put(`/materials/${id}/dims`, {
@@ -612,8 +717,8 @@ export default function ShipmentsPage() {
     const parts = new Set(items.map(it => partitionOf(it.po_no)).filter(Boolean))
     if (parts.size > 1) hard.push('本票混合了 RRI 与 RRM 的 PO，不允许混柜，请拆成两票')
     // 警告需要物料毛/净重：按 material_id 批量取
-    const ids = [...new Set(items.map(it => it.material_id).filter((x): x is number => x != null))]
-    const matById = new Map<number, any>()
+    const ids = [...new Set(items.map(it => it.material_id).filter((x): x is number => x != null && x > 0))]
+    const matById = new Map<number, any>(matMap)
     if (ids.length) {
       try {
         const { data } = await api.get<any[]>('/materials/by-ids', { params: { ids: ids.join(',') } })
@@ -678,17 +783,21 @@ export default function ShipmentsPage() {
       const productHs = new Map<string, { hsCN?: string; hsID?: string }>()
       for (const p of prods) productHs.set(p.code, { hsCN: p.hs_cn, hsID: p.hs_id })
       const materials = new Map<number, any>()
-      await Promise.all((prods || []).map(async (p: any) => {
-        try {
-          const { data } = await api.get<any[]>('/materials', { params: { code: p.code } })
-          for (const m of (data || [])) if (m.id != null) materials.set(m.id, m)
-        } catch {}
-      }))
+      const { data: usedMaterials } = await api.get<any[]>('/materials/by-ids', { params: { ids: [...new Set(items.map(it => it.material_id).filter(id => id != null && id > 0))].join(',') } })
+      for (const m of usedMaterials) if (m.id != null) materials.set(m.id, m)
+      for (const it of items) if (it.material_snapshot && it.material_id != null) materials.set(it.material_id, matMap.get(it.material_id))
       // 3) 图片：对用到的物料按 image_id 拉 dataURL → bytes
       const images = new Map<number, { bytes: Uint8Array; ext: string }>()
+      for (const it of items) {
+        const image = it.material_snapshot && matMap.get(it.material_id!)?.image
+        if (image && it.material_id != null) {
+          const parsed = dataUrlToBytes(image)
+          if (parsed) images.set(it.material_id, parsed)
+        }
+      }
       const withImg = items
         .map(it => it.material_id != null ? materials.get(it.material_id) : null)
-        .filter((m: any) => m && m.image_id)
+        .filter((m: any) => m && m.image_id && items.some(it => !it.material_snapshot && it.material_id === m.id))
       await Promise.all(withImg.map(async (m: any) => {
         try {
           const { data } = await api.get<{ data_url?: string }>(`/images/${m.image_id}`)
@@ -735,7 +844,11 @@ export default function ShipmentsPage() {
 
   function patchItem(i: number, k: keyof ShipmentItem, v: any) {
     setEditorDirty(true)
-    setItems(its => its.map((it, idx) => idx === i ? { ...it, [k]: v } : it))
+    setItems(its => {
+      const key = cartonGroupKey(its[i], matMap)
+      return its.map((it, idx) => (idx === i || (k === 'cartons' && key && cartonGroupKey(it, matMap) === key))
+        ? { ...it, [k]: v, carton_group: ['supplier', 'customs_company', 'material_id'].includes(k) ? undefined : it.carton_group } : it)
+    })
   }
   // 送货重量按所选单位：KGM 显示净重 KG，TNE/TON 显示净重吨数。
   function kgForItem(it: ShipmentItem, m: any): number {
@@ -748,7 +861,7 @@ export default function ShipmentsPage() {
       if (idx !== i) return it
       const next = { ...it, [k]: v }
       const cartons = shipmentCartonCount(next.qty, next.qty_per_carton)
-      next.cartons = cartons
+      if (!next.carton_group) next.cartons = cartons
       next.kg = kgForItem(next, matMap.get(next.material_id!))
       return next
     }))
@@ -781,9 +894,10 @@ export default function ShipmentsPage() {
       return current.map((item, index) => {
         if (index <= sourceIndex || index > targetIndex) return item
         const next = { ...item, [field]: value }
+        if (['supplier', 'customs_company', 'material_id'].includes(field)) next.carton_group = undefined
         if (field === 'qty' || field === 'qty_per_carton') {
           const cartons = shipmentCartonCount(next.qty, next.qty_per_carton)
-          next.cartons = cartons
+          if (!next.carton_group) next.cartons = cartons
           next.kg = kgForItem(next, matMap.get(next.material_id!))
         } else if (field === 'material_id') {
           next.kg = kgForItem(next, matMap.get(next.material_id!))
@@ -826,7 +940,7 @@ export default function ShipmentsPage() {
     setMatMap(current => {
       const next = new Map(current)
       for (const materialId of targetMaterialIds) {
-        next.set(materialId, { ...(next.get(materialId) || {}), [materialField]: value })
+        next.set(materialId, { ...(next.get(materialId) || matMap.get(materialId) || {}), [materialField]: value })
       }
       return next
     })
@@ -895,8 +1009,8 @@ export default function ShipmentsPage() {
       rows: items.length,
       qty: items.reduce((s, it) => s + (it.qty ?? 0), 0),
       kg:  items.reduce((s, it) => s + (it.kg ?? 0), 0),
-      cartons: items.reduce((s, it) => s + (it.cartons ?? 0), 0),
-      amount: items.reduce((s, it) => s + (it.qty ?? 0) * (it.price ?? 0), 0),
+      cartons: cartonRows.reduce((s, row) => s + row.count, 0),
+      amount: items.reduce((s, it) => s + shipmentPurchaseAmount(it), 0),
       cbm, gross, net,
     }
   }, [items, matMap])
@@ -1047,13 +1161,40 @@ export default function ShipmentsPage() {
             <Space wrap>
               <Button size="small" type="primary" onClick={() => { loadOutbound(editing?.id || undefined); setOutOpen(true) }}>📦 从出库精确分配</Button>
               <Button size="small" onClick={() => { setManOpen(true); if (!manMats.length) loadManMats(manCode) }}>🗂 按货号选物料</Button>
+              <Button size="small" onClick={openTools}>从工具库选择</Button>
               <Button size="small" onClick={() => setSchedPickerOpen(true)}>🔗 从排期勾选</Button>
               <Button size="small" onClick={addItem}>➕ 加一行</Button>
+              <ShipmentImport existing={items.map(row => ({ ...row, material_snapshot: matMap.get(row.material_id!) }))} onImport={(imported: ShipmentImportItem[], targets: number[]) => {
+                setItems(current => {
+                  const next = [...current]
+                  imported.forEach((row, index) => {
+                    const target = targets[index]
+                    if (target < 0) { next.push(row); return }
+                    const old = next[target]
+                    const provided = Object.fromEntries(Object.entries(row).filter(([, value]) => value != null && value !== ''))
+                    const material = Object.fromEntries(Object.entries(row.material_snapshot).filter(([, value]) => value != null && value !== ''))
+                    next[target] = { ...old, ...provided, material_snapshot: { ...matMap.get(old.material_id!), ...material } }
+                  })
+                  return next
+                })
+                setMatMap(current => {
+                  const next = new Map(current)
+                  targets.filter(target => target >= 0).forEach(target => {
+                    const id = items[target].material_id
+                    if (id != null && id < 0) next.delete(id)
+                  })
+                  return next
+                })
+                setEditorDirty(true)
+              }} />
+              <Button size="small" onClick={requestMergeCartons} disabled={cartonSelection.length < 2}>合并箱数</Button>
+              <Button size="small" onClick={unmergeCartons} disabled={!cartonSelection.length}>取消合并</Button>
             </Space>
           }
         >
           <Table
-            rowKey={(_, i) => String(i)}
+            rowKey={r => String(r._rowKey)}
+            rowSelection={{ selectedRowKeys: cartonSelection.map(String), onChange: keys => setCartonSelection(keys.map(Number)), fixed: true }}
             size="small"
             pagination={false}
             scroll={{ x: 4600, y: drawerFull ? 'calc(100vh - 350px)' : 'calc(100vh - 400px)' }}
@@ -1075,7 +1216,7 @@ export default function ShipmentsPage() {
                     : <span style={{ color: '#bbb', fontSize: 12 }}>无</span>
                 },
               },
-              { title: '物料ID', width: 80, fixed: 'left', render: (_v, r, i) => fillable(i, 'material_id', <InputNumber size="small" controls={false} value={r.material_id} onChange={(v) => { patchItem(i, 'material_id', v); loadMatsForItems([v as number]) }} style={{ width: '100%' }} />) },
+              { title: '物料ID', width: 80, fixed: 'left', render: (_v, r, i) => r.material_snapshot ? <Tag title="Excel 导入资料只保存在本次走货单">{r.material_snapshot.id || '导入'}</Tag> : fillable(i, 'material_id', <InputNumber size="small" controls={false} value={r.material_id} onChange={(v) => { patchItem(i, 'material_id', v); loadMatsForItems([v as number]) }} style={{ width: '100%' }} />) },
               { title: '产品中文名称', width: 160, fixed: 'left', render: (_v, r) => matMap.get(r.material_id!)?.name_zh ?? '' },
               { title: '货号', width: 100, fixed: 'left', render: (_v, r) => matMap.get(r.material_id!)?.product_code ?? '' },
               { title: '中国HSCODE', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.hs_cn ?? '' },
@@ -1083,7 +1224,21 @@ export default function ShipmentsPage() {
               { title: '套公式名称栏', width: 150, render: (_v, r, i) => fillable(i, 'formula_name', <Input size="small" value={r.formula_name} onChange={(e) => patchItem(i, 'formula_name', e.target.value)} />) },
               { title: '产品英文名称', width: 160, render: (_v, r) => matMap.get(r.material_id!)?.name_en ?? '' },
               { title: '规格', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.spec ?? '' },
-              { title: '类别', width: 90, render: (_v, r) => matMap.get(r.material_id!)?.category ?? '' },
+              { title: '类别', width: 150, render: (_v, r) => {
+                const material = matMap.get(r.material_id!)
+                if (r.outbound_id || !material) return material?.category ?? ''
+                const options = [...new Set([...MATERIAL_CATEGORIES, material.category].filter(Boolean))]
+                return <Select size="small" showSearch style={{ width: '100%' }} placeholder="选择类别"
+                  value={material.category || undefined} options={options.map(value => ({ value, label: value }))}
+                  onChange={category => {
+                    setItems(current => current.map(item => item._rowKey === r._rowKey
+                      ? { ...item, material_snapshot: { ...material, category } } : item))
+                    if (r.material_id != null && r.material_id < 0) setMatMap(current => {
+                      const next = new Map(current); next.delete(r.material_id!); return next
+                    })
+                    setEditorDirty(true)
+                  }} />
+              } },
               { title: '单位', width: 130, render: (_v, r, i) => fillableMaterial(i, 'unit_kg', <Select size="small" value={matMap.get(r.material_id!)?.unit_kg || 'KGM'} options={UNIT_LIST.map(u => ({ value: u, label: u }))} onChange={(v) => patchMatDim(r.material_id, 'unit_kg', v)} style={{ width: '100%' }} />) },
               { title: '送货重量', width: 120, render: (_v, r, i) => fillable(i, 'kg', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.kg} onChange={(v) => patchItem(i, 'kg', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '送货数量', width: 90, render: (_v, r, i) => fillable(i, 'qty', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.qty} onChange={(v) => patchQtyOrPack(i, 'qty', v ?? 0)} style={{ width: '100%' }} />) },
@@ -1097,7 +1252,7 @@ export default function ShipmentsPage() {
               { title: '合同日期', width: 155, render: (_v, r, i) => fillable(i, 'contract_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.contract_date ? dayjs(r.contract_date) : null} onChange={(v) => patchItem(i, 'contract_date', v ? v.format('YYYY-MM-DD') : '')} />) },
               { title: '发票号', width: 180, render: (_v, r, i) => fillable(i, 'invoice_no', <Input size="small" value={r.invoice_no} onChange={(e) => patchItem(i, 'invoice_no', e.target.value)} />) },
               { title: '发票日期', width: 155, render: (_v, r, i) => fillable(i, 'invoice_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.invoice_date ? dayjs(r.invoice_date) : null} onChange={(v) => patchItem(i, 'invoice_date', v ? v.format('YYYY-MM-DD') : '')} />) },
-              { title: '发票单价', width: 100, render: (_v, r, i) => fillable(i, 'invoice_price', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.invoice_price} onChange={(v) => patchItem(i, 'invoice_price', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '发票单价', width: 120, onCell: () => ({ style: GRAY }), render: (_v, r) => <InputNumber size="small" readOnly controls={false} precision={4} value={r.invoice_price} title="自动按导出公式计算；金额按送货重量计算" style={{ ...GRAY, width: '100%' }} /> },
               { title: '金额', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.invoiceAmount ? c.invoiceAmount.toFixed(2) : '' } },
               { title: '供应商', width: 160, render: (_v, r, i) => fillable(i, 'supplier', <Input size="small" value={r.supplier} onChange={(e) => patchItem(i, 'supplier', e.target.value)} />) },
               { title: '采购单日期', width: 130, render: (_v, r, i) => fillable(i, 'po_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.po_date ? dayjs(r.po_date) : null} onChange={(v) => patchItem(i, 'po_date', v ? v.format('YYYY-MM-DD') : '')} />) },
@@ -1105,11 +1260,18 @@ export default function ShipmentsPage() {
               { title: '采购单价', width: 100, render: (_v, r, i) => fillable(i, 'price', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.price} onChange={(v) => patchItem(i, 'price', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '币种', width: 90, render: (_v, r, i) => fillable(i, 'currency', <Select size="small" value={r.currency || '¥'} options={CURR} onChange={(v) => patchItem(i, 'currency', v)} style={{ width: '100%' }} />) },
               { title: '采购金额', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.purchaseAmount ? c.purchaseAmount.toFixed(2) : '' } },
-              { title: '报关出口公司', width: 160, render: (_v, r, i) => fillable(i, 'customs_company', <Input size="small" value={r.customs_company} onChange={(e) => patchItem(i, 'customs_company', e.target.value)} />) },
+              { title: '报关出口公司', width: 240, render: (_v, r, i) => fillable(i, 'customs_company',
+                <Select size="small" showSearch allowClear style={{ width: '100%' }} placeholder="选择报关出口公司"
+                  options={customsOptions} popupMatchSelectWidth={false} value={r.customs_company || undefined}
+                  onChange={value => patchItem(i, 'customs_company', value || '')} />) },
               { title: '提单抬头', width: 180, render: (_v, r, i) => fillable(i, 'bl_head', <Select size="small" value={r.bl_head || undefined} options={BL_HEAD_LIST.map(v => ({ value: v, label: v }))} onChange={(v) => patchItem(i, 'bl_head', v)} style={{ width: '100%' }} allowClear />) },
-              { title: '箱数', width: 70, render: (_v, r, i) => fillable(i, 'cartons', <InputNumber size="small" controls={false} min={0} value={r.cartons} onChange={(v) => patchItem(i, 'cartons', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '箱数', width: 90, onCell: (_, i) => ({ rowSpan: cartonRows[i!]?.span ?? 1 }), render: (_v, r, i) => <div>
+                <InputNumber size="small" controls={false} min={0} precision={0} value={r.cartons} onChange={(v) => patchItem(i, 'cartons', v ?? 0)} style={{ width: '100%' }} />
+                {(cartonRows[i]?.span || 0) > 1 && <Tag>同箱合并</Tag>}
+              </div> },
               { title: '每箱数量', width: 190, render: (_v, r, i) => fillable(i, 'qty_per_carton', <Input.TextArea size="small" autoSize={{ minRows: 1, maxRows: 4 }} value={r.qty_per_carton} placeholder={'3000 或 1-2/3000\n3/4000'} title="可填统一数量 3000，或按箱号分段：1-2/3000 3/4000" onChange={(e) => patchQtyOrPack(i, 'qty_per_carton', e.target.value)} onBlur={(e) => { const formatted = formatShipmentPackingLines(e.target.value); if (formatted !== e.target.value) patchQtyOrPack(i, 'qty_per_carton', formatted) }} style={{ resize: 'none' }} />) },
               { title: '卡板', width: 140, render: (_v, r, i) => fillable(i, 'pallet', <Input.TextArea size="small" autoSize={{ minRows: 1, maxRows: 4 }} value={r.pallet} placeholder="1-22/2卡" onChange={(e) => patchItem(i, 'pallet', e.target.value)} style={{ resize: 'none', overflowWrap: 'anywhere' }} />) },
+              { title: '箱号', width: 120, render: (_, r, i) => fillable(i, 'carton_no', <Input size="small" value={r.carton_no} onChange={e => patchItem(i, 'carton_no', e.target.value)} />) },
               { title: '长', width: 90, render: (_v, r, i) => fillableMaterial(i, 'length', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.length || null} onChange={(v) => patchMatDim(r.material_id, 'length', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '宽', width: 90, render: (_v, r, i) => fillableMaterial(i, 'width', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.width || null} onChange={(v) => patchMatDim(r.material_id, 'width', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '高', width: 90, render: (_v, r, i) => fillableMaterial(i, 'height', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.height || null} onChange={(v) => patchMatDim(r.material_id, 'height', v ?? 0)} style={{ width: '100%' }} />) },
@@ -1130,6 +1292,11 @@ export default function ShipmentsPage() {
         </Card>
       </Drawer>
 
+      <Modal open={mergeOpen} title="合并箱数" onCancel={() => setMergeOpen(false)} onOk={mergeCartons}
+        okButtonProps={{ disabled: !sharedCartons || !Number.isInteger(sharedCartons) || sharedCartons < 1 }}>
+        <Typography.Paragraph>所选明细共用以下箱数，仅计算一次。物料数量、价格、重量等仍各自保留。</Typography.Paragraph>
+        <InputNumber min={1} precision={0} value={sharedCartons} onChange={setSharedCartons} addonBefore="合计箱数" />
+      </Modal>
       <Modal
         open={schedPickerOpen}
         title={`从排期勾选拉物料（共 ${schedRows.length} 行 · 已选 ${schedPickerSel.length}）`}
@@ -1222,6 +1389,28 @@ export default function ShipmentsPage() {
             { title: '出库日期', dataIndex: 'out_date', width: 120, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '' },
           ]}
         />
+      </Modal>
+
+      <Modal open={toolOpen} title="从工具库选择" width={1000}
+        onCancel={() => setToolOpen(false)} onOk={pullTools} okText="添加到走货明细"
+        okButtonProps={{ disabled: toolLoading || !toolSel.length }}>
+        <Typography.Paragraph type="secondary">直接带入工具资料、采购单价和币种，不关联采购或出库、不扣库存。请填写本次数量，核实装箱资料和发票单价后导出。</Typography.Paragraph>
+        <Input.Search allowClear placeholder="搜索供应商 / 名称 / 规格 / 关联货号" value={toolQuery}
+          onChange={e => setToolQuery(e.target.value)} style={{ marginBottom: 12 }} />
+        <Table<Material> rowKey={m => m.id!} loading={toolLoading} size="small"
+          dataSource={toolRows.filter(m => [m.supplier, m.name_zh, m.spec, m.related_product_code].some(v => (v || '').toLowerCase().includes(toolQuery.trim().toLowerCase())))}
+          rowSelection={{ selectedRowKeys: toolSel, onChange: setToolSel, preserveSelectedRowKeys: true,
+            getCheckboxProps: m => ({ disabled: items.some(it => it.material_id === m.id) }) }}
+          pagination={{ pageSize: 20 }} scroll={{ x: 900, y: 420 }} columns={[
+            { title: '供应商', dataIndex: 'supplier' },
+            { title: '名称', dataIndex: 'name_zh' },
+            { title: '类别', dataIndex: 'tool_kind' },
+            { title: '规格', dataIndex: 'spec' },
+            { title: '关联货号', dataIndex: 'related_product_code' },
+            { title: '单位', dataIndex: 'unit_kg' },
+            { title: '采购单价', dataIndex: 'purchase_price' },
+            { title: '币种', dataIndex: 'purchase_currency' },
+          ]} />
       </Modal>
 
       {/* 按货号选物料（补充） */}

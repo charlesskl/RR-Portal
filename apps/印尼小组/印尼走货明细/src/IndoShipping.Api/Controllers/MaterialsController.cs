@@ -31,10 +31,13 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
         if (idList.Length == 0) return Ok(Array.Empty<object>());
         using var c = factory.Create();
         var rows = await c.QueryAsync(@"
-            SELECT m.*, i.data_url AS image
+            SELECT m.*, i.data_url AS image, t.related_product_code, t.tool_kind
             FROM materials m LEFT JOIN images i ON i.id = m.image_id
+            LEFT JOIN tool_materials t ON t.material_id=m.id
             WHERE m.id = ANY(@ids)
             ORDER BY array_position(@ids, m.id)", new { ids = idList });
+        foreach (IDictionary<string, object> row in rows)
+            if (row["tool_kind"] != null) row["product_code"] = row["related_product_code"];
         return Ok(rows);
     }
 
@@ -80,6 +83,7 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
             UPDATE po_items SET ship_unit=@unit
             WHERE material_id=@id AND ship_unit IS DISTINCT FROM @unit",
             new { id, unit }, tx);
+        await c.ExecuteAsync("UPDATE tool_materials SET revision=revision+1 WHERE material_id=@id", new { id }, tx);
         tx.Commit();
         return Ok(new { ok = true, id, unit_links_updated = linked });
     }
@@ -277,6 +281,7 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
         c.Open();
         using var tx = c.BeginTransaction();
         var n = await c.ExecuteAsync($"UPDATE materials SET {sets} WHERE id=@id", dyn, tx);
+        await c.ExecuteAsync("UPDATE tool_materials SET revision=revision+1 WHERE material_id=@id", new { id }, tx);
         if (n == 0)
         {
             tx.Rollback();

@@ -26,6 +26,7 @@ export default function AppLayout() {
   const routes = PERMISSION_MODULES.filter(m => auth.canAccess(m.key)).map(m => ({ path: m.path, name: names[m.key] }))
   if (auth.canAccess('products')) routes.splice(2, 0, { path: '/supplier-summary', name: '供应商汇总' })
   if (auth.canAccess('products')) routes.splice(3, 0, { path: '/dictionaries', name: 'HS/翻译字典' })
+  if (auth.canAccess('products')) routes.splice(2, 0, { path: '/tool-materials', name: '工具及非生产物料' })
   if (auth.canAccess('purchase')) routes.splice(5, 0, { path: '/material-alerts', name: '物料追踪' })
   if (auth.isAdmin) routes.push({ path: '/users', name: '账户管理' })
 

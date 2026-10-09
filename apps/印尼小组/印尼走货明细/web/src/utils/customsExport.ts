@@ -11,15 +11,8 @@ import { documentSellerForLine, supplierForLine } from './supplierProfiles'
 import { deliveryDeadline, syncedShipmentDeadline } from './shipmentDeadline'
 import { isPaperRope, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
 
-export const CUSTOMS_FIXED = '深圳市华胜益出口贸易有限公司'
-
-export function effectiveCustomsCompany(
-  item: Pick<CustomsItem, 'customs_company'>,
-  material?: Pick<Material, 'customs_company'>,
-  fallback = CUSTOMS_FIXED,
-) {
-  return (item.customs_company || material?.customs_company || fallback || CUSTOMS_FIXED).trim()
-}
+import { CUSTOMS_FIXED, effectiveCustomsCompany, sortShipmentItems, cartonLayout } from './shipmentOrder'
+export { CUSTOMS_FIXED, effectiveCustomsCompany } from './shipmentOrder'
 
 const CUSTOMS_COMPANY_COLORS = [
   'C6E0B4', // 浅绿（参考表第 1 组）
@@ -34,6 +27,7 @@ const CUSTOMS_COMPANY_COLORS = [
 const FORMULA_NAME_PREFIXES = ['五金配件', '塑胶件', '搪胶件', '毛绒裁片']
 
 const PURCHASE_CURRENCY_FORMATS: Record<string, string> = {
+  'IDR': '"IDR"#,##0.0000',
   '¥': '¥#,##0.0000',
   'HK$': '"HK$"#,##0.0000',
   'US$': '"US$"#,##0.0000',
@@ -52,17 +46,8 @@ export function customsFormulaName(item: CustomsItem, material?: Material, custo
   return FORMULA_NAME_PREFIXES.find(prefix => name.startsWith(prefix)) || name
 }
 
-export function customsInvoicePrice(
-  purchasePrice?: number,
-  customsCompany = '',
-  deliveryKg?: number,
-  isLastCompanyItem = false,
-) {
-  const price = Number(purchasePrice) || 0
-  if (!customsCompany.includes('华胜益')) return price
-  const surchargePerKg = isLastCompanyItem && Number(deliveryKg) > 0 ? 1248 / Number(deliveryKg) : 0
-  return (price * 1.05 + surchargePerKg) / 7.2
-}
+import { customsInvoicePrice, customsInvoiceFormula, invoiceCustomsCompany } from './shipmentInvoice'
+export { customsInvoicePrice } from './shipmentInvoice'
 
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
 export interface CustomsItem {
@@ -70,6 +55,7 @@ export interface CustomsItem {
   kg?: number
   qty?: number
   cartons?: number
+  carton_group?: string
   qty_per_carton?: string
   weighing_qty?: number
   purchase_unit?: string
@@ -1145,19 +1131,12 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   const effCustoms = (it: CustomsItem) => {
     const m = matOf(it)
     // 供应商不是报关公司，不能在报关公司留空时拿来代替。
-    // 无明确报关公司的旧数据按华胜益处理，以便套用华胜益的发票单价公式。
+    // 仅用于展示及分组；发票计算另取明确的报关公司，不使用默认值。
     return effectiveCustomsCompany(it, m, tf.exportCompany)
   }
+  const sorted = sortShipmentItems(items, materials, tf.exportCompany)
+  const cartonRows = cartonLayout(sorted, materials, tf.exportCompany)
   const supplierOf = (it: CustomsItem) => (it.supplier || matOf(it)?.supplier || '').trim()
-  const sorted = [...items].sort((a, b) => {
-    const ca = effCustoms(a), cb = effCustoms(b)
-    const wa = ca === CUSTOMS_FIXED ? 0 : (ca ? 1 : 2)
-    const wb = cb === CUSTOMS_FIXED ? 0 : (cb ? 1 : 2)
-    if (wa !== wb) return wa - wb
-    const byC = ca.localeCompare(cb, 'zh')
-    if (byC !== 0) return byC
-    return supplierOf(a).localeCompare(supplierOf(b), 'zh')
-  })
   const companyColor = new Map<string, string>()
   for (const item of sorted) {
     const company = effCustoms(item)
@@ -1223,7 +1202,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       const img = images.get(it.material_id)!
       floatImages.push({ rowZeroIdx: ri, bytes: img.bytes, ext: img.ext })
     }
-    const phs = m?.product_code ? productHs.get(m.product_code) : undefined
+    const phs = m?.product_code && !m.tool_kind ? productHs.get(m.product_code) : undefined
     setCell(ws, ri, 0, i + 1, 'n')
     setCell(ws, ri, 1, m?.hs_cn || phs?.hsCN || '', 's')
     setCell(ws, ri, 2, m?.hs_id || phs?.hsID || '', 's')
@@ -1244,21 +1223,17 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 15, '=ROUND(BA' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
     setCell(ws, ri, 16, '=ROUND(BB' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
     setCell(ws, ri, 17, '=AU' + (ri + 1) + '*AV' + (ri + 1) + '*AW' + (ri + 1) + '/28316.75*0.0283', 'n')
-    setCell(ws, ri, 18, '=R' + (ri + 1) + '*AT' + (ri + 1), 'n')
+    setCell(ws, ri, 18, '=R' + (ri + 1) + '*' + (it.carton_group ? String(Number(it.cartons) || 0) : 'AT' + (ri + 1)), 'n')
     setCell(ws, ri, 20, it.product_use || '', 's')
     setCell(ws, ri, 21, it.contract_no || '', 's')
     if (it.contract_date) setCell(ws, ri, 22, excelDate(it.contract_date), 'n')
     setCell(ws, ri, 23, it.invoice_no || '', 's')
     if (it.invoice_date) setCell(ws, ri, 24, excelDate(it.invoice_date), 'n')
-    const customsCompany = effCustoms(it)
-    const isLastCompanyItem = i === sorted.length - 1 || effCustoms(sorted[i + 1]) !== customsCompany
-    const invoicePrice = customsInvoicePrice(it.price, customsCompany, it.kg, isLastCompanyItem)
+    const customsCompany = invoiceCustomsCompany(it, m)
+    const isLastCompanyItem = !sorted.slice(i + 1).some(next => invoiceCustomsCompany(next, matOf(next)) === customsCompany)
+    const invoicePrice = customsInvoicePrice(it.price, customsCompany, it.kg, isLastCompanyItem, it.currency)
     setCell(ws, ri, 25, invoicePrice, 'n')
-    ws[XLSX.utils.encode_cell({ r: ri, c: 25 })].f = !customsCompany.includes('华胜益')
-      ? `AO${ri + 1}`
-      : isLastCompanyItem
-        ? `IFERROR((AO${ri + 1}*1.05+1248/K${ri + 1})/7.2,AO${ri + 1}*1.05/7.2)`
-        : `AO${ri + 1}*1.05/7.2`
+    ws[XLSX.utils.encode_cell({ r: ri, c: 25 })].f = customsInvoiceFormula(ri + 1, customsCompany, isLastCompanyItem, it.currency)
     // 发票金额 = 发票单价 × 送货 KG 重量。
     setCell(ws, ri, 26, '=Z' + (ri + 1) + '*K' + (ri + 1), 'n')
     setCell(ws, ri, 28, tf.containerNo, 's')
@@ -1282,7 +1257,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     })
     setCell(ws, ri, 43, effCustoms(it) || tf.exportCompany, 's')
     setCell(ws, ri, 44, it.bl_head || tf.blHead, 's')
-    setCell(ws, ri, 45, it.cartons || 0, 'n')
+    setCell(ws, ri, 45, cartonRows[i].count, 'n')
     const qpc = it.qty_per_carton ?? 0
     setCell(ws, ri, 46, m?.length || 0, 'n')
     setCell(ws, ri, 47, m?.width || 0, 'n')
@@ -1512,6 +1487,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     await resizeModernLinkedDocumentTables(outZip, newName, linkedDocumentGroups, String(form.customer || '').toUpperCase().includes('RRI'))
   }
   await ensureMainTableGrid(outZip, newName, mainTotalRow)
+  await mergeMainCartonCells(outZip, newName, cartonRows)
   if (!input.mainOnly) await groupGenericInvoice(outZip, newName, sorted.map(effCustoms), ws, wbObj.Sheets['商品汇总表'])
   if (!input.mainOnly) await formatHengxinchangInvoiceFooters(outZip)
   if (!input.mainOnly) await compactEmptyInvoiceFooters(outZip)
@@ -1521,6 +1497,33 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     await injectOoxmlImages(outZip, mainSheetIdx, floatImages)
   }
   return await outZip.generateAsync({ type: 'blob' })
+}
+
+export async function mergeMainCartonCells(zip: JSZip, mainName: string, layout: { span: number; count: number }[]) {
+  const path = (await workbookSheetParts(zip)).get(mainName)
+  if (!path || !layout.some(row => row.span > 1)) return
+  const doc = new DOMParser().parseFromString(await zip.file(path)!.async('string'), 'application/xml')
+  const root = doc.documentElement as XmlElement
+  let merges = directChild(root, 'mergeCells')
+  if (!merges) {
+    merges = doc.createElementNS(SPREADSHEET_NS, 'mergeCells') as XmlElement
+    const before = (Array.from(root.childNodes) as XmlElement[]).filter(node => node.nodeType === 1).find(node => ['phoneticPr', 'conditionalFormatting', 'dataValidations', 'hyperlinks', 'printOptions', 'pageMargins', 'pageSetup', 'headerFooter', 'rowBreaks', 'colBreaks', 'drawing', 'legacyDrawing', 'extLst'].includes(node.localName || node.nodeName))
+    root.insertBefore(merges, before || null)
+  }
+  const data = directChild(root, 'sheetData')!
+  layout.forEach((entry, i) => {
+    if (entry.span <= 1) return
+    const merge = doc.createElementNS(SPREADSHEET_NS, 'mergeCell')
+    merge.setAttribute('ref', `AT${i + 4}:AT${i + entry.span + 3}`)
+    merges!.appendChild(merge)
+    for (let n = i + 1; n < i + entry.span; n++) {
+      const row = directChildren(data, 'row').find(r => rowNumber(r) === n + 4)
+      const cell = row && directChildren(row, 'c').find(c => c.getAttribute('r') === `AT${n + 4}`)
+      if (cell) clearXmlCell(cell)
+    }
+  })
+  merges.setAttribute('count', String(directChildren(merges, 'mergeCell').length))
+  zip.file(path, new XMLSerializer().serializeToString(doc))
 }
 
 async function addPackingGrandTotal(zip: JSZip, mainName: string, mainTotalRow?: number) {
@@ -2047,6 +2050,19 @@ async function restoreTemplateDocumentStyles(
     if (code.includes('HK$') && code.includes('0.000')) currencyNumFmt.set('HK$', node.getAttribute('numFmtId') || '178')
   }
   const derivedStyles = new Map<string, string>()
+  // 模板未自带印尼盾格式，补充后仍保留原单元格字体及边框。
+  if (!currencyNumFmt.has('IDR')) {
+    const formats = rawStyles.getElementsByTagName('numFmts')[0]
+    if (formats) {
+      const nextId = String(Math.max(163, ...Array.from(formats.getElementsByTagName('numFmt')).map(n => Number(n.getAttribute('numFmtId')) || 0)) + 1)
+      const format = rawStyles.createElementNS(formats.namespaceURI, 'numFmt')
+      format.setAttribute('numFmtId', nextId)
+      format.setAttribute('formatCode', PURCHASE_CURRENCY_FORMATS.IDR)
+      formats.appendChild(format)
+      formats.setAttribute('count', String(formats.getElementsByTagName('numFmt').length))
+      currencyNumFmt.set('IDR', nextId)
+    }
+  }
   const derivedFonts = new Map<string, string>()
   const styleForCurrency = (baseStyle: string, currency: string) => {
     const numFmtId = currencyNumFmt.get(currency)

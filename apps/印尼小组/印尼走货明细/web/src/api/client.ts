@@ -82,6 +82,11 @@ export interface ProductDetail extends Product {
 
 export interface Material {
   id?: number
+  tool_kind?: '工具' | '机器设备'
+  related_product_code?: string
+  revision?: number
+  purchase_price?: number | null
+  purchase_currency?: string | null
   product_code?: string
   item_no?: string
   name_zh?: string

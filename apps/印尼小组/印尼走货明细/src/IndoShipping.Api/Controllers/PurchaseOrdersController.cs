@@ -28,7 +28,8 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
         using var c = factory.Create();
         var rows = await c.QueryAsync(@"
             SELECT DISTINCT tomy_po, product_code FROM po_items
-            WHERE tomy_po IS NOT NULL AND tomy_po <> '' AND product_code IS NOT NULL AND product_code <> ''");
+            WHERE tomy_po IS NOT NULL AND tomy_po <> '' AND product_code IS NOT NULL AND product_code <> ''
+              AND NOT EXISTS (SELECT 1 FROM tool_materials t WHERE t.material_id=po_items.material_id)");
         return Ok(rows);
     }
 
@@ -43,6 +44,7 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
                    MAX(currency) AS currency
             FROM po_items
             WHERE product_code IS NOT NULL AND product_code <> ''
+              AND NOT EXISTS (SELECT 1 FROM tool_materials t WHERE t.material_id=po_items.material_id)
             GROUP BY product_code");
         return Ok(rows);
     }

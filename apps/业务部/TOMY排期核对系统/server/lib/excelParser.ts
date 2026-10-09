@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import { prepareScheduleWorkbook } from './prepareScheduleWorkbook.js'
 import type { ScheduleRow } from '../types/index.js'
 
 // Column name aliases for cross-file compatibility
@@ -76,7 +77,7 @@ function getCellValue(row: ExcelJS.Row, colIndex: number | undefined): unknown {
  */
 export async function parseScheduleExcel(buffer: Buffer, sheetName?: string): Promise<ScheduleRow[]> {
   const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(buffer)
+  await workbook.xlsx.load(await prepareScheduleWorkbook(buffer))
 
   let ws: ExcelJS.Worksheet | undefined
 

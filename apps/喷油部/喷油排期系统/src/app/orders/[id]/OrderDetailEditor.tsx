@@ -6,7 +6,7 @@ import { STATUS_META } from "@/lib/orderStatus";
 import { apiFetch } from "@/lib/apiFetch";
 
 type PartQtyDto = { id: number; partName: string; sourcePartId: number | null; qty: number; partOrder: number };
-type ProductPartDto = { id: number; partName: string; craft: string; partGroupId: number; unitCost: number; laborPrice: number; paintCost: number; quotedPrice: number };
+type ProductPartDto = { id: number; partName: string; craft: string; partGroupId: number; unitCost: number; laborPrice: number; paintCost: number; quotedPrice: number; dailyCapacity: number };
 type OrderProductDto = { id: number; productNo: string; parts: ProductPartDto[] };
 type ProductionLineDto = { id: number; name: string; craftType: string; isActive: boolean };
 type ProcessRow = { partQtyId: number; startDate: string; lineId: number | ""; laborPrice: number; dailyTarget: number };
@@ -25,14 +25,15 @@ export default function OrderDetailEditor({ order, lines, isAdmin }: { order: Or
   const router = useRouter();
   const products = order.products?.length ? order.products : (order.product ? [order.product] : []);
   const product = order.product!;
-  const laborFor = (partQtyId: number, craft: string) => {
+  const defaultsFor = (partQtyId: number, craft: string) => {
     const orderedPart = order.partQtys.find(part => part.id === partQtyId);
     const partProduct = products.find(item => item.parts.some(part => part.id === orderedPart?.sourcePartId)) ?? product;
     const anchor = partProduct.parts.find(part => part.id === orderedPart?.sourcePartId);
-    if (!anchor) return 0;
+    if (!anchor) return { laborPrice: 0, dailyTarget: 0 };
     const samePart = partProduct.parts.find(part =>
       part.partName.trim() === anchor.partName.trim() && part.craft.trim() === craft);
-    return samePart?.laborPrice ?? (anchor.craft.trim() === craft || !anchor.craft.trim() ? anchor.laborPrice : 0);
+    const rule = samePart ?? (anchor.craft.trim() === craft || !anchor.craft.trim() ? anchor : undefined);
+    return { laborPrice: rule?.laborPrice ?? 0, dailyTarget: rule?.dailyCapacity ?? 0 };
   };
   const [orderDate, setOrderDate] = useState(ymd(order.orderDate));
   const [deliveryDate, setDeliveryDate] = useState(ymd(order.deliveryDate));
@@ -44,7 +45,7 @@ export default function OrderDetailEditor({ order, lines, isAdmin }: { order: Or
   const [error, setError] = useState("");
   const [processRows, setProcessRows] = useState<ProcessRow[]>(() => order.partQtys
     .filter(part => part.qty > 0)
-    .map(part => ({ partQtyId: part.id, startDate: "", lineId: lines[0]?.id ?? "", laborPrice: laborFor(part.id, lines[0]?.craftType ?? ""), dailyTarget: 0 })));
+    .map(part => ({ partQtyId: part.id, startDate: "", lineId: lines[0]?.id ?? "", ...defaultsFor(part.id, lines[0]?.craftType ?? "") })));
   const [scheduling, setScheduling] = useState(false);
   const [actualsSummary, setActualsSummary] = useState<ActualsSummary | null>(null);
   const [revokeScope, setRevokeScope] = useState<"day" | "all">("day");
@@ -108,7 +109,7 @@ export default function OrderDetailEditor({ order, lines, isAdmin }: { order: Or
     const lastSamePartIndex = rows.reduce((last, row, index) => row.partQtyId === partQtyId ? index : last, -1);
     const next = [...rows];
     next.splice(lastSamePartIndex + 1, 0, {
-      partQtyId, startDate: "", lineId: lines[0]?.id ?? "", laborPrice: laborFor(partQtyId, lines[0]?.craftType ?? ""), dailyTarget: 0,
+      partQtyId, startDate: "", lineId: lines[0]?.id ?? "", ...defaultsFor(partQtyId, lines[0]?.craftType ?? ""),
     });
     return next;
   });
@@ -129,14 +130,14 @@ export default function OrderDetailEditor({ order, lines, isAdmin }: { order: Or
     <div className="bg-white rounded-card border border-app-border overflow-hidden mb-3"><table className="w-full text-sm"><thead className="bg-[#f0fdf4] text-[#047857] text-xs"><tr><th className="px-4 py-2 text-left">部位</th><th className="px-4 py-2 text-right">数量</th></tr></thead><tbody>{order.partQtys.map((q, index) => <tr key={q.id} className={index % 2 ? "bg-[#fafdfb]" : ""}><td className="px-4 py-2">{q.partName}</td><td className="px-4 py-2 text-right">{order.qtyEditable ? <input type="number" min="0" className="w-32 border border-app-border rounded-btn px-2 py-1 text-right" value={qtys[q.id] ?? q.qty} onChange={e => setQtys(current => ({ ...current, [q.id]: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))} /> : (qtys[q.id] ?? q.qty).toLocaleString("zh-CN")}</td></tr>)}</tbody></table></div>
     <div className="text-right text-sm mb-4">订单总数 <b className="text-mint-700">{Math.max(0, ...order.partQtys.map(q => qtys[q.id] ?? q.qty)).toLocaleString("zh-CN")}</b></div>
     {(order.status === "draft" || order.status === "received") && <div className="bg-white rounded-card border border-app-border p-5 mb-4">
-      <div className="mb-4"><h2 className="font-semibold text-text">工序排期</h2><p className="text-xs text-text-secondary mt-1">按部位分别填写；各工序独立计算并可同时进行。保存后同时更新部位级核价表和生产计划。</p></div>
+      <div className="mb-4"><h2 className="font-semibold text-text">工序排期</h2><p className="text-xs text-text-secondary mt-1">按部位分别填写；各工序独立计算并可同时进行。人工和每日目标数自动带入核价表中同部位、同工序的上次保存值，可手动修改。保存后同时更新部位级核价表和生产计划。</p></div>
       <table className="w-full text-sm"><thead className="bg-[#f0fdf4] text-[#047857] text-xs"><tr><th className="px-3 py-2 text-left">部位</th><th className="px-3 py-2 text-center">开始日期</th><th className="px-3 py-2 text-center">拉别</th><th className="px-3 py-2 text-center">人工</th><th className="px-3 py-2 text-center">每日目标数</th><th className="px-3 py-2 text-center">预计生产天数</th><th className="px-3 py-2 text-right">操作</th></tr></thead><tbody>{processRows.map((row, index) => {
         const part = order.partQtys.find(item => item.id === row.partQtyId)!;
         const partRowCount = processRows.filter(item => item.partQtyId === row.partQtyId).length;
         return <tr key={`${row.partQtyId}-${index}`}>
         <td className="px-3 py-2 font-medium">{part.partName}</td>
         <td className="px-2 py-2 text-center"><input className={`${input} !w-52`} type="date" value={row.startDate} onChange={e => updateProcessRow(index, { startDate: e.target.value })} /></td>
-        <td className="px-2 py-2 text-center"><select className={input} value={row.lineId} onChange={e => { const line = lines.find(item => item.id === Number(e.target.value)); updateProcessRow(index, { lineId: line?.id ?? "", laborPrice: laborFor(row.partQtyId, line?.craftType ?? "") }); }}><option value="">请选择拉别</option>{lines.map(line => <option key={line.id} value={line.id}>{line.name}</option>)}</select></td>
+        <td className="px-2 py-2 text-center"><select className={input} value={row.lineId} onChange={e => { const line = lines.find(item => item.id === Number(e.target.value)); const previousCraft = lines.find(item => item.id === row.lineId)?.craftType; updateProcessRow(index, { lineId: line?.id ?? "", ...(previousCraft === line?.craftType ? {} : defaultsFor(row.partQtyId, line?.craftType ?? "")) }); }}><option value="">请选择拉别</option>{lines.map(line => <option key={line.id} value={line.id}>{line.name}</option>)}</select></td>
         <td className="px-2 py-2 text-center"><input className={`${input} !w-40 text-right`} type="number" min="0" step="0.001" value={row.laborPrice} onChange={e => updateProcessRow(index, { laborPrice: Math.max(0, Number(e.target.value) || 0) })} /></td>
         <td className="px-2 py-2 text-center"><input className={`${input} !w-40 text-right`} type="number" min="1" step="1" value={row.dailyTarget || ""} onChange={e => updateProcessRow(index, { dailyTarget: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} /></td>
         <td className="px-3 py-2 text-center tabular-nums">{row.dailyTarget > 0 ? `${Math.ceil((qtys[part.id] ?? part.qty) / row.dailyTarget)}天` : "—"}</td>

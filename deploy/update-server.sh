@@ -29,9 +29,8 @@ ENV_FILE="${INSTALL_DIR}/.env.cloud.production"
 COMPOSE_FILE="docker-compose.cloud.yml"
 STATE_FILE="${INSTALL_DIR}/deploy/.deploy-state"
 BACKUP_DIR="${INSTALL_DIR}/deploy/backups"
-# 维护模式标志：存在即让 nginx 对所有业务路径返回 503 + 维护页（见 nginx.cloud.conf）
+# 维护模式按系统分组，门户首页不受业务系统部署影响。
 MAINT_FLAG_DIR="${INSTALL_DIR}/deploy/maintenance"
-MAINT_FLAG="${MAINT_FLAG_DIR}/ON"
 
 cd "$INSTALL_DIR"
 # bind mount 进 nginx 容器，必须保证目录存在（ro mount，容器内只检测不写入）
@@ -97,6 +96,13 @@ fi
 echo "  Changed files (${BEFORE_HEAD:0:7} → ${AFTER_HEAD:0:7}):"
 echo "$CHANGED_FILES" | sed 's/^/    /'
 
+source "$INSTALL_DIR/deploy/service-maintenance.sh"
+# 升级旧版本时撤掉全站标志；新的 nginx 配置也会忽略它。
+rm -f "$MAINT_FLAG_DIR/ON"
+MAINT_COMPOSE_SERVICES=$(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --services)
+# 重试无代码改动的部署也能清掉已恢复健康的单系统遗留标志。
+recover_maintenance_flags
+
 # ─── Step 3: 算出影响的服务 ───
 save_state "analyze"
 echo "[3/6] Analyzing affected services..."
@@ -115,6 +121,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/PMC跟仓管/采购订单管理系统/"]="jiangping"
   ["apps/PMC跟仓管/成品核对系统/"]="liwenjuan"
   ["apps/PMC跟仓管/加工管理/"]="cpg"
+  ["apps/PMC跟仓管/华登C仓库/"]="c-store"
   ["apps/PMC跟仓管/加工厂月度评审管理制度/"]="factory-review factory-review-test"
   ["apps/业务部/报价系统/"]="baojia"
   ["apps/业务部/TOMY排期核对系统/"]="tomy-paiqi"
@@ -444,14 +451,6 @@ ensure_service_base_images() {
   done
 }
 
-# ─── 维护模式 ON：recreate 窗口期让用户看到维护页，而非 502 / Next.js 错误摘要页 ───
-# 标志文件经 bind mount 进 nginx 容器（/etc/nginx/maintenance/ON），
-# nginx server 级 if (-f ...) 命中即 return 503 + maintenance.html，无需 reload。
-# 失败路径（set -e 中途退出 / 下方健康等待超时）保留标志：此时服务大概率不可用，
-# 维护页比裸错误页更友好；恢复后重跑部署（成功会自动清除）或手动 rm -f 该文件。
-touch "$MAINT_FLAG"
-echo "  [MAINT] 维护模式已开启（$MAINT_FLAG）"
-
 # ─── Step 6: 执行部署 ───
 save_state "deploy"
 echo "[6/6] Deploying..."
@@ -491,27 +490,32 @@ for name, svc in sorted((cfg.get('services') or {}).items()):
       docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build "$svc"
     fi
   done
-  # --remove-orphans: 删除已从 compose 移除的服务遗留的孤儿容器，
-  # 否则被下线/重命名的服务容器会继续运行（crash-loop 时甚至拖垮内存导致全站 OOM）
-  # --no-build: 镜像缺失必须在上面逐服务预构建；隐式多目标 bake 会踩 sharedkey bug，
-  # 宁可报错也不让它触发（预构建覆盖所有 build 服务，非 build 服务走 pull 不受影响）。
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-build --remove-orphans
-  # 还要 rebuild 那些真的动了源码的服务（incremental）
-  for svc in "${AFFECTED_SERVICES[@]}"; do
-    echo "  [INCR] Rebuilding $svc (--no-deps)..."
-    ensure_service_base_images "$svc"
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build --no-deps "$svc"
-  done
-  # 容器 IP 全变，但 nginx 用动态 resolver 10 秒自动感知
+  # 按依赖顺序逐服务应用 compose，避免一次性让所有业务系统进入维护。
+  # 输出只有服务名；不把包含生产 secrets 的 compose 配置写入磁盘或日志。
+  COMPOSE_ORDER=$(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --format json | python3 -c "
+import json, sys
+from graphlib import TopologicalSorter
+services = json.load(sys.stdin)['services']
+graph = {name: [dep for dep in (svc.get('depends_on') or {}) if dep in services]
+         for name, svc in services.items()}
+print('\n'.join(TopologicalSorter(graph).static_order()))
+")
+  while IFS= read -r svc; do
+    # nginx 配置/文件变动时由下方专用逻辑 recreate，避免重复切换门户。
+    [[ "$svc" == nginx ]] && continue
+    REBUILD=0
+    if [[ " ${AFFECTED_SERVICES[*]} " == *" $svc "* ]]; then REBUILD=1; fi
+    deploy_service "$svc" "$REBUILD"
+  done <<< "$COMPOSE_ORDER"
+  # 单独应用 nginx 定义，并清理已从 compose 删除的孤儿服务；不启动依赖。
+  if [[ "$NGINX_CHANGED" -eq 0 ]] && [[ "$FRONTEND_CHANGED" -eq 0 ]]; then
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-build --no-deps --remove-orphans nginx
+  fi
 elif [[ "${#AFFECTED_SERVICES[@]}" -gt 0 ]]; then
-  # 增量：只 rebuild 影响的服务，带 --no-deps 不触发依赖链
   for svc in "${AFFECTED_SERVICES[@]}"; do
-    echo "  [INCR] Rebuilding $svc (--no-deps)..."
-    ensure_service_base_images "$svc"
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build --no-deps "$svc"
+    echo "  [INCR] Building and deploying $svc (--no-deps)..."
+    deploy_service "$svc" 1
   done
-  # 容器 recreate 后 Docker bridge IP 会变，但因为 nginx 现在用动态 resolver
-  # （resolver 127.0.0.11 valid=10s），10 秒内就重新解析了。不需要 restart nginx。
   echo "  [INFO] nginx 用动态 resolver，无需 restart（10 秒内自动感知新 IP）"
 fi
 
@@ -521,7 +525,7 @@ fi
 # nginx -s reload 读的是旧内容 → 必须 recreate 容器刷新 mount。
 if [[ "$NGINX_CHANGED" -eq 1 ]] || [[ "$FRONTEND_CHANGED" -eq 1 ]]; then
   echo "  [NGINX] config/frontend 文件变动，recreate 容器以刷新 bind mount inode（约 3s 停机）"
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate --no-deps nginx
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-build --force-recreate --no-deps --remove-orphans nginx
 
   echo "  [NGINX] 等待新容器就绪..."
   # 刚 recreate 的容器启动时已加载新配置，无需再 reload。旧实现 recreate 后立刻
@@ -562,59 +566,18 @@ for i in $(seq 1 15); do
   sleep 2
 done
 
-# ─── 维护模式 OFF：先等受影响容器 healthy，再撤标志 ───
-# 避免「标志撤了但应用还没起」的空窗（up -d 返回只代表容器启动，不代表应用就绪）。
-# /nginx-health 已被 nginx 配置豁免，上面的 nginx 检查不受标志影响；
-# deploy.yml 的各 app 健康检查在本脚本退出后才执行，此时标志已清除，不会被 503 干扰。
-MAINT_WAIT_SERVICES=()
+# 多容器系统可能在中途保留标志等待下一服务；全部部署后仍有标志必须报失败。
+# 只检查本次部署的系统，不扩大为其他系统的维护。
 if [[ "$COMPOSE_CHANGED" -eq 1 ]]; then
-  mapfile -t MAINT_WAIT_SERVICES < <(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --services 2>/dev/null)
-elif [[ "${#AFFECTED_SERVICES[@]}" -gt 0 ]]; then
-  MAINT_WAIT_SERVICES=("${AFFECTED_SERVICES[@]}")
-fi
-
-if [[ "${#MAINT_WAIT_SERVICES[@]}" -gt 0 ]]; then
-  echo "  [MAINT] 等待受影响服务 healthy 后关闭维护模式: ${MAINT_WAIT_SERVICES[*]}"
-  ALL_HEALTHY=0
-  PENDING=""
-  WAIT_DEADLINE=$((SECONDS + 300))
-  while (( SECONDS < WAIT_DEADLINE )); do
-    ALL_HEALTHY=1
-    for svc in "${MAINT_WAIT_SERVICES[@]}"; do
-      CID=$(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps -q "$svc" 2>/dev/null | head -1)
-      if [[ -z "$CID" ]]; then
-        # 无运行中容器：可能是一次性初始化容器（如 erp-db-init，restart:"no"）
-        # 已跑完退出——compose ps 默认只列 running，需 -a 才能看到；退出码 0 视为就绪。
-        XCID=$(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps -a -q "$svc" 2>/dev/null | head -1)
-        XSTATE=""
-        [[ -n "$XCID" ]] && XSTATE=$(docker inspect -f '{{.State.Status}}/{{.State.ExitCode}}' "$XCID" 2>/dev/null || true)
-        if [[ "$XSTATE" == "exited/0" ]]; then
-          continue
-        fi
-        ALL_HEALTHY=0; PENDING="$svc(未在运行${XSTATE:+,$XSTATE})"; break
-      fi
-      HSTATUS=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CID" 2>/dev/null || echo "unknown")
-      case "$HSTATUS" in
-        healthy|none) ;;  # 无 healthcheck 的服务（如 autoheal）容器在跑即视为 OK
-        *) ALL_HEALTHY=0; PENDING="$svc($HSTATUS)"; break ;;
-      esac
-    done
-    [[ "$ALL_HEALTHY" -eq 1 ]] && break
-    sleep 5
+  while IFS= read -r svc; do
+    require_maintenance_cleared "$svc"
+  done <<< "$MAINT_COMPOSE_SERVICES"
+else
+  for svc in "${AFFECTED_SERVICES[@]}"; do
+    require_maintenance_cleared "$svc"
   done
-  if [[ "$ALL_HEALTHY" -ne 1 ]]; then
-    echo "  [ERROR] 等待超时（300s），$PENDING 仍未 healthy。"
-    echo "          维护模式保持开启（用户看到维护页而非错误页）。"
-    echo "          排查恢复后重跑部署（成功会自动清除），或手动执行: rm -f $MAINT_FLAG"
-    exit 1
-  fi
-  echo "  [MAINT] 所有受影响服务已 healthy"
 fi
-rm -f "$MAINT_FLAG"
-echo "  [MAINT] 维护模式已关闭"
 
 echo "[OK] Update complete."
 echo "=== Container Status ==="
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null || true
-
-# 2026-10-08: 占位变更——触发一次无影响的快速部署以清除维护模式（ERP 上线暂停中）。

@@ -1,0 +1,31 @@
+name: Maintenance isolation regression
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/update-server.sh'
+      - 'deploy/service-maintenance.sh'
+      - 'deploy/tests/**'
+      - 'nginx/nginx.cloud.conf'
+      - 'frontend/maintenance.html'
+      - '.github/workflows/maintenance-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  maintenance-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nginx for local integration tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y nginx
+      - name: Check shell syntax and isolated maintenance behavior
+        env:
+          NGINX_BIN: /usr/sbin/nginx
+        run: |
+          bash -n deploy/update-server.sh deploy/service-maintenance.sh
+          python3 -m unittest discover -s deploy/tests -v

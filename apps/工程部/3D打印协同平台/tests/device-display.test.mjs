@@ -10,7 +10,9 @@ test('mapped machine cards use real cloud IDs and show original IDs without inve
  const imported=[{machine:1,status:'running'},{machine:14,status:'running'},{machine:21,status:'running'}];
  context.imported=imported;
  assert.deepEqual(Array.from(vm.runInContext('displayMachineIds(21,imported)',context)),[101,114]);
- assert.deepEqual(Array.from(vm.runInContext('historyMachineIds(21,imported)',context)),[1,14,21,101,114],'historical hours remain available in the table');
+ assert.deepEqual(Array.from(vm.runInContext('historyMachineIds(imported)',context)),[1,14,21],'table includes only machines recorded on the selected date');
+ assert.deepEqual(Array.from(vm.runInContext('historyMachineIds([])',context)),[]);
+ assert.deepEqual(Array.from(vm.runInContext('historyMachineIds([{machine:101},{machine:101},{machine:114,_deleted:true},{machine:0},{machine:"bad"}])',context)),[101],'keep a platform machine when it has real records, exclude deleted or invalid ones');
  context.liveStatus[114].connected=false;
  assert.deepEqual(Array.from(vm.runInContext('displayMachineIds()',context)),[101,114],'offline bridge devices remain visible');
  context.liveStatus={};assert.equal(vm.runInContext('displayMachineIds(30,imported).length',context),0,'do not invent cards before first telemetry');

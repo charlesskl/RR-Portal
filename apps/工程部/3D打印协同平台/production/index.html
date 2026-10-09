@@ -1763,13 +1763,15 @@ function renderMachinePage(){
   document.getElementById('machGrid').innerHTML=ghtml||'<p style="color:var(--gray);padding:16px">暂无采集设备，等待 Windows 桥接上报。</p>';
 
   let thtml='<table><tr><th>机台</th><th>机型</th><th>运行(h)</th><th>空闲(h)</th><th>故障(h)</th><th>使用率</th><th>产品</th></tr>';
-  for(const i of historyMachineIds(s.machineCount,day.items)){
+  const historyIds=historyMachineIds(day.items);
+  for(const i of historyIds){
     const h=mh[i]||{running:0,idle:0,fault:0};
     const total=h.running+h.idle+h.fault;
     const util=total>0?h.running/12:0;
     const prods=(day.items||[]).filter(it=>!it._deleted&&it.machine==i&&it.status==='running').map(it=>escHtml(it.productName||'')).join(', ')||'-';
     thtml+=`<tr><td>#${i}</td><td style="font-size:12px">${getMachineType(i)}</td><td>${fmt(h.running,1)}</td><td>${fmt(h.idle,1)}</td><td>${fmt(h.fault,1)}</td><td>${fmtP(util)}</td><td style="text-align:left;font-size:12px">${prods}</td></tr>`;
   }
+  if(!historyIds.length)thtml+='<tr><td colspan="7" style="text-align:center;color:var(--gray);padding:20px">所选日期暂无机台生产记录</td></tr>';
   thtml+='</table>';
   document.getElementById('machTable').innerHTML=thtml;
 }
@@ -3741,10 +3743,8 @@ let liveStatus = {};
 function displayMachineIds(){
  return Object.keys(liveStatus).filter(id=>/^[1-9]\d*$/.test(id)).map(Number).sort((a,b)=>a-b);
 }
-function historyMachineIds(count,items=[]){
- const active=Object.keys(liveStatus).filter(id=>/^[1-9]\d*$/.test(id)).map(Number);
- if(!active.length)return Array.from({length:count},(_,i)=>i+1);
- return [...new Set([...active,...items.filter(x=>!x._deleted).map(x=>Number(x.machine)).filter(x=>Number.isSafeInteger(x)&&x>0)])].sort((a,b)=>a-b);
+function historyMachineIds(items=[]){
+ return [...new Set(items.filter(x=>!x._deleted).map(x=>Number(x.machine)).filter(x=>Number.isSafeInteger(x)&&x>0))].sort((a,b)=>a-b);
 }
 function deviceLabel(id){const source=liveStatus[id]?.sourceMachine;return source&&String(source)!==String(id)?`现场 #${escHtml(source)} · 平台 #${id}`:`#${id}`;}
 

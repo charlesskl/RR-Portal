@@ -18,22 +18,28 @@ test('startup reconciles only completed printing orders, records once and rolls 
    db.prepare('INSERT INTO orders VALUES (?,?,?)').run(id,orderStatus,'original');
    db.prepare('INSERT INTO production_jobs(id,order_id,station,machine,payload,status,created) VALUES (?,?,?,?,?,?,?)').run(id,id,'test-station',String(index+1),'{}',jobStatus,'original');
   }
+  db.prepare("UPDATE production_jobs SET payload=?,synced=1 WHERE id='repair'").run(JSON.stringify({attempt:2,quality:{notes:'历史质检记录'}}));
   integration(context);
+  const repaired=db.prepare("SELECT payload,synced FROM production_jobs WHERE id='repair'").get();
+  assert.equal(repaired.synced,0,'migration queues schedule synchronization');
+  assert.equal(JSON.parse(repaired.payload).quality.notes,'历史质检记录','migration preserves historical quality data');
   for(const [id,jobStatus,,expected] of cases){
    const order=db.prepare('SELECT * FROM orders WHERE id=?').get(id);
    assert.equal(order.status,expected,id);
-   assert.equal(db.prepare('SELECT status FROM production_jobs WHERE id=?').get(id).status,jobStatus,id+' still requires quality');
-   if(id!=='repair')assert.equal(order.updated,'original',id+' remains untouched');
+   assert.equal(db.prepare('SELECT status FROM production_jobs WHERE id=?').get(id).status,(['repair','ready'].includes(id)?'待交付':jobStatus),id+' migrated stage');
+   if(!['repair','ready'].includes(id))assert.equal(order.updated,'original',id+' remains untouched');
   }
-  assert.equal(db.prepare('SELECT count(*) AS n FROM events').get().n,1);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM events').get().n,2);
   assert.equal(db.prepare('SELECT order_id FROM events').get().order_id,'repair');
   integration(context);
-  assert.equal(db.prepare('SELECT count(*) AS n FROM events').get().n,1,'restart is idempotent');
+  assert.equal(db.prepare('SELECT count(*) AS n FROM events').get().n,2,'restart is idempotent');
   db.prepare("UPDATE orders SET status='打印中',updated='original' WHERE id='repair'").run();
+  db.prepare("UPDATE production_jobs SET status='待质检' WHERE id='repair'").run();
   assert.throws(()=>integration({...context,recordEvent:()=>{throw Error('audit write failed')}}),/audit write failed/);
   assert.equal(db.prepare("SELECT status FROM orders WHERE id='repair'").get().status,'打印中','failed reconciliation rolls back');
   assert.equal(db.prepare("SELECT updated FROM orders WHERE id='repair'").get().updated,'original');
-  assert.equal(db.prepare('SELECT count(*) AS n FROM events').get().n,1);
+  assert.equal(db.prepare("SELECT status FROM production_jobs WHERE id='repair'").get().status,'待质检','failed migration rolls back the job too');
+  assert.equal(db.prepare('SELECT count(*) AS n FROM events').get().n,2);
   db.close();
  `;
  const child=spawnSync(process.execPath,['--input-type=module','-e',script],{

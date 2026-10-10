@@ -131,7 +131,7 @@ export default function SupplierSummaryPage() {
     <Modal title={editing ? `编辑供应商：${editing.full || ''}` : '新增供应商'} open={open} onCancel={() => setOpen(false)}
       onOk={save} okText="保存" confirmLoading={loading} destroyOnHidden>
       <Form form={form} layout="vertical">
-        <Form.Item name="keyword" label="供应商显示名称" extra="可填写简称，例如“台聚”；留空时使用公司中文名称，不改变合同公司全称。">
+        <Form.Item name="keyword" label="供应商显示名称" extra="显示名称不能重复；公司中文名称可以相同。留空时使用公司中文名称。">
           <Input maxLength={128} placeholder="请输入供应商显示名称" />
         </Form.Item>
         <p style={{ color: '#666' }}>以下维护本供应商档案。华胜益报关时，合同信息从华胜益档案读取，不会覆盖本供应商资料。</p>

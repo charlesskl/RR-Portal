@@ -39,7 +39,7 @@ export default function SupplierSummaryPage() {
     ...r,
     seller: documentSellerForLine(r.keyword || r.full || '', supplierCustomsCompany(r), companies, true),
   })).filter(r =>
-    [r.keyword, r.full, r.nameEn, r.contact, supplierCustomsCompany(r), r.seller.full, r.seller.nameEn]
+    [r.keyword, r.full, r.nameEn, r.contact, supplierCustomsCompany(r), r.seller.full, r.seller.nameEn, r.seller.contact]
       .some(x => (x || '').toLowerCase().includes(search.toLowerCase()))
   ), [companies, search])
 

@@ -27,13 +27,15 @@ export function supplierProfileForName(name: string, profiles: SupplierDict[]): 
     .some(candidate => candidate?.trim().toLocaleLowerCase() === key))
 }
 
-export function canonicalSupplierProfiles(profiles: SupplierDict[]): SupplierDict[] {
-  return profiles.filter(profile => {
-    const full = profile.full?.trim() || ''
-    const keyword = profile.keyword?.trim() || ''
-    if (!full || full !== keyword) return true
-    return supplierProfileForName(full, profiles) === profile
-  })
+// 汇总按档案逐条展示，不隐藏简称、同名或历史重复记录。
+// 非华胜益报关直接展示本行资料，避免同名匹配将本行字段置空或串到其他档案。
+export function supplierSummaryRows(profiles: SupplierDict[]) {
+  return profiles.map(profile => ({
+    ...profile,
+    seller: isHuashengyi(supplierCustomsCompany(profile))
+      ? supplierForLine(HUASHENGYI_FULL_NAME, profiles, true)
+      : profile,
+  }))
 }
 
 export function supplierCustomsCompany(profile: SupplierDict): string {

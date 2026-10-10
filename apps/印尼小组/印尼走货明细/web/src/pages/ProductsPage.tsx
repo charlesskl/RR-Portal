@@ -10,7 +10,7 @@ import { mergeImportedMaterials, recommendMaterialChoices, resolveMaterialImport
 import { MaterialImportReview } from '../components/MaterialImportReview'
 import SupplierProfileEditor from '../components/SupplierProfileEditor'
 import {
-  canonicalSupplierProfiles, HUASHENGYI_FULL_NAME, linkedCustomsCompany,
+  HUASHENGYI_FULL_NAME, linkedCustomsCompany,
   supplierCustomsCompany, supplierProfileForName,
 } from '../utils/supplierProfiles'
 
@@ -796,7 +796,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode, onSuppliersChange
           { title: '供应商', width: 220, render: (_v, r, i) => <><AutoComplete size="small" allowClear
             placeholder="选择或输入新供应商" style={{ width: '100%' }}
             value={supplierProfileForName(r.supplier || '', dicts.suppliers)?.full || r.supplier || undefined}
-            options={canonicalSupplierProfiles(dicts.suppliers).map(supplier => ({
+            options={dicts.suppliers.map(supplier => ({
               value: supplier.full || supplier.keyword,
               label: supplier.full || supplier.keyword,
             }))}

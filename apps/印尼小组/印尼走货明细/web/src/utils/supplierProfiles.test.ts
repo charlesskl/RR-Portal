@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  canonicalSupplierProfiles, documentSellerForLine, HUASHENGYI_FULL_NAME, linkedCustomsCompany,
+  supplierSummaryRows, documentSellerForLine, HUASHENGYI_FULL_NAME, linkedCustomsCompany,
   supplierCustomsCompany, supplierForLine, supplierProfileForName,
 } from './supplierProfiles'
 
@@ -33,11 +33,27 @@ describe('supplier customs-company linkage', () => {
     expect(linkedCustomsCompany(otherProfile.full, [customProfile])).toBe(customs)
   })
 
-  it('resolves and hides legacy abbreviation-only duplicate rows', () => {
+  it('resolves legacy abbreviations but keeps every archive visible in the summary', () => {
     const legacyAlias = { keyword: '星徽', full: '星徽' }
     const company = { ...otherProfile, keyword: otherProfile.full }
     expect(supplierProfileForName('星徽', [company, legacyAlias])).toEqual(company)
-    expect(canonicalSupplierProfiles([company, legacyAlias])).toEqual([company])
+    expect(supplierSummaryRows([company, legacyAlias]).map(row => row.seller)).toEqual([company, legacyAlias])
+  })
+
+  it('preserves distinct IDs and each archive’s fields when names collide', () => {
+    const duplicate = { ...otherProfile, id: 3, nameEn: 'Historical company name' }
+    const rows = supplierSummaryRows([otherProfile, duplicate])
+    expect(rows.map(row => row.id)).toEqual([2, 3])
+    expect(rows.map(row => row.seller.nameEn)).toEqual([otherProfile.nameEn, duplicate.nameEn])
+    expect(supplierSummaryRows([])).toEqual([])
+  })
+
+  it('keeps Huashengyi contract display without hiding supplier archives', () => {
+    const supplier = { ...otherProfile, customs: HUASHENGYI_FULL_NAME }
+    const rows = supplierSummaryRows([supplier, profile])
+    expect(rows).toHaveLength(2)
+    expect(rows[0].seller).toEqual(profile)
+    expect(rows[0].full).toBe(otherProfile.full)
   })
 })
 

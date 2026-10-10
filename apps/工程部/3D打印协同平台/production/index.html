@@ -1352,7 +1352,7 @@ function loadDay(){
       const basePrice = it.status==='running' ? (calc && calc.price > 0 ? calc.price : (it.price||0)*qty) : 0;
       const displayPrice = it.status==='running' ? (basePrice + designFee) : 0;
       const stTag = it.status==='running'?'<span class="tag tag-g">生产</span>':it.status==='fault'?'<span class="tag tag-r">故障</span>':'<span class="tag tag-y">空闲</span>';
-      const recordReview = it.inventoryReview ? '<span class="tag tag-y" title="桥接新增记录未自动扣减云端库存，请核对耗材；关联订单在质检时统一入账">未扣库存</span>' : '';
+      const recordReview = it.inventoryReview ? '<span class="tag tag-y" title="' + escHtml(it.inventoryReason || '请核对耗材') + '">未扣库存</span>' : it.inventoryDeduction ? '<span class="tag tag-g" title="本条采集记录已自动扣减材料库存">已扣库存</span>' : '';
       const autoBadge = recordReview + (it.printerOutcome==='失败'?'<span class="tag tag-r">打印失败</span>':'') + (it.autoRecord ? '<span class="tag tag-g" style="font-size:10px;margin-right:4px">自动</span>' : '');
       html+=`<tr>
         <td>${rowNum}</td><td>#${it.machine}</td><td style="font-size:11px">${getMachineType(it.machine)}</td><td>${stTag}</td>

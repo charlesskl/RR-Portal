@@ -3,14 +3,14 @@ import {spawn} from 'node:child_process';import {mkdtemp,rm,readFile,writeFile,m
 import {tmpdir} from 'node:os';import path from 'node:path';import {fileURLToPath} from 'node:url';import {DatabaseSync} from 'node:sqlite';import {randomUUID,createHash} from 'node:crypto';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
-test('cloud production integration: permissions, scheduling, telemetry replay, quality gate, durable collector and restart',async()=>{
+for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,batches:1},{stock:35,batches:2}])test(`cloud production integration: permissions, scheduling, quality, restart; stock=${scenario.stock}, prepaid batches=${scenario.batches}`,async()=>{
  const dir=await mkdtemp(path.join(tmpdir(),'printlink-integrated-'));const port=33100+Math.floor(Math.random()*500),base=`http://127.0.0.1:${port}`;let processHandle,collector,logs='';
  async function launch(){processHandle=spawn(process.execPath,['start.mjs','--cloud-only'],{cwd:root,env:{...process.env,APP_MODE:'production',PLATFORM_DATA_DIR:dir,PORT:String(port),PRODUCTION_PORT:String(port+600),ADMIN_PASSWORD:'test-secret-123',COOKIE_SECURE:'false'},stdio:['ignore','pipe','pipe']});processHandle.stdout.on('data',x=>logs+=x);processHandle.stderr.on('data',x=>logs+=x);for(let i=0;i<80;i++){try{if((await fetch(base+'/api/health')).ok){await delay(200);return;}}catch{}await delay(100);}throw Error(logs);}
  async function stop(){if(processHandle){const p=processHandle;processHandle=null;p.kill('SIGTERM');await new Promise(r=>p.once('exit',r));}}
  async function request(route,{auth,data,method,token}={}){const r=await fetch(base+route,{method:method||(data?'POST':'GET'),headers:{'Content-Type':'application/json',...(auth?{Cookie:auth.cookie,'X-CSRF-Token':auth.csrf}:{}),...(token?{Authorization:'Bearer '+token}:{})},body:data?JSON.stringify(data):undefined});const text=await r.text();let body;try{body=JSON.parse(text);}catch{body=text;}return {status:r.status,body,headers:r.headers};}
  async function login(username='admin'){const r=await request('/api/login',{data:{username,password:username==='admin'?'test-secret-123':'member123'}});assert.equal(r.status,200);return {cookie:r.headers.get('set-cookie').split(';')[0],csrf:r.body.csrf};}
  try{
-  await writeFile(path.join(dir,'production-source.json'),JSON.stringify({settings:null,products:[{id:'test-product',name:'测试产品',image:'data:image/png;base64,aGVsbG8='}],materials:[{id:'test-material',name:'PLA'}],inventory:{PLA:{stockG:1000}},records:{},schedules:[],maintenance:[],stockInLogs:[],miscExpenses:[]}));
+  await writeFile(path.join(dir,'production-source.json'),JSON.stringify({settings:null,products:[{id:'test-product',name:'测试产品',image:'data:image/png;base64,aGVsbG8='}],materials:[{id:'test-material',name:'PLA'}],inventory:{PLA:{stockG:scenario.stock}},records:{},schedules:[],maintenance:[],stockInLogs:[],miscExpenses:[]}));
   await launch();let admin=await login();const secrets=JSON.parse(await readFile(path.join(dir,'secrets.json'),'utf8')),token=secrets.collector;
   assert.equal((await request('/api/platform/overview')).status,401);
   assert.equal((await request('/api/collector/jobs',{token:'wrong'})).status,401);
@@ -69,11 +69,21 @@ test('cloud production integration: permissions, scheduling, telemetry replay, q
   const sourceBatch={records:[{sourceId:'local-print-1',attempt:2,sourceMachine:'1',machine:'1',date:'2026-10-09',jobId:id,record:{productName:'测试产品',autoRecord:true,status:'running',printStartTime:new Date().toISOString(),qty:1,time:0}}]};
   assert.equal((await request('/api/collector/records',{token:'wrong',data:sourceBatch})).status,401);
   assert.equal((await request('/api/collector/records',{token,data:{records:[{...sourceBatch.records[0],machine:'9999'}]}})).status,400);
+  const unbound={records:[{...sourceBatch.records[0],jobId:undefined,record:{...sourceBatch.records[0].record,material:material.name,weight:10,qty:2}}]};
+  for(let n=0;n<2;n++)assert.equal((await request('/api/collector/records',{token,data:unbound})).status,200);
+  assert.equal((await request('/api/production/data',{auth:admin})).body.inventory[material.name].stockG,material.stockG-20,'unbound auto record charges only once before later task binding');
+  let prepaid=20;
+  if(scenario.batches===2){
+   const extra={records:[{...unbound.records[0],sourceId:'local-print-extra',record:{...unbound.records[0].record,weight:5}}]};
+   assert.equal((await request('/api/collector/records',{token,data:extra})).status,200);
+   assert.equal((await request('/api/collector/records',{token,data:{records:[{...extra.records[0],jobId:id}]}})).status,200);
+   prepaid+=10;
+  }
   assert.equal((await request('/api/collector/records',{token,data:sourceBatch})).status,200);
   assert.equal((await request('/api/collector/records',{token,data:sourceBatch})).status,200);
   const beforeQuality=(await request('/api/production/data',{auth:admin})).body;
-  assert.equal(Object.values(beforeQuality.records).flatMap(d=>d.items||[]).filter(i=>i.cloudJobId===id).length,1);
-  assert.equal(beforeQuality.inventory[material.name].stockG,material.stockG);
+  assert.equal(Object.values(beforeQuality.records).flatMap(d=>d.items||[]).filter(i=>i.cloudJobId===id).length,scenario.batches);
+  assert.equal(beforeQuality.inventory[material.name].stockG,material.stockG-prepaid);
   const quality={action:'quality',totalWeight:24,actualHours:1.5,price:0,notes:'尺寸与表面检查合格',materialId:material.id};
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'quality'}})).status,400);
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{...quality,totalWeight:material.stockG+1}})).status,409);
@@ -87,9 +97,17 @@ test('cloud production integration: permissions, scheduling, telemetry replay, q
   const records=(await request('/api/production/data',{auth:admin})).body;
   assert.equal(records.inventory[material.name].stockG,material.stockG-24);
   const attemptRecords=Object.values(records.records).flatMap(d=>d.items||[]).filter(i=>i.cloudJobId===id);
-  assert.equal(attemptRecords.length,2);
-  assert.equal(attemptRecords.filter(i=>i.inventoryReview===false).length,1);
+  assert.equal(attemptRecords.length,scenario.batches+1);
+  assert.equal(attemptRecords.filter(i=>i.inventoryReview===false).length,scenario.batches);
   assert.equal(attemptRecords.filter(i=>i.inventoryReview===true).length,1);
+  // A prepaid batch linked after settlement refunds its debit without charging quality again.
+  const latePaid={records:[{...unbound.records[0],sourceId:'local-print-late-paid',record:{...unbound.records[0].record,weight:1,qty:1}}]};
+  assert.equal((await request('/api/collector/records',{token,data:latePaid})).status,200);
+  assert.equal((await request('/api/production/data',{auth:admin})).body.inventory[material.name].stockG,material.stockG-25);
+  assert.equal((await request('/api/collector/records',{token,data:{records:[{...latePaid.records[0],jobId:id}]}})).status,200);
+  for(let n=0;n<2;n++)assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'resync'}})).status,200);
+  assert.equal((await request('/api/production/data',{auth:admin})).body.inventory[material.name].stockG,material.stockG-24);
+
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'deliver',notes:'测试接收人签收 2 件'}})).status,200);
   const orders=(await request('/api/orders',{auth:member})).body;assert.equal(orders[0].status,'已完成');
   await stop();await launch();admin=await login();assert.equal((await overview()).jobs[0].status,'待交付');

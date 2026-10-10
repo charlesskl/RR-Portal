@@ -59,6 +59,8 @@ const { DatabaseSync } = require('node:sqlite');
 const store = new DatabaseSync(process.env.PRODUCTION_DB || path.join(__dirname,'../data/production.sqlite'));
 store.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS snapshot (id INTEGER PRIMARY KEY, value TEXT NOT NULL)');
 if (!store.prepare('SELECT id FROM snapshot WHERE id=1').get()) { const source=process.env.PRODUCTION_SOURCE || path.join(__dirname,'../data/production-source.json'); store.prepare('INSERT INTO snapshot VALUES (1,?)').run(fs.existsSync(source)?fs.readFileSync(source,'utf8'):JSON.stringify({settings:null,materials:[],products:[],records:{},schedules:[],maintenance:[],inventory:{},stockInLogs:[],miscExpenses:[]})); }
+const sourceInventory=require('./source-inventory.cjs');
+sourceInventory.init(store);
 const dataImages=require('./data-images.cjs')(store);
 let compactCache=null,compactVersion=null;
 let _cachedData = null;
@@ -145,10 +147,11 @@ function saveData(data) {
   const current=loadData(),existing=current.schedules||[];
   for(const [date,day]of Object.entries(current.records||{})){const linked=(day.items||[]).filter(i=>i.cloudJobId);if(linked.length){data.records||={};data.records[date]||={off:false,items:[]};data.records[date].items=(data.records[date].items||[]).filter(i=>!i.cloudJobId).concat(linked);}}
   const sourceRows=new Map(Object.values(current.records||{}).flatMap(d=>d.items||[]).filter(i=>i.sourceRecordId).map(i=>[i._id,i]));
-  for(const day of Object.values(data.records||{}))for(const item of day.items||[]){const old=sourceRows.get(item._id);if(old)for(const key of ['sourceRecordId','sourceStation','platformMachine','inventoryReview','printerOutcome','_sourceFacts'])item[key]=old[key];}
+  for(const day of Object.values(data.records||{}))for(const item of day.items||[]){const old=sourceRows.get(item._id);if(old)for(const key of ['sourceRecordId','sourceStation','platformMachine','inventoryReview','inventoryReason','inventoryDeduction','qualitySettled','printerOutcome','_sourceFacts'])item[key]=old[key];}
   data.schedules=(data.schedules||[]).filter(x=>!x.cloudJobId).concat(existing.filter(x=>x.cloudJobId));
+  store.exec('BEGIN IMMEDIATE');
+  try{sourceInventory.apply(store,data);store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));store.exec('COMMIT');}catch(e){store.exec('ROLLBACK');throw e;}
   dataVersion=Math.max(Date.now(),dataVersion+1); _cachedData=structuredClone(data);
-  store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));
 }
 const printerStatus={}, _remotePrinterStatus={},printerPrevState={};
 function sanitizeString(s) { return s; }
@@ -180,7 +183,7 @@ const server = http.createServer((req, res) => {
     let raw='';req.on('data',c=>{raw+=c;if(raw.length>1024*1024)req.destroy();});
     req.on('end',()=>{try{const {station,records}=JSON.parse(raw);if(typeof station!=='string'||!Array.isArray(records)||records.length>20)throw Error('记录格式无效');
       store.exec('BEGIN IMMEDIATE');let result;
-      try{const data=loadData();result=require('./record-sync.cjs')(store,data,station,records);store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));store.exec('COMMIT');dataVersion=Math.max(Date.now(),dataVersion+1);_cachedData=null;}catch(e){store.exec('ROLLBACK');throw e;}
+      try{const data=loadData();result=require('./record-sync.cjs')(store,data,station,records);sourceInventory.apply(store,data);store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));store.exec('COMMIT');dataVersion=Math.max(Date.now(),dataVersion+1);_cachedData=null;}catch(e){store.exec('ROLLBACK');throw e;}
       res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,...result}));
     }catch(e){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}));}});return;
   }
@@ -194,12 +197,22 @@ const server = http.createServer((req, res) => {
         const q=job.completion;
         const attemptRecords=Object.values(data.records||{}).flatMap(day=>day.items||[]).filter(i=>i.cloudJobId===job.cloudJobId&&(i.cloudAttempt||1)===(job.attempt||1)).sort((a,b)=>(a.printStartTime||'').localeCompare(b.printStartTime||''));
         // An already-posted record wins over a newer provisional batch arriving late.
-        const existingRecord=attemptRecords.find(i=>!i.inventoryReview)||attemptRecords.at(-1);
-        if(!existingRecord||existingRecord.inventoryReview){
+        const settledRecord=attemptRecords.find(i=>!i.inventoryReview&&!i.inventoryDeduction);
+        const existingRecord=settledRecord||attemptRecords.find(i=>!i.inventoryReview)||attemptRecords.at(-1);
+        // Reconcile every prepaid batch, including batches linked after quality settled.
+        const prepaidRecords=attemptRecords.filter(i=>!i.qualitySettled&&i.inventoryDeduction);
+        for(const item of prepaidRecords){
+          const paid=item.inventoryDeduction;
+          data.inventory||={};data.inventory[paid.material]||={stockG:0,minStockG:3000};
+          data.inventory[paid.material].stockG+=paid.grams;
+          data.inventory[paid.material]._updatedAt=Date.now();data._snapshotUpdatedAt=Date.now();
+          item.qualitySettled=true;item.inventoryReview=false;item.inventoryDeduction=undefined;item.inventoryReason='';item._updatedAt=Date.now();
+        }
+        if(!settledRecord){
           deductInventory(data,q.material,q.totalWeight);
           data.records||={};data.records[q.date]||={off:false,items:[]};
           if(existingRecord)for(const day of Object.values(data.records))day.items=day.items.filter(i=>i!==existingRecord);
-          data.records[q.date].items.push({...existingRecord,inventoryReview:false,_id:existingRecord?._id||'cloud-'+job.cloudJobId,cloudJobId:job.cloudJobId,cloudAttempt:job.attempt||1,_updatedAt:Date.now(),createdAt:q.checkedAt,machine:job.machine,status:'running',productName:job.productName,material:q.material,weight:q.weight,qty:q.qty,time:q.time,price:q.price,designFee:0,customer:job.customer,remark:job.remark+'；质检人：'+q.checkedBy+'；'+q.notes});
+          data.records[q.date].items.push({...existingRecord,inventoryReview:false,qualitySettled:true,inventoryDeduction:undefined,inventoryReason:'',_id:existingRecord?._id||'cloud-'+job.cloudJobId,cloudJobId:job.cloudJobId,cloudAttempt:job.attempt||1,_updatedAt:Date.now(),createdAt:q.checkedAt,machine:job.machine,status:'running',productName:job.productName,material:q.material,weight:q.weight,qty:q.qty,time:q.time,price:q.price,designFee:0,customer:job.customer,remark:job.remark+'；质检人：'+q.checkedBy+'；'+q.notes});
         }
       }
       dataVersion=Math.max(Date.now(),dataVersion+1); store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));

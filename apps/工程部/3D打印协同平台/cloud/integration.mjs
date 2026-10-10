@@ -107,7 +107,11 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
     const o=db.prepare('SELECT payload FROM orders WHERE id=?').get(j.order_id),op=JSON.parse(o.payload);
     if(!Number.isFinite(p.totalWeight)||p.totalWeight<=0||!Number.isFinite(p.actualHours)||p.actualHours<=0||!Number.isFinite(p.price)||p.price<0||typeof p.notes!=='string'||!p.notes.trim()||p.notes.length>2000)fail(400,'请填写实际总耗材、工时、每件报价和质检记录');
     const c=await catalog(),m=c.materials.find(x=>String(x.id)===String(p.materialId));if(!m)fail(400,'请选择实际使用的材料');
-    if((c.inventory?.[m.name]?.stockG||0)<p.totalWeight)fail(409,'实际耗材超过可用库存，请先核实或补充入库');
+    const attempt=JSON.parse(j.payload).attempt||1;
+    const prepaid=Object.values(c.records||{}).flatMap(day=>day.items||[])
+     .filter(item=>!item._deleted&&item.cloudJobId===j.id&&(item.cloudAttempt||1)===attempt&&!item.qualitySettled&&item.inventoryDeduction?.material===m.name)
+     .reduce((sum,item)=>sum+item.inventoryDeduction.grams,0);
+    if((c.inventory?.[m.name]?.stockG||0)+prepaid<p.totalWeight)fail(409,'实际耗材超过可用库存及本次已扣用量，请先核实或补充入库');
     quality={totalWeight:p.totalWeight,weight:p.totalWeight/op.quantity,time:p.actualHours,price:p.price,qty:op.quantity,material:m.name,notes:p.notes.trim(),checkedBy:u.name,checkedAt:stamp(),date:new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai'}).format(new Date())};
     const fresh=db.prepare('SELECT status FROM production_jobs WHERE id=?').get(j.id);if(fresh.status!=='待质检')fail(409,'任务已被其他人处理');
    }

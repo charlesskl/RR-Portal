@@ -18,6 +18,15 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
  const digest=x=>createHash('sha256').update(x).digest();
  const stamp=()=>new Date().toISOString();
  async function catalog(){const response=await fetch(`http://127.0.0.1:${process.env.PRODUCTION_PORT||3102}/api/data`,{headers:{'X-Internal-Token':process.env.INTERNAL_TOKEN},signal:AbortSignal.timeout(3000)});if(!response.ok)fail(503,'生产资料暂时不可用');return response.json();}
+ // Bring orders with an already-confirmed completion into the same display stage.
+ db.exec('BEGIN IMMEDIATE');
+ try{
+  for(const j of db.prepare("SELECT j.order_id FROM production_jobs j JOIN orders o ON o.id=j.order_id WHERE j.status='待质检' AND o.status='打印中'").all()){
+   db.prepare("UPDATE orders SET status='待交付',updated=? WHERE id=?").run(stamp(),j.order_id);
+   recordEvent(j.order_id,'生产平台','已确认打印完成，订单更新为待交付；交付前仍需质检及耗材核对');
+  }
+  db.exec('COMMIT');
+ }catch(e){db.exec('ROLLBACK');throw e;}
  const jobs=()=>db.prepare('SELECT * FROM production_jobs ORDER BY created DESC').all().map(j=>({...j,...JSON.parse(db.prepare('SELECT payload FROM orders WHERE id=?').get(j.order_id).payload),...JSON.parse(j.payload),telemetry:j.telemetry?JSON.parse(j.telemetry):null,orderStatus:db.prepare('SELECT status FROM orders WHERE id=?').get(j.order_id)?.status,files:db.prepare('SELECT id,name FROM files WHERE order_id=?').all(j.order_id),events:db.prepare('SELECT actor,text,created FROM events WHERE order_id=? ORDER BY id DESC LIMIT 8').all(j.order_id)}));
  function collectorAuth(req){const found=stations.find(s=>s.token&&timingSafeEqual(digest(req.headers.authorization||''),digest('Bearer '+s.token)));if(!found)fail(401,'采集站凭据无效');return found;}
  async function sync(j){
@@ -62,7 +71,10 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
      if(Date.parse(e.observedAt)>=Date.parse(JSON.parse(j.payload).attemptStarted||j.created)){
       if(e.state==='RUNNING'&&j.status==='待打印'){
        transition(j,'打印中','采集到打印开始');db.prepare("UPDATE orders SET status='打印中',updated=? WHERE id=? AND status='待排产'").run(stamp(),j.order_id);
-      } else if(e.state==='FINISH'&&j.status==='打印中')transition(j,'待质检','设备打印完成，等待人工质检');
+      } else if(e.state==='FINISH'&&j.status==='打印中'){
+       transition(j,'待质检','设备打印完成，订单自动进入待交付；交付前仍需质检及耗材核对');
+       db.prepare("UPDATE orders SET status='待交付',updated=? WHERE id=? AND status='打印中'").run(stamp(),j.order_id);
+      }
       else if(['FAILED','PAUSE'].includes(e.state)&&['待打印','打印中'].includes(j.status))transition(j,'异常','设备异常，等待人工处理');
      }
     }

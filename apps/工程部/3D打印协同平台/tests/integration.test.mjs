@@ -140,6 +140,37 @@ for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,b
   const extraSchedule=(await request('/api/production/data',{auth:admin})).body.schedules.find(x=>x.orderId===extraOrder.body.id);
   assert.equal(extraSchedule.status,'printing');assert.equal(extraSchedule.orderNumber,extraOrder.body.number);
   assert.equal((await request('/api/platform/jobs',{auth:admin,data:linkBody})).status,409);
+  // A manually linked printing order has no bound device completion: confirm only its current attempt.
+  const manual={action:'confirm-finish',attempt:1,notes:'现场确认机台 2 已完成本轮 2 件'};
+  const manualRoute='/api/platform/jobs/'+extraJob.body.id;
+  const beforeManual=(await request('/api/production/data',{auth:admin})).body;
+  for(const invalid of [{attempt:undefined},{attempt:'1'},{notes:' '.repeat(3)},{notes:'x'.repeat(2001)}]){
+   assert.equal((await request(manualRoute,{auth:admin,method:'PATCH',data:{...manual,...invalid}})).status,'notes' in invalid?400:409);
+  }
+  const manualDB=new DatabaseSync(path.join(dir,'orders/printlink.sqlite'));
+  try{
+   manualDB.prepare("UPDATE orders SET status='待交付' WHERE id=?").run(extraOrder.body.id);
+   assert.equal((await request(manualRoute,{auth:admin,method:'PATCH',data:manual})).status,409);
+   manualDB.prepare("UPDATE orders SET status='打印中' WHERE id=?").run(extraOrder.body.id);
+   manualDB.exec("CREATE TRIGGER reject_manual_audit BEFORE INSERT ON events WHEN NEW.text LIKE '%手动确认打印完成%' BEGIN SELECT RAISE(ABORT,'test audit failure'); END");
+   assert.equal((await request(manualRoute,{auth:admin,method:'PATCH',data:manual})).status,500);
+   assert.equal(manualDB.prepare('SELECT status FROM production_jobs WHERE id=?').get(extraJob.body.id).status,'打印中');
+   assert.equal(manualDB.prepare('SELECT status FROM orders WHERE id=?').get(extraOrder.body.id).status,'打印中');
+   manualDB.exec('DROP TRIGGER reject_manual_audit');
+  }finally{manualDB.close();}
+  const concurrent=await Promise.all([request(manualRoute,{auth:admin,method:'PATCH',data:manual}),request(manualRoute,{auth:admin,method:'PATCH',data:manual})]);
+  assert.deepEqual(concurrent.map(r=>r.status).sort(),[200,409]);
+  const manuallyFinished=(await overview()).jobs.find(j=>j.id===extraJob.body.id);
+  assert.equal(manuallyFinished.status,'待质检');assert.equal(manuallyFinished.orderStatus,'待交付');
+  assert.equal(manuallyFinished.sequence,0);assert.equal(manuallyFinished.requestedState,'IDLE');assert.equal(manuallyFinished.quality,undefined);
+  assert.equal(manuallyFinished.events.filter(e=>e.text.includes('手动确认打印完成')).length,1);
+  const confirmingAdmin=(await request('/api/me',{auth:admin})).body.user.name;
+  assert.ok(manuallyFinished.events.some(e=>e.text.includes('管理员 '+confirmingAdmin)&&e.text.includes(manual.notes)));
+  const afterManual=(await request('/api/production/data',{auth:admin})).body;
+  assert.deepEqual(afterManual.inventory,beforeManual.inventory);assert.deepEqual(afterManual.records,beforeManual.records);
+  assert.equal((await request(manualRoute,{auth:admin,method:'PATCH',data:{action:'deliver',notes:'尚未质检'}})).status,409);
+  assert.equal((await request('/api/orders/'+extraOrder.body.id,{auth:admin,method:'PATCH',data:{status:'已完成',follower:'测试',replyDate:'2026-11-30'}})).status,409);
+  assert.equal((await request('/api/orders/'+extraOrder.body.id,{auth:admin,method:'PATCH',data:{status:'待交付',follower:'新的跟进人',replyDate:'2026-12-02'}})).status,200,'linked order metadata remains editable');
   assert.equal((await request('/api/orders',{auth:admin})).body.find(o=>o.id===orderId).status,'已完成','same-name products do not link unrelated orders');
   // A persisted outbox created while offline must replay and be cleared by the real agent process.
   const agentDir=path.join(dir,'agent');await mkdir(agentDir);const q=new DatabaseSync(path.join(agentDir,'outbox.sqlite'));q.exec('CREATE TABLE outbox(sequence INTEGER PRIMARY KEY AUTOINCREMENT,payload TEXT NOT NULL)');const replay=randomUUID();q.prepare('INSERT INTO outbox(payload) VALUES (?)').run(JSON.stringify({id:replay,observedAt:new Date().toISOString()}));q.close();

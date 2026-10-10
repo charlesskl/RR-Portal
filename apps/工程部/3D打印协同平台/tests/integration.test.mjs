@@ -168,12 +168,23 @@ for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,b
   assert.ok(manuallyFinished.events.some(e=>e.text.includes('管理员 '+confirmingAdmin)&&e.text.includes(manual.notes)));
   const afterManual=(await request('/api/production/data',{auth:admin})).body;
   assert.deepEqual(afterManual.inventory,beforeManual.inventory);assert.deepEqual(afterManual.records,beforeManual.records);
+  // Bound collector batches settle inventory without creating a legacy quality record.
+  const automatic={records:[{sourceId:'linked-auto-without-quality',sourceMachine:'2',machine:'2',date:'2026-10-10',jobId:extraJob.body.id,attempt:1,record:{productName:'无质检自动采集',autoRecord:true,status:'running',printStartTime:new Date().toISOString(),material:material.name,weight:2,qty:2,time:1}}]};
+  for(let n=0;n<2;n++)assert.equal((await request('/api/collector/records',{token,data:automatic})).status,200);
+  const autoData=(await request('/api/production/data',{auth:admin})).body;
+  assert.equal(autoData.inventory[material.name].stockG,afterManual.inventory[material.name].stockG-4);
+  const autoRows=Object.values(autoData.records).flatMap(day=>day.items).filter(item=>item.cloudJobId===extraJob.body.id);
+  assert.equal(autoRows.length,1);assert.equal(autoRows[0].inventoryDeduction.grams,4);
+  assert.equal(autoRows[0].qualitySettled,undefined);
 
   assert.equal((await request('/api/orders/'+extraOrder.body.id,{auth:admin,method:'PATCH',data:{status:'已完成',follower:'测试',replyDate:'2026-11-30'}})).status,409);
   assert.equal((await request('/api/orders/'+extraOrder.body.id,{auth:admin,method:'PATCH',data:{status:'待交付',follower:'新的跟进人',replyDate:'2026-12-02'}})).status,200,'linked order metadata remains editable');
   assert.equal((await request('/api/orders',{auth:admin})).body.find(o=>o.id===orderId).status,'已完成','same-name products do not link unrelated orders');
   assert.equal((await request(manualRoute,{auth:admin,method:'PATCH',data:{action:'deliver',notes:'无需质检直接交付，现场签收'}})).status,200);
   assert.equal((await request('/api/orders',{auth:admin})).body.find(o=>o.id===extraOrder.body.id).status,'已完成');
+  assert.equal((await request('/api/collector/records',{token,data:automatic})).status,200);
+  assert.equal((await request(manualRoute,{auth:admin,method:'PATCH',data:{action:'resync'}})).status,200);
+  assert.equal((await request('/api/production/data',{auth:admin})).body.inventory[material.name].stockG,autoData.inventory[material.name].stockG,'delivery and collector replay must not debit twice');
   // A persisted outbox created while offline must replay and be cleared by the real agent process.
   const agentDir=path.join(dir,'agent');await mkdir(agentDir);const q=new DatabaseSync(path.join(agentDir,'outbox.sqlite'));q.exec('CREATE TABLE outbox(sequence INTEGER PRIMARY KEY AUTOINCREMENT,payload TEXT NOT NULL)');const replay=randomUUID();q.prepare('INSERT INTO outbox(payload) VALUES (?)').run(JSON.stringify({id:replay,observedAt:new Date().toISOString()}));q.close();
   const conf=path.join(dir,'collector-test.json');await writeFile(conf,JSON.stringify({mode:'simulation',cloudUrl:base,token}));

@@ -144,6 +144,8 @@ function saveData(data) {
   // Linked orders are owned by the cloud task workflow, not legacy forms.
   const current=loadData(),existing=current.schedules||[];
   for(const [date,day]of Object.entries(current.records||{})){const linked=(day.items||[]).filter(i=>i.cloudJobId);if(linked.length){data.records||={};data.records[date]||={off:false,items:[]};data.records[date].items=(data.records[date].items||[]).filter(i=>!i.cloudJobId).concat(linked);}}
+  const sourceRows=new Map(Object.values(current.records||{}).flatMap(d=>d.items||[]).filter(i=>i.sourceRecordId).map(i=>[i._id,i]));
+  for(const day of Object.values(data.records||{}))for(const item of day.items||[]){const old=sourceRows.get(item._id);if(old)for(const key of ['sourceRecordId','sourceStation','platformMachine','inventoryReview','printerOutcome','_sourceFacts'])item[key]=old[key];}
   data.schedules=(data.schedules||[]).filter(x=>!x.cloudJobId).concat(existing.filter(x=>x.cloudJobId));
   dataVersion=Math.max(Date.now(),dataVersion+1); _cachedData=structuredClone(data);
   store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));
@@ -174,6 +176,14 @@ const server = http.createServer((req, res) => {
       res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,backupId,summary:plan.summary}));
     }catch(e){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}));}});return;
   }
+  if(req.url==='/bridge/records'&&req.method==='POST'){
+    let raw='';req.on('data',c=>{raw+=c;if(raw.length>1024*1024)req.destroy();});
+    req.on('end',()=>{try{const {station,records}=JSON.parse(raw);if(typeof station!=='string'||!Array.isArray(records)||records.length>20)throw Error('记录格式无效');
+      store.exec('BEGIN IMMEDIATE');let result;
+      try{const data=loadData();result=require('./record-sync.cjs')(store,data,station,records);store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));store.exec('COMMIT');dataVersion=Math.max(Date.now(),dataVersion+1);_cachedData=null;}catch(e){store.exec('ROLLBACK');throw e;}
+      res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,...result}));
+    }catch(e){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}));}});return;
+  }
   if (req.url === '/bridge/jobs' && req.method==='POST') {
     let raw=''; req.on('data',c=>{raw+=c;if(raw.length>65536) req.destroy();});
     req.on('end',()=>{try {
@@ -182,10 +192,14 @@ const server = http.createServer((req, res) => {
       if(old) Object.assign(old,job); else data.schedules.push({...job,id:Math.max(0,...data.schedules.map(x=>Number(x.id)||0))+1});
       if(job.completion){
         const q=job.completion;
-        if(!Object.values(data.records||{}).some(day=>(day.items||[]).some(i=>i.cloudJobId===job.cloudJobId))){
+        const attemptRecords=Object.values(data.records||{}).flatMap(day=>day.items||[]).filter(i=>i.cloudJobId===job.cloudJobId&&(i.cloudAttempt||1)===(job.attempt||1)).sort((a,b)=>(a.printStartTime||'').localeCompare(b.printStartTime||''));
+        // An already-posted record wins over a newer provisional batch arriving late.
+        const existingRecord=attemptRecords.find(i=>!i.inventoryReview)||attemptRecords.at(-1);
+        if(!existingRecord||existingRecord.inventoryReview){
           deductInventory(data,q.material,q.totalWeight);
           data.records||={};data.records[q.date]||={off:false,items:[]};
-          data.records[q.date].items.push({_id:'cloud-'+job.cloudJobId,cloudJobId:job.cloudJobId,_updatedAt:Date.now(),createdAt:q.checkedAt,machine:job.machine,status:'running',productName:job.productName,material:q.material,weight:q.weight,qty:q.qty,time:q.time,price:q.price,designFee:0,customer:job.customer,remark:job.remark+'；质检人：'+q.checkedBy+'；'+q.notes});
+          if(existingRecord)for(const day of Object.values(data.records))day.items=day.items.filter(i=>i!==existingRecord);
+          data.records[q.date].items.push({...existingRecord,inventoryReview:false,_id:existingRecord?._id||'cloud-'+job.cloudJobId,cloudJobId:job.cloudJobId,cloudAttempt:job.attempt||1,_updatedAt:Date.now(),createdAt:q.checkedAt,machine:job.machine,status:'running',productName:job.productName,material:q.material,weight:q.weight,qty:q.qty,time:q.time,price:q.price,designFee:0,customer:job.customer,remark:job.remark+'；质检人：'+q.checkedBy+'；'+q.notes});
         }
       }
       dataVersion=Math.max(Date.now(),dataVersion+1); store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));

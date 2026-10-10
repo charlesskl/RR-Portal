@@ -66,18 +66,35 @@ test('cloud production integration: permissions, scheduling, telemetry replay, q
   await emit(9,'RUNNING',{attempt:2});await emit(10,'FINISH',{attempt:2});assert.equal((await overview()).jobs[0].status,'待质检');
   assert.equal((await request('/api/platform/jobs/'+id,{auth:member,method:'PATCH',data:{action:'quality'}})).status,403);
   const cat=(await request('/api/platform/catalog',{auth:admin})).body;const material=cat.materials.find(m=>m.stockG>=24);assert.ok(material);
+  const sourceBatch={records:[{sourceId:'local-print-1',attempt:2,sourceMachine:'1',machine:'1',date:'2026-10-09',jobId:id,record:{productName:'测试产品',autoRecord:true,status:'running',printStartTime:new Date().toISOString(),qty:1,time:0}}]};
+  assert.equal((await request('/api/collector/records',{token:'wrong',data:sourceBatch})).status,401);
+  assert.equal((await request('/api/collector/records',{token,data:{records:[{...sourceBatch.records[0],machine:'9999'}]}})).status,400);
+  assert.equal((await request('/api/collector/records',{token,data:sourceBatch})).status,200);
+  assert.equal((await request('/api/collector/records',{token,data:sourceBatch})).status,200);
+  const beforeQuality=(await request('/api/production/data',{auth:admin})).body;
+  assert.equal(Object.values(beforeQuality.records).flatMap(d=>d.items||[]).filter(i=>i.cloudJobId===id).length,1);
+  assert.equal(beforeQuality.inventory[material.name].stockG,material.stockG);
   const quality={action:'quality',totalWeight:24,actualHours:1.5,price:0,notes:'尺寸与表面检查合格',materialId:material.id};
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'quality'}})).status,400);
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{...quality,totalWeight:material.stockG+1}})).status,409);
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:quality})).status,200);
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:quality})).status,409);
   for(let n=0;n<2;n++)assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'resync'}})).status,200);
+  // A later source batch from the same attempt must not debit inventory again.
+  const lateBatch={records:[{...sourceBatch.records[0],sourceId:'local-print-late',record:{...sourceBatch.records[0].record,printStartTime:new Date(Date.parse(sourceBatch.records[0].record.printStartTime)+1000).toISOString()}}]};
+  assert.equal((await request('/api/collector/records',{token,data:lateBatch})).status,200);
+  for(let n=0;n<2;n++)assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'resync'}})).status,200);
   const records=(await request('/api/production/data',{auth:admin})).body;
   assert.equal(records.inventory[material.name].stockG,material.stockG-24);
-  assert.equal(Object.values(records.records).flatMap(d=>d.items||[]).filter(i=>i.cloudJobId===id).length,1);
+  const attemptRecords=Object.values(records.records).flatMap(d=>d.items||[]).filter(i=>i.cloudJobId===id);
+  assert.equal(attemptRecords.length,2);
+  assert.equal(attemptRecords.filter(i=>i.inventoryReview===false).length,1);
+  assert.equal(attemptRecords.filter(i=>i.inventoryReview===true).length,1);
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'deliver',notes:'测试接收人签收 2 件'}})).status,200);
   const orders=(await request('/api/orders',{auth:member})).body;assert.equal(orders[0].status,'已完成');
   await stop();await launch();admin=await login();assert.equal((await overview()).jobs[0].status,'待交付');
+  assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'resync'}})).status,200);
+  assert.equal((await request('/api/production/data',{auth:admin})).body.inventory[material.name].stockG,material.stockG-24,'restart and late-batch retries must preserve the single inventory debit');
   // An order manually marked as printing can be explicitly linked without regression.
   const extraUpload=await fetch(base+'/api/uploads',{method:'POST',headers:{Cookie:admin.cookie,'X-CSRF-Token':admin.csrf,'X-File-Name':'link.stl'},body:'solid link\nendsolid link'});
   assert.equal(extraUpload.status,201);const extraFile=await extraUpload.json();

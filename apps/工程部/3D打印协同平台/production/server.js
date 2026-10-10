@@ -192,7 +192,9 @@ const server = http.createServer((req, res) => {
       if(old) Object.assign(old,job); else data.schedules.push({...job,id:Math.max(0,...data.schedules.map(x=>Number(x.id)||0))+1});
       if(job.completion){
         const q=job.completion;
-        const existingRecord=Object.values(data.records||{}).flatMap(day=>day.items||[]).filter(i=>i.cloudJobId===job.cloudJobId&&(i.cloudAttempt||1)===(job.attempt||1)).sort((a,b)=>(a.printStartTime||'').localeCompare(b.printStartTime||'')).at(-1);
+        const attemptRecords=Object.values(data.records||{}).flatMap(day=>day.items||[]).filter(i=>i.cloudJobId===job.cloudJobId&&(i.cloudAttempt||1)===(job.attempt||1)).sort((a,b)=>(a.printStartTime||'').localeCompare(b.printStartTime||''));
+        // An already-posted record wins over a newer provisional batch arriving late.
+        const existingRecord=attemptRecords.find(i=>!i.inventoryReview)||attemptRecords.at(-1);
         if(!existingRecord||existingRecord.inventoryReview){
           deductInventory(data,q.material,q.totalWeight);
           data.records||={};data.records[q.date]||={off:false,items:[]};

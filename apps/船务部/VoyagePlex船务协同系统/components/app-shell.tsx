@@ -321,7 +321,7 @@ export function AppShell({ route }: { route: string }) {
           <span className="brand-mark"><Anchor size={19} /></span>
           <span><strong>VoyagePlex</strong><small>船务协同系统</small></span>
         </div>
-        <label className="company-switch"><span>公司板块</span><select aria-label="公司板块" value={company} onChange={event=>{document.cookie=`voyageplex_company=${event.target.value}; Path=/; SameSite=Lax`;window.location.assign(new URL("/",window.location.href).toString());}}>{(user.role==="admin"||user.companyAccess!=="Huadeng")&&<option value="Xingxin">兴信</option>}{(user.role==="admin"||user.companyAccess==="Both"||user.companyAccess==="Huadeng")&&<option value="Huadeng">华登</option>}</select></label>
+        <label className="company-switch"><span>公司板块</span><select aria-label="公司板块" value={company} onChange={event=>{document.cookie=`voyageplex_company=${event.target.value}; Path=/; SameSite=Lax`;window.location.assign(new URL(`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/`,window.location.href).toString());}}>{(user.role==="admin"||user.companyAccess!=="Huadeng")&&<option value="Xingxin">兴信</option>}{(user.role==="admin"||user.companyAccess==="Both"||user.companyAccess==="Huadeng")&&<option value="Huadeng">华登</option>}</select></label>
         <nav aria-label="主要导航">
           {navigation.filter(item=>item.roles.includes(role)).map((item) => {
             const Icon = item.icon;

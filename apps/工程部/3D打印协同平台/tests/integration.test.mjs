@@ -66,6 +66,14 @@ test('cloud production integration: permissions, scheduling, telemetry replay, q
   await emit(9,'RUNNING',{attempt:2});await emit(10,'FINISH',{attempt:2});assert.equal((await overview()).jobs[0].status,'待质检');
   assert.equal((await request('/api/platform/jobs/'+id,{auth:member,method:'PATCH',data:{action:'quality'}})).status,403);
   const cat=(await request('/api/platform/catalog',{auth:admin})).body;const material=cat.materials.find(m=>m.stockG>=24);assert.ok(material);
+  const sourceBatch={records:[{sourceId:'local-print-1',attempt:2,sourceMachine:'1',machine:'1',date:'2026-10-09',jobId:id,record:{productName:'测试产品',autoRecord:true,status:'running',printStartTime:new Date().toISOString(),qty:1,time:0}}]};
+  assert.equal((await request('/api/collector/records',{token:'wrong',data:sourceBatch})).status,401);
+  assert.equal((await request('/api/collector/records',{token,data:{records:[{...sourceBatch.records[0],machine:'9999'}]}})).status,400);
+  assert.equal((await request('/api/collector/records',{token,data:sourceBatch})).status,200);
+  assert.equal((await request('/api/collector/records',{token,data:sourceBatch})).status,200);
+  const beforeQuality=(await request('/api/production/data',{auth:admin})).body;
+  assert.equal(Object.values(beforeQuality.records).flatMap(d=>d.items||[]).filter(i=>i.cloudJobId===id).length,1);
+  assert.equal(beforeQuality.inventory[material.name].stockG,material.stockG);
   const quality={action:'quality',totalWeight:24,actualHours:1.5,price:0,notes:'尺寸与表面检查合格',materialId:material.id};
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'quality'}})).status,400);
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{...quality,totalWeight:material.stockG+1}})).status,409);

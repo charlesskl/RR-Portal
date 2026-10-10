@@ -106,6 +106,7 @@ export default function SupplierSummaryPage() {
     </Space>}>
       <p style={{ color: '#666' }}>供应商显示名称与合同卖方分开显示。报关公司选择华胜益时，合同使用华胜益档案；其他情况使用供应商档案。合同地址及联系方式随卖方档案带出，需修改华胜益资料时请编辑华胜益档案。</p>
       <Table<(typeof filtered)[number]> rowKey={r => r.id || r.keyword} loading={loading} dataSource={filtered} scroll={{ x: 2400 }}
+        locale={{ filterConfirm: '确定', filterReset: '重置', filterSearchPlaceholder: '搜索选项' }}
         onChange={(_pagination, filters) => setColumnFilters({
           displayName: filters.displayName?.map(String),
           customsCompany: filters.customsCompany?.map(String),
@@ -134,7 +135,7 @@ export default function SupplierSummaryPage() {
       onOk={save} okText="保存" confirmLoading={loading} destroyOnHidden>
       <Form form={form} layout="vertical">
         <Form.Item name="keyword" label="供应商显示名称" extra="可填写简称，例如“台聚”；留空时使用公司中文名称，不改变合同公司全称。">
-          <Input maxLength={256} placeholder="请输入供应商显示名称" />
+          <Input maxLength={128} placeholder="请输入供应商显示名称" />
         </Form.Item>
         <p style={{ color: '#666' }}>以下维护本供应商档案。华胜益报关时，合同信息从华胜益档案读取，不会覆盖本供应商资料。</p>
         {profileFields.map(f => <Form.Item key={f.name} name={f.name} label={f.label}

@@ -101,6 +101,8 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
         using var c = factory.Create();
         c.Open();
         using var tx = c.BeginTransaction();
+        // Share the registration lock before checking names or reading the old identity.
+        await c.ExecuteAsync("SELECT pg_advisory_xact_lock(84720391)", transaction: tx);
         if (await SupplierNameExists(c, tx, keyword, full))
             return Conflict(new { error = "供应商简称或公司中文名称已存在" });
         var id = await c.ExecuteScalarAsync<int>(@"
@@ -125,6 +127,8 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
         using var c = factory.Create();
         c.Open();
         using var tx = c.BeginTransaction();
+        // Share the registration lock before checking names or reading the old identity.
+        await c.ExecuteAsync("SELECT pg_advisory_xact_lock(84720391)", transaction: tx);
         var saved = await c.QuerySingleOrDefaultAsync<SupItem>(@"
             SELECT keyword, full_name AS full, customs_company AS customs
             FROM dict_supplier WHERE id=@id", new { id }, tx);

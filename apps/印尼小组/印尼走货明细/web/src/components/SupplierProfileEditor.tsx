@@ -43,7 +43,7 @@ export default function SupplierProfileEditor({ name, disabled, onSaved }: {
       <Form form={form} layout="vertical">
         {supplierEditableFields.map(([key, label]) => <Form.Item key={key} name={key} label={label}
           rules={!original?.id && key === 'full' ? [{ required: true, whitespace: true }] : []}>
-          <Input maxLength={key.startsWith('address') ? 1000 : 256} />
+          <Input maxLength={key === 'keyword' ? 128 : key.startsWith('address') ? 1000 : 256} />
         </Form.Item>)}
       </Form>
     </Modal>

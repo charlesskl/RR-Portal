@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AutoComplete, Button, Card, Form, Input, Modal, Popconfirm, Space, Table, Tag, message } from 'antd'
 import { api, type Dictionaries, type SupplierDict } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { canonicalSupplierProfiles, documentSellerForLine, HUASHENGYI_FULL_NAME, supplierCustomsCompany } from '../utils/supplierProfiles'
+import { supplierSummaryRows, HUASHENGYI_FULL_NAME, supplierCustomsCompany } from '../utils/supplierProfiles'
 import { supplierFilterOptions, supplierFilterValue, type SupplierFilterField } from '../utils/supplierFilters'
 
 const profileFields: Array<{ name: keyof SupplierDict; label: string }> = [
@@ -36,7 +36,7 @@ export default function SupplierSummaryPage() {
   }
   useEffect(() => { void load() }, [])
 
-  const companies = useMemo(() => canonicalSupplierProfiles(rows), [rows])
+  const companies = rows
   const columnFilter = (field: SupplierFilterField) => ({
     key: field,
     filters: supplierFilterOptions(companies, field),
@@ -45,10 +45,7 @@ export default function SupplierSummaryPage() {
     filteredValue: columnFilters[field] || null,
     onFilter: (value: unknown, row: SupplierDict) => supplierFilterValue(row, field) === String(value),
   })
-  const filtered = useMemo(() => companies.map(r => ({
-    ...r,
-    seller: documentSellerForLine(r.keyword || r.full || '', supplierCustomsCompany(r), companies, true),
-  })).filter(r =>
+  const filtered = useMemo(() => supplierSummaryRows(companies).filter(r =>
     [r.keyword, r.full, r.nameEn, r.contact, supplierCustomsCompany(r), r.seller.full, r.seller.nameEn, r.seller.contact]
       .some(x => (x || '').toLowerCase().includes(search.toLowerCase()))
   ), [companies, search])

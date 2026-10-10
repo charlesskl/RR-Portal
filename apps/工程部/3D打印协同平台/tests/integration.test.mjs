@@ -61,8 +61,12 @@ for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,b
   assert.equal((await emit(3,'RUNNING',{observedAt:new Date(Date.now()-300000).toISOString()})).status,200);assert.equal((await overview()).jobs[0].status,'待打印','stale state cannot advance');
   assert.equal((await emit(4,'RUNNING')).status,200);assert.equal((await overview()).jobs[0].status,'打印中');
   const eventId=randomUUID();await emit(5,'FINISH',{id:eventId});assert.equal((await emit(5,'FINISH',{id:eventId})).body.duplicate,true);assert.equal((await overview()).jobs[0].status,'待质检');
+  assert.equal((await request('/api/orders',{auth:member})).body.find(o=>o.id===orderId).status,'待交付','confirmed completion automatically advances the order before quality');
+  assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'deliver',notes:'尚未质检'}})).status,409);
+  assert.equal((await request('/api/orders/'+orderId,{auth:admin,method:'PATCH',data:{status:'已完成',follower:'测试',replyDate:'2026-11-30'}})).status,409,'order workbench cannot bypass quality');
   await emit(2,'FAILED');assert.equal((await overview()).jobs[0].status,'待质检');
   await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'retry'}});await emit(8,'FINISH');assert.equal((await overview()).jobs[0].status,'待打印','old attempt ignored');
+  assert.equal((await request('/api/orders',{auth:member})).body.find(o=>o.id===orderId).status,'待排产','retry reopens scheduling');
   await emit(9,'RUNNING',{attempt:2});await emit(10,'FINISH',{attempt:2});assert.equal((await overview()).jobs[0].status,'待质检');
   assert.equal((await request('/api/platform/jobs/'+id,{auth:member,method:'PATCH',data:{action:'quality'}})).status,403);
   const cat=(await request('/api/platform/catalog',{auth:admin})).body;const material=cat.materials.find(m=>m.stockG>=24);assert.ok(material);
@@ -111,6 +115,7 @@ for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,b
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'deliver',notes:'测试接收人签收 2 件'}})).status,200);
   const orders=(await request('/api/orders',{auth:member})).body;assert.equal(orders[0].status,'已完成');
   await stop();await launch();admin=await login();assert.equal((await overview()).jobs[0].status,'待交付');
+  assert.equal((await request('/api/orders',{auth:admin})).body.find(o=>o.id===orderId).status,'已完成','startup reconciliation preserves delivered orders');
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'resync'}})).status,200);
   assert.equal((await request('/api/production/data',{auth:admin})).body.inventory[material.name].stockG,material.stockG-24,'restart and late-batch retries must preserve the single inventory debit');
   // An order manually marked as printing can be explicitly linked without regression.

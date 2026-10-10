@@ -127,6 +127,19 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
     quality={totalWeight:p.totalWeight,weight:p.totalWeight/op.quantity,time:p.actualHours,price:p.price,qty:op.quantity,material:m.name,notes:p.notes.trim(),checkedBy:u.name,checkedAt:stamp(),date:new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai'}).format(new Date())};
     const fresh=db.prepare('SELECT status FROM production_jobs WHERE id=?').get(j.id);if(fresh.status!=='待质检')fail(409,'任务已被其他人处理');
    }
+   if(p.action==='confirm-finish'){
+    if(typeof p.notes!=='string'||!p.notes.trim()||p.notes.length>2000)fail(400,'请填写现场确认说明');
+    db.exec('BEGIN IMMEDIATE');try{
+     const fresh=db.prepare('SELECT * FROM production_jobs WHERE id=?').get(j.id);
+     const order=db.prepare('SELECT status FROM orders WHERE id=?').get(j.order_id);
+     if(fresh.status!=='打印中'||p.attempt!==(JSON.parse(fresh.payload).attempt||1)||order?.status!=='打印中')fail(409,'任务状态或打印轮次已变化，请刷新');
+     transition(fresh,'待质检','管理员 '+u.name+' 手动确认打印完成：'+p.notes.trim()+'；订单进入待交付，仍需质检及耗材核对');
+     db.prepare("UPDATE orders SET status='待交付',updated=? WHERE id=?").run(stamp(),j.order_id);
+     db.exec('COMMIT');
+    }catch(e){db.exec('ROLLBACK');throw e;}
+    await sync(db.prepare('SELECT * FROM production_jobs WHERE id=?').get(j.id));
+    return json(res,200,{ok:true}),true;
+   }
    if(p.action==='resync'){await sync(j);return json(res,200,{ok:true}),true;}
    if(p.action==='deliver'){
     if(j.status!=='待交付'||!j.synced)fail(409,'请先完成质检及生产记录同步');

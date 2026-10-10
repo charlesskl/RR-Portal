@@ -67,7 +67,15 @@ for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,b
   await emit(2,'FAILED');assert.equal((await overview()).jobs[0].status,'待质检');
   await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'retry'}});await emit(8,'FINISH');assert.equal((await overview()).jobs[0].status,'待打印','old attempt ignored');
   assert.equal((await request('/api/orders',{auth:member})).body.find(o=>o.id===orderId).status,'待排产','retry reopens scheduling');
-  await emit(9,'RUNNING',{attempt:2});await emit(10,'FINISH',{attempt:2});assert.equal((await overview()).jobs[0].status,'待质检');
+  await emit(9,'RUNNING',{attempt:2});
+  const confirm={action:'confirm-finish',attempt:2,notes:'现场已确认机台及本轮订单全部打印完成'};
+  assert.equal((await request('/api/platform/jobs/'+id,{auth:member,method:'PATCH',data:confirm})).status,403);
+  assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{...confirm,notes:''}})).status,400);
+  assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{...confirm,attempt:1}})).status,409);
+  assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:confirm})).status,200);
+  assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:confirm})).status,409);
+  assert.equal((await request('/api/orders',{auth:member})).body.find(o=>o.id===orderId).status,'待交付');
+  await emit(10,'FINISH',{attempt:2});assert.equal((await overview()).jobs[0].status,'待质检');
   assert.equal((await request('/api/platform/jobs/'+id,{auth:member,method:'PATCH',data:{action:'quality'}})).status,403);
   const cat=(await request('/api/platform/catalog',{auth:admin})).body;const material=cat.materials.find(m=>m.stockG>=24);assert.ok(material);
   const sourceBatch={records:[{sourceId:'local-print-1',attempt:2,sourceMachine:'1',machine:'1',date:'2026-10-09',jobId:id,record:{productName:'测试产品',autoRecord:true,status:'running',printStartTime:new Date().toISOString(),qty:1,time:0}}]};

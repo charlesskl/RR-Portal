@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AutoComplete, Button, Card, Form, Input, Modal, Popconfirm, Space, Table, Tag, message } from 'antd'
 import { api, type Dictionaries, type SupplierDict } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { canonicalSupplierProfiles, HUASHENGYI_FULL_NAME, supplierCustomsCompany } from '../utils/supplierProfiles'
+import { canonicalSupplierProfiles, documentSellerForLine, HUASHENGYI_FULL_NAME, supplierCustomsCompany } from '../utils/supplierProfiles'
 
 const profileFields: Array<{ name: keyof SupplierDict; label: string }> = [
   { name: 'full', label: '公司中文名称' },
@@ -35,8 +35,12 @@ export default function SupplierSummaryPage() {
   useEffect(() => { void load() }, [])
 
   const companies = useMemo(() => canonicalSupplierProfiles(rows), [rows])
-  const filtered = useMemo(() => companies.filter(r =>
-    [r.full, r.nameEn, r.contact].some(x => (x || '').toLowerCase().includes(search.toLowerCase()))
+  const filtered = useMemo(() => companies.map(r => ({
+    ...r,
+    seller: documentSellerForLine(r.keyword || r.full || '', supplierCustomsCompany(r), companies, true),
+  })).filter(r =>
+    [r.keyword, r.full, r.nameEn, r.contact, supplierCustomsCompany(r), r.seller.full, r.seller.nameEn]
+      .some(x => (x || '').toLowerCase().includes(search.toLowerCase()))
   ), [companies, search])
 
   function edit(row: SupplierDict) {
@@ -85,28 +89,24 @@ export default function SupplierSummaryPage() {
 
   return <div style={{ padding: 16 }}>
     <Card title={`供应商汇总（${companies.length} 家）`} extra={<Space>
-      <Input.Search allowClear placeholder="搜索公司名或联系人" style={{ width: 300 }} onChange={e => setSearch(e.target.value)} />
+      <Input.Search allowClear placeholder="搜索供应商、报关公司、合同公司或联系人" style={{ width: 360 }} onChange={e => setSearch(e.target.value)} />
       <Button onClick={load} loading={loading}>刷新</Button>
       <Button type="primary" disabled={!auth.canEdit('products')} onClick={add}>新增供应商</Button>
     </Space>}>
-      <p style={{ color: '#666' }}>在此维护供应商公司资料及默认报关公司。物料明细选择供应商后，会自动关联报关公司并用于合同、发票和装箱单。</p>
-      <Table rowKey={r => r.id || r.keyword} loading={loading} dataSource={filtered} scroll={{ x: 1500 }}
+      <p style={{ color: '#666' }}>供应商显示名称与合同卖方分开显示。报关公司选择华胜益时，合同使用华胜益档案；其他情况使用供应商档案。合同地址及联系方式随卖方档案带出，需修改华胜益资料时请编辑华胜益档案。</p>
+      <Table<(typeof filtered)[number]> rowKey={r => r.id || r.keyword} loading={loading} dataSource={filtered} scroll={{ x: 2400 }}
         pagination={{ defaultPageSize: 30 }} columns={[
-          { title: '公司中文名称', dataIndex: 'full', width: 240, fixed: 'left' },
-          { title: '公司英文名称', dataIndex: 'nameEn', width: 240 },
-          { title: '中文地址', dataIndex: 'addressZh', width: 240, ellipsis: true },
-          { title: '英文地址', dataIndex: 'addressEn', width: 260, ellipsis: true },
-          { title: '电话', dataIndex: 'phone', width: 140 },
-          { title: '邮箱', dataIndex: 'email', width: 210 },
-          { title: '联系人', dataIndex: 'contact', width: 140 },
-          { title: '报关公司', width: 240, render: (_: unknown, r: SupplierDict) => {
-            const customs = supplierCustomsCompany(r)
-            if (customs === HUASHENGYI_FULL_NAME) return <Tag color="blue">华胜益</Tag>
-            if (customs === r.full?.trim()) return <Tag color="green">本公司</Tag>
-            return <Tag color="gold">{customs}</Tag>
-          } },
-          { title: '资料', width: 100, render: (_: unknown, r: SupplierDict) =>
-            profileFields.every(f => String(r[f.name] || '').trim()) ? <Tag color="green">齐全</Tag> : <Tag color="orange">待补充</Tag> },
+          { title: '供应商显示名称', width: 220, fixed: 'left', render: (_: unknown, r) => r.keyword || r.full },
+          { title: '对应报关公司', width: 260, render: (_: unknown, r) => supplierCustomsCompany(r) },
+          { title: '合同中文公司名', dataIndex: ['seller', 'full'], width: 260 },
+          { title: '合同英文公司名', dataIndex: ['seller', 'nameEn'], width: 260 },
+          { title: '合同中文地址', dataIndex: ['seller', 'addressZh'], width: 240, ellipsis: true },
+          { title: '合同英文地址', dataIndex: ['seller', 'addressEn'], width: 260, ellipsis: true },
+          { title: '合同电话', dataIndex: ['seller', 'phone'], width: 140 },
+          { title: '合同邮箱', dataIndex: ['seller', 'email'], width: 210 },
+          { title: '合同联系人', dataIndex: ['seller', 'contact'], width: 140 },
+          { title: '合同资料', width: 100, render: (_: unknown, r) =>
+            profileFields.every(f => String(r.seller[f.name] || '').trim()) ? <Tag color="green">齐全</Tag> : <Tag color="orange">待补充</Tag> },
           { title: '操作', width: 130, fixed: 'right', render: (_: unknown, r: SupplierDict) => <Space size={0}>
             <Button type="link" disabled={!auth.canEdit('products')} onClick={() => edit(r)}>编辑</Button>
             <Popconfirm title="删除该供应商？" description="已被物料或走货使用的供应商不能删除。" onConfirm={() => remove(r)}>
@@ -118,6 +118,8 @@ export default function SupplierSummaryPage() {
     <Modal title={editing ? `编辑供应商：${editing.full || ''}` : '新增供应商'} open={open} onCancel={() => setOpen(false)}
       onOk={save} okText="保存" confirmLoading={loading} destroyOnHidden>
       <Form form={form} layout="vertical">
+        {editing && <Form.Item label="供应商显示名称"><Input value={editing.keyword || editing.full} readOnly /></Form.Item>}
+        <p style={{ color: '#666' }}>以下维护本供应商档案。华胜益报关时，合同信息从华胜益档案读取，不会覆盖本供应商资料。</p>
         {profileFields.map(f => <Form.Item key={f.name} name={f.name} label={f.label}
           rules={f.name === 'full' ? [{ required: true, whitespace: true, message: '请填写' }] : f.name === 'email' ? [{ type: 'email', warningOnly: true }] : undefined}>
           <Input.TextArea autoSize={f.name === 'addressZh' || f.name === 'addressEn' ? { minRows: 2, maxRows: 4 } : { minRows: 1, maxRows: 1 }} />

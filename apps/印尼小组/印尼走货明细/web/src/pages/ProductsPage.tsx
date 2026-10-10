@@ -8,6 +8,7 @@ import { MATERIAL_CATEGORIES, inferMaterialCategory } from '../utils/engineering
 import { resolveMaterialTranslation } from '../utils/materialTranslate'
 import { mergeImportedMaterials, recommendMaterialChoices, resolveMaterialImport, type ImportChoice } from '../utils/materialImportMerge'
 import { MaterialImportReview } from '../components/MaterialImportReview'
+import SupplierProfileEditor from '../components/SupplierProfileEditor'
 import {
   canonicalSupplierProfiles, HUASHENGYI_FULL_NAME, linkedCustomsCompany,
   supplierCustomsCompany, supplierProfileForName,
@@ -429,6 +430,7 @@ export default function ProductsPage() {
                 rows={materials}
                 onChange={setMaterials}
                 dicts={dicts}
+                onSuppliersChanged={loadDicts}
                 productCode={currentProductCode?.trim() || editing?.code}
               />,
             },
@@ -586,11 +588,12 @@ function PartsTable({ parts, materialName, onChange }: { parts: MoldingPart[]; m
 
 // ---------------- Materials editor (phase 2b) ----------------
 
-function MaterialsEditor({ rows, onChange, dicts, productCode }: {
+function MaterialsEditor({ rows, onChange, dicts, productCode, onSuppliersChanged }: {
   rows: Material[]
   onChange: (rows: Material[]) => void
   dicts: Dictionaries
   productCode?: string
+  onSuppliersChanged: () => void
 }) {
   const { message } = App.useApp()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -790,14 +793,21 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
               onChange={(v) => patch(i, 'category', v ?? '')} />
           ) },
           { title: '物料编码', width: 130, render: (_v, r, i) => <Input size="small" value={r.material_code} onChange={(e) => patch(i, 'material_code', e.target.value)} /> },
-          { title: '供应商', width: 220, render: (_v, r, i) => <Select size="small" showSearch allowClear
-            placeholder="选择公司中文名称" style={{ width: '100%' }}
+          { title: '供应商', width: 220, render: (_v, r, i) => <><AutoComplete size="small" allowClear
+            placeholder="选择或输入新供应商" style={{ width: '100%' }}
             value={supplierProfileForName(r.supplier || '', dicts.suppliers)?.full || r.supplier || undefined}
             options={canonicalSupplierProfiles(dicts.suppliers).map(supplier => ({
               value: supplier.full || supplier.keyword,
               label: supplier.full || supplier.keyword,
             }))}
-            onChange={(value) => patchSupplier(i, value || '')} /> },
+            onChange={(value) => patchSupplier(i, value || '')} />
+            <SupplierProfileEditor name={r.supplier || ''} onSaved={(profile, previous) => {
+              const oldNames = [previous.keyword, previous.full].filter(Boolean).map(n => n!.trim().toLowerCase())
+              onChange(rows.map((row, index) => index === i || oldNames.includes((row.supplier || '').trim().toLowerCase())
+                ? { ...row, supplier: profile.full || profile.keyword, customs_company: supplierCustomsCompany(profile) } : row))
+              onSuppliersChanged()
+            }} />
+          </> },
           { title: '报关公司', width: 200, render: (_v, r) => {
             const profile = supplierProfileForName(r.supplier || '', dicts.suppliers)
             const selfCompany = profile?.full?.trim() || r.supplier?.trim() || ''

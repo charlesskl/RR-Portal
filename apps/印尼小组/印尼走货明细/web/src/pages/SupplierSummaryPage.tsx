@@ -3,6 +3,7 @@ import { AutoComplete, Button, Card, Form, Input, Modal, Popconfirm, Space, Tabl
 import { api, type Dictionaries, type SupplierDict } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { canonicalSupplierProfiles, documentSellerForLine, HUASHENGYI_FULL_NAME, supplierCustomsCompany } from '../utils/supplierProfiles'
+import { supplierFilterOptions, supplierFilterValue, type SupplierFilterField } from '../utils/supplierFilters'
 
 const profileFields: Array<{ name: keyof SupplierDict; label: string }> = [
   { name: 'full', label: '公司中文名称' },
@@ -19,6 +20,7 @@ export default function SupplierSummaryPage() {
   const [rows, setRows] = useState<SupplierDict[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
+  const [columnFilters, setColumnFilters] = useState<Partial<Record<SupplierFilterField, string[]>>>({})
   const [editing, setEditing] = useState<SupplierDict | null>(null)
   const [open, setOpen] = useState(false)
   const [form] = Form.useForm<SupplierDict>()
@@ -35,6 +37,14 @@ export default function SupplierSummaryPage() {
   useEffect(() => { void load() }, [])
 
   const companies = useMemo(() => canonicalSupplierProfiles(rows), [rows])
+  const columnFilter = (field: SupplierFilterField) => ({
+    key: field,
+    filters: supplierFilterOptions(companies, field),
+    filterSearch: true,
+    filterMultiple: true,
+    filteredValue: columnFilters[field] || null,
+    onFilter: (value: unknown, row: SupplierDict) => supplierFilterValue(row, field) === String(value),
+  })
   const filtered = useMemo(() => companies.map(r => ({
     ...r,
     seller: documentSellerForLine(r.keyword || r.full || '', supplierCustomsCompany(r), companies, true),
@@ -61,7 +71,7 @@ export default function SupplierSummaryPage() {
     const payload: SupplierDict = {
       ...values,
       full,
-      keyword: editing?.keyword?.trim() || full,
+      keyword: values.keyword?.trim() || full,
       customs: values.customs?.trim() || full,
     }
     setLoading(true)
@@ -89,15 +99,20 @@ export default function SupplierSummaryPage() {
 
   return <div style={{ padding: 16 }}>
     <Card title={`供应商汇总（${companies.length} 家）`} extra={<Space>
-      <Input.Search allowClear placeholder="搜索供应商、报关公司、合同公司或联系人" style={{ width: 360 }} onChange={e => setSearch(e.target.value)} />
+      <Input.Search allowClear value={search} placeholder="搜索供应商、报关公司、合同公司或联系人" style={{ width: 360 }} onChange={e => setSearch(e.target.value)} />
+      <Button onClick={() => { setSearch(''); setColumnFilters({}) }}>重置筛选</Button>
       <Button onClick={load} loading={loading}>刷新</Button>
       <Button type="primary" disabled={!auth.canEdit('products')} onClick={add}>新增供应商</Button>
     </Space>}>
       <p style={{ color: '#666' }}>供应商显示名称与合同卖方分开显示。报关公司选择华胜益时，合同使用华胜益档案；其他情况使用供应商档案。合同地址及联系方式随卖方档案带出，需修改华胜益资料时请编辑华胜益档案。</p>
       <Table<(typeof filtered)[number]> rowKey={r => r.id || r.keyword} loading={loading} dataSource={filtered} scroll={{ x: 2400 }}
+        onChange={(_pagination, filters) => setColumnFilters({
+          displayName: filters.displayName?.map(String),
+          customsCompany: filters.customsCompany?.map(String),
+        })}
         pagination={{ defaultPageSize: 30 }} columns={[
-          { title: '供应商显示名称', width: 220, fixed: 'left', render: (_: unknown, r) => r.keyword || r.full },
-          { title: '对应报关公司', width: 260, render: (_: unknown, r) => supplierCustomsCompany(r) },
+          { title: '供应商显示名称', width: 220, fixed: 'left', ...columnFilter('displayName'), render: (_: unknown, r) => r.keyword || r.full },
+          { title: '对应报关公司', width: 260, ...columnFilter('customsCompany'), render: (_: unknown, r) => supplierCustomsCompany(r) },
           { title: '合同中文公司名', dataIndex: ['seller', 'full'], width: 260 },
           { title: '合同英文公司名', dataIndex: ['seller', 'nameEn'], width: 260 },
           { title: '合同中文地址', dataIndex: ['seller', 'addressZh'], width: 240, ellipsis: true },
@@ -118,7 +133,9 @@ export default function SupplierSummaryPage() {
     <Modal title={editing ? `编辑供应商：${editing.full || ''}` : '新增供应商'} open={open} onCancel={() => setOpen(false)}
       onOk={save} okText="保存" confirmLoading={loading} destroyOnHidden>
       <Form form={form} layout="vertical">
-        {editing && <Form.Item label="供应商显示名称"><Input value={editing.keyword || editing.full} readOnly /></Form.Item>}
+        <Form.Item name="keyword" label="供应商显示名称" extra="可填写简称，例如“台聚”；留空时使用公司中文名称，不改变合同公司全称。">
+          <Input maxLength={256} placeholder="请输入供应商显示名称" />
+        </Form.Item>
         <p style={{ color: '#666' }}>以下维护本供应商档案。华胜益报关时，合同信息从华胜益档案读取，不会覆盖本供应商资料。</p>
         {profileFields.map(f => <Form.Item key={f.name} name={f.name} label={f.label}
           rules={f.name === 'full' ? [{ required: true, whitespace: true, message: '请填写' }] : f.name === 'email' ? [{ type: 'email', warningOnly: true }] : undefined}>

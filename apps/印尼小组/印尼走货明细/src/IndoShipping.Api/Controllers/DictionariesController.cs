@@ -154,6 +154,30 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
                 keyword,
                 full,
             }, tx);
+        // Preserve references to an alias that is no longer a valid matching name.
+        // References to the unchanged company full name remain valid as-is.
+        var oldAlias = (saved.keyword ?? "").Trim();
+        if (oldAlias.Length > 0 &&
+            !string.Equals(oldAlias, keyword, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(oldAlias, full, StringComparison.OrdinalIgnoreCase))
+        {
+            await c.ExecuteAsync(@"
+                UPDATE materials SET supplier=@keyword WHERE lower(trim(supplier))=lower(@oldAlias);
+                UPDATE shipment_items SET supplier=@keyword WHERE lower(trim(supplier))=lower(@oldAlias);
+                UPDATE purchase_orders SET supplier=@keyword WHERE lower(trim(supplier))=lower(@oldAlias);",
+                new { keyword, oldAlias }, tx);
+        }
+        var oldFull = (saved.full ?? "").Trim();
+        if (oldFull.Length > 0 &&
+            !string.Equals(oldFull, full, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(oldFull, keyword, StringComparison.OrdinalIgnoreCase))
+        {
+            await c.ExecuteAsync(@"
+                UPDATE materials SET supplier=@full WHERE lower(trim(supplier))=lower(@oldFull);
+                UPDATE shipment_items SET supplier=@full WHERE lower(trim(supplier))=lower(@oldFull);
+                UPDATE purchase_orders SET supplier=@full WHERE lower(trim(supplier))=lower(@oldFull);",
+                new { full, oldFull }, tx);
+        }
         tx.Commit();
         return Ok(new { ok = updated > 0 });
     }
@@ -224,12 +248,11 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
 
     // 货号库保存时同步供应商汇总：
     // - 新供应商直接加入；
-    // - 已有供应商的全称不静默覆盖，第一次请求只返回差异，前端确认后再更新。
+    // - 已有供应商不重复新增；档案编辑按 ID 更新，切换供应商不改名。
     // 报关公司由供应商汇总维护；新供应商同步时一并建立默认关联。
     [HttpPost("suppliers/sync")]
     public async Task<IActionResult> SyncSuppliers([FromBody] SupplierSyncBody body)
     {
-        var confirmChanges = body?.confirmChanges == true;
         var entries = (body?.entries ?? new())
             .Select(x => new
             {
@@ -239,7 +262,7 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
                 previousCustoms = (x.previousCustoms ?? "").Trim(),
             })
             .Where(x => x.supplier.Length > 0)
-            .GroupBy(x => $"{x.previousSupplier.ToUpperInvariant()}|{x.supplier.ToUpperInvariant()}")
+            .GroupBy(x => x.supplier.ToUpperInvariant())
             .Select(g => g.First())
             .ToList();
 
@@ -248,6 +271,8 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
         using var tx = c.BeginTransaction();
         try
         {
+            // Serialize registrations so repeated/concurrent saves cannot add the same name twice.
+            await c.ExecuteAsync("SELECT pg_advisory_xact_lock(84720391)", transaction: tx);
             var added = 0;
             var updated = 0;
             var conflicts = new List<object>();
@@ -255,15 +280,8 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
             foreach (var entry in entries)
             {
                 dynamic? saved = null;
-                if (entry.previousSupplier.Length > 0)
-                {
-                    saved = await c.QuerySingleOrDefaultAsync(@"
-                        SELECT id, keyword, full_name AS ""full""
-                        FROM dict_supplier
-                        WHERE lower(trim(keyword))=lower(@name) OR lower(trim(COALESCE(full_name,'')))=lower(@name)
-                        ORDER BY CASE WHEN lower(trim(COALESCE(full_name,'')))=lower(@name) THEN 0 ELSE 1 END, priority, id
-                        LIMIT 1", new { name = entry.previousSupplier }, tx);
-                }
+                // A changed material selection is not a rename of the previous supplier.
+                // Renames/profile edits use PUT suppliers/{id}, preserving identity.
                 if (saved is null)
                 {
                     saved = await c.QuerySingleOrDefaultAsync(@"
@@ -289,28 +307,8 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
                     continue;
                 }
 
-                var savedFull = ((string?)saved.full ?? "").Trim();
-                var supplierChanged = entry.previousSupplier.Length > 0
-                    && !string.Equals(entry.previousSupplier, entry.supplier, StringComparison.OrdinalIgnoreCase);
-                if (!supplierChanged) continue;
-
-                conflicts.Add(new
-                {
-                    keyword = (string?)saved.keyword ?? "",
-                    savedFull,
-                    enteredFull = entry.supplier,
-                });
-                if (!confirmChanges) continue;
-
-                updated += await c.ExecuteAsync(@"
-                    UPDATE dict_supplier
-                    SET full_name=@full
-                    WHERE id=@id",
-                    new
-                    {
-                        id = (int)saved.id,
-                        full = entry.supplier,
-                        }, tx);
+                // Existing profiles are not overwritten by stale material rows.
+                // All editable company fields are synchronized through the ID-based editor.
             }
 
             tx.Commit();

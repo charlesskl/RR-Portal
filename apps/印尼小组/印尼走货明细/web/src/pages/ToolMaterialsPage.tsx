@@ -10,6 +10,8 @@ import { filterToolMaterials, toolFilterFields, toolFilterOptions, type ToolFilt
 import { toolCurrencies } from '../utils/toolPrice'
 import { toolImportDefaults } from '../utils/toolImportDefaults'
 import { HUASHENGYI_FULL_NAME } from '../utils/supplierProfiles'
+import { supplierCustomsCompany } from '../utils/supplierProfiles'
+import SupplierProfileEditor from '../components/SupplierProfileEditor'
 
 type HsPreview = { material: Material; candidates: HsDict[]; choice: number }
 
@@ -78,6 +80,13 @@ export default function ToolMaterialsPage() {
         purchase_currency: m.purchase_currency || null,
         image: m.image === rows.find(r => r.id === m.id)?.image ? undefined : m.image,
       })))
+      try {
+        await api.post('/dictionaries/suppliers/sync', { entries: materials
+          .filter(m => m.supplier?.trim())
+          .map(m => ({ supplier: m.supplier!.trim(), customs: m.customs_company || '' })) })
+      } catch {
+        message.warning('物料已保存，但供应商汇总同步失败；请重试保存')
+      }
       setEditing(null); setPlans(null)
       setHsPreview(null)
       message.success(`已保存 ${materials.length} 条工具及非生产物料`)
@@ -214,6 +223,11 @@ export default function ToolMaterialsPage() {
             ? <Select showSearch allowClear placeholder="选择报关公司" options={companyOptions} popupMatchSelectWidth={false} />
             : <Input maxLength={['related_product_code', 'material_code', 'hs_cn', 'hs_id'].includes(key) ? 64 : 256} />}</Form.Item></Col>)}
           {numberFields.map(([key, label]) => <Col span={8} key={key}><Form.Item name={key} label={label}><InputNumber min={0} max={999999999} style={{ width: '100%' }} /></Form.Item></Col>)}
+          <Col span={24}><SupplierProfileEditor name={draftSupplier || ''} disabled={!editable} onSaved={(profile) => {
+            form.setFieldsValue({ supplier: profile.full || profile.keyword, customs_company: supplierCustomsCompany(profile) })
+            setCompanyNames(current => [...current, profile.full || '', supplierCustomsCompany(profile)])
+            void load()
+          }} /></Col>
         </Row>
       </Form>
     </Modal>

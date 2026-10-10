@@ -29,9 +29,9 @@ export default function CustomersPage() {
     setName(''); message.success('已添加'); load()
   }
 
-  async function deactivate(n: string) { try { await api.delete(`/customers/${encodeURIComponent(n)}`); message.success('已停用'); load() } catch {} }
-  async function restore(n: string) { try { await api.post(`/customers/${encodeURIComponent(n)}/restore`); message.success('已启用'); load() } catch {} }
-  async function hardDel(n: string) { try { await api.delete(`/customers/${encodeURIComponent(n)}?hard=true`); message.success('已彻底删除'); load() } catch {} }
+  async function deactivate(n: string) { try { await api.delete('/customers', { params: { name: n } }); message.success('已停用'); load() } catch {} }
+  async function restore(n: string) { try { await api.post('/customers/restore', null, { params: { name: n } }); message.success('已启用'); load() } catch {} }
+  async function hardDel(n: string) { try { await api.delete('/customers', { params: { name: n, hard: true } }); message.success('已彻底删除'); load() } catch {} }
 
   const filtered = items.filter(i => !filter || i.name.toLowerCase().includes(filter.toLowerCase()))
 

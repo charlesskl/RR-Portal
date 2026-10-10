@@ -10,6 +10,76 @@ namespace IndoShipping.Api.Tests;
 public class SupplierSyncIntegrationTests
 {
     [Fact]
+    public async Task Renaming_unique_full_names_preserves_cross_name_ambiguity()
+    {
+        await using var fixture = await Fixture.Create();
+        if (fixture is null) return;
+        var c = fixture.Connection;
+        var controller = new DictionariesController(fixture.Factory);
+        await controller.CreateSupplier(new() { keyword = "Alpha", full = "Unique Company", customs = "Customs A" });
+        await controller.CreateSupplier(new() { keyword = "Beta", full = "Shared Company", customs = "Customs B" });
+        await controller.CreateSupplier(new() { keyword = "Gamma", full = "Alpha", customs = "Customs C" });
+        var id = await c.ExecuteScalarAsync<int>("SELECT id FROM dict_supplier WHERE keyword='Alpha'");
+        Assert.IsType<ConflictObjectResult>(await controller.CreateSupplier(new() {
+            keyword = " aLpHa ", full = "Another Company" }));
+        await c.ExecuteAsync(@"INSERT INTO materials VALUES (' aLpHa ','Historical Customs'),
+            (' UNIQUE COMPANY ','Customs A'), ('Shared Company','Customs B');
+            INSERT INTO shipment_items SELECT * FROM materials;
+            INSERT INTO purchase_orders SELECT supplier FROM materials;");
+        Assert.IsType<OkObjectResult>(await controller.UpdateSupplier(id, new() {
+            keyword = "New Alpha", full = "Shared Company", customs = "New Customs A" }));
+        foreach (var table in new[] { "materials", "shipment_items" })
+        {
+            Assert.Equal("Historical Customs", await c.ExecuteScalarAsync<string>(
+                $"SELECT customs_company FROM {table} WHERE supplier=' aLpHa '"));
+            Assert.Equal("Customs B", await c.ExecuteScalarAsync<string>(
+                $"SELECT customs_company FROM {table} WHERE supplier='Shared Company'"));
+            Assert.Equal("New Customs A", await c.ExecuteScalarAsync<string>(
+                $"SELECT customs_company FROM {table} WHERE supplier='New Alpha'"));
+        }
+        Assert.Equal(1, await c.ExecuteScalarAsync<int>("SELECT count(*) FROM purchase_orders WHERE supplier='New Alpha'"));
+        Assert.Equal(1, await c.ExecuteScalarAsync<int>("SELECT count(*) FROM purchase_orders WHERE supplier=' aLpHa '"));
+        Assert.Equal(1, await c.ExecuteScalarAsync<int>("SELECT count(*) FROM purchase_orders WHERE supplier='Shared Company'"));
+        Assert.Equal("Alpha", await c.ExecuteScalarAsync<string>("SELECT full_name FROM dict_supplier WHERE keyword='Gamma'"));
+    }
+
+    [Fact]
+    public async Task Shared_company_names_are_allowed_but_display_names_remain_unique()
+    {
+        await using var fixture = await Fixture.Create();
+        if (fixture is null) return;
+        var c = fixture.Connection;
+        var controller = new DictionariesController(fixture.Factory);
+        Assert.IsType<OkObjectResult>(await controller.CreateSupplier(new() {
+            keyword = "供应商A", full = "共同公司", customs = "报关A" }));
+        Assert.IsType<OkObjectResult>(await controller.CreateSupplier(new() {
+            keyword = "供应商B", full = "共同公司", customs = "报关B" }));
+        Assert.IsType<OkObjectResult>(await controller.CreateSupplier(new() {
+            keyword = "供应商C", full = "原公司", customs = "报关C" }));
+        var id = await c.ExecuteScalarAsync<int>("SELECT id FROM dict_supplier WHERE keyword='供应商C'");
+        Assert.IsType<OkObjectResult>(await controller.UpdateSupplier(id, new() {
+            keyword = "供应商C", full = "共同公司", customs = "报关C" }));
+        Assert.Equal(3, await c.ExecuteScalarAsync<int>("SELECT count(*) FROM dict_supplier WHERE full_name='共同公司'"));
+        Assert.IsType<ConflictObjectResult>(await controller.CreateSupplier(new() {
+            keyword = " 供应商A ", full = "另一公司" }));
+        Assert.IsType<ConflictObjectResult>(await controller.UpdateSupplier(id, new() {
+            keyword = "供应商A", full = "另一公司" }));
+        await c.ExecuteAsync(@"INSERT INTO materials VALUES ('供应商A','报关A'), ('供应商C','报关C'), ('共同公司','历史报关');
+            INSERT INTO shipment_items SELECT * FROM materials;
+            INSERT INTO purchase_orders SELECT supplier FROM materials;");
+        Assert.IsType<OkObjectResult>(await controller.UpdateSupplier(id, new() {
+            keyword = "新供应商C", full = "新公司C", customs = "新报关C" }));
+        foreach (var table in new[] { "materials", "shipment_items" })
+        {
+            Assert.Equal("报关A", await c.ExecuteScalarAsync<string>($"SELECT customs_company FROM {table} WHERE supplier='供应商A'"));
+            Assert.Equal("历史报关", await c.ExecuteScalarAsync<string>($"SELECT customs_company FROM {table} WHERE supplier='共同公司'"));
+            Assert.Equal("新报关C", await c.ExecuteScalarAsync<string>($"SELECT customs_company FROM {table} WHERE supplier='新供应商C'"));
+        }
+        Assert.Equal(1, await c.ExecuteScalarAsync<int>("SELECT count(*) FROM purchase_orders WHERE supplier='共同公司'"));
+        Assert.Equal("共同公司", await c.ExecuteScalarAsync<string>("SELECT full_name FROM dict_supplier WHERE keyword='供应商A'"));
+    }
+
+    [Fact]
     public async Task Register_once_switch_without_renaming_and_edit_by_id()
     {
         await using var fixture = await Fixture.Create();

@@ -103,8 +103,8 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
         using var tx = c.BeginTransaction();
         // Share the registration lock before checking names or reading the old identity.
         await c.ExecuteAsync("SELECT pg_advisory_xact_lock(84720391)", transaction: tx);
-        if (await SupplierNameExists(c, tx, keyword, full))
-            return Conflict(new { error = "供应商简称或公司中文名称已存在" });
+        if (await SupplierNameExists(c, tx, keyword))
+            return Conflict(new { error = "供应商显示名称已存在，请使用不同的显示名称；公司中文名称可以相同" });
         var id = await c.ExecuteScalarAsync<int>(@"
             INSERT INTO dict_supplier(keyword, full_name, customs_company, name_en, address_zh,
                 address_en, phone, email, contact, priority)
@@ -133,8 +133,16 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
             SELECT keyword, full_name AS full, customs_company AS customs
             FROM dict_supplier WHERE id=@id", new { id }, tx);
         if (saved is null) return NotFound();
-        if (await SupplierNameExists(c, tx, keyword, full, id))
-            return Conflict(new { error = "供应商简称或公司中文名称已存在" });
+        if (await SupplierNameExists(c, tx, keyword, id))
+            return Conflict(new { error = "供应商显示名称已存在，请使用不同的显示名称；公司中文名称可以相同" });
+        // Shared company names do not identify an archive. Only synchronize references
+        // that unambiguously belonged to this archive before editing it.
+        var ownedNames = (await c.QueryAsync<string>(@"
+            SELECT DISTINCT n FROM unnest(@names::text[]) AS names(n)
+            WHERE n <> '' AND NOT EXISTS (
+                SELECT 1 FROM dict_supplier other WHERE other.id <> @id
+                AND (lower(trim(other.keyword))=lower(n) OR lower(trim(other.full_name))=lower(n)))",
+            new { id, names = new[] { (saved.keyword ?? "").Trim(), (saved.full ?? "").Trim() } }, tx)).ToArray();
         var updated = await c.ExecuteAsync(@"
             UPDATE dict_supplier SET keyword=@keyword, full_name=@full,
                 name_en=@nameEn, address_zh=@addressZh, address_en=@addressEn, phone=@phone,
@@ -145,23 +153,18 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
                 email = (item.email ?? "").Trim(), contact = (item.contact ?? "").Trim() }, tx);
         await c.ExecuteAsync(@"
             UPDATE materials SET customs_company=@customs
-            WHERE lower(trim(COALESCE(supplier, ''))) IN
-                (lower(@oldKeyword), lower(@oldFull), lower(@keyword), lower(@full));
+            WHERE lower(trim(COALESCE(supplier, ''))) = ANY(@ownedNames);
             UPDATE shipment_items SET customs_company=@customs
-            WHERE lower(trim(COALESCE(supplier, ''))) IN
-                (lower(@oldKeyword), lower(@oldFull), lower(@keyword), lower(@full));",
+            WHERE lower(trim(COALESCE(supplier, ''))) = ANY(@ownedNames);",
             new
             {
                 customs,
-                oldKeyword = (saved.keyword ?? "").Trim(),
-                oldFull = (saved.full ?? "").Trim(),
-                keyword,
-                full,
+                ownedNames = ownedNames.Select(n => n.ToLowerInvariant()).ToArray(),
             }, tx);
         // Preserve references to an alias that is no longer a valid matching name.
         // References to the unchanged company full name remain valid as-is.
         var oldAlias = (saved.keyword ?? "").Trim();
-        if (oldAlias.Length > 0 &&
+        if (ownedNames.Contains(oldAlias) &&
             !string.Equals(oldAlias, keyword, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(oldAlias, full, StringComparison.OrdinalIgnoreCase))
         {
@@ -172,15 +175,15 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
                 new { keyword, oldAlias }, tx);
         }
         var oldFull = (saved.full ?? "").Trim();
-        if (oldFull.Length > 0 &&
+        if (ownedNames.Contains(oldFull) &&
             !string.Equals(oldFull, full, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(oldFull, keyword, StringComparison.OrdinalIgnoreCase))
         {
             await c.ExecuteAsync(@"
-                UPDATE materials SET supplier=@full WHERE lower(trim(supplier))=lower(@oldFull);
-                UPDATE shipment_items SET supplier=@full WHERE lower(trim(supplier))=lower(@oldFull);
-                UPDATE purchase_orders SET supplier=@full WHERE lower(trim(supplier))=lower(@oldFull);",
-                new { full, oldFull }, tx);
+                UPDATE materials SET supplier=@keyword WHERE lower(trim(supplier))=lower(@oldFull);
+                UPDATE shipment_items SET supplier=@keyword WHERE lower(trim(supplier))=lower(@oldFull);
+                UPDATE purchase_orders SET supplier=@keyword WHERE lower(trim(supplier))=lower(@oldFull);",
+                new { keyword, oldFull }, tx);
         }
         tx.Commit();
         return Ok(new { ok = updated > 0 });
@@ -222,12 +225,11 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
     };
 
     private static async Task<bool> SupplierNameExists(System.Data.IDbConnection c,
-        System.Data.IDbTransaction tx, string keyword, string full, int? excludeId = null) =>
+        System.Data.IDbTransaction tx, string keyword, int? excludeId = null) =>
         await c.ExecuteScalarAsync<bool>(@"
             SELECT EXISTS (SELECT 1 FROM dict_supplier WHERE (@excludeId IS NULL OR id <> @excludeId)
-                AND (lower(trim(keyword)) IN (lower(@keyword), lower(@full))
-                  OR lower(trim(full_name)) IN (lower(@keyword), lower(@full))))",
-            new { keyword, full, excludeId }, tx);
+                AND lower(trim(keyword)) = lower(@keyword))",
+            new { keyword, excludeId }, tx);
 
     // 将 HS 字典回填到物料主档。走货明细通过 material_id 读取物料 HS，
     // 因而已有走货资料重新打开后也会显示最新编码。仅补空白值，避免覆盖人工维护内容。

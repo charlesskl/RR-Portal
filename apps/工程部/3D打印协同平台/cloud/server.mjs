@@ -272,7 +272,7 @@ const server = http.createServer(async (req,res) => {
       if(u.role!=='admin') fail(403,'只有管理员可更新订单进度');
       const d=await body(req), o=getOrder(u,match[1]), p=JSON.parse(o.payload); const status=field(d,'status',true);
       if(status==='已完成'&&db.prepare("SELECT id FROM production_jobs WHERE order_id=? AND synced=0").get(o.id))fail(409,'生产记录尚未同步，请先处理入账');
-      if(status!==o.status && db.prepare("SELECT id FROM production_jobs WHERE order_id=? AND status NOT IN ('待交付','已取消')").get(o.id)) fail(409,'关联生产任务请在生产协同页处理状态');
+      if(status!==o.status && db.prepare("SELECT id FROM production_jobs WHERE order_id=? AND status NOT IN ('已取消')").get(o.id)) fail(409,'关联生产任务请在生产协同页处理状态');
       if(status!==o.status && !transitions[o.status].includes(status)) fail(400,'不能跳过或回退处理流程');
       p.replyDate=date(field(d,'replyDate')); p.follower=field(d,'follower');
       if(!['待接单','已取消'].includes(status) && (!p.replyDate || !p.follower)) fail(400,'接单后需填写复交板时间和 3D 跟进人');

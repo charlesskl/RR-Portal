@@ -13,7 +13,6 @@ exports.apply=function(store,data){
   if(item.qualitySettled||!item.inventoryReview)continue;
   const start=Date.parse(item.printStartTime);
   if(!Number.isFinite(start)||start<config.since){item.inventoryReason='历史记录，请核对原库存，未自动补扣';continue;}
-  if(item.cloudJobId){item.inventoryReason='关联订单，等待质检统一扣料';continue;}
   const grams=Number(item.weight)*Number(item.qty),stock=data.inventory?.[item.material];
   if(!item.autoRecord||!item.material||!Number.isFinite(grams)||Number(item.weight)<=0||Number(item.qty)<=0){item.inventoryReason='材料、料重或数量不完整，请核对';continue;}
   if(!stock||!Number.isFinite(stock.stockG)||stock.stockG<grams){item.inventoryReason='材料库存不足或不存在，请核实入库';continue;}

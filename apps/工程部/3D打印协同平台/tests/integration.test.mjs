@@ -60,11 +60,11 @@ for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,b
   assert.equal((await emit(2,'RUNNING',{machine:'2'})).status,403);
   assert.equal((await emit(3,'RUNNING',{observedAt:new Date(Date.now()-300000).toISOString()})).status,200);assert.equal((await overview()).jobs[0].status,'待打印','stale state cannot advance');
   assert.equal((await emit(4,'RUNNING')).status,200);assert.equal((await overview()).jobs[0].status,'打印中');
-  const eventId=randomUUID();await emit(5,'FINISH',{id:eventId});assert.equal((await emit(5,'FINISH',{id:eventId})).body.duplicate,true);assert.equal((await overview()).jobs[0].status,'待质检');
+  const eventId=randomUUID();await emit(5,'FINISH',{id:eventId});assert.equal((await emit(5,'FINISH',{id:eventId})).body.duplicate,true);assert.equal((await overview()).jobs[0].status,'待交付');
   assert.equal((await request('/api/orders',{auth:member})).body.find(o=>o.id===orderId).status,'待交付','confirmed completion automatically advances the order before quality');
-  assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'deliver',notes:'尚未质检'}})).status,409);
+
   assert.equal((await request('/api/orders/'+orderId,{auth:admin,method:'PATCH',data:{status:'已完成',follower:'测试',replyDate:'2026-11-30'}})).status,409,'order workbench cannot bypass quality');
-  await emit(2,'FAILED');assert.equal((await overview()).jobs[0].status,'待质检');
+  await emit(2,'FAILED');assert.equal((await overview()).jobs[0].status,'待交付');
   await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'retry'}});await emit(8,'FINISH');assert.equal((await overview()).jobs[0].status,'待打印','old attempt ignored');
   assert.equal((await request('/api/orders',{auth:member})).body.find(o=>o.id===orderId).status,'待排产','retry reopens scheduling');
   await emit(9,'RUNNING',{attempt:2});
@@ -75,7 +75,7 @@ for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,b
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:confirm})).status,200);
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:confirm})).status,409);
   assert.equal((await request('/api/orders',{auth:member})).body.find(o=>o.id===orderId).status,'待交付');
-  await emit(10,'FINISH',{attempt:2});assert.equal((await overview()).jobs[0].status,'待质检');
+  await emit(10,'FINISH',{attempt:2});assert.equal((await overview()).jobs[0].status,'待交付');
   assert.equal((await request('/api/platform/jobs/'+id,{auth:member,method:'PATCH',data:{action:'quality'}})).status,403);
   const cat=(await request('/api/platform/catalog',{auth:admin})).body;const material=cat.materials.find(m=>m.stockG>=24);assert.ok(material);
   const sourceBatch={records:[{sourceId:'local-print-1',attempt:2,sourceMachine:'1',machine:'1',date:'2026-10-09',jobId:id,record:{productName:'测试产品',autoRecord:true,status:'running',printStartTime:new Date().toISOString(),qty:1,time:0}}]};
@@ -161,17 +161,19 @@ for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,b
   const concurrent=await Promise.all([request(manualRoute,{auth:admin,method:'PATCH',data:manual}),request(manualRoute,{auth:admin,method:'PATCH',data:manual})]);
   assert.deepEqual(concurrent.map(r=>r.status).sort(),[200,409]);
   const manuallyFinished=(await overview()).jobs.find(j=>j.id===extraJob.body.id);
-  assert.equal(manuallyFinished.status,'待质检');assert.equal(manuallyFinished.orderStatus,'待交付');
+  assert.equal(manuallyFinished.status,'待交付');assert.equal(manuallyFinished.orderStatus,'待交付');
   assert.equal(manuallyFinished.sequence,0);assert.equal(manuallyFinished.requestedState,'IDLE');assert.equal(manuallyFinished.quality,undefined);
   assert.equal(manuallyFinished.events.filter(e=>e.text.includes('手动确认打印完成')).length,1);
   const confirmingAdmin=(await request('/api/me',{auth:admin})).body.user.name;
   assert.ok(manuallyFinished.events.some(e=>e.text.includes('管理员 '+confirmingAdmin)&&e.text.includes(manual.notes)));
   const afterManual=(await request('/api/production/data',{auth:admin})).body;
   assert.deepEqual(afterManual.inventory,beforeManual.inventory);assert.deepEqual(afterManual.records,beforeManual.records);
-  assert.equal((await request(manualRoute,{auth:admin,method:'PATCH',data:{action:'deliver',notes:'尚未质检'}})).status,409);
+
   assert.equal((await request('/api/orders/'+extraOrder.body.id,{auth:admin,method:'PATCH',data:{status:'已完成',follower:'测试',replyDate:'2026-11-30'}})).status,409);
   assert.equal((await request('/api/orders/'+extraOrder.body.id,{auth:admin,method:'PATCH',data:{status:'待交付',follower:'新的跟进人',replyDate:'2026-12-02'}})).status,200,'linked order metadata remains editable');
   assert.equal((await request('/api/orders',{auth:admin})).body.find(o=>o.id===orderId).status,'已完成','same-name products do not link unrelated orders');
+  assert.equal((await request(manualRoute,{auth:admin,method:'PATCH',data:{action:'deliver',notes:'无需质检直接交付，现场签收'}})).status,200);
+  assert.equal((await request('/api/orders',{auth:admin})).body.find(o=>o.id===extraOrder.body.id).status,'已完成');
   // A persisted outbox created while offline must replay and be cleared by the real agent process.
   const agentDir=path.join(dir,'agent');await mkdir(agentDir);const q=new DatabaseSync(path.join(agentDir,'outbox.sqlite'));q.exec('CREATE TABLE outbox(sequence INTEGER PRIMARY KEY AUTOINCREMENT,payload TEXT NOT NULL)');const replay=randomUUID();q.prepare('INSERT INTO outbox(payload) VALUES (?)').run(JSON.stringify({id:replay,observedAt:new Date().toISOString()}));q.close();
   const conf=path.join(dir,'collector-test.json');await writeFile(conf,JSON.stringify({mode:'simulation',cloudUrl:base,token}));

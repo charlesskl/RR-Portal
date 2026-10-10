@@ -197,10 +197,18 @@ const server = http.createServer((req, res) => {
         const q=job.completion;
         const attemptRecords=Object.values(data.records||{}).flatMap(day=>day.items||[]).filter(i=>i.cloudJobId===job.cloudJobId&&(i.cloudAttempt||1)===(job.attempt||1)).sort((a,b)=>(a.printStartTime||'').localeCompare(b.printStartTime||''));
         // An already-posted record wins over a newer provisional batch arriving late.
-        const existingRecord=attemptRecords.find(i=>!i.inventoryReview)||attemptRecords.at(-1);
-        if(!existingRecord||existingRecord.inventoryReview||(!existingRecord.qualitySettled&&existingRecord.inventoryDeduction)){
-          const paid=existingRecord?.inventoryDeduction;
-          if(paid){data.inventory[paid.material].stockG+=paid.grams;data.inventory[paid.material]._updatedAt=Date.now();}
+        const settledRecord=attemptRecords.find(i=>!i.inventoryReview&&!i.inventoryDeduction);
+        const existingRecord=settledRecord||attemptRecords.find(i=>!i.inventoryReview)||attemptRecords.at(-1);
+        // Reconcile every prepaid batch, including batches linked after quality settled.
+        const prepaidRecords=attemptRecords.filter(i=>!i.qualitySettled&&i.inventoryDeduction);
+        for(const item of prepaidRecords){
+          const paid=item.inventoryDeduction;
+          data.inventory||={};data.inventory[paid.material]||={stockG:0,minStockG:3000};
+          data.inventory[paid.material].stockG+=paid.grams;
+          data.inventory[paid.material]._updatedAt=Date.now();data._snapshotUpdatedAt=Date.now();
+          item.qualitySettled=true;item.inventoryReview=false;item.inventoryDeduction=undefined;item.inventoryReason='';item._updatedAt=Date.now();
+        }
+        if(!settledRecord){
           deductInventory(data,q.material,q.totalWeight);
           data.records||={};data.records[q.date]||={off:false,items:[]};
           if(existingRecord)for(const day of Object.values(data.records))day.items=day.items.filter(i=>i!==existingRecord);

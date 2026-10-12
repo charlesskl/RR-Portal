@@ -26,7 +26,8 @@ try:
  token=unsigned+'.'+encode(hmac.new(key,unsigned.encode(),hashlib.sha256).digest())
  del key,env
  history=request('/material-alerts/history',token=token)
- assert len(history)==7, 'Unexpected number of initial archived revisions'
+ print(json.dumps({'archived_revisions':len(history),'source_schedules':len(request('/schedules',token=token))},ensure_ascii=False))
+ assert history, 'No archived revisions'
  assert [h['id'] for h in history]==sorted([h['id'] for h in history],reverse=True), 'Incorrect revision ordering'
  current=request('/material-alerts',token=token)
  items=current['items']

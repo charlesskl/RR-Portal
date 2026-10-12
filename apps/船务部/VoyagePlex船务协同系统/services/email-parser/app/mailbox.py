@@ -10,6 +10,25 @@ LOOKBACK_DAYS = 7
 INTERNAL_DATE = re.compile(rb'INTERNALDATE "([^"]+)"')
 
 
+def identify_client(client) -> None:
+    """网易等服务器要求在打开收件箱前声明客户端身份。"""
+    if b"ID" not in getattr(client, "capabilities", ()) and "ID" not in getattr(client, "capabilities", ()):
+        return
+    # imaplib has no public ID method; register the RFC 2971 command before use.
+    imaplib.Commands.setdefault("ID", ("AUTH",))
+    status, _ = client._simple_command("ID", '("name" "VoyagePlex" "version" "1.0" "vendor" "VoyagePlex")')
+    if status != "OK":
+        raise imaplib.IMAP4.error("邮箱服务器拒绝客户端身份声明")
+
+
+def folder_failure(parts) -> str:
+    """Only inspect server responses; never echo credentials or raw login traces."""
+    response = str(parts).lower()
+    if "unsafe" in response or "security" in response:
+        return "邮箱服务器因安全限制拒绝打开收件箱，请检查第三方客户端授权及客户端身份声明"
+    return "已登录，但无法打开收件文件夹，请检查文件夹名称和权限"
+
+
 def received_at_from_fetch(parts: list) -> str:
     header = next((part[0] for part in parts if isinstance(part, tuple)), b"")
     match = INTERNAL_DATE.search(header)
@@ -34,9 +53,10 @@ def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: s
     client = imaplib.IMAP4_SSL(host, 993, timeout=30)
     try:
         client.login(address, secret)
+        identify_client(client)
         status, _ = client.select(folder, readonly=True)
         if status != "OK":
-            raise RuntimeError("无法读取指定邮箱文件夹")
+            raise RuntimeError(folder_failure(_))
         status, response = client.response("UIDVALIDITY")
         validity = int(response[0]) if status == "UIDVALIDITY" and response and response[0] else 0
         # IMAP SINCE uses server internal dates; search one day earlier and let
@@ -89,11 +109,15 @@ def test_mailbox_connection(credentials: dict) -> dict:
         except imaplib.IMAP4.error:
             return {"connected": False, "message": "邮箱登录失败，请检查授权码，并确认邮箱已开启IMAP"}
         try:
-            status, _ = client.select(credentials.get("folder", "INBOX"), readonly=True)
-            if status != "OK":
-                return {"connected": False, "message": "已登录，但无法打开收件文件夹，请检查文件夹名称和权限"}
+            identify_client(client)
         except imaplib.IMAP4.error:
-            return {"connected": False, "message": "已登录，但无法打开收件文件夹，请检查文件夹名称和权限"}
+            return {"connected": False, "message": "邮箱服务器拒绝客户端身份声明，请检查第三方客户端授权"}
+        try:
+            status, parts = client.select(credentials.get("folder", "INBOX"), readonly=True)
+            if status != "OK":
+                return {"connected": False, "message": folder_failure(parts)}
+        except imaplib.IMAP4.error as error:
+            return {"connected": False, "message": folder_failure(error)}
         return {"connected": True, "message": "测试连接成功，可登录邮箱并读取指定文件夹。请保存配置。"}
     except (OSError, ValueError):
         return {"connected": False, "message": "连接测试失败，请检查服务器地址和网络"}

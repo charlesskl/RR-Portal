@@ -76,6 +76,8 @@ def configured_env():
 def install_configuration():
  incoming=json.loads(base64.b64decode(os.environ['MAILBOX_CONFIG_B64'],validate=True))
  assert_safe(isinstance(incoming,list) and len(incoming)==4,'CONFIG_COUNT_INVALID')
+ prior=configured_env()
+ assert_safe(isinstance(prior,list) and all(e.get('username') in {e['username'] for e in incoming} for e in prior),'OTHER_MAILBOX_CONFIG_PRESENT')
  current=candidates();resolved=[]
  for name,address in zip(NAMES,ADDRESSES):
   matches=current[name];assert_safe(len(matches)==1,'AMBIGUOUS_ACCOUNT:'+name)
@@ -160,11 +162,17 @@ def verify_configuration():
    if connected:
     imported=0;rounds=0;caught_up=False;sync_error=None
     for n in range(20):
+     with connect() as cursor_db:
+      previous_cursor=cursor_db.execute('SELECT LastUid FROM MailSyncStates WHERE Id=?',(1000+u['Id'],)).fetchone()
+     previous_uid=previous_cursor[0] if previous_cursor else 0
      code,sync=request(base,'/api/imports/email/mailbox/sync',tokens[admin['Id']],owner=u['Id'],method='POST',body={});rounds+=1
      if code!=200 or sync.get('configured') is not True or sync.get('error') or sync.get('waitingUntil'):
       sync_error={'status':code,'configured':sync.get('configured'),'waitingUntil':sync.get('waitingUntil'),'message':'同步未完成，请检查服务状态及现有起始日期'};break
      imported+=sync.get('imported',0)
-     if sync.get('imported',0)==0:caught_up=True;break
+     with connect() as cursor_db:
+      current_cursor=cursor_db.execute('SELECT LastUid FROM MailSyncStates WHERE Id=?',(1000+u['Id'],)).fetchone()
+     current_uid=current_cursor[0] if current_cursor else 0
+     if sync.get('imported',0)==0 and current_uid==previous_uid:caught_up=True;break
     result.update({'syncImportedDuringValidation':imported,'syncRounds':rounds,'caughtUp':caught_up,'syncError':sync_error})
    print(json.dumps({'mailboxResult':result},ensure_ascii=False),flush=True);results.append(result)
   with connect() as c:
@@ -201,9 +209,9 @@ def verify_configuration():
     permissions.append({'username':u['Username'],'role':u['Role'],'existingAllMailboxScope':True,'ownerSelection':True})
   assert_safe(len({d['cursor']['Id'] for d in details if d['cursor']})==len([d for d in details if d['cursor']]),'MAILBOX_CURSORS_NOT_INDEPENDENT')
   for d in details:d.pop('oneSampleId',None)
-  print(json.dumps({'mailboxStates':details,'permissions':permissions,'temporarySessionsCleanedOnExit':True},ensure_ascii=False),flush=True)
+  print(json.dumps({'mailboxStates':details,'permissions':permissions},ensure_ascii=False),flush=True)
  verified=all(r['connected'] and r.get('caughtUp') and not r.get('syncError') for r in results)
- print(json.dumps({'verified':verified,'mailboxesTested':len(results)},ensure_ascii=False),flush=True)
+ print(json.dumps({'verified':verified,'mailboxesTested':len(results),'temporarySessionsCleaned':True},ensure_ascii=False),flush=True)
  if not verified:raise RuntimeError('MAILBOX_CONNECTION_OR_SYNC_INCOMPLETE')
 
 try:

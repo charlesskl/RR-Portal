@@ -21,7 +21,7 @@ on:
       printlink_data_ops:
         description: "PrintLink private backup / safe enable / read-only status and runtime diagnostics"
         type: choice
-        options: [none, backup, verify, inspect, status, enable, runtime, sizes]
+        options: [none, backup, verify, inspect, status, enable, runtime, sizes, preservation]
         default: none
         required: false
       tomy_smoke:
@@ -74,14 +74,14 @@ jobs:
           script: |
             set -euo pipefail
             if [[ "${PRINTLINK_DATA_OPS:-none}" != none ]]; then
-              [[ "$OPS_SERVICE" == printlink && "$PRINTLINK_DATA_OPS" =~ ^(backup|verify|inspect|status|enable|runtime|sizes)$ && "$OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+              [[ "$OPS_SERVICE" == printlink && "$PRINTLINK_DATA_OPS" =~ ^(backup|verify|inspect|status|enable|runtime|sizes|preservation)$ && "$OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
               cd /opt/rr-portal
               git fetch origin ops/printlink-pre-909-20261012
               umask 077
               temporary=$(mktemp -d /tmp/printlink-909.XXXXXX)
               trap 'rm -rf "$temporary"' EXIT
               git show "$OPS_REF:deploy/ops/printlink-909.py" > "$temporary/run.py"
-              if [[ "$PRINTLINK_DATA_OPS" == runtime || "$PRINTLINK_DATA_OPS" == sizes ]]; then
+              if [[ "$PRINTLINK_DATA_OPS" == runtime || "$PRINTLINK_DATA_OPS" == sizes || "$PRINTLINK_DATA_OPS" == preservation ]]; then
                 python3 "$temporary/run.py" "$PRINTLINK_DATA_OPS"
               else
                 git show "$OPS_REF:deploy/ops/printlink-909.mjs" > "$temporary/inspect.mjs"

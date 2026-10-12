@@ -7,7 +7,7 @@ CONTAINER = 'rr-portal-printlink-1'
 COMPOSE = ['docker', 'compose', '-f', 'docker-compose.cloud.yml', '--env-file', '.env.cloud.production']
 APP = REPO / 'apps/工程部/3D打印协同平台'
 SOURCE_FILES = ['start.mjs', 'cloud/server.mjs', 'cloud/integration.mjs', 'production/server.js',
-                'production/business-sync.cjs', 'shared/business-sync.cjs',
+                'production/business-sync.cjs', 'production/data-images.cjs', 'shared/business-sync.cjs',
                 'cloud/public/business-sync.html', 'cloud/public/business-sync.js']
 
 
@@ -367,6 +367,39 @@ def enable(source):
 
 
 def main():
+    if len(sys.argv) == 2 and sys.argv[1] == 'preservation':
+        directory, _ = latest_backup()
+        with sqlite3.connect((directory / 'production.sqlite').as_uri() + '?mode=ro', uri=True) as db:
+            def digest(query):
+                value = db.execute(query).fetchone()[0]
+                return hashlib.sha256(value.encode()).hexdigest()
+            expected = {
+                'snapshot': digest('SELECT value FROM snapshot WHERE id=1'),
+                'syncState': digest('SELECT value FROM business_sync_state WHERE id=1'),
+                'inventory': digest("SELECT json_extract(value,'$.inventory') FROM snapshot WHERE id=1"),
+                'syncBackups': db.execute('SELECT count(*) FROM business_sync_backups').fetchone()[0],
+            }
+        source = """
+import {DatabaseSync} from 'node:sqlite';
+import {createHash} from 'node:crypto';
+try {
+ const expected=JSON.parse(process.env.PRINTLINK_EXPECTED_DATA_HASHES);
+ const db=new DatabaseSync('/app/runtime/production.sqlite',{readOnly:true});
+ db.exec('BEGIN');
+ const digest=query=>createHash('sha256').update(db.prepare(query).get().value).digest('hex');
+ const checks={snapshotPreserved:digest('SELECT value FROM snapshot WHERE id=1')===expected.snapshot,
+  syncStatePreserved:digest('SELECT value FROM business_sync_state WHERE id=1')===expected.syncState,
+  inventoryPreserved:digest("SELECT json_extract(value,'$.inventory') AS value FROM snapshot WHERE id=1")===expected.inventory,
+  syncBackupRowsPreserved:db.prepare('SELECT count(*) AS n FROM business_sync_backups').get().n===expected.syncBackups};
+ db.exec('COMMIT');db.close();
+ console.log(JSON.stringify({...checks,businessWritesPerformed:false}));
+ if(Object.values(checks).some(value=>!value))process.exitCode=1;
+} catch {console.log(JSON.stringify({failed:true,safeError:'DATA_PRESERVATION_CHECK_FAILED'}));process.exitCode=1;}
+"""
+        print(json.dumps(json.loads(command(['docker', 'exec', '-i', '-e',
+            'PRINTLINK_EXPECTED_DATA_HASHES=' + json.dumps(expected), CONTAINER,
+            'node', '--input-type=module'], source))))
+        return
     if len(sys.argv) == 2 and sys.argv[1] == 'sizes':
         source = """
 import {DatabaseSync} from 'node:sqlite';

@@ -33,6 +33,17 @@ try:
  items=current['items']
  print(json.dumps({'current_items':len(items),'covered':sum(i['status']=='covered' for i in items),'fully_manual':sum(i['manual_completed'] for i in items),'pending':sum(i['shortage_qty']>0 for i in items)},ensure_ascii=False))
  assert items, 'No cumulative tracking items'
+ cleared_dates=0;checked_pending_dates=0
+ for i in items:
+  if i['status']=='covered':
+   assert not i['accepted_date'] and i['due_date'] is None and i['days_remaining'] is None, 'Completed material still contributes a deadline'
+   cleared_dates+=1
+  else:
+   pending=[d for d in i['order_details'] if max(d['receipt_shortage_qty'],d['outbound_shortage_qty'])>0]
+   if pending:
+    assert i['accepted_date']==min(d['accepted_date'] for d in pending), 'Completed order affects outstanding accepted date'
+    checked_pending_dates+=1
+ print(json.dumps({'completed_dates_cleared':cleared_dates,'pending_accepted_dates_verified':checked_pending_dates},ensure_ascii=False))
  metadata_query="SELECT jsonb_agg(jsonb_build_object('id',id,'acknowledged',acknowledged)) FROM indo_shipping.material_tracking_history"
  metadata=json.loads(subprocess.check_output(compose+['exec','-T','db','sh','-c','exec psql -X -At -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-rrportal}" -d "${POSTGRES_DB:-rrportal}" -c "$1"','psql',metadata_query],text=True))
  acknowledged_ids={r['id'] for r in metadata if r['acknowledged']}

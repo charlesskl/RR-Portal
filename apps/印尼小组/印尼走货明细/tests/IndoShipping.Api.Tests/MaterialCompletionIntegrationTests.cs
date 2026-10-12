@@ -60,12 +60,7 @@ public class MaterialCompletionIntegrationTests
         await using var f = await Fixture.Create(); if (f is null) return;
         await f.Acknowledge();
         var oldVersion = await f.Db.ExecuteScalarAsync<long>("SELECT min(id) FROM material_tracking_history");
-        Assert.IsType<OkObjectResult>(await new SchedulesController(new SqlConnectionFactory(
-            f.Db.ConnectionString)).Create(new SchedulesController.CreateBody {
-                week_label = "10-01", upload_date = new DateTime(2026, 9, 30),
-                raw_rows = JsonSerializer.Deserialize<JsonElement>(
-                    """[{"code":"A","orderNo":"PO1","qty":15}]""")
-            }));
+        await f.Upload("10-01", """[{"code":"A","orderNo":"PO1","qty":15}]""", new DateTime(2026, 9, 30));
         var current = Purchase(await f.Read());
         Assert.Equal(30, current.GetProperty("required_qty").GetDecimal());
         Assert.Equal(10, current.GetProperty("shortage_qty").GetDecimal());
@@ -217,9 +212,9 @@ public class MaterialCompletionIntegrationTests
                 (SELECT jsonb_object_agg(id::text,md5(raw_rows::text))::text FROM schedules))
             ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value
             """);
-        public async Task Upload(string label, string rows) => Assert.IsType<OkObjectResult>(
+        public async Task Upload(string label, string rows, DateTime? uploadDate = null) => Assert.IsType<OkObjectResult>(
             await new SchedulesController(new SqlConnectionFactory(connection)).Create(new SchedulesController.CreateBody {
-                week_label = label, upload_date = new DateTime(2026, 10, 10), raw_rows = JsonSerializer.Deserialize<JsonElement>(rows)
+                week_label = label, upload_date = uploadDate ?? new DateTime(2026, 10, 10), raw_rows = JsonSerializer.Deserialize<JsonElement>(rows)
             }));
         public static async Task<Fixture?> Create()
         {

@@ -186,7 +186,7 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
     {
         using var c = factory.Create();
         var schedule = await c.QueryFirstOrDefaultAsync<ScheduleRow>(@"
-            SELECT id, week_label, upload_date, raw_rows
+            SELECT id, week_label, upload_date, raw_rows, md5(raw_rows::text) AS rows_hash
             FROM schedules
             ORDER BY upload_date DESC NULLS LAST, id DESC
             LIMIT 1");
@@ -416,6 +416,21 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
             });
         }
 
+        // Completion is a snapshot of an existing schedule, never fabricated stock movements.
+        var completionRaw = await c.ExecuteScalarAsync<string?>(
+            "SELECT value FROM settings WHERE key='material_tracking_completed_schedules'");
+        if (MatchesCompletionSnapshot(completionRaw, schedule.id, schedule.rows_hash))
+        {
+            foreach (var item in items)
+            {
+                item.manual_completed = true;
+                item.status = "covered";
+                item.workflow_status = "已送完(手动)";
+                item.purchase_shortage_qty = item.receipt_shortage_qty = item.outbound_shortage_qty = item.shortage_qty = 0;
+                foreach (var detail in item.order_details) detail.status = "已送完(手动)";
+            }
+        }
+
         var statusOrder = new Dictionary<string, int>
         {
             ["critical"] = 0, ["warning"] = 1, ["normal"] = 2,
@@ -434,6 +449,20 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
             order_count = scheduleOrderNos.Count,
             items = items,
         };
+    }
+
+    private static bool MatchesCompletionSnapshot(string? raw, int scheduleId, string? rowsHash)
+    {
+        if (string.IsNullOrWhiteSpace(raw) || string.IsNullOrWhiteSpace(rowsHash)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty(scheduleId.ToString(CultureInfo.InvariantCulture), out var hash)
+                && hash.ValueKind == JsonValueKind.String
+                && string.Equals(hash.GetString(), rowsHash, StringComparison.Ordinal);
+        }
+        catch (JsonException) { return false; }
     }
 
     private static string NormalizeCategory(string? value)
@@ -698,6 +727,7 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
         public string? week_label { get; set; }
         public DateTime? upload_date { get; set; }
         public string? raw_rows { get; set; }
+        public string? rows_hash { get; set; }
     }
 
     private sealed class ProductMoldingRow
@@ -819,6 +849,7 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
         public decimal receipt_shortage_qty { get; set; }
         public decimal outbound_shortage_qty { get; set; }
         public decimal shortage_qty { get; set; }
+        public bool manual_completed { get; set; }
         public string workflow_status { get; set; } = "";
         public int? days_remaining { get; set; }
         public string status { get; set; } = "";

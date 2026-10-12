@@ -35,6 +35,7 @@ interface AlertItem {
   receipt_shortage_qty: number
   outbound_shortage_qty: number
   shortage_qty: number
+  manual_completed?: boolean
   workflow_status: string
   days_remaining?: number
   tracking_type: 'purchase' | 'plastic' | 'vinyl'
@@ -358,7 +359,7 @@ export default function MaterialAlertsPage() {
     {
       title: '流程 / 完成率', dataIndex: 'workflow_status', width: 225,
       render: (v: string, r: AlertItem) => {
-        const pct = r.required_qty > 0 ? Math.min(100, Math.round(r.outbound_qty / r.required_qty * 100)) : 100
+        const pct = r.manual_completed ? 100 : r.required_qty > 0 ? Math.min(100, Math.round(r.outbound_qty / r.required_qty * 100)) : 100
         return (
           <Space direction="vertical" size={6} style={{ width: '100%' }}>
             <Space size={[4, 4]} wrap>
@@ -366,18 +367,18 @@ export default function MaterialAlertsPage() {
                 <Tag
                   key={step}
                   bordered={false}
-                  color={step === '已完成' ? 'success' : step.includes('欠') ? 'error' : step.includes('部分') ? 'warning' : step.includes('待') ? 'default' : 'processing'}
+                  color={step === '已完成' || step === '已送完(手动)' ? 'success' : step.includes('欠') ? 'error' : step.includes('部分') ? 'warning' : step.includes('待') ? 'default' : 'processing'}
                   style={{ marginInlineEnd: 0 }}
                 >
                   {step}
                 </Tag>
               ))}
             </Space>
-            <Tooltip title={`入库 ${numberFmt.format(r.received_qty)} / 出库 ${numberFmt.format(r.outbound_qty)}；出库达到需求后才算完成`}>
+            <Tooltip title={r.manual_completed ? '本排期已手动确认送完；账面入库、出库数量保持实际记录' : `入库 ${numberFmt.format(r.received_qty)} / 出库 ${numberFmt.format(r.outbound_qty)}；出库达到需求后才算完成`}>
               <Progress
                 percent={pct}
                 size="small"
-                status={pct >= 100 && r.received_qty >= r.required_qty ? 'success' : r.status === 'critical' ? 'exception' : 'active'}
+                status={r.manual_completed || (pct >= 100 && r.received_qty >= r.required_qty) ? 'success' : r.status === 'critical' ? 'exception' : 'active'}
               />
             </Tooltip>
           </Space>
@@ -496,7 +497,7 @@ export default function MaterialAlertsPage() {
             <Space wrap>
                 <Tag color="blue">当前排期：{data.schedule_label || '暂无'}</Tag>
                 <Typography.Text type="secondary">应交日 = 接单日期 + 货号物料交货周期</Typography.Text>
-                <Tag color="green">完成 = 入库达标 + 出库达标</Tag>
+                <Tag color="green">完成 = 入出库达标或手动确认送完</Tag>
                 <Tag color="purple">日产能生产天数不计周日</Tag>
             </Space>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
@@ -552,7 +553,7 @@ export default function MaterialAlertsPage() {
         footer={null}
         onCancel={() => setOrderDetailItem(null)}
       >
-        <Typography.Paragraph type="secondary">入库、出库数量按最早接单日期 FIFO 自动分配到订单，出库达到该订单需求后才标记完成。</Typography.Paragraph>
+        <Typography.Paragraph type="secondary">入库、出库数量按最早接单日期 FIFO 自动分配到订单。手动确认送完的排期显示完成，账面数量仍保留实际记录。</Typography.Paragraph>
         <Table
           rowKey="order_no"
           size="small"
@@ -577,7 +578,7 @@ export default function MaterialAlertsPage() {
             { title: '需求数量', dataIndex: 'required_qty', width: 130, align: 'right', render: v => numberFmt.format(v) },
             { title: '分配入库', dataIndex: 'received_qty', width: 130, align: 'right', render: v => numberFmt.format(v) },
             { title: '分配出库', dataIndex: 'outbound_qty', width: 130, align: 'right', render: v => numberFmt.format(v) },
-            { title: '订单状态', dataIndex: 'status', width: 170, render: v => <Tag color={v === '已完成' ? 'green' : v.includes('部分') ? 'orange' : 'blue'}>{v}</Tag> },
+            { title: '订单状态', dataIndex: 'status', width: 170, render: v => <Tag color={v === '已完成' || v === '已送完(手动)' ? 'green' : v.includes('部分') ? 'orange' : 'blue'}>{v}</Tag> },
           ]}
         />
       </Modal>

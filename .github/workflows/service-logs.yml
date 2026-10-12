@@ -18,6 +18,12 @@ on:
         type: string
         required: false
         default: "100"
+      printlink_data_ops:
+        description: "PrintLink pre-909 private backup / post-deploy read-only verification"
+        type: choice
+        options: [none, backup, verify]
+        default: none
+        required: false
       tomy_smoke:
         description: "仅 TOMY：使用合成文件验证上传核对及 ZIP 下载"
         type: boolean
@@ -53,6 +59,8 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           OPS_SERVICE: ${{ inputs.service }}
           OPS_TAIL: ${{ inputs.tail }}
+          PRINTLINK_DATA_OPS: ${{ inputs.printlink_data_ops }}
+          OPS_REF: ${{ github.sha }}
           TOMY_SMOKE: ${{ inputs.tomy_smoke }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
@@ -61,9 +69,21 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 5m
-          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE
+          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE,PRINTLINK_DATA_OPS,OPS_REF
           script: |
             set -euo pipefail
+            if [[ "${PRINTLINK_DATA_OPS:-none}" != none ]]; then
+              [[ "$OPS_SERVICE" == printlink && "$PRINTLINK_DATA_OPS" =~ ^(backup|verify)$ && "$OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+              cd /opt/rr-portal
+              git fetch origin ops/printlink-pre-909-20261012
+              umask 077
+              temporary=$(mktemp -d /tmp/printlink-909.XXXXXX)
+              trap 'rm -rf "$temporary"' EXIT
+              git show "$OPS_REF:deploy/ops/printlink-909.py" > "$temporary/run.py"
+              git show "$OPS_REF:deploy/ops/printlink-909.mjs" > "$temporary/inspect.mjs"
+              python3 "$temporary/run.py" "$PRINTLINK_DATA_OPS" "$temporary/inspect.mjs"
+              exit 0
+            fi
             # 服务名只允许字母数字和连字符，防止注入
             if [[ ! "$OPS_SERVICE" =~ ^[a-z0-9-]+$ ]]; then
               echo "非法服务名: $OPS_SERVICE" >&2

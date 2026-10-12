@@ -19,7 +19,11 @@ on:
         type: choice
         required: true
         default: check
-        options: [check, query, repair-locked, rollback]
+        options: [check, query, repair-locked, rollback, july-preview, july-unlock]
+      expected:
+        description: "july-unlock 必须填写 july-preview 返回的范围摘要"
+        type: string
+        required: false
       sql:
         description: "mode=query 时执行的 SELECT 语句（仅限只读 SELECT）"
         type: string
@@ -54,6 +58,9 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           OPS_MODE: ${{ inputs.mode }}
           OPS_SQL: ${{ inputs.sql }}
+          OPS_EXPECTED: ${{ inputs.expected }}
+          OPS_REF: ${{ github.sha }}
+          OPS_ACTOR: ${{ github.actor }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -61,13 +68,26 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 12m
-          envs: OPS_MODE,OPS_SQL
+          envs: OPS_MODE,OPS_SQL,OPS_EXPECTED,OPS_REF,OPS_ACTOR
           script: |
             set -uo pipefail
             MODE="${OPS_MODE:-check}"
             cd /opt/rr-portal
             DB="apps/PMC跟仓管/华登包材管理/data/huadeng.db"
             echo "=================== MODE: $MODE ==================="
+            if [[ "$MODE" == july-preview || "$MODE" == july-unlock ]]; then
+              set -euo pipefail
+              [[ "$OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+              git fetch origin ops/huadeng-unlock-july-20261012
+              directory=$(mktemp -d /tmp/huadeng-july.XXXXXX)
+              trap 'rm -rf "$directory"' EXIT
+              git show "$OPS_REF:deploy/ops/unlock-huadeng-july.py" > "$directory/unlock.py"
+              action=preview
+              if [[ "$MODE" == july-unlock ]]; then action=unlock; fi
+              python3 "$directory/unlock.py" --database "$DB" --mode "$action" --expected "${OPS_EXPECTED:-}" --actor "$OPS_ACTOR" --backup-dir /opt/rr-portal/deploy/backups
+              curl --fail --silent http://localhost/huadeng/health
+              exit 0
+            fi
 
             run_select() {
               python3 - "$DB" "$1" <<'PY'

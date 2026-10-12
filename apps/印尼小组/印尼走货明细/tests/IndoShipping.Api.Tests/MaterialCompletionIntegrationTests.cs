@@ -55,6 +55,27 @@ public class MaterialCompletionIntegrationTests
     }
 
     [Fact]
+    public async Task Backdated_same_week_upload_still_uses_the_new_revision_and_tracks_extra_quantity()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        await f.Acknowledge();
+        var oldVersion = await f.Db.ExecuteScalarAsync<long>("SELECT min(id) FROM material_tracking_history");
+        Assert.IsType<OkObjectResult>(await new SchedulesController(new SqlConnectionFactory(
+            f.Db.ConnectionString)).Create(new SchedulesController.CreateBody {
+                week_label = "10-01", upload_date = new DateTime(2026, 9, 30),
+                raw_rows = JsonSerializer.Deserialize<JsonElement>(
+                    """[{"code":"A","orderNo":"PO1","qty":15}]""")
+            }));
+        var current = Purchase(await f.Read());
+        Assert.Equal(30, current.GetProperty("required_qty").GetDecimal());
+        Assert.Equal(10, current.GetProperty("shortage_qty").GetDecimal());
+        Assert.False(current.GetProperty("manual_completed").GetBoolean());
+        var historical = Purchase(await f.Read(oldVersion));
+        Assert.Equal(20, historical.GetProperty("required_qty").GetDecimal());
+        Assert.True(historical.GetProperty("manual_completed").GetBoolean());
+    }
+
+    [Fact]
     public async Task Missing_old_orders_remain_but_new_orders_do_not_inherit_completion()
     {
         await using var f = await Fixture.Create(); if (f is null) return;
@@ -109,8 +130,42 @@ public class MaterialCompletionIntegrationTests
         await using var f = await Fixture.Create(); if (f is null) return;
         await f.Upload("10-10", """[{"code":"A","orderNo":"PO1","qty":4},{"code":"A","orderNo":"PO1","qty":6}]""");
         Assert.Equal(20, Purchase(await f.Read()).GetProperty("required_qty").GetDecimal());
+        await f.Upload("10-10", """[{"code":"A","orderNo":"PO1","qty":0},{"code":"A","orderNo":"PO1","qty":5}]""");
+        Assert.Equal(10, Purchase(await f.Read()).GetProperty("required_qty").GetDecimal());
         await f.Upload("10-10", """[{"code":"A","orderNo":"PO1","qty":0}]""");
         Assert.Empty((await f.Read()).EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Zero_order_quantity_cancels_historical_materials_even_after_BOM_replacement()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        var oldVersion = await f.Db.ExecuteScalarAsync<long>("SELECT min(id) FROM material_tracking_history");
+        await f.Db.ExecuteAsync("UPDATE materials SET active=false; INSERT INTO materials VALUES(2,'A','M2','替换物料','五金','测试供应商',1,true,2)");
+        await f.Upload("10-10", """[{"code":"A","orderNo":"PO1","qty":0}]""");
+        Assert.Empty((await f.Read()).EnumerateArray());
+        Assert.Equal(20, Purchase(await f.Read(oldVersion)).GetProperty("required_qty").GetDecimal());
+    }
+
+    [Fact]
+    public async Task Cancellation_does_not_remove_other_orders_customers_or_full_product_variants()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        await f.Upload("10-02", """
+            [{"code":"A","orderNo":"PO1","qty":10},
+             {"code":"A","orderNo":"PO2","qty":5},
+             {"code":"A","customer":"other","orderNo":"PO1","qty":7},
+             {"code":"A-VARIANT","orderNo":"PO1","qty":9}]
+            """);
+        await f.Db.ExecuteAsync("UPDATE materials SET active=false; INSERT INTO materials VALUES(2,'A','M2','替换物料','五金','测试供应商',1,true,2)");
+        await f.Upload("10-10", """[{"code":"A","orderNo":"PO1","qty":0}]""");
+        var item = Purchase(await f.Read());
+        Assert.Equal(42, item.GetProperty("required_qty").GetDecimal());
+        var details = item.GetProperty("order_details").EnumerateArray().ToList();
+        Assert.Equal(3, details.Count);
+        Assert.DoesNotContain(details, d => d.GetProperty("order_no").GetString() == "PO1"
+            && d.GetProperty("customer").GetString() == ""
+            && d.GetProperty("product_code").GetString() == "A");
     }
 
     [Fact]

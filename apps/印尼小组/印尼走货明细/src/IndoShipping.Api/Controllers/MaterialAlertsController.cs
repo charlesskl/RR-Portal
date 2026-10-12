@@ -173,7 +173,7 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
         using var c = factory.Create();
         return Ok(await c.QueryAsync(@"
             SELECT id, schedule_id, week_label, upload_date, captured_at
-            FROM material_tracking_history ORDER BY upload_date DESC NULLS LAST, id DESC"));
+            FROM material_tracking_history ORDER BY id DESC"));
     }
 
     [HttpGet("stats")]
@@ -198,7 +198,7 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
         var revisions = (await c.QueryAsync<MaterialTrackingHistory.Snapshot>(@"
             SELECT id,schedule_id,week_label,upload_date,raw_rows::text,rows_hash,
                    materials::text,products::text,acknowledged
-            FROM material_tracking_history ORDER BY upload_date NULLS FIRST, id")).ToList();
+            FROM material_tracking_history ORDER BY id")).ToList();
         var schedule = revisionId.HasValue ? revisions.FirstOrDefault(x => x.id == revisionId) : revisions.LastOrDefault();
         if (schedule is null) return revisionId.HasValue ? null : new AlertResponse();
         var completionRaw = await c.ExecuteScalarAsync<string?>(
@@ -279,6 +279,12 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
             var revisionDemands = !revisionId.HasValue && revision.id == schedule.id
                 ? ExpandDemands(revision, materials, productionParts) : frozenDemands;
             selectedKeys = revisionDemands.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // An explicit zero cancels the order, including components removed from
+            // the live BOM. Missing orders continue to retain their historical demand.
+            var cancelledOrders = CancelledOrders(revision.raw_rows);
+            foreach (var key in demands.Where(x => cancelledOrders.Contains(OrderIdentity(
+                x.Value.customer, x.Value.order_no, x.Value.source_code))).Select(x => x.Key).ToArray())
+                demands.Remove(key);
             foreach (var (key, demand) in revisionDemands)
             {
                 // No reliable cross-schedule identity without an order number. Such rows
@@ -522,6 +528,26 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
                 foreach (var part in partMatches) Add($"part:{part.key}", part.usage_qty, null, part);
         }
         return result;
+    }
+
+    private static string OrderIdentity(string customer, string orderNo, string sourceCode) =>
+        JsonSerializer.Serialize(new[] { customer, orderNo, sourceCode });
+
+    private static HashSet<string> CancelledOrders(string? raw)
+    {
+        var quantities = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        using var doc = JsonDocument.Parse(raw ?? "[]");
+        if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            foreach (var row in doc.RootElement.EnumerateArray())
+            {
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var orderNo = Text(row, "orderNo");
+                var sourceCode = Text(row, "code");
+                if (orderNo.Length == 0 || sourceCode.Length == 0) continue;
+                var identity = OrderIdentity(Text(row, "customer"), orderNo, sourceCode);
+                quantities[identity] = quantities.GetValueOrDefault(identity) + Math.Max(Number(row, "qty"), 0);
+            }
+        return quantities.Where(x => x.Value == 0).Select(x => x.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     private static string NormalizeCategory(string? value)

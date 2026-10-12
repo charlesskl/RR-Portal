@@ -82,5 +82,10 @@ jobs:
             SELECT conrelid::regclass AS referencing_table, confrelid::regclass AS referenced_table, pg_get_constraintdef(oid) AS definition
             FROM pg_constraint WHERE contype='f'
               AND confrelid IN ('indo_shipping.purchase_orders'::regclass,'indo_shipping.po_items'::regclass,'indo_shipping.po_receipts'::regclass,'indo_shipping.outbound'::regclass);
+            SELECT jsonb_build_object(
+              'schedule_fingerprint', (SELECT md5(string_agg(id::text||':'||md5(COALESCE(raw_rows::text,'')), ',' ORDER BY id)) FROM indo_shipping.schedules),
+              'valid_order_keys', (SELECT COUNT(DISTINCT (r->>'orderNo')||'|'||(r->>'code')) FROM indo_shipping.schedules s CROSS JOIN LATERAL jsonb_array_elements(s.raw_rows) r WHERE BTRIM(COALESCE(r->>'orderNo',''))<>'' AND BTRIM(COALESCE(r->>'code',''))<>''),
+              'snapshot_count', (SELECT COUNT(*) FROM indo_shipping.schedules s WHERE EXISTS(SELECT 1 FROM indo_shipping.settings t WHERE key='material_tracking_completed_schedules' AND t.value::jsonb->>s.id::text=md5(s.raw_rows::text)))
+            ) AS completion_preview;
             COMMIT;
             SQL

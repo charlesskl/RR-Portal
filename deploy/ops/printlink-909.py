@@ -22,6 +22,91 @@ def command(args, input=None, env=None):
     return result.stdout
 
 
+def runtime_read(args):
+    """Capture locally for classification only; never echo command output or failures."""
+    result = subprocess.run(args, text=True, capture_output=True, cwd=REPO, timeout=30)
+    return result.returncode == 0, result.stdout, result.stderr
+
+
+def classify_runtime_logs(lines):
+    patterns = {
+        'heapOutOfMemory': r'FATAL ERROR:.*(?:heap limit|heap out of memory|Allocation failed|mark-compacts)',
+        'nativeOutOfMemory': r'\b(?:ENOMEM|std::bad_alloc)\b',
+        'addressInUse': r'\bEADDRINUSE\b',
+        'connectionReset': r'\bECONNRESET\b',
+        'networkTimeout': r'\bETIMEDOUT\b',
+        'sqliteBusy': r'\bSQLITE_BUSY\b',
+        'sqliteCorrupt': r'\bSQLITE_CORRUPT\b',
+        'syntaxError': r'\bSyntaxError\b',
+        'typeError': r'\bTypeError\b',
+        'childExited': r'子服务退出：',
+        'shutdownTimeout': r'子进程未及时停止',
+        'startup': r'独立整合版：http',
+    }
+    counts = {name: {'count': 0, 'latest': None} for name in patterns}
+    unclassified = 0
+    for line in lines.splitlines():
+        matched = False
+        timestamp = re.match(r'^(\d{4}-\d{2}-\d{2}T[0-9:.]+Z)\s', line)
+        for name, pattern in patterns.items():
+            if re.search(pattern, line, re.IGNORECASE):
+                matched = True
+                counts[name]['count'] += 1
+                if timestamp:
+                    counts[name]['latest'] = timestamp.group(1)
+        if not matched and re.search(r'\b(?:Error|Exception|failed)\b|错误|失败', line, re.IGNORECASE):
+            unclassified += 1
+    return {'windowMinutes': 40, 'maximumLines': 1500, 'types': counts,
+            'unclassifiedErrorLines': unclassified}
+
+
+def runtime_diagnostics(proc_root=pathlib.Path('/proc'), cgroup_root=pathlib.Path('/sys/fs/cgroup')):
+    cid = command(COMPOSE + ['ps', '-q', 'printlink']).strip()
+    require(bool(re.fullmatch(r'[a-f0-9]{12,64}', cid)), 'PRINTLINK_CONTAINER_NOT_UNIQUE')
+    template = ('{"id":{{json .Id}},"pid":{{.State.Pid}},"memory":{{.HostConfig.Memory}},'
+                '"memorySwap":{{.HostConfig.MemorySwap}},"oomKilled":{{.State.OOMKilled}},'
+                '"exitCode":{{.State.ExitCode}},"restartCount":{{.RestartCount}},'
+                '"startedAt":{{json .State.StartedAt}}}')
+    docker = json.loads(command(['docker', 'inspect', '-f', template, cid]))
+    require(bool(re.fullmatch(r'[a-f0-9]{64}', docker['id'])), 'CONTAINER_ID_INVALID')
+    host = {}
+    for line in (proc_root / 'meminfo').read_text().splitlines():
+        match = re.fullmatch(r'(MemTotal|MemAvailable):\s+(\d+)\s+kB', line)
+        if match:
+            host[match.group(1) + 'KiB'] = int(match.group(2))
+    cgroup = {'available': False}
+    pid = int(docker['pid'])
+    try:
+        membership = (proc_root / str(pid) / 'cgroup').read_text()
+        require(docker['id'] in membership, 'TARGET_PROCESS_CGROUP_NOT_VERIFIED')
+        entry = next((line.split(':', 2) for line in membership.splitlines() if line.startswith('0::')), None)
+        if entry:
+            relative = pathlib.PurePosixPath(entry[2])
+            require('..' not in relative.parts, 'CGROUP_PATH_INVALID')
+            directory = cgroup_root / str(relative).lstrip('/')
+            cgroup = {'available': True, 'version': 2, 'events': {}}
+            allowed_events = {'low', 'high', 'max', 'oom', 'oom_kill', 'oom_group_kill'}
+            events = directory / 'memory.events'
+            if events.exists():
+                for line in events.read_text().splitlines():
+                    name, value = line.split()
+                    if name in allowed_events and value.isdigit():
+                        cgroup['events'][name] = int(value)
+            for file, label in [('memory.current', 'currentBytes'), ('memory.peak', 'peakBytes'),
+                                ('memory.max', 'limitBytes'), ('memory.swap.current', 'swapCurrentBytes')]:
+                value = (directory / file).read_text().strip() if (directory / file).exists() else ''
+                cgroup[label] = int(value) if value.isdigit() else None
+    except (OSError, RuntimeError, ValueError):
+        cgroup = {'available': False, 'reason': 'TARGET_PROCESS_UNAVAILABLE_OR_CHANGED'}
+    logs_ok, stdout, stderr = runtime_read(['docker', 'logs', '--since', '40m', '--tail', '1500', '--timestamps', cid])
+    logs = classify_runtime_logs(stdout + '\n' + stderr)
+    logs['available'] = logs_ok
+    docker.pop('id')
+    return {'service': 'printlink', 'docker': docker, 'hostMemory': host, 'cgroupMemory': cgroup,
+            'logs': logs,
+            'businessPayloadRead': False, 'businessWritesPerformed': False, 'containerRecreated': False}
+
+
 def container_run(mode, source, extra=None):
     args = ['docker', 'exec', '-i', '-e', 'PRINTLINK_OPS_MODE=' + mode]
     for key, value in (extra or {}).items():
@@ -236,6 +321,10 @@ def enable(source):
 
 
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == 'runtime':
+        require(len(sys.argv) == 2, 'INVALID_RUNTIME_ARGUMENTS')
+        print(json.dumps(runtime_diagnostics(), ensure_ascii=False))
+        return
     mode, script = sys.argv[1:]
     require(mode in ['backup', 'verify', 'inspect', 'status', 'enable'], 'INVALID_MODE')
     source = pathlib.Path(script).read_text()

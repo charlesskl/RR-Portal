@@ -22,12 +22,27 @@ describe('采购订单衔接线下编号', () => {
   afterEach(() => vi.useRealTimers())
 
   it('RRI 和 RRM 从指定编号之后起排，已有更大编号时继续递增', () => {
-    expect(poGenContractNo([], 'HD_INDUSTRY', 'HS')).toBe('IRRIHS0402')
-    expect(poGenContractNo(['IRRIHS0401'], 'HD_INDUSTRY', 'HS')).toBe('IRRIHS0402')
+    expect(poGenContractNo([], 'HD_INDUSTRY', 'HS')).toBe('IRRIHS0405')
+    expect(poGenContractNo(['IRRIHS0401'], 'HD_INDUSTRY', 'HS')).toBe('IRRIHS0405')
+    expect(poGenContractNo(['IRRIHS0404'], 'HD_INDUSTRY', 'HS')).toBe('IRRIHS0405')
+    expect(poGenContractNo(['IRRIHS0405'], 'HD_INDUSTRY', 'HS')).toBe('IRRIHS0406')
     expect(poGenContractNo(['IRRIHS0450'], 'HD_INDUSTRY', 'HS')).toBe('IRRIHS0451')
     expect(poGenContractNo(['IRRMHS0059'], 'HD_GLOBAL', 'HS')).toBe('IRRMHS0060')
     expect(poGenContractNo(['IRRMHS0100'], 'HD_GLOBAL', 'HS')).toBe('IRRMHS0101')
     expect(poGenContractNo([], 'HD_INDUSTRY', 'HD')).toBe('IRRIHD0001')
+  })
+
+  it('批量下单各自连续编号，不修改已有号码', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 9, 12))
+    const existing = ['IRRIHS0404', 'IRRMHS0067', '2026900170']
+    const original = [...existing]
+    const generated: string[] = []
+    for (const entity of ['HD_INDUSTRY', 'HD_GLOBAL', 'HSY', 'HD_INDUSTRY', 'HD_GLOBAL', 'HSY'] as const) {
+      generated.push(poGenContractNo([...existing, ...generated], entity, 'HS'))
+    }
+    expect(generated).toEqual(['IRRIHS0405', 'IRRMHS0068', '2026900171', 'IRRIHS0406', 'IRRMHS0069', '2026900172'])
+    expect(existing).toEqual(original)
   })
 
   it('华胜益 2026 年从 2026900171 开始并保持连续', () => {

@@ -82,7 +82,8 @@ export function poGenContractNo(existing: string[], entity: PoEntity, wcode: str
   const prefix = poContractPrefix(entity, wcode)
   // 衔接线下已用编号；已有更大编号时继续递增，不修改历史订单。
   // 华胜益的基线仅适用于 2026 年，其他年份沿用原有年度编号规则。
-  const startSeq = prefix === 'IRRIHS' ? 402
+  // 已用末号：IRRIHS0404、IRRMHS0059、2026900170。
+  const startSeq = prefix === 'IRRIHS' ? 405
     : prefix === 'IRRMHS' ? 60
       : entity === 'HSY' && prefix === '2026' ? 900171 : 1
   const seq = Math.max(poNextSeq(existing, prefix), startSeq)

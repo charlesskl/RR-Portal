@@ -1,3 +1,18 @@
+.purchase-editor-drawer .ant-drawer-header {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.purchase-editor-drawer .ant-drawer-header-title {
+  flex: 1 0 100%;
+  min-width: 0;
+}
+
+.purchase-editor-drawer .ant-drawer-extra {
+  max-width: 100%;
+  margin-inline-start: 0;
+}
+
 .purchase-fillable-cell {
   position: relative;
   min-width: 0;

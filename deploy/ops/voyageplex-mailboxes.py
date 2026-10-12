@@ -27,6 +27,22 @@ try:
  mode=sys.argv[1]
  if mode=='inspect':
   print(json.dumps({'candidates':candidates()},ensure_ascii=False))
+ elif mode=='backup':
+  target=ROOT/'deploy/backups'/('voyageplex-pre-904-'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
+  target.mkdir(parents=True,mode=0o700)
+  destination=target/'voyageplex.db'
+  with connect() as source,sqlite3.connect(destination) as backup:
+   source.backup(backup)
+   if backup.execute('PRAGMA quick_check').fetchone()[0]!='ok': raise RuntimeError('BACKUP_INTEGRITY_FAILED')
+  destination.chmod(0o600)
+  env=(ROOT/'.env.cloud.production').read_bytes()
+  (target/'env.before').write_bytes(env)
+  (target/'env.before').chmod(0o600)
+  import shutil
+  keys=DATA/'mailbox-keys'
+  if keys.exists(): shutil.copytree(keys,target/'mailbox-keys')
+  digest=hashlib.sha256(destination.read_bytes()).hexdigest()
+  print(json.dumps({'backup':str(target),'databaseIntegrity':'ok','databaseSha256':digest},ensure_ascii=False))
  elif mode in ['configure','verify']:
   raise RuntimeError('NOT_IMPLEMENTED_YET')
  else: raise RuntimeError('INVALID_MODE')

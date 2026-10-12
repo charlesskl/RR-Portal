@@ -367,6 +367,17 @@ def enable(source):
 
 
 def main():
+    if len(sys.argv) == 2 and sys.argv[1] == 'sizes':
+        source = """
+import {DatabaseSync} from 'node:sqlite';
+const db=new DatabaseSync('/app/runtime/production.sqlite',{readOnly:true});
+const has=t=>!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t);
+const size=t=>has(t)?db.prepare('SELECT count(*) AS rows,coalesce(sum(length(cast(value as blob))),0) AS totalBytes,coalesce(max(length(cast(value as blob))),0) AS largestBytes FROM '+t).get():null;
+const images=has('data_images')?db.prepare('SELECT count(*) AS rows,coalesce(sum(length(cast(uri as blob))),0) AS totalBytes,coalesce(max(length(cast(uri as blob))),0) AS largestBytes FROM data_images').get():null;
+console.log(JSON.stringify({snapshot:size('snapshot'),syncState:size('business_sync_state'),syncBackups:size('business_sync_backups'),imageCache:images,businessPayloadRead:false,businessWritesPerformed:false}));db.close();
+"""
+        print(json.dumps(json.loads(command(['docker','exec','-i',CONTAINER,'node','--input-type=module'],source))))
+        return
     if len(sys.argv) >= 2 and sys.argv[1] == 'runtime':
         require(len(sys.argv) == 2, 'INVALID_RUNTIME_ARGUMENTS')
         print(json.dumps(runtime_diagnostics(), ensure_ascii=False))

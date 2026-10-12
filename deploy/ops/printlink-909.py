@@ -8,6 +8,7 @@ COMPOSE = ['docker', 'compose', '-f', 'docker-compose.cloud.yml', '--env-file', 
 APP = REPO / 'apps/工程部/3D打印协同平台'
 SOURCE_FILES = ['start.mjs', 'cloud/server.mjs', 'cloud/integration.mjs', 'production/server.js',
                 'production/business-sync.cjs', 'production/data-images.cjs', 'shared/business-sync.cjs',
+                'shared/json-stream.cjs', 'shared/business-sync-transport.cjs',
                 'cloud/public/business-sync.html', 'cloud/public/business-sync.js']
 
 

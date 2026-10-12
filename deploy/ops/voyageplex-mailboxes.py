@@ -249,6 +249,38 @@ try:
   if old.startswith("'") and old.endswith("'"):old=old[1:-1]
   old_count=len(json.loads(old)) if old else 0
   print(json.dumps({'readOnlyProgress':progress,'preUpgradeMailboxEntries':old_count},ensure_ascii=False))
+ elif mode=='access':
+  current=users_by_id();rows=[current[i] for i in [2,3,5,6]]
+  admin=next(u for u in current.values() if u['Role']=='admin' and u['IsActive'])
+  with connect() as c:
+   samples={u['Id']:c.execute("SELECT Id FROM ImportEmailItems WHERE Company='Huadeng' AND MailOwnerId=? AND MailboxKey<>'' ORDER BY Id LIMIT 1",(u['Id'],)).fetchone() for u in rows}
+  reports=[]
+  with sessions([admin['Id']]+[u['Id'] for u in rows]) as tokens:
+   base=api_base()
+   for u in rows:
+    uid=u['Id'];assert_safe(u['Role']==('admin' if uid==2 else 'shipping') and u['CompanyAccess']==('Xingxin' if uid==2 else 'Huadeng'),'APPROVED_ACCOUNT_SCOPE_CHANGED')
+    with connect() as c:
+     state=c.execute('SELECT MailboxTestStatus FROM Users WHERE Id=?',(uid,)).fetchone()[0]
+    if state!='Connected':
+     code,test=request(base,'/api/users/'+str(uid)+'/mailbox-test',tokens[admin['Id']],method='POST',body={})
+     assert_safe(code==200 and test.get('connected') is True,'MAILBOX_CONNECTION_TEST_FAILED:'+u['DisplayName'])
+    else:code=200
+    other=next(v for v in rows if v['Id']!=uid and samples[v['Id']])
+    result={'username':u['Username'],'connectionTestStatus':code,'connected':True}
+    if u['Role']=='shipping':
+     code,data=request(base,'/api/mail/accounts',tokens[uid],owner=other['Id']);assert_safe(code==200 and data['selectedOwnerId']==uid and [v['id'] for v in data['accounts']]==[uid],'SHIPPING_ACCOUNT_ISOLATION_FAILED')
+     cross,_=request(base,'/api/imports/email/mailbox/items/'+str(samples[other['Id']][0]),tokens[uid],owner=other['Id']);assert_safe(cross==404,'SHIPPING_CROSS_MAIL_ACCESS_FAILED')
+     own=None
+     if samples[uid]:
+      own,_=request(base,'/api/imports/email/mailbox/items/'+str(samples[uid][0]),tokens[uid]);assert_safe(own==200,'SHIPPING_OWN_MAIL_ACCESS_FAILED')
+     denied,_=request(base,'/api/users/'+str(other['Id'])+'/mailbox-test',tokens[uid],method='POST',body={});assert_safe(denied==403,'SHIPPING_ADMIN_API_NOT_BLOCKED')
+     result.update({'onlyOwnMailbox':True,'forgedOwnerIgnored':True,'otherMailboxDetail':cross,'ownMailboxDetail':own,'adminMailboxTestDenied':denied})
+    else:
+     code,data=request(base,'/api/mail/accounts',tokens[uid]);assert_safe(code==200 and {v['Id'] for v in rows}<={v['id'] for v in data['accounts']},'ADMIN_ALL_MAILBOX_SCOPE_FAILED')
+     code,selected=request(base,'/api/mail/accounts',tokens[uid],owner=other['Id']);assert_safe(code==200 and selected['selectedOwnerId']==other['Id'],'ADMIN_OWNER_SELECTION_FAILED')
+     result.update({'allFourMailboxesVisible':True,'ownerSelection':True})
+    reports.append(result)
+  print(json.dumps({'accessVerified':True,'connectionAndAccess':reports,'temporarySessionsCleaned':True},ensure_ascii=False))
  elif mode=='rollout':
   directory=sorted((ROOT/'deploy/backups').glob('voyageplex-pre-904-*'))[-1]
   fields='Id,Username,DisplayName,Role,CompanyAccess,IsActive,PasswordHash,MailboxAddress'

@@ -39,7 +39,7 @@ try:
    assert not i['accepted_date'] and i['due_date'] is None and i['days_remaining'] is None, 'Completed material still contributes a deadline'
    cleared_dates+=1
   else:
-   pending=[d for d in i['order_details'] if max(d['receipt_shortage_qty'],d['outbound_shortage_qty'])>0]
+   pending=[d for d in i['order_details'] if d['required_qty']>min(max(d['manual_qty'],d['received_qty']),max(d['manual_qty'],d['outbound_qty']))]
    if pending:
     assert i['accepted_date']==min(d['accepted_date'] for d in pending), 'Completed order affects outstanding accepted date'
     checked_pending_dates+=1

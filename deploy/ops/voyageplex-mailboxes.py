@@ -218,6 +218,22 @@ try:
   if keys.exists(): shutil.copytree(keys,target/'data-protection-keys')
   digest=hashlib.sha256(destination.read_bytes()).hexdigest()
   print(json.dumps({'backup':str(target),'databaseIntegrity':'ok','databaseSha256':digest},ensure_ascii=False))
+ elif mode=='rollout':
+  directory=sorted((ROOT/'deploy/backups').glob('voyageplex-pre-904-*'))[-1]
+  fields='Id,Username,DisplayName,Role,CompanyAccess,IsActive,PasswordHash,MailboxAddress'
+  with sqlite3.connect((directory/'voyageplex.db').as_uri()+'?mode=ro',uri=True) as before,connect() as after:
+   assert_safe(before.execute('SELECT '+fields+' FROM Users ORDER BY Id').fetchall()==after.execute('SELECT '+fields+' FROM Users ORDER BY Id').fetchall(),'EXISTING_ACCOUNT_FIELDS_CHANGED')
+   columns={table:{r[1] for r in after.execute('PRAGMA table_info('+table+')')} for table in ['Users','MailSyncStates']}
+   assert_safe('MailboxTestConfigurationKey' in columns['Users'] and {'MailboxIdentity','ConfigurationKey'}<=columns['MailSyncStates'],'UPGRADE_SCHEMA_MISSING')
+   assert_safe(after.execute('PRAGMA quick_check').fetchone()[0]=='ok','DATABASE_INTEGRITY_FAILED')
+  actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+  base=api_base()
+  with urllib.request.urlopen(base+'/api/health',timeout=10) as response:assert_safe(response.status==200,'HEALTH_NOT_OK')
+  admin=next(u for u in users_by_id().values() if u['Role']=='admin' and u['IsActive'])
+  with sessions([admin['Id']]) as tokens:
+   code,users=request(base,'/api/users',tokens[admin['Id']]);assert_safe(code==200,'ADMIN_USER_API_FAILED')
+   safe=[{k:u[k] for k in ['id','username','displayName','role','companyAccess','isActive','mailboxAddress','mailboxConfigured']} for u in users if u['id'] in [2,3,5,6]]
+  print(json.dumps({'rolloutVerified':True,'serverGitCommit':actual,'schemaUpgraded':True,'databaseIntegrity':'ok','originalAccountsAndPasswordsPreserved':True,'accounts':safe},ensure_ascii=False))
  elif mode=='configure':
   install_configuration()
  elif mode=='verify':

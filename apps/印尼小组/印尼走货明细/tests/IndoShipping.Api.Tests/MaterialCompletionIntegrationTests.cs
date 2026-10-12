@@ -198,6 +198,39 @@ public class MaterialCompletionIntegrationTests
         }
     }
 
+    [Theory]
+    [InlineData("0.333333")]
+    [InlineData("0.000001")]
+    public async Task Fractional_usage_keeps_fully_confirmed_orders_complete(string usageText)
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        var usage = decimal.Parse(usageText, System.Globalization.CultureInfo.InvariantCulture);
+        await f.Db.ExecuteAsync("UPDATE materials SET usage_qty=@usage", new { usage });
+        await f.Upload("10-01", """
+            [{"code":"A","orderNo":"PO1","qty":1},
+             {"code":"A","orderNo":"PO2","qty":1},
+             {"code":"A","orderNo":"PO3","qty":1}]
+            """);
+        await f.Acknowledge();
+        var item = Purchase(await f.Read());
+        Assert.True(item.GetProperty("manual_completed").GetBoolean());
+        Assert.Equal("covered", item.GetProperty("status").GetString());
+        Assert.Equal("已送完(手动)", item.GetProperty("workflow_status").GetString());
+    }
+
+    [Fact]
+    public async Task Small_extra_requirement_does_not_become_complete_when_display_quantities_round_to_zero()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        await f.Db.ExecuteAsync("UPDATE materials SET usage_qty=0.000001");
+        await f.Upload("10-01", """[{"code":"A","orderNo":"PO1","qty":11}]""");
+        await f.Acknowledge();
+        await f.Upload("10-01", """[{"code":"A","orderNo":"PO1","qty":12}]""");
+        var item = Purchase(await f.Read());
+        Assert.False(item.GetProperty("manual_completed").GetBoolean());
+        Assert.NotEqual("covered", item.GetProperty("status").GetString());
+    }
+
     private static JsonElement Purchase(JsonElement items) => items.EnumerateArray()
         .Single(x => x.GetProperty("tracking_type").GetString() == "purchase");
 

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Dapper;
 using IndoShipping.Api.Features.Bootstrap;
 using IndoShipping.Infrastructure.Persistence;
@@ -450,13 +451,14 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
         foreach (var item in items)
         {
             var details = item.order_details;
-            var manual = details.Sum(x => x.manual_qty);
-            item.manual_completed = manual >= item.required_qty;
+            var manual = details.Sum(x => x.manual_qty_exact);
+            var required = details.Sum(x => x.required_qty_exact);
+            item.manual_completed = details.All(x => x.manually_covered);
             if (manual <= 0) continue;
-            item.purchase_shortage_qty = Math.Max(item.required_qty - Math.Max(manual, item.ordered_qty), 0);
-            item.receipt_shortage_qty = details.Sum(x => Math.Max(x.required_qty - Math.Max(x.manual_qty, x.received_qty), 0));
-            item.outbound_shortage_qty = item.shortage_qty = details.Sum(x => Math.Max(x.required_qty - Math.Max(x.manual_qty, x.outbound_qty), 0));
-            if (item.receipt_shortage_qty == 0 && item.outbound_shortage_qty == 0)
+            item.purchase_shortage_qty = decimal.Round(Math.Max(required - Math.Max(manual, item.ordered_qty), 0), 4);
+            item.receipt_shortage_qty = decimal.Round(details.Sum(x => x.receipt_shortage_exact), 4);
+            item.outbound_shortage_qty = item.shortage_qty = decimal.Round(details.Sum(x => x.outbound_shortage_exact), 4);
+            if (details.All(x => x.receipt_shortage_exact == 0 && x.outbound_shortage_exact == 0))
             {
                 item.status = "covered";
                 item.workflow_status = item.manual_completed ? "已送完(手动)" : "已完成(含手动确认)";
@@ -602,6 +604,11 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
                 customer = x.customer,
                 schedule_label = x.schedule_label,
                 manual_qty = decimal.Round(x.manual_qty, 4),
+                required_qty_exact = x.required_qty,
+                manual_qty_exact = x.manual_qty,
+                manually_covered = x.manual_qty >= x.required_qty,
+                receipt_shortage_exact = Math.Max(x.required_qty - Math.Max(x.manual_qty, received), 0),
+                outbound_shortage_exact = Math.Max(x.required_qty - Math.Max(x.manual_qty, outbound), 0),
                 accepted_date = x.accepted_date.ToString("yyyy-MM-dd"),
                 required_qty = decimal.Round(x.required_qty, 4),
                 received_qty = decimal.Round(received, 4),
@@ -878,6 +885,11 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
 
     private sealed class OrderDetail
     {
+        [JsonIgnore] public decimal required_qty_exact { get; set; }
+        [JsonIgnore] public decimal manual_qty_exact { get; set; }
+        [JsonIgnore] public bool manually_covered { get; set; }
+        [JsonIgnore] public decimal receipt_shortage_exact { get; set; }
+        [JsonIgnore] public decimal outbound_shortage_exact { get; set; }
         public string key { get; set; } = "";
         public string order_no { get; set; } = "";
         public string product_code { get; set; } = "";

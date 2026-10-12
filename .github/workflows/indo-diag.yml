@@ -6,7 +6,7 @@ on:
       mode:
         description: "check=只读数量 / clear=按已核对范围备份并清空采购和出入库（保留走货）/ complete=现有排期采购已下、物料送完"
         type: choice
-        options: [check, clear, complete, verify]
+        options: [check, clear, complete, verify, backup]
         default: check
         required: true
 
@@ -53,6 +53,17 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/rr-portal
+            if [[ "$OPS_MODE" == backup ]]; then
+              umask 077
+              mkdir -p deploy/backups
+              backup="/opt/rr-portal/deploy/backups/indo-pre-906-$(date -u +%Y%m%dT%H%M%SZ).dump"
+              docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production exec -T db sh -c 'exec pg_dump -Fc --schema=indo_shipping -U "${POSTGRES_USER:-rrportal}" -d "${POSTGRES_DB:-rrportal}"' > "$backup"
+              test -s "$backup"
+              docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production exec -T db pg_restore --list < "$backup" > /dev/null
+              echo "Backup retained: $backup"
+              sha256sum "$backup"
+              exit 0
+            fi
             if [[ "$OPS_MODE" == verify ]]; then
               [[ "$OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
               git fetch origin ops/indo-purchase-clear-20261012

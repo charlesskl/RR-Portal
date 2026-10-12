@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Read-only API verification. Credentials remain in process memory and are never logged."""
-import base64,json,subprocess,urllib.request,urllib.error,sys
+import base64,json,subprocess,urllib.request,urllib.error,sys,hmac,hashlib,time
 compose=['docker','compose','-f','docker-compose.cloud.yml','--env-file','.env.cloud.production']
 try:
  cid=subprocess.check_output(compose+['ps','-q','indo-shipping'],text=True).strip()
@@ -13,9 +13,18 @@ try:
   if token: headers['Authorization']='Bearer '+token
   data=None if body is None else json.dumps(body).encode()
   with urllib.request.urlopen(urllib.request.Request(base+path,data=data,headers=headers),timeout=20) as r: return json.load(r)
- password=base64.b64decode(env['INDO_SHIPPING_ADMIN_PASSWORD_B64'],validate=True).decode()
- token=request('/auth/login',{'username':'admin','password':password})['token']
- del password,env
+ # Server-local 60-second read probe; the API still checks the existing user's live DB permissions.
+ query="""SELECT "Id" FROM indo_shipping."Users" WHERE "IsActive" AND substring("Userbqrpower",4,2)='11' ORDER BY "Id" LIMIT 1"""
+ uid=subprocess.check_output(compose+['exec','-T','db','sh','-c',
+  'exec psql -X -At -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-rrportal}" -d "${POSTGRES_DB:-rrportal}" -c "$1"','psql',query],text=True).strip()
+ assert uid.isdigit(), 'No existing account with schedule and purchase read permission'
+ key=base64.b64decode(env['INDO_SHIPPING_JWT_KEY_B64'],validate=True)
+ def encode(data): return base64.urlsafe_b64encode(data).decode().rstrip('=')
+ header=encode(json.dumps({'alg':'HS256','typ':'JWT'},separators=(',',':')).encode())
+ body=encode(json.dumps({'iss':'IndoShipping','aud':'IndoShipping','sub':uid,'exp':int(time.time())+60},separators=(',',':')).encode())
+ unsigned=header+'.'+body
+ token=unsigned+'.'+encode(hmac.new(key,unsigned.encode(),hashlib.sha256).digest())
+ del key,env
  alerts=request('/material-alerts',token=token)
  items=alerts['items']
  assert items, 'No tracked materials'

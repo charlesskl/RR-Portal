@@ -50,6 +50,20 @@ export function purchaseMaterialBucket(source: string | undefined, supplier: str
   return [(source || '').trim().toUpperCase() === 'RRM' ? 'RRM' : 'RRI', supplier, groupKey ?? ''].join('\u0000')
 }
 
+export function purchaseSelectionSource(choices: PurchaseMaterialChoice[], sources: Record<string, string | undefined>, currentPoNo = '') {
+  const selected = new Set(choices.filter(c => c.groupKey != null).map(c =>
+    (sources[c.groupKey!] || '').trim().toUpperCase() === 'RRM' ? 'RRM' : 'RRI'))
+  if (selected.size > 1) throw new Error('RRI 与 RRM 排期请分开下单，或使用按供应商生成采购单。')
+  const source = [...selected][0]
+  const number = currentPoNo.trim().toUpperCase()
+  const current = number.startsWith('IRRM') ? 'RRM'
+    : number.startsWith('IRRI') || /^\d{5,}$/.test(number) ? 'RRI' : undefined
+  if (source && current && source !== current) {
+    throw new Error(`所选 ${source} 排期与当前 ${current} 采购单不一致，请使用批量下单另建采购单。`)
+  }
+  return source
+}
+
 export function purchaseSelectionSupplier(choices: PurchaseMaterialChoice[], currentSupplier = '') {
   const suppliers = [...new Set(choices.map(c => (c.material.supplier || '').trim()))]
   if (suppliers.includes('')) throw new Error('所选物料有未填写供应商的记录，请先在货号库补齐。')

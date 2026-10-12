@@ -9,7 +9,7 @@ import { numToChinese, poDetermineEntity, poGenContractNo, PO_ENTITY_META, type 
 import './PurchasePage.css'
 import { combinePurchaseContracts } from '../utils/purchaseContractWorkbook'
 import PurchaseMaterialPicker from '../components/PurchaseMaterialPicker'
-import { purchaseMaterialBucket, purchaseMaterialLine, purchaseSelectionSupplier, type PurchaseMaterialChoice } from '../utils/purchaseMaterialSelection'
+import { purchaseMaterialBucket, purchaseMaterialLine, purchaseSelectionSource, purchaseSelectionSupplier, type PurchaseMaterialChoice } from '../utils/purchaseMaterialSelection'
 
 interface SchedRow {
   source?: string
@@ -563,14 +563,11 @@ export default function PurchasePage() {
     if (materialSelection.mode !== 'append') return generateBySupplier(choices)
     const currentSupplier = String(form.getFieldValue('supplier') || '').trim()
     let supplier: string
-    try { supplier = purchaseSelectionSupplier(choices, currentSupplier) }
-    catch (error) { message.warning((error as Error).message); return false }
-    const sources = new Set(choices.filter(c => c.groupKey != null).map(c =>
-      (materialSelection.schedules?.[Number(c.groupKey)]?.source || '').trim().toUpperCase() === 'RRM' ? 'RRM' : 'RRI'))
-    if (sources.size > 1) {
-      message.warning('RRI 与 RRM 排期请分开下单，或使用按供应商生成采购单。')
-      return false
+    try {
+      supplier = purchaseSelectionSupplier(choices, currentSupplier)
+      purchaseSelectionSource(choices, Object.fromEntries((materialSelection.schedules || []).map((row, i) => [String(i), row.source])), String(form.getFieldValue('po_no') || ''))
     }
+    catch (error) { message.warning((error as Error).message); return false }
     const first = choices[0]
     const source = first.groupKey == null ? undefined : materialSelection.schedules?.[Number(first.groupKey)]?.source
     const currency = /^\d{4}\d/.test(String(form.getFieldValue('po_no') || ''))

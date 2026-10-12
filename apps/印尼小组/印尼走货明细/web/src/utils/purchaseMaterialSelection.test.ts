@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { purchaseMaterialBucket, purchaseMaterialChoices, purchaseMaterialLine, purchaseSelectionSupplier, selectedPurchaseMaterials } from './purchaseMaterialSelection'
+import { purchaseMaterialBucket, purchaseMaterialChoices, purchaseMaterialLine, purchaseSelectionSource, purchaseSelectionSupplier, selectedPurchaseMaterials } from './purchaseMaterialSelection'
 
 const materials = [
   { id: 1, name_zh: '纸绳', material_code: 'M1', usage_qty: 2, supplier: '供应商A', spec: '2MM', unit_kg: 'MTR', net_per_pc: 0.03 },
@@ -8,6 +8,24 @@ const materials = [
 ]
 
 describe('purchase material selection', () => {
+  it('rejects schedule materials from a different source than the existing purchase contract', () => {
+    const choices = purchaseMaterialChoices(materials, '46510', { key: '0', code: '46510', label: 'PO', quantity: 100 })
+    expect(() => purchaseSelectionSource(choices, { '0': 'RRM' }, 'IRRIHS0405')).toThrow('当前 RRI')
+    expect(() => purchaseSelectionSource(choices, { '0': 'RRI' }, 'IRRMHS0060')).toThrow('当前 RRM')
+    expect(() => purchaseSelectionSource(choices, { '0': 'RRM' }, '2026900171')).toThrow('当前 RRI')
+    expect(purchaseSelectionSource(choices, { '0': ' rrm ' }, ' irrmhs0060 ')).toBe('RRM')
+    expect(purchaseSelectionSource(choices, { '0': 'RRM' })).toBe('RRM')
+  })
+  it('rejects mixed selected schedule sources before any line is appended', () => {
+    const a = purchaseMaterialChoices(materials, '46510', { key: '0', code: '46510', label: 'RRI', quantity: 100 })
+    const b = purchaseMaterialChoices(materials, '46510', { key: '1', code: '46510', label: 'RRM', quantity: 100 })
+    expect(() => purchaseSelectionSource([...a, ...b], { '0': 'RRI', '1': 'RRM' })).toThrow('分开下单')
+  })
+  it('keeps direct material-library selection available for either existing source', () => {
+    const choices = purchaseMaterialChoices(materials, '46510')
+    expect(purchaseSelectionSource(choices, {}, 'IRRMHS0060')).toBeUndefined()
+    expect(purchaseSelectionSource(choices, {}, 'IRRIHS0405')).toBeUndefined()
+  })
   it('offers active materials with stable IDs without selecting all by default', () => {
     const choices = purchaseMaterialChoices(materials, '46510')
     expect(choices.map(c => c.material.id)).toEqual([1, 2])

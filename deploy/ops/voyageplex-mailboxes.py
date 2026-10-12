@@ -85,7 +85,9 @@ def install_configuration():
   approved=entry.get('approvedAccount',{})
   assert_safe(all(row[k]==approved.get(k) for k in ['Id','Role','CompanyAccess','IsActive']),'ACCOUNT_CHANGED_RECHECK_REQUIRED:'+name)
   desired=entry.get('desiredAccount',{})
-  assert_safe(desired.get('Role') in ['admin','supervisor','shipping'] and desired.get('CompanyAccess') in ['Huadeng','Xingxin','Both'] and row['IsActive'],'DESIRED_SCOPE_INVALID')
+  expected_role='admin' if row['Id']==2 else 'shipping'
+  expected_company='Xingxin' if row['Id']==2 else 'Huadeng'
+  assert_safe(desired.get('Role')==expected_role and desired.get('CompanyAccess')==expected_company and row['IsActive'],'DESIRED_SCOPE_INVALID')
   resolved.append((row,entry,desired))
  assert_safe(len({e['username'] for e in incoming})==4 and len({e['address'] for e in incoming})==4,'DUPLICATE_CONFIG')
  admins=[u for u in users_by_id().values() if u['Role']=='admin' and u['IsActive']]
@@ -144,6 +146,7 @@ def verify_configuration():
   assert_safe(len(matches)==1,'AMBIGUOUS_ACCOUNT:'+name);u=matches[0]
   e=next((e for e in config if e.get('username')==u['Username'] and e.get('address')==address),None)
   assert_safe(e is not None and u['MailboxAddress']==address and e.get('host')=='imap.163.com' and e.get('folder')=='INBOX','RUNNING_BINDING_MISMATCH')
+  assert_safe(u['Role']==('admin' if u['Id']==2 else 'shipping') and u['CompanyAccess']==('Xingxin' if u['Id']==2 else 'Huadeng') and u['IsActive'],'APPROVED_ACCOUNT_SCOPE_CHANGED:'+name)
   rows.append(u)
  admins=[u for u in known.values() if u['Role']=='admin' and u['IsActive']]
  assert_safe(bool(admins),'NO_ACTIVE_ADMIN');admin=admins[0]
@@ -199,7 +202,9 @@ def verify_configuration():
   assert_safe(len({d['cursor']['Id'] for d in details if d['cursor']})==len([d for d in details if d['cursor']]),'MAILBOX_CURSORS_NOT_INDEPENDENT')
   for d in details:d.pop('oneSampleId',None)
   print(json.dumps({'mailboxStates':details,'permissions':permissions,'temporarySessionsCleanedOnExit':True},ensure_ascii=False),flush=True)
- print(json.dumps({'verified':all(r['connected'] and r.get('caughtUp') and not r.get('syncError') for r in results),'mailboxesTested':len(results)},ensure_ascii=False),flush=True)
+ verified=all(r['connected'] and r.get('caughtUp') and not r.get('syncError') for r in results)
+ print(json.dumps({'verified':verified,'mailboxesTested':len(results)},ensure_ascii=False),flush=True)
+ if not verified:raise RuntimeError('MAILBOX_CONNECTION_OR_SYNC_INCOMPLETE')
 
 try:
  mode=sys.argv[1]

@@ -30,6 +30,7 @@ try:
  assert [h['id'] for h in history]==sorted([h['id'] for h in history],reverse=True), 'Incorrect revision ordering'
  current=request('/material-alerts',token=token)
  items=current['items']
+ print(json.dumps({'current_items':len(items),'covered':sum(i['status']=='covered' for i in items),'fully_manual':sum(i['manual_completed'] for i in items),'pending':sum(i['shortage_qty']>0 for i in items)},ensure_ascii=False))
  assert items and all(i['status']=='covered' and i['manual_completed'] and i['shortage_qty']==0 for i in items), 'Existing completion was not preserved'
  assert all(i['received_qty']==0 and i['outbound_qty']==0 for i in items), 'Unexpected stock records'
  historical_count=0
@@ -50,5 +51,5 @@ try:
   'checked_history_views':len(history),'historical_material_item_rows':historical_count,'supplier_archives':len(suppliers),
   'current_actual_received_qty':0,'current_actual_outbound_qty':0,'nonexistent_revision_status':404},ensure_ascii=False))
 except Exception as e:
- print('Read-only history verification failed: '+type(e).__name__,file=sys.stderr)
+ print('Read-only history verification failed: '+type(e).__name__+(': '+str(e) if isinstance(e,AssertionError) else ''),file=sys.stderr)
  sys.exit(1)

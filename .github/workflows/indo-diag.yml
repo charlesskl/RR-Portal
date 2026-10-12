@@ -2,6 +2,13 @@ name: Indo Shipping Diag
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "check=只读数量 / clear=按已核对范围备份并清空采购和出入库（保留走货）"
+        type: choice
+        options: [check, clear]
+        default: check
+        required: true
 
 permissions:
   contents: read
@@ -30,16 +37,33 @@ jobs:
       - name: Inspect purchase and stock records via SSH
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_MODE: ${{ inputs.mode }}
+          OPS_REF: ${{ github.sha }}
+          OPS_ACTOR: ${{ github.actor }}
+          OPS_EXPECTED: '{"purchase_orders":40,"po_items":144,"po_receipts":98,"outbound":68,"shipment_links":10}'
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 5m
+          command_timeout: 8m
+          envs: OPS_MODE,OPS_REF,OPS_ACTOR,OPS_EXPECTED
           script: |
             set -euo pipefail
             cd /opt/rr-portal
+            if [[ "$OPS_MODE" == clear ]]; then
+              [[ "$OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+              git fetch origin ops/indo-purchase-clear-20261012
+              directory=$(mktemp -d /tmp/indo-clear.XXXXXX)
+              trap 'rm -rf "$directory"' EXIT
+              git show "$OPS_REF:deploy/ops/clear-indo-purchases.sh" > "$directory/clear.sh"
+              git show "$OPS_REF:deploy/ops/clear-indo-purchases.sql" > "$directory/clear.sql"
+              export OPS_SQL_FILE="$directory/clear.sql"
+              bash "$directory/clear.sh"
+              exit 0
+            fi
+            [[ "$OPS_MODE" == check ]] || exit 1
             docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production exec -T db sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-rrportal}" -d "${POSTGRES_DB:-rrportal}"' <<'SQL'
             BEGIN READ ONLY;
             SELECT jsonb_build_object(

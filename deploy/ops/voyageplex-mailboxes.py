@@ -317,6 +317,27 @@ try:
    health.append({'service':service,'status':info['State']['Health']['Status'],'restartCount':info['RestartCount']})
   assert_safe((ROOT/'.env.cloud.production').stat().st_mode & 0o077 == 0,'ENV_FILE_NOT_PRIVATE')
   print(json.dumps({'auditVerified':True,'version':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'snapshotAt':datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat(),'mailboxes':report,'serviceHealth':health,'originalIdentitiesAndPasswordsPreserved':True,'expiredValidationSessionsRemoved':len(expired),'temporarySessionsCleaned':True,'historyBackfill':'continues automatically per existing mailbox interval'},ensure_ascii=False))
+ elif mode=='errors':
+  from collections import Counter
+  reports=[]
+  with connect() as c:
+   for uid in [2,3,5,6]:
+    user=c.execute('SELECT Username,MailboxAddress FROM Users WHERE Id=?',(uid,)).fetchone()
+    failures=c.execute("SELECT Error FROM ImportEmailItems WHERE Company='Huadeng' AND MailOwnerId=? AND MailboxKey<>'' AND Error<>''",(uid,)).fetchall()
+    categories=Counter()
+    for row in failures:
+     error=row[0].lower()
+     if '25mb' in error or '25 mb' in error:category='邮件超过25MB读取限制'
+     elif 'encrypt' in error or 'password' in error or '加密' in error:category='邮件附件加密或需要密码'
+     elif 'pdf' in error:category='PDF附件解析异常'
+     elif 'xlsx' in error or 'excel' in error or '工作表' in error:category='Excel附件解析异常'
+     elif '有效' in error or '没有' in error or '未找到' in error or '可识别' in error or 'unsupported' in error or '不支持' in error:category='未发现可识别业务内容或附件格式不支持'
+     elif '读取' in error or 'fetch' in error:category='单封邮件读取异常'
+     else:category='邮件或附件内容解析异常'
+     categories[category]+=1
+    count=c.execute("SELECT COUNT(*) FROM ImportEmailItems WHERE Company='Huadeng' AND MailOwnerId=? AND MailboxKey<>''",(uid,)).fetchone()[0]
+    reports.append({'username':user[0],'address':user[1],'mailCount':count,'parseFailures':len(failures),'errorCategories':dict(categories)})
+  print(json.dumps({'errorSummary':reports,'snapshotAt':datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat()},ensure_ascii=False))
  elif mode=='rollout':
   directory=sorted((ROOT/'deploy/backups').glob('voyageplex-pre-904-*'))[-1]
   fields='Id,Username,DisplayName,Role,CompanyAccess,IsActive,PasswordHash,MailboxAddress'

@@ -27,7 +27,7 @@ jobs:
             exit 1
           fi
 
-      - name: Fetch indo-shipping container logs via SSH
+      - name: Inspect purchase and stock records via SSH
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
@@ -39,7 +39,24 @@ jobs:
           command_timeout: 5m
           script: |
             set -euo pipefail
-            echo "== 容器状态 =="
-            docker ps -a --filter name=indo-shipping --format 'table {{.Names}}\t{{.Status}}'
-            echo "== 最近 100 行日志 =="
-            docker logs rr-portal-indo-shipping-1 --tail 100 2>&1 || true
+            cd /opt/rr-portal
+            docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production exec -T db sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-rrportal}" -d "${POSTGRES_DB:-rrportal}"' <<'SQL'
+            BEGIN READ ONLY;
+            SELECT jsonb_build_object(
+              'purchase_orders', (SELECT COUNT(*) FROM indo_shipping.purchase_orders),
+              'po_items', (SELECT COUNT(*) FROM indo_shipping.po_items),
+              'po_receipts', (SELECT COUNT(*) FROM indo_shipping.po_receipts),
+              'outbound', (SELECT COUNT(*) FROM indo_shipping.outbound),
+              'shipment_links', (SELECT COUNT(*) FROM indo_shipping.shipment_items WHERE outbound_id IS NOT NULL),
+              'shipments', (SELECT COUNT(*) FROM indo_shipping.shipments),
+              'shipment_items', (SELECT COUNT(*) FROM indo_shipping.shipment_items),
+              'products', (SELECT COUNT(*) FROM indo_shipping.products),
+              'materials', (SELECT COUNT(*) FROM indo_shipping.materials),
+              'suppliers', (SELECT COUNT(*) FROM indo_shipping.dict_supplier),
+              'schedules', (SELECT COUNT(*) FROM indo_shipping.schedules)
+            ) AS cleanup_preview;
+            SELECT conrelid::regclass AS referencing_table, confrelid::regclass AS referenced_table, pg_get_constraintdef(oid) AS definition
+            FROM pg_constraint WHERE contype='f'
+              AND confrelid IN ('indo_shipping.purchase_orders'::regclass,'indo_shipping.po_items'::regclass,'indo_shipping.po_receipts'::regclass,'indo_shipping.outbound'::regclass);
+            COMMIT;
+            SQL

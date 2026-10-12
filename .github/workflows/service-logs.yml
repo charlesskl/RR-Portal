@@ -23,6 +23,15 @@ on:
         type: boolean
         required: false
         default: false
+      indo_data_ops:
+        description: "仅 INDO：备份或只读验证 911 数据修复"
+        type: choice
+        required: false
+        default: none
+        options:
+          - none
+          - backup
+          - verify
 
 permissions:
   contents: read
@@ -54,6 +63,8 @@ jobs:
           OPS_SERVICE: ${{ inputs.service }}
           OPS_TAIL: ${{ inputs.tail }}
           TOMY_SMOKE: ${{ inputs.tomy_smoke }}
+          INDO_DATA_OPS: ${{ inputs.indo_data_ops }}
+          OPS_REF: ${{ github.sha }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -61,9 +72,32 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 5m
-          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE
+          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE,INDO_DATA_OPS,OPS_REF
           script: |
             set -euo pipefail
+            if [[ "${INDO_DATA_OPS:-none}" != "none" ]]; then
+              if [[ "$OPS_SERVICE" != "indo-shipping" ]]; then
+                echo 'INDO data operations require service=indo-shipping.' >&2
+                exit 1
+              fi
+              if [[ "$INDO_DATA_OPS" != "backup" && "$INDO_DATA_OPS" != "verify" ]]; then
+                echo 'INDO data operation must be backup or verify.' >&2
+                exit 1
+              fi
+              if [[ ! "$OPS_REF" =~ ^[0-9a-f]{40}$ ]]; then
+                echo 'OPS_REF must be a 40-character Git commit SHA.' >&2
+                exit 1
+              fi
+              cd /opt/rr-portal
+              git fetch origin ops/indo-911-20261012
+              umask 077
+              OPS_TMP_DIR="$(mktemp -d)"
+              trap 'rm -rf -- "$OPS_TMP_DIR"' EXIT
+              git show "${OPS_REF}:deploy/ops/indo-911.py" > "$OPS_TMP_DIR/run.py"
+              python3 "$OPS_TMP_DIR/run.py" "$INDO_DATA_OPS"
+              exit 0
+            fi
+
             # 服务名只允许字母数字和连字符，防止注入
             if [[ ! "$OPS_SERVICE" =~ ^[a-z0-9-]+$ ]]; then
               echo "非法服务名: $OPS_SERVICE" >&2

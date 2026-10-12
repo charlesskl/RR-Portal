@@ -24,8 +24,53 @@ def command(args, input=None, env=None):
 
 def runtime_read(args):
     """Capture locally for classification only; never echo command output or failures."""
-    result = subprocess.run(args, text=True, capture_output=True, cwd=REPO, timeout=30)
+    try:
+        result = subprocess.run(args, text=True, capture_output=True, cwd=REPO, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return False, '', ''
     return result.returncode == 0, result.stdout, result.stderr
+
+
+def runtime_history(cid):
+    until = int(time.time())
+    template = ('{"action":{{json .Action}},"time":{{.Time}},'
+                '"exitCode":{{json (index .Actor.Attributes "exitCode")}},'
+                '"signal":{{json (index .Actor.Attributes "signal")}}}')
+    args = ['docker', 'events', '--since', str(until - 2400), '--until', str(until),
+            '--filter', 'container=' + cid, '--filter', 'type=container']
+    for action in ['oom', 'die', 'kill', 'restart']:
+        args += ['--filter', 'event=' + action]
+    ok, output, _ = runtime_read(args + ['--format', template])
+    counts = {action: 0 for action in ['oom', 'die', 'kill', 'restart']}
+    events = []
+    for line in output.splitlines():
+        try:
+            row = json.loads(line)
+            action = row.get('action')
+            stamp = int(row.get('time', 0))
+            if action not in counts or not until - 2400 <= stamp <= until:
+                continue
+            counts[action] += 1
+            code = str(row.get('exitCode', ''))
+            signal = str(row.get('signal', ''))
+            events.append({'type': action,
+                           'timestamp': datetime.datetime.fromtimestamp(stamp, datetime.timezone.utc).isoformat(),
+                           'exitCode': int(code) if re.fullmatch(r'[0-9]{1,3}', code) and int(code) <= 255 else None,
+                           'signal': int(signal) if signal.isdigit() and 1 <= int(signal) <= 64 else signal if signal in ['SIGKILL', 'SIGTERM', 'SIGABRT', 'SIGINT', 'SIGHUP'] else None})
+        except (ValueError, TypeError, AttributeError):
+            continue
+    journal_ok, journal, _ = runtime_read(['journalctl', '-k', '--since', '-40min', '--no-pager',
+                                         '--output=short-iso', '--grep=' + cid])
+    kernel_times = []
+    for line in journal.splitlines():
+        if cid in line and 'CONSTRAINT_MEMCG' in line and re.search(r'\btask=node\b', line) and re.search(r'\boom-kill\b', line):
+            stamp = re.match(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2}))\s', line)
+            kernel_times.append(stamp.group(1) if stamp else None)
+    return {'windowMinutes': 40,
+            'dockerEvents': {'available': ok, 'counts': counts, 'events': events,
+                             'daemonHistoryMaximumEvents': 256},
+            'kernelNodeMemcgOOM': {'available': journal_ok, 'count': len(kernel_times),
+                                  'timestamps': kernel_times}}
 
 
 def classify_runtime_logs(lines):
@@ -101,9 +146,10 @@ def runtime_diagnostics(proc_root=pathlib.Path('/proc'), cgroup_root=pathlib.Pat
     logs_ok, stdout, stderr = runtime_read(['docker', 'logs', '--since', '40m', '--tail', '1500', '--timestamps', cid])
     logs = classify_runtime_logs(stdout + '\n' + stderr)
     logs['available'] = logs_ok
+    history = runtime_history(docker['id'])
     docker.pop('id')
     return {'service': 'printlink', 'docker': docker, 'hostMemory': host, 'cgroupMemory': cgroup,
-            'logs': logs,
+            'logs': logs, 'history': history,
             'businessPayloadRead': False, 'businessWritesPerformed': False, 'containerRecreated': False}
 
 

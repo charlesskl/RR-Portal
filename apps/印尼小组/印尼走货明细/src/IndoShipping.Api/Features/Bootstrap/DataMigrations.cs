@@ -1,5 +1,6 @@
 using System.Data;
 using System.Text.Json;
+using Dapper;
 using IndoShipping.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -26,6 +27,14 @@ public static class DataMigrations
         var connection = db.Database.GetDbConnection();
         if (connection.State != ConnectionState.Open)
             await connection.OpenAsync();
+
+        // Bootstrap existing schedules once, then retain each subsequent upload's BOM.
+        await connection.ExecuteAsync(MaterialTrackingHistory.SchemaSql);
+        await using (var historyTx = await connection.BeginTransactionAsync())
+        {
+            await MaterialTrackingHistory.CaptureAsync(connection, historyTx);
+            await historyTx.CommitAsync();
+        }
 
         // 独立非生产物料复用全局物料 ID，但不挂入 products/BOM。
         await using (var tools = connection.CreateCommand())

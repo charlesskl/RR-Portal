@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   App, Badge, Button, Card, Col, Empty, Form, Input, InputNumber, Modal, Popover, Progress, Row, Segmented,
-  Space, Statistic, Switch, Table, Tag, Tooltip, Typography,
+  Select, Space, Statistic, Switch, Table, Tag, Tooltip, Typography,
 } from 'antd'
 import {
   BellOutlined, CheckCircleOutlined, ClockCircleOutlined, ExclamationCircleOutlined,
@@ -21,7 +21,7 @@ interface AlertItem {
   supplier?: string
   order_count: number
   order_nos: string[]
-  order_details?: Array<{ order_no: string; accepted_date: string; required_qty: number; received_qty: number; outbound_qty: number; status: string }>
+  order_details?: Array<{ key: string; order_no: string; product_code: string; customer: string; schedule_label: string; manual_qty: number; accepted_date: string; required_qty: number; received_qty: number; outbound_qty: number; status: string }>
   accepted_date: string
   due_date?: string
   lead_days?: number
@@ -45,11 +45,19 @@ interface AlertItem {
 }
 
 interface AlertResponse {
+  revision_id?: number
   schedule_id?: number
   schedule_label?: string
   schedule_upload_date?: string
   order_count?: number
   items: AlertItem[]
+}
+
+interface TrackingRevision {
+  id: number
+  week_label?: string
+  upload_date?: string
+  captured_at?: string
 }
 
 interface LeadProfile {
@@ -91,6 +99,9 @@ export default function MaterialAlertsPage() {
   const [data, setData] = useState<AlertResponse>({ items: [] })
   const [profiles, setProfiles] = useState<LeadProfile[]>([])
   const [loading, setLoading] = useState(false)
+  const [revisionId, setRevisionId] = useState<number | undefined>()
+  const [revisions, setRevisions] = useState<TrackingRevision[]>([])
+  const loadSequence = useRef(0)
   const [q, setQ] = useState('')
   const [scope, setScope] = useState<string>('待处理')
   const [typeScope, setTypeScope] = useState<string>('全部类型')
@@ -105,18 +116,27 @@ export default function MaterialAlertsPage() {
   const [profileForm] = Form.useForm()
 
   async function load() {
+    const sequence = ++loadSequence.current
     setLoading(true)
     try {
-      const [alertsResp, profilesResp] = await Promise.all([
-        api.get<AlertResponse>('/material-alerts'),
+      const [alertsResp, profilesResp, historyResp] = await Promise.all([
+        api.get<AlertResponse>('/material-alerts', { params: { revisionId } }),
         api.get<LeadProfile[]>('/material-alerts/profiles'),
+        api.get<TrackingRevision[]>('/material-alerts/history'),
       ])
+      if (sequence !== loadSequence.current) return
       setData(alertsResp.data?.items ? alertsResp.data : { items: [] })
       setProfiles(Array.isArray(profilesResp.data) ? profilesResp.data : [])
-    } finally { setLoading(false) }
+      setRevisions(Array.isArray(historyResp.data) ? historyResp.data : [])
+    } finally { if (sequence === loadSequence.current) setLoading(false) }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    setData({ items: [] })
+    setOrderDetailItem(null)
+    void load()
+    return () => { ++loadSequence.current }
+  }, [revisionId])
 
   const stats = useMemo(() => {
     const items = data.items || []
@@ -359,7 +379,7 @@ export default function MaterialAlertsPage() {
     {
       title: '流程 / 完成率', dataIndex: 'workflow_status', width: 225,
       render: (v: string, r: AlertItem) => {
-        const pct = r.manual_completed ? 100 : r.required_qty > 0 ? Math.min(100, Math.round(r.outbound_qty / r.required_qty * 100)) : 100
+        const pct = r.required_qty > 0 ? Math.max(0, Math.min(100, Math.round((r.required_qty - r.outbound_shortage_qty) / r.required_qty * 100))) : 100
         return (
           <Space direction="vertical" size={6} style={{ width: '100%' }}>
             <Space size={[4, 4]} wrap>
@@ -367,7 +387,7 @@ export default function MaterialAlertsPage() {
                 <Tag
                   key={step}
                   bordered={false}
-                  color={step === '已完成' || step === '已送完(手动)' ? 'success' : step.includes('欠') ? 'error' : step.includes('部分') ? 'warning' : step.includes('待') ? 'default' : 'processing'}
+                  color={step.startsWith('已完成') || step === '已送完(手动)' ? 'success' : step.includes('欠') ? 'error' : step.includes('部分') ? 'warning' : step.includes('待') ? 'default' : 'processing'}
                   style={{ marginInlineEnd: 0 }}
                 >
                   {step}
@@ -495,11 +515,24 @@ export default function MaterialAlertsPage() {
         <div style={{ padding: 16, borderBottom: '1px solid #f0f0f0' }}>
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Space wrap>
-                <Tag color="blue">当前排期：{data.schedule_label || '暂无'}</Tag>
+                <Select
+                  aria-label="追踪排期范围"
+                  style={{ width: 330 }} showSearch optionFilterProp="label"
+                  value={revisionId ?? 'all'}
+                  onChange={value => setRevisionId(value === 'all' ? undefined : Number(value))}
+                  options={[
+                    { value: 'all', label: '累计追踪（保留历史订单，按最新需求更新）' },
+                    ...revisions.map(r => ({ value: r.id, label: `${r.week_label || '未命名排期'} · ${r.upload_date ? dayjs(r.upload_date).format('YYYY-MM-DD') : '日期未填'} · 版本 #${r.id}` })),
+                  ]}
+                />
+                <Tag color="blue">{revisionId ? '历史排期' : '最新排期'}：{data.schedule_label || '暂无'}</Tag>
                 <Typography.Text type="secondary">应交日 = 接单日期 + 货号物料交货周期</Typography.Text>
                 <Tag color="green">完成 = 入出库达标或手动确认送完</Tag>
                 <Tag color="purple">日产能生产天数不计周日</Tag>
             </Space>
+            <Typography.Text type="secondary">
+              {revisionId ? '按该版本的订单和物料资料查看；入出库数量仍为当前实际记录。' : '新排期未出现的历史订单继续保留；相同订单、货号、物料不重复累计。缺少订单号的行只计入最新排期，可在历史版本查看。'}
+            </Typography.Text>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
               <Space wrap size={8}>
                 <Segmented value={typeScope} onChange={v => setTypeScope(String(v))} options={[
@@ -549,13 +582,13 @@ export default function MaterialAlertsPage() {
       <Modal
         open={Boolean(orderDetailItem)}
         title={orderDetailItem ? `${orderDetailItem.product_code} · ${orderDetailItem.material_name || orderDetailItem.item_no} · 对应排期订单` : '对应排期订单'}
-        width={980}
+        width={1200}
         footer={null}
         onCancel={() => setOrderDetailItem(null)}
       >
-        <Typography.Paragraph type="secondary">入库、出库数量按最早接单日期 FIFO 自动分配到订单。手动确认送完的排期显示完成，账面数量仍保留实际记录。</Typography.Paragraph>
+        <Typography.Paragraph type="secondary">入库、出库数量按最早接单日期 FIFO 自动分配到订单。手动确认量按订单、货号及物料保留；与实际记录不重复相加，追加需求继续追踪。</Typography.Paragraph>
         <Table
-          rowKey="order_no"
+          rowKey="key"
           size="small"
           dataSource={orderDetailItem?.order_details || []}
           pagination={{ defaultPageSize: 20, showTotal: total => `共 ${total} 张订单` }}
@@ -570,14 +603,22 @@ export default function MaterialAlertsPage() {
             <Table.Summary.Cell index={4} align="right">
               <Typography.Text strong>{numberFmt.format(rows.reduce((sum, row) => sum + Number(row.outbound_qty || 0), 0))}</Typography.Text>
             </Table.Summary.Cell>
-            <Table.Summary.Cell index={5} />
+            <Table.Summary.Cell index={5} align="right">
+              <Typography.Text strong>{numberFmt.format(rows.reduce((sum, row) => sum + Number(row.manual_qty || 0), 0))}</Typography.Text>
+            </Table.Summary.Cell>
+            <Table.Summary.Cell index={6} />
           </Table.Summary.Row>}
           columns={[
-            { title: '订单号', dataIndex: 'order_no', render: v => <Tag color="blue">{v}</Tag> },
+            { title: '订单 / 货号 / 排期', dataIndex: 'order_no', render: (v, row) => <Space direction="vertical" size={0}>
+              <Tag color="blue">{v || '未填写订单号'}</Tag>
+              <span>{row.customer} · {row.product_code}</span>
+              <Typography.Text type="secondary">来源排期：{row.schedule_label}</Typography.Text>
+            </Space> },
             { title: '接单日期', dataIndex: 'accepted_date', width: 150 },
             { title: '需求数量', dataIndex: 'required_qty', width: 130, align: 'right', render: v => numberFmt.format(v) },
             { title: '分配入库', dataIndex: 'received_qty', width: 130, align: 'right', render: v => numberFmt.format(v) },
             { title: '分配出库', dataIndex: 'outbound_qty', width: 130, align: 'right', render: v => numberFmt.format(v) },
+            { title: '手动确认量', dataIndex: 'manual_qty', width: 130, align: 'right', render: v => numberFmt.format(v || 0) },
             { title: '订单状态', dataIndex: 'status', width: 170, render: v => <Tag color={v === '已完成' || v === '已送完(手动)' ? 'green' : v.includes('部分') ? 'orange' : 'blue'}>{v}</Tag> },
           ]}
         />

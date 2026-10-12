@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Dapper;
+using IndoShipping.Api.Features.Bootstrap;
 using IndoShipping.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 
@@ -160,16 +161,25 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
     }
 
     [HttpGet]
-    public async Task<IActionResult> List()
+    public async Task<IActionResult> List([FromQuery] long? revisionId = null)
     {
-        var result = await BuildAlerts();
-        return Ok(result);
+        var result = await BuildAlerts(revisionId);
+        return result is null ? NotFound(new { message = "排期版本不存在" }) : Ok(result);
+    }
+
+    [HttpGet("history")]
+    public async Task<IActionResult> History()
+    {
+        using var c = factory.Create();
+        return Ok(await c.QueryAsync(@"
+            SELECT id, schedule_id, week_label, upload_date, captured_at
+            FROM material_tracking_history ORDER BY upload_date DESC NULLS LAST, id DESC"));
     }
 
     [HttpGet("stats")]
     public async Task<IActionResult> Stats()
     {
-        var result = await BuildAlerts();
+        var result = await BuildAlerts() ?? new AlertResponse();
         return Ok(new
         {
             pending_critical = result.items.Count(x => x.status == "critical"),
@@ -182,16 +192,19 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
         });
     }
 
-    private async Task<AlertResponse> BuildAlerts()
+    private async Task<AlertResponse?> BuildAlerts(long? revisionId = null)
     {
         using var c = factory.Create();
-        var schedule = await c.QueryFirstOrDefaultAsync<ScheduleRow>(@"
-            SELECT id, week_label, upload_date, raw_rows, md5(raw_rows::text) AS rows_hash
-            FROM schedules
-            ORDER BY upload_date DESC NULLS LAST, id DESC
-            LIMIT 1");
-        if (schedule is null || string.IsNullOrWhiteSpace(schedule.raw_rows))
-            return new AlertResponse();
+        var revisions = (await c.QueryAsync<MaterialTrackingHistory.Snapshot>(@"
+            SELECT id,schedule_id,week_label,upload_date,raw_rows::text,rows_hash,
+                   materials::text,products::text,acknowledged
+            FROM material_tracking_history ORDER BY upload_date NULLS FIRST, id")).ToList();
+        var schedule = revisionId.HasValue ? revisions.FirstOrDefault(x => x.id == revisionId) : revisions.LastOrDefault();
+        if (schedule is null) return revisionId.HasValue ? null : new AlertResponse();
+        var completionRaw = await c.ExecuteScalarAsync<string?>(
+            "SELECT value FROM settings WHERE key='material_tracking_completed_schedules'");
+        // Historical views must not inherit confirmations from a later revision.
+        if (revisionId.HasValue) revisions = revisions.Take(revisions.IndexOf(schedule) + 1).ToList();
 
         var profiles = (await c.QueryAsync<ProfileRow>(@"
             SELECT product_code, product_name, category, component_name, lead_days, capacity_per_day
@@ -206,8 +219,6 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
             FROM materials
             WHERE active=TRUE
             ORDER BY product_code, sort_order, id")).ToList();
-        var materialByCode = materials.GroupBy(x => x.product_code ?? "", StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(x => x.Key, x => x.ToList(), StringComparer.OrdinalIgnoreCase);
 
         var productionParts = new List<ProductionPartRow>();
         var productRows = await c.QueryAsync<ProductMoldingRow>(@"
@@ -216,8 +227,6 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
               AND NULLIF(BTRIM(moldings::text), '') IS NOT NULL
               AND BTRIM(moldings::text) <> '[]'");
         foreach (var product in productRows) productionParts.AddRange(ParseProductionParts(product));
-        var productionByCode = productionParts.GroupBy(x => x.product_code, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(x => x.Key, x => x.ToList(), StringComparer.OrdinalIgnoreCase);
 
         var productionPlan = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
         var moldingPoRaw = await c.ExecuteScalarAsync<string?>("SELECT value FROM settings WHERE \"key\"='moldingPOs'");
@@ -246,58 +255,72 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
         var aggregates = new Dictionary<int, DemandAggregate>();
         var productionAggregates = new Dictionary<string, ProductionDemandAggregate>(StringComparer.OrdinalIgnoreCase);
         var scheduleOrderNos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var knownCodes = materialByCode.Keys.Union(productionByCode.Keys, StringComparer.OrdinalIgnoreCase).ToArray();
-        using var doc = JsonDocument.Parse(schedule.raw_rows);
-        if (doc.RootElement.ValueKind == JsonValueKind.Array)
+        var demands = new Dictionary<string, TrackingDemand>(StringComparer.OrdinalIgnoreCase);
+        var acknowledgements = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> selectedKeys = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var revision in revisions)
         {
-            foreach (var row in doc.RootElement.EnumerateArray())
+            // Keep historical BOMs immutable, but continue reflecting live library edits
+            // in the current view. New material IDs never inherit old confirmations.
+            var revisionMaterials = JsonSerializer.Deserialize<List<MaterialRow>>(revision.materials) ?? [];
+            var revisionParts = new List<ProductionPartRow>();
+            using (var productDoc = JsonDocument.Parse(revision.products))
+                foreach (var product in productDoc.RootElement.EnumerateArray())
+                    revisionParts.AddRange(ParseProductionParts(new ProductMoldingRow {
+                        code = Text(product, "code"), name = Text(product, "name"),
+                        moldings = product.TryGetProperty("moldings", out var molds) ? molds.GetRawText() : "[]"
+                    }));
+            var acknowledged = revision.acknowledged || MaterialTrackingHistory.MatchesCompletion(
+                completionRaw, revision.schedule_id, revision.rows_hash);
+            var frozenDemands = ExpandDemands(revision, revisionMaterials, revisionParts);
+            if (acknowledged)
+                foreach (var (key, demand) in frozenDemands)
+                    acknowledgements[key] = Math.Max(acknowledgements.GetValueOrDefault(key), demand.required_qty);
+            var revisionDemands = !revisionId.HasValue && revision.id == schedule.id
+                ? ExpandDemands(revision, materials, productionParts) : frozenDemands;
+            selectedKeys = revisionDemands.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, demand) in revisionDemands)
             {
-                var sourceCode = Text(row, "code");
-                if (string.IsNullOrWhiteSpace(sourceCode)) continue;
-                var code = ResolveCode(sourceCode, knownCodes);
-                if (code is null) continue;
-                var qty = Number(row, "qty");
-                if (qty <= 0) continue;
-                var orderNo = Text(row, "orderNo");
-                if (!string.IsNullOrWhiteSpace(orderNo)) scheduleOrderNos.Add(orderNo);
-                var accepted = ParseDate(Text(row, "orderDate")) ?? schedule.upload_date?.Date ?? DateTime.Today;
-
-                if (materialByCode.TryGetValue(code, out var productMaterials))
+                // No reliable cross-schedule identity without an order number. Such rows
+                // remain in their historical view rather than doubling current demand.
+                if (demand.order_no.Length == 0 && revision.id != schedule.id) continue;
+                demands[key] = demand;
+            }
+        }
+        foreach (var (key, demand) in demands)
+        {
+            if (revisionId.HasValue && !selectedKeys.Contains(key)) continue;
+            if (demand.required_qty <= 0) continue;
+            if (demand.order_no.Length > 0) scheduleOrderNos.Add(JsonSerializer.Serialize(new[] { demand.customer, demand.order_no }));
+            var manualQty = Math.Min(demand.required_qty, acknowledgements.GetValueOrDefault(key));
+            var order = new OrderDemand {
+                key = key,
+                order_no = demand.order_no, product_code = demand.source_code, customer = demand.customer,
+                accepted_date = demand.accepted_date, required_qty = demand.required_qty,
+                manual_qty = manualQty, schedule_label = demand.schedule_label,
+            };
+            if (demand.material is { } material)
+            {
+                if (!aggregates.TryGetValue(material.id, out var agg))
                 {
-                    foreach (var material in productMaterials)
-                    {
-                        if (!aggregates.TryGetValue(material.id, out var agg))
-                        {
-                            agg = new DemandAggregate
-                            {
-                                material = material,
-                                product_code = code,
-                                accepted_date = accepted,
-                            };
-                            aggregates[material.id] = agg;
-                        }
-                        var materialDemand = qty * material.usage_qty;
-                        agg.required_qty += materialDemand;
-                        agg.accepted_date = accepted < agg.accepted_date ? accepted : agg.accepted_date;
-                        AddOrderDetail(agg.order_details, orderNo, accepted, materialDemand);
-                    }
+                    agg = new DemandAggregate { material = material, product_code = material.product_code ?? "",
+                        accepted_date = demand.accepted_date };
+                    aggregates[material.id] = agg;
                 }
-
-                if (productionByCode.TryGetValue(code, out var productParts))
+                agg.required_qty += demand.required_qty;
+                if (demand.accepted_date < agg.accepted_date) agg.accepted_date = demand.accepted_date;
+                agg.order_details[key] = order;
+            }
+            else if (demand.part is { } part)
+            {
+                if (!productionAggregates.TryGetValue(part.key, out var agg))
                 {
-                    foreach (var part in productParts)
-                    {
-                        if (!productionAggregates.TryGetValue(part.key, out var agg))
-                        {
-                            agg = new ProductionDemandAggregate { part = part, accepted_date = accepted };
-                            productionAggregates[part.key] = agg;
-                        }
-                        var productionDemand = qty * part.usage_qty;
-                        agg.required_qty += productionDemand;
-                        agg.accepted_date = accepted < agg.accepted_date ? accepted : agg.accepted_date;
-                        AddOrderDetail(agg.order_details, orderNo, accepted, productionDemand);
-                    }
+                    agg = new ProductionDemandAggregate { part = part, accepted_date = demand.accepted_date };
+                    productionAggregates[part.key] = agg;
                 }
+                agg.required_qty += demand.required_qty;
+                if (demand.accepted_date < agg.accepted_date) agg.accepted_date = demand.accepted_date;
+                agg.order_details[key] = order;
             }
         }
 
@@ -342,7 +365,7 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
                 lead_category = normalizedCategory,
                 supplier = material.supplier ?? "",
                 order_count = agg.order_details.Count,
-                order_nos = agg.order_details.Keys.OrderBy(x => x).Take(8).ToArray(),
+                order_nos = agg.order_details.Values.Select(x => x.order_no).Where(x => x.Length > 0).Distinct().OrderBy(x => x).Take(8).ToArray(),
                 order_details = ToOrderDetails(agg.order_details, received, outbound),
                 accepted_date = agg.accepted_date.ToString("yyyy-MM-dd"),
                 due_date = due?.ToString("yyyy-MM-dd"),
@@ -393,7 +416,7 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
                 supplier = part.workshop,
                 detail = part.detail,
                 order_count = agg.order_details.Count,
-                order_nos = agg.order_details.Keys.OrderBy(x => x).Take(8).ToArray(),
+                order_nos = agg.order_details.Values.Select(x => x.order_no).Where(x => x.Length > 0).Distinct().OrderBy(x => x).Take(8).ToArray(),
                 order_details = ToOrderDetails(agg.order_details, 0, 0),
                 accepted_date = agg.accepted_date.ToString("yyyy-MM-dd"),
                 due_date = due?.ToString("yyyy-MM-dd"),
@@ -416,19 +439,23 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
             });
         }
 
-        // Completion is a snapshot of an existing schedule, never fabricated stock movements.
-        var completionRaw = await c.ExecuteScalarAsync<string?>(
-            "SELECT value FROM settings WHERE key='material_tracking_completed_schedules'");
-        if (MatchesCompletionSnapshot(completionRaw, schedule.id, schedule.rows_hash))
+        // Acknowledged quantities belong to an order/product/material, not an entire
+        // upload. Use max, not addition, so real movements are never counted twice.
+        foreach (var item in items)
         {
-            foreach (var item in items)
+            var details = item.order_details;
+            var manual = details.Sum(x => x.manual_qty);
+            item.manual_completed = manual >= item.required_qty;
+            if (manual <= 0) continue;
+            item.purchase_shortage_qty = Math.Max(item.required_qty - Math.Max(manual, item.ordered_qty), 0);
+            item.receipt_shortage_qty = details.Sum(x => Math.Max(x.required_qty - Math.Max(x.manual_qty, x.received_qty), 0));
+            item.outbound_shortage_qty = item.shortage_qty = details.Sum(x => Math.Max(x.required_qty - Math.Max(x.manual_qty, x.outbound_qty), 0));
+            if (item.receipt_shortage_qty == 0 && item.outbound_shortage_qty == 0)
             {
-                item.manual_completed = true;
                 item.status = "covered";
-                item.workflow_status = "已送完(手动)";
-                item.purchase_shortage_qty = item.receipt_shortage_qty = item.outbound_shortage_qty = item.shortage_qty = 0;
-                foreach (var detail in item.order_details) detail.status = "已送完(手动)";
+                item.workflow_status = item.manual_completed ? "已送完(手动)" : "已完成(含手动确认)";
             }
+            else item.workflow_status = "部分已送完(手动)·" + item.workflow_status;
         }
 
         var statusOrder = new Dictionary<string, int>
@@ -443,7 +470,8 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
 
         return new AlertResponse
         {
-            schedule_id = schedule.id,
+            schedule_id = schedule.schedule_id,
+            revision_id = revisionId,
             schedule_label = schedule.week_label ?? "",
             schedule_upload_date = schedule.upload_date?.ToString("yyyy-MM-dd"),
             order_count = scheduleOrderNos.Count,
@@ -451,18 +479,49 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
         };
     }
 
-    private static bool MatchesCompletionSnapshot(string? raw, int scheduleId, string? rowsHash)
+    private static Dictionary<string, TrackingDemand> ExpandDemands(MaterialTrackingHistory.Snapshot revision,
+        List<MaterialRow> materials, List<ProductionPartRow> parts)
     {
-        if (string.IsNullOrWhiteSpace(raw) || string.IsNullOrWhiteSpace(rowsHash)) return false;
-        try
+        var result = new Dictionary<string, TrackingDemand>(StringComparer.OrdinalIgnoreCase);
+        var byCode = materials.GroupBy(x => x.product_code ?? "", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.ToList(), StringComparer.OrdinalIgnoreCase);
+        var partsByCode = parts.GroupBy(x => x.product_code, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.ToList(), StringComparer.OrdinalIgnoreCase);
+        var codes = byCode.Keys.Union(partsByCode.Keys, StringComparer.OrdinalIgnoreCase).ToArray();
+        using var doc = JsonDocument.Parse(revision.raw_rows ?? "[]");
+        if (doc.RootElement.ValueKind != JsonValueKind.Array) return result;
+        var index = 0;
+        foreach (var row in doc.RootElement.EnumerateArray())
         {
-            using var doc = JsonDocument.Parse(raw);
-            return doc.RootElement.ValueKind == JsonValueKind.Object
-                && doc.RootElement.TryGetProperty(scheduleId.ToString(CultureInfo.InvariantCulture), out var hash)
-                && hash.ValueKind == JsonValueKind.String
-                && string.Equals(hash.GetString(), rowsHash, StringComparison.Ordinal);
+            index++;
+            if (row.ValueKind != JsonValueKind.Object) continue;
+            var source = Text(row, "code");
+            var code = ResolveCode(source, codes);
+            if (code is null || source.Length == 0) continue;
+            var orderNo = Text(row, "orderNo");
+            var customer = Text(row, "customer");
+            var accepted = ParseDate(Text(row, "orderDate")) ?? revision.upload_date?.Date ?? DateTime.Today;
+            var qty = Math.Max(Number(row, "qty"), 0);
+            void Add(string component, decimal usage, MaterialRow? material, ProductionPartRow? part)
+            {
+                // JSON tuple avoids delimiter collisions; keep the full source variant.
+                var key = JsonSerializer.Serialize(new[] { customer, orderNo, source, component,
+                    orderNo.Length == 0 ? $"{revision.id}:{index}" : "" });
+                if (!result.TryGetValue(key, out var demand))
+                {
+                    demand = new TrackingDemand { order_no = orderNo, source_code = source, customer = customer,
+                        accepted_date = accepted, material = material, part = part, schedule_label = revision.week_label ?? "" };
+                    result[key] = demand;
+                }
+                demand.required_qty += qty * usage;
+                if (accepted < demand.accepted_date) demand.accepted_date = accepted;
+            }
+            if (byCode.TryGetValue(code, out var matches))
+                foreach (var material in matches) Add($"material:{material.id}", material.usage_qty, material, null);
+            if (partsByCode.TryGetValue(code, out var partMatches))
+                foreach (var part in partMatches) Add($"part:{part.key}", part.usage_qty, null, part);
         }
-        catch (JsonException) { return false; }
+        return result;
     }
 
     private static string NormalizeCategory(string? value)
@@ -496,22 +555,6 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
         return date;
     }
 
-    private static void AddOrderDetail(
-        IDictionary<string, OrderDemand> target,
-        string? orderNo,
-        DateTime acceptedDate,
-        decimal requiredQty)
-    {
-        if (string.IsNullOrWhiteSpace(orderNo)) return;
-        if (!target.TryGetValue(orderNo, out var detail))
-        {
-            target[orderNo] = new OrderDemand { order_no = orderNo, accepted_date = acceptedDate, required_qty = requiredQty };
-            return;
-        }
-        detail.required_qty += requiredQty;
-        if (acceptedDate < detail.accepted_date) detail.accepted_date = acceptedDate;
-    }
-
     private static List<OrderDetail> ToOrderDetails(
         IReadOnlyDictionary<string, OrderDemand> source,
         decimal receivedQty,
@@ -527,13 +570,20 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
             outboundRemaining -= outbound;
             return new OrderDetail
             {
+                key = x.key,
                 order_no = x.order_no,
+                product_code = x.product_code,
+                customer = x.customer,
+                schedule_label = x.schedule_label,
+                manual_qty = decimal.Round(x.manual_qty, 4),
                 accepted_date = x.accepted_date.ToString("yyyy-MM-dd"),
                 required_qty = decimal.Round(x.required_qty, 4),
                 received_qty = decimal.Round(received, 4),
                 outbound_qty = decimal.Round(outbound, 4),
-                status = outbound >= x.required_qty && received >= x.required_qty
+                status = x.manual_qty >= x.required_qty ? "已送完(手动)"
+                    : outbound >= x.required_qty && received >= x.required_qty
                     ? "已完成"
+                    : x.manual_qty > 0 ? "部分已送完(手动)"
                     : received >= x.required_qty
                         ? outbound > 0 ? "部分出库" : "已入库待出库"
                         : received > 0
@@ -721,15 +771,6 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
             ? date.Date
             : null;
 
-    private sealed class ScheduleRow
-    {
-        public int id { get; set; }
-        public string? week_label { get; set; }
-        public DateTime? upload_date { get; set; }
-        public string? raw_rows { get; set; }
-        public string? rows_hash { get; set; }
-    }
-
     private sealed class ProductMoldingRow
     {
         public string code { get; set; } = "";
@@ -799,14 +840,24 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
 
     private sealed class OrderDemand
     {
+        public string key { get; set; } = "";
         public string order_no { get; set; } = "";
+        public string product_code { get; set; } = "";
+        public string customer { get; set; } = "";
+        public string schedule_label { get; set; } = "";
+        public decimal manual_qty { get; set; }
         public DateTime accepted_date { get; set; }
         public decimal required_qty { get; set; }
     }
 
     private sealed class OrderDetail
     {
+        public string key { get; set; } = "";
         public string order_no { get; set; } = "";
+        public string product_code { get; set; } = "";
+        public string customer { get; set; } = "";
+        public string schedule_label { get; set; } = "";
+        public decimal manual_qty { get; set; }
         public string accepted_date { get; set; } = "";
         public decimal required_qty { get; set; }
         public decimal received_qty { get; set; }
@@ -816,11 +867,24 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
 
     private sealed class AlertResponse
     {
+        public long? revision_id { get; set; }
         public int? schedule_id { get; set; }
         public string schedule_label { get; set; } = "";
         public string? schedule_upload_date { get; set; }
         public int order_count { get; set; }
         public List<AlertItem> items { get; set; } = [];
+    }
+
+    private sealed class TrackingDemand
+    {
+        public string order_no { get; set; } = "";
+        public string source_code { get; set; } = "";
+        public string customer { get; set; } = "";
+        public string schedule_label { get; set; } = "";
+        public DateTime accepted_date { get; set; }
+        public decimal required_qty { get; set; }
+        public MaterialRow? material { get; set; }
+        public ProductionPartRow? part { get; set; }
     }
 
     private sealed class AlertItem

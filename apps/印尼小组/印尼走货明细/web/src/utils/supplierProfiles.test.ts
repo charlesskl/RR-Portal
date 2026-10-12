@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   supplierSummaryRows, documentSellerForLine, HUASHENGYI_FULL_NAME, linkedCustomsCompany,
   supplierCustomsCompany, supplierForLine, supplierProfileForName,
+  supplierAutocompleteOptions, filterSupplierOption,
 } from './supplierProfiles'
 
 const profile = {
@@ -13,6 +14,45 @@ const otherProfile = {
   ...profile, id: 2, keyword: '星徽', full: '东莞市星徽纸品有限公司',
   nameEn: 'Dongguan Xinghui Paper Products Co., Ltd.', email: 'xinghui@example.com',
 }
+
+describe('supplier autocomplete options', () => {
+  it('deduplicates trimmed company names without changing or hiding archives', () => {
+    const profiles = [
+      { id: 1, keyword: '胶袋', full: '东莞兴信塑胶制品有限公司' },
+      { id: 2, keyword: '吸塑', full: ' 东莞兴信塑胶制品有限公司 ' },
+      { id: 3, keyword: '登信', full: '东莞市登信电子有限公司' },
+    ]
+    const before = JSON.stringify(profiles)
+    const options = supplierAutocompleteOptions(profiles)
+    expect(options.map(o => o.value)).toEqual(['东莞兴信塑胶制品有限公司', '东莞市登信电子有限公司'])
+    expect(new Set(options.map(o => o.value)).size).toBe(options.length)
+    expect(supplierSummaryRows(profiles)).toHaveLength(3)
+    expect(JSON.stringify(profiles)).toBe(before)
+  })
+
+  it('searches every alias of a shared full name and excludes unrelated suppliers', () => {
+    const options = supplierAutocompleteOptions([
+      { keyword: '胶袋', full: '兴信公司' }, { keyword: '吸塑', full: '兴信公司' },
+      { keyword: '登信', full: '登信公司' },
+    ])
+    for (const text of ['胶袋', '吸塑', '兴信', ' 胶袋 ']) {
+      expect(options.filter(o => filterSupplierOption(text, o)).map(o => o.value)).toEqual(['兴信公司'])
+    }
+    expect(options.filter(o => filterSupplierOption('不存在', o))).toEqual([])
+    expect(options.filter(o => filterSupplierOption('', o))).toHaveLength(2)
+  })
+
+  it('uses nonempty fallback names and compares Latin names without case sensitivity', () => {
+    const options = supplierAutocompleteOptions([
+      { keyword: ' 新供应商 ', full: '  ' }, { keyword: ' ', full: '' },
+      { keyword: '英文别名一', full: 'ACME' }, { keyword: '英文别名二', full: ' acme ' },
+    ])
+    expect(options.map(o => o.value)).toEqual(['新供应商', 'ACME'])
+    expect(filterSupplierOption('acme', options[1])).toBe(true)
+    expect(filterSupplierOption('英文别名二', options[1])).toBe(true)
+    expect(supplierAutocompleteOptions([])).toEqual([])
+  })
+})
 
 describe('supplier customs-company linkage', () => {
   it('finds a supplier by its Chinese company name or historical keyword', () => {

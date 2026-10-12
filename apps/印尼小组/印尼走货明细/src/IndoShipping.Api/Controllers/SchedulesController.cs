@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Dapper;
+using IndoShipping.Api.Features.Bootstrap;
 using IndoShipping.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 
@@ -114,12 +115,15 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;",
     public async Task<IActionResult> Create([FromBody] CreateBody body)
     {
         using var c = factory.Create();
+        c.Open();
+        using var tx = c.BeginTransaction();
+        await MaterialTrackingHistory.CaptureAsync(c, tx);
         // Diff baseline: 按周次标签排序紧邻的"前一周"（week_label 严格小于本次的最大者），
         // 而非按上传时间——这样补传历史周次也不会比错对象。
         var prevRaw = await c.ExecuteScalarAsync<string?>(@"
             SELECT raw_rows FROM schedules
             WHERE week_label IS NOT NULL AND week_label < @wl
-            ORDER BY week_label DESC LIMIT 1", new { wl = body.week_label });
+            ORDER BY week_label DESC LIMIT 1", new { wl = body.week_label }, tx);
         var rawRowsStr = body.raw_rows?.GetRawText() ?? "[]";
         var prevRows = ParseArray(prevRaw);
         var currRows = ParseArray(rawRowsStr);
@@ -134,7 +138,9 @@ ON CONFLICT (week_label) DO UPDATE SET
     raw_rows = EXCLUDED.raw_rows,
     diff_from_prev = EXCLUDED.diff_from_prev
 RETURNING id;",
-            new { wl = body.week_label, ud = body.upload_date, rr = rawRowsStr, df = diffStr });
+            new { wl = body.week_label, ud = body.upload_date, rr = rawRowsStr, df = diffStr }, tx);
+        await MaterialTrackingHistory.CaptureAsync(c, tx);
+        tx.Commit();
         return Ok(new { ok = true, id, diff });
     }
 

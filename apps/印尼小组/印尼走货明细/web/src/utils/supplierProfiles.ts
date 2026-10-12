@@ -2,6 +2,26 @@ import type { SupplierDict } from '../api/client'
 
 export const HUASHENGYI_FULL_NAME = '深圳市华胜益出口贸易有限公司'
 
+// 物料只保存供应商名称，因此同一名称在候选列表中只需出现一次。
+// 合并搜索别名但不修改档案；供应商汇总仍逐条显示全部记录。
+export function supplierAutocompleteOptions(profiles: SupplierDict[]) {
+  const options = new Map<string, { value: string; label: string; searchText: string }>()
+  for (const profile of profiles) {
+    const value = profile.full?.trim() || profile.keyword?.trim() || ''
+    if (!value) continue
+    const key = value.toLocaleLowerCase()
+    const searchText = [value, profile.keyword?.trim()].filter(Boolean).join('\n').toLocaleLowerCase()
+    const existing = options.get(key)
+    if (existing) existing.searchText += '\n' + searchText
+    else options.set(key, { value, label: value, searchText })
+  }
+  return [...options.values()]
+}
+
+export function filterSupplierOption(input: string, option?: { searchText: string }): boolean {
+  return (option?.searchText || '').includes(input.trim().toLocaleLowerCase())
+}
+
 function isHuashengyi(name: string): boolean {
   const key = name.trim().toLocaleLowerCase()
   return key === '华胜益' || key === HUASHENGYI_FULL_NAME.toLocaleLowerCase()

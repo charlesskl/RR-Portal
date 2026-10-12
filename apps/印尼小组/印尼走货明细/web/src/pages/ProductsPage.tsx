@@ -12,6 +12,7 @@ import SupplierProfileEditor from '../components/SupplierProfileEditor'
 import {
   HUASHENGYI_FULL_NAME, linkedCustomsCompany,
   supplierCustomsCompany, supplierProfileForName,
+  supplierAutocompleteOptions, filterSupplierOption,
 } from '../utils/supplierProfiles'
 
 interface ProductForm {
@@ -598,6 +599,8 @@ function MaterialsEditor({ rows, onChange, dicts, productCode, onSuppliersChange
   const { message } = App.useApp()
   const fileRef = useRef<HTMLInputElement>(null)
 
+  const supplierOptions = useMemo(() => supplierAutocompleteOptions(dicts.suppliers), [dicts.suppliers])
+
   function patch(i: number, k: keyof Material, v: any) {
     onChange(rows.map((m, idx) => idx === i ? { ...m, [k]: v } : m))
   }
@@ -796,10 +799,8 @@ function MaterialsEditor({ rows, onChange, dicts, productCode, onSuppliersChange
           { title: '供应商', width: 220, render: (_v, r, i) => <><AutoComplete size="small" allowClear
             placeholder="选择或输入新供应商" style={{ width: '100%' }}
             value={supplierProfileForName(r.supplier || '', dicts.suppliers)?.full || r.supplier || undefined}
-            options={dicts.suppliers.map(supplier => ({
-              value: supplier.full || supplier.keyword,
-              label: supplier.full || supplier.keyword,
-            }))}
+            options={supplierOptions}
+            filterOption={filterSupplierOption}
             onChange={(value) => patchSupplier(i, value || '')} />
             <SupplierProfileEditor name={r.supplier || ''} onSaved={(profile, previous) => {
               const oldNames = [previous.keyword, previous.full].filter(Boolean).map(n => n!.trim().toLowerCase())

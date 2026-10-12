@@ -281,6 +281,42 @@ try:
      result.update({'allFourMailboxesVisible':True,'ownerSelection':True})
     reports.append(result)
   print(json.dumps({'accessVerified':True,'connectionAndAccess':reports,'temporarySessionsCleaned':True},ensure_ascii=False))
+ elif mode=='audit':
+  current=users_by_id();rows=[current[i] for i in [2,3,5,6]];configuration=configured_env()
+  assert_safe(len(configuration)==4,'CONFIG_COUNT_INVALID')
+  admin=next(u for u in current.values() if u['Role']=='admin' and u['IsActive'])
+  directory=sorted((ROOT/'deploy/backups').glob('voyageplex-pre-904-*'))[-1]
+  with sqlite3.connect((directory/'voyageplex.db').as_uri()+'?mode=ro',uri=True) as before,connect(False) as c:
+   for u in rows:
+    old=before.execute('SELECT Username,DisplayName,PasswordHash,IsActive FROM Users WHERE Id=?',(u['Id'],)).fetchone()
+    new=c.execute('SELECT Username,DisplayName,PasswordHash,IsActive FROM Users WHERE Id=?',(u['Id'],)).fetchone()
+    assert_safe(old==new,'ACCOUNT_PASSWORD_OR_IDENTITY_CHANGED')
+   # Only expired probes created by this helper's 25-minute session convention.
+   expired=c.execute("SELECT Id FROM UserSessions WHERE UserId IN (1,2,3,5,6) AND CreatedAt LIKE '%T%' AND julianday(ExpiresAt)<=julianday('now') AND abs((julianday(ExpiresAt)-julianday(CreatedAt))*1440-25)<0.001").fetchall()
+   for row in expired:c.execute('DELETE FROM UserSessions WHERE Id=?',(row[0],))
+   assert_safe(c.execute('PRAGMA quick_check').fetchone()[0]=='ok','DATABASE_INTEGRITY_FAILED')
+  report=[]
+  with sessions([admin['Id']]) as tokens:
+   base=api_base()
+   for u,address in zip(rows,ADDRESSES):
+    uid=u['Id'];assert_safe(u['Role']==('admin' if uid==2 else 'shipping') and u['CompanyAccess']==('Xingxin' if uid==2 else 'Huadeng') and u['IsActive'] and u['MailboxAddress']==address,'APPROVED_SCOPE_OR_BINDING_CHANGED')
+    entry=next((e for e in configuration if e['username']==u['Username'] and e['address']==address),None)
+    assert_safe(entry is not None and entry['host']=='imap.163.com' and entry['folder']=='INBOX','RUNNING_BINDING_MISMATCH')
+    code,setting=request(base,'/api/mail/settings',tokens[admin['Id']],owner=uid)
+    assert_safe(code==200 and setting.get('connectionStatus')=='Connected' and setting.get('lastSuccessAt') and not setting.get('lastError'),'CURRENT_CONNECTION_OR_SYNC_NOT_SUCCESSFUL')
+    with connect() as c:
+     c.row_factory=sqlite3.Row
+     cursor=dict(c.execute('SELECT Id,Address,UidValidity,LastUid,LastSuccessAt,LastError FROM MailSyncStates WHERE Id=?',(1000+uid,)).fetchone())
+     mismatch=c.execute("SELECT COUNT(*) FROM ImportEmailItems WHERE Company='Huadeng' AND MailOwnerId=? AND MailboxKey<>'' AND MailboxKey NOT LIKE ?",(uid,'Huadeng:'+str(uid)+':%')).fetchone()[0]
+    assert_safe(cursor['Address']==address and not cursor['LastError'] and mismatch==0,'MAILBOX_CURSOR_OR_OWNER_MISMATCH')
+    report.append({'id':uid,'username':u['Username'],'name':u['DisplayName'],'role':u['Role'],'companyAccess':u['CompanyAccess'],'address':address,'connectionStatus':setting['connectionStatus'],'syncEnabled':setting['syncEnabled'],'intervalMinutes':setting['syncIntervalMinutes'],'startDate':setting['startDate'],'mailCount':setting['mailCount'],'parseFailedCount':setting['failedCount'],'cursor':cursor})
+  health=[]
+  for service in ['voyageplex-api','voyageplex-web','voyageplex-parser']:
+   info=json.loads(subprocess.check_output(['docker','inspect','rr-portal-'+service+'-1'],text=True))[0]
+   assert_safe(info['State']['Health']['Status']=='healthy','SERVICE_NOT_HEALTHY')
+   health.append({'service':service,'status':info['State']['Health']['Status'],'restartCount':info['RestartCount']})
+  assert_safe((ROOT/'.env.cloud.production').stat().st_mode & 0o077 == 0,'ENV_FILE_NOT_PRIVATE')
+  print(json.dumps({'auditVerified':True,'version':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'snapshotAt':datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat(),'mailboxes':report,'serviceHealth':health,'originalIdentitiesAndPasswordsPreserved':True,'expiredValidationSessionsRemoved':len(expired),'temporarySessionsCleaned':True,'historyBackfill':'continues automatically per existing mailbox interval'},ensure_ascii=False))
  elif mode=='rollout':
   directory=sorted((ROOT/'deploy/backups').glob('voyageplex-pre-904-*'))[-1]
   fields='Id,Username,DisplayName,Role,CompanyAccess,IsActive,PasswordHash,MailboxAddress'

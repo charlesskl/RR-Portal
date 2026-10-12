@@ -243,7 +243,12 @@ try:
     state=c.execute('SELECT Id,Address,LastUid,LastSuccessAt,LastError FROM MailSyncStates WHERE Id=?',(1000+uid,)).fetchone()
     count=c.execute("SELECT COUNT(*) FROM ImportEmailItems WHERE Company='Huadeng' AND MailOwnerId=? AND MailboxKey<>''",(uid,)).fetchone()[0]
     progress.append({'user':user,'cursor':dict(state) if state else None,'mailCount':count})
-  print(json.dumps({'readOnlyProgress':progress},ensure_ascii=False))
+  directory=sorted((ROOT/'deploy/backups').glob('voyageplex-pre-904-*'))[-1]
+  old_lines=(directory/'env.before').read_text().splitlines()
+  old=next((line.split('=',1)[1].strip() for line in old_lines if line.startswith('VOYAGEPLEX_HUADENG_MAILBOXES_JSON=')),'')
+  if old.startswith("'") and old.endswith("'"):old=old[1:-1]
+  old_count=len(json.loads(old)) if old else 0
+  print(json.dumps({'readOnlyProgress':progress,'preUpgradeMailboxEntries':old_count},ensure_ascii=False))
  elif mode=='rollout':
   directory=sorted((ROOT/'deploy/backups').glob('voyageplex-pre-904-*'))[-1]
   fields='Id,Username,DisplayName,Role,CompanyAccess,IsActive,PasswordHash,MailboxAddress'

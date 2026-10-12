@@ -123,8 +123,11 @@ def install_configuration():
  else:raise RuntimeError('API_NOT_HEALTHY_AFTER_RECREATE')
  assert_safe(configured_env()==final,'RUNNING_CONTAINER_ENV_MISMATCH')
  time.sleep(max(0,12-(time.monotonic()-switched_at)))
- healths=[subprocess.check_output(['docker','inspect','-f','{{.State.Health.Status}}','rr-portal-'+service+'-1'],text=True).strip() for service in ['voyageplex-api','voyageplex-web','voyageplex-parser']]
- if all(h=='healthy' for h in healths):flag.unlink(missing_ok=True)
+ for attempt in range(36):
+  healths=[subprocess.check_output(['docker','inspect','-f','{{.State.Health.Status}}','rr-portal-'+service+'-1'],text=True).strip() for service in ['voyageplex-api','voyageplex-web','voyageplex-parser']]
+  if all(h=='healthy' for h in healths):
+   flag.unlink(missing_ok=True);break
+  time.sleep(5)
  else:raise RuntimeError('VOYAGEPLEX_GROUP_NOT_HEALTHY')
  after=users_by_id()
  for row,entry,desired in resolved:

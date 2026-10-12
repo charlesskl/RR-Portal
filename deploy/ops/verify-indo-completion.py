@@ -33,16 +33,19 @@ try:
  assert all(d['status']=='已送完(手动)' for i in items for d in i['order_details']),'Incomplete order details'
  placed=set(request('/schedules/placed-manual',token=token))
  schedules=request('/schedules',token=token)
- keys=set(); rows=0;unmarkable=0
+ keys=set(); rows=0;unmarkable=0; missing={}
  for s in schedules:
   raw=request('/schedules/'+str(s['id']),token=token)['raw_rows']
   entries=json.loads(raw) if isinstance(raw,str) else raw
   for r in entries or []:
    rows+=1
    if str(r.get('orderNo') or '').strip() and str(r.get('code') or '').strip(): keys.add(str(r['orderNo'])+'|'+str(r['code']))
-   else: unmarkable+=1
+   else:
+    unmarkable+=1
+    reason=('missing_order' if not str(r.get('orderNo') or '').strip() else '')+('missing_code' if not str(r.get('code') or '').strip() else '')
+    missing[reason]=missing.get(reason,0)+1
  assert len(schedules)==7 and len(keys)==565 and keys<=placed,'Purchase status mismatch'
- print(json.dumps({'verified':True,'schedules':len(schedules),'schedule_rows':rows,'marked_order_product_keys':len(keys),'rows_without_order_or_code':unmarkable,'tracked_materials':len(items),'completed_materials':sum(i['status']=='covered' for i in items),'order_detail_rows':sum(len(i['order_details']) for i in items),'actual_received_qty':0,'actual_outbound_qty':0},ensure_ascii=False))
+ print(json.dumps({'verified':True,'schedules':len(schedules),'schedule_rows':rows,'marked_order_product_keys':len(keys),'rows_without_order_or_code':unmarkable,'missing_field_counts':missing,'tracked_materials':len(items),'completed_materials':sum(i['status']=='covered' for i in items),'order_detail_rows':sum(len(i['order_details']) for i in items),'actual_received_qty':0,'actual_outbound_qty':0},ensure_ascii=False))
 except Exception as e:
  print('Read-only completion verification failed: '+type(e).__name__,file=sys.stderr)
  sys.exit(1)

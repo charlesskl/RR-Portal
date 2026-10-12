@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check=只读数量 / clear=按已核对范围备份并清空采购和出入库（保留走货）"
+        description: "check=只读数量 / clear=按已核对范围备份并清空采购和出入库（保留走货）/ complete=现有排期采购已下、物料送完"
         type: choice
-        options: [check, clear]
+        options: [check, clear, complete, verify]
         default: check
         required: true
 
@@ -40,6 +40,7 @@ jobs:
           OPS_MODE: ${{ inputs.mode }}
           OPS_REF: ${{ github.sha }}
           OPS_ACTOR: ${{ github.actor }}
+          OPS_FINGERPRINT: '81a9d0a25dc4e270a6a7579d946f52d3'
           OPS_EXPECTED: '{"purchase_orders":40,"po_items":144,"po_receipts":98,"outbound":68,"shipment_links":10}'
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
@@ -48,17 +49,31 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 8m
-          envs: OPS_MODE,OPS_REF,OPS_ACTOR,OPS_EXPECTED
+          envs: OPS_MODE,OPS_REF,OPS_ACTOR,OPS_EXPECTED,OPS_FINGERPRINT
           script: |
             set -euo pipefail
             cd /opt/rr-portal
-            if [[ "$OPS_MODE" == clear ]]; then
+            if [[ "$OPS_MODE" == verify ]]; then
+              [[ "$OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+              git fetch origin ops/indo-purchase-clear-20261012
+              directory=$(mktemp -d /tmp/indo-verify.XXXXXX)
+              trap 'rm -rf "$directory"' EXIT
+              git show "$OPS_REF:deploy/ops/verify-indo-completion.py" > "$directory/verify.py"
+              python3 "$directory/verify.py"
+              exit 0
+            fi
+            if [[ "$OPS_MODE" == clear || "$OPS_MODE" == complete ]]; then
               [[ "$OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
               git fetch origin ops/indo-purchase-clear-20261012
               directory=$(mktemp -d /tmp/indo-clear.XXXXXX)
               trap 'rm -rf "$directory"' EXIT
-              git show "$OPS_REF:deploy/ops/clear-indo-purchases.sh" > "$directory/clear.sh"
-              git show "$OPS_REF:deploy/ops/clear-indo-purchases.sql" > "$directory/clear.sql"
+              if [[ "$OPS_MODE" == complete ]]; then
+                git show "$OPS_REF:deploy/ops/complete-indo-schedules.sh" > "$directory/clear.sh"
+                git show "$OPS_REF:deploy/ops/complete-indo-schedules.sql" > "$directory/clear.sql"
+              else
+                git show "$OPS_REF:deploy/ops/clear-indo-purchases.sh" > "$directory/clear.sh"
+                git show "$OPS_REF:deploy/ops/clear-indo-purchases.sql" > "$directory/clear.sql"
+              fi
               export OPS_SQL_FILE="$directory/clear.sql"
               bash "$directory/clear.sh"
               exit 0

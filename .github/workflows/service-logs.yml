@@ -61,6 +61,7 @@ jobs:
           OPS_TAIL: ${{ inputs.tail }}
           PRINTLINK_DATA_OPS: ${{ inputs.printlink_data_ops }}
           OPS_REF: ${{ github.sha }}
+          PRINTLINK_EXPECTED_SOURCE_SHA: 5736b795b8699560b487cae920ddc6bb84068b7e
           TOMY_SMOKE: ${{ inputs.tomy_smoke }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
@@ -69,7 +70,7 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 5m
-          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE,PRINTLINK_DATA_OPS,OPS_REF
+          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE,PRINTLINK_DATA_OPS,OPS_REF,PRINTLINK_EXPECTED_SOURCE_SHA
           script: |
             set -euo pipefail
             if [[ "${PRINTLINK_DATA_OPS:-none}" != none ]]; then

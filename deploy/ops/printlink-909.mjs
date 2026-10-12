@@ -6,7 +6,32 @@ const has=(db,t)=>!!db.prepare("SELECT name FROM sqlite_master WHERE type='table
 const cloud=new DatabaseSync(path.join(root,'orders/printlink.sqlite'),{readOnly:true});
 const production=new DatabaseSync(path.join(root,'production.sqlite'),{readOnly:true});
 const ids=(db,t)=>has(db,t)?db.prepare('SELECT id FROM '+t+' ORDER BY id').all().map(x=>x.id):[];
-if(mode==='backup'){
+const collections=new Set(['products','materials','schedules','maintenance','miscExpenses','stockInLogs','records','days','inventory','settings']);
+const readState=()=>has(production,'business_sync_state')?JSON.parse(production.prepare('SELECT value FROM business_sync_state WHERE id=1').get()?.value||'{}'):{};
+function stationDefinitions(){
+ const file=path.join(root,'stations.json');
+ const value=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):JSON.parse(process.env.COLLECTOR_STATIONS||'[]');
+ if(!Array.isArray(value))throw Error('STATION_CONFIG_INVALID');
+ return value;
+}
+function conflictSummary(conflicts){
+ const counts=new Map();
+ for(const conflict of Array.isArray(conflicts)?conflicts:[]){
+  const parts=Array.isArray(conflict.path)?conflict.path:[];
+  const collection=collections.has(parts[0])?parts[0]:'other';
+  const category=[collection,...parts.slice(1).map(()=>'*')].join('/');
+  const key=collection+'\0'+category;
+  counts.set(key,{collection,pathCategory:category,count:(counts.get(key)?.count||0)+1});
+ }
+ return [...counts.values()].sort((a,b)=>a.pathCategory.localeCompare(b.pathCategory));
+}
+function stateSummary(state){return {active:process.env.BUSINESS_SYNC_STATION||null,activated:state.activated===true,clientIdExists:typeof state.clientId==='string'&&!!state.clientId,lastSuccess:state.lastSuccess||null,conflicts:Array.isArray(state.conflicts)?state.conflicts.length:0,conflictCategories:conflictSummary(state.conflicts)};}
+if(mode==='inspect'){
+ const snapshot=has(production,'snapshot')?JSON.parse(production.prepare('SELECT value FROM snapshot WHERE id=1').get()?.value||'{}'):{};
+ const collectionCounts=Object.fromEntries([...collections].map(name=>[name,name==='records'?Object.values(snapshot.records||{}).reduce((sum,day)=>sum+(Array.isArray(day?.items)?day.items.length:0),0):name==='days'?Object.keys(snapshot.records||{}).length:Array.isArray(snapshot[name])?snapshot[name].length:snapshot[name]&&typeof snapshot[name]==='object'?Object.keys(snapshot[name]).length:0]));
+ console.log(JSON.stringify({stations:stationDefinitions().map(s=>({id:s.id,name:s.name,factories:Array.isArray(s.factories)?s.factories:[],devices:Array.isArray(s.machines)?s.machines.length:0})),businessSync:stateSummary(readState()),collectionCounts}));
+ cloud.close();production.close();
+}else if(mode==='backup'){
  const target=fs.mkdtempSync(path.join(root,'.pre909-'));
  for(const name of fs.readdirSync(root)){
   if(name.startsWith('.pre909-')||name==='.platform-lock')continue;

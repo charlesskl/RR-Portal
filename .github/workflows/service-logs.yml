@@ -19,9 +19,9 @@ on:
         required: false
         default: "100"
       printlink_data_ops:
-        description: "PrintLink pre-909 private backup / post-deploy read-only verification"
+        description: "PrintLink private backup / safe business-sync enable / read-only status"
         type: choice
-        options: [none, backup, verify]
+        options: [none, backup, verify, inspect, status, enable]
         default: none
         required: false
       tomy_smoke:
@@ -73,7 +73,7 @@ jobs:
           script: |
             set -euo pipefail
             if [[ "${PRINTLINK_DATA_OPS:-none}" != none ]]; then
-              [[ "$OPS_SERVICE" == printlink && "$PRINTLINK_DATA_OPS" =~ ^(backup|verify)$ && "$OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+              [[ "$OPS_SERVICE" == printlink && "$PRINTLINK_DATA_OPS" =~ ^(backup|verify|inspect|status|enable)$ && "$OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
               cd /opt/rr-portal
               git fetch origin ops/printlink-pre-909-20261012
               umask 077

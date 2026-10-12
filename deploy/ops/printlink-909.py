@@ -27,5 +27,5 @@ if mode=='backup':
  result['target']=str(dest)
  result['backupFiles']=len(checks)
  result['manifestSha256']=hashlib.sha256((dest/'sha256-manifest.json').read_bytes()).hexdigest()
-else: result['backup']=str(dirs[-1])
+elif mode=='verify': result['backup']=str(dirs[-1])
 print(json.dumps(result,ensure_ascii=False))

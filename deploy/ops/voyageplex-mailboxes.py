@@ -234,6 +234,16 @@ try:
   if keys.exists(): shutil.copytree(keys,target/'data-protection-keys')
   digest=hashlib.sha256(destination.read_bytes()).hexdigest()
   print(json.dumps({'backup':str(target),'databaseIntegrity':'ok','databaseSha256':digest},ensure_ascii=False))
+ elif mode=='progress':
+  with connect() as c:
+   c.row_factory=sqlite3.Row
+   progress=[]
+   for uid in [2,3,5,6]:
+    user=dict(c.execute('SELECT Id,Username,MailboxAddress,MailboxTestStatus,MailboxTestedAt FROM Users WHERE Id=?',(uid,)).fetchone())
+    state=c.execute('SELECT Id,Address,LastUid,LastSuccessAt,LastError FROM MailSyncStates WHERE Id=?',(1000+uid,)).fetchone()
+    count=c.execute("SELECT COUNT(*) FROM ImportEmailItems WHERE Company='Huadeng' AND MailOwnerId=? AND MailboxKey<>''",(uid,)).fetchone()[0]
+    progress.append({'user':user,'cursor':dict(state) if state else None,'mailCount':count})
+  print(json.dumps({'readOnlyProgress':progress},ensure_ascii=False))
  elif mode=='rollout':
   directory=sorted((ROOT/'deploy/backups').glob('voyageplex-pre-904-*'))[-1]
   fields='Id,Username,DisplayName,Role,CompanyAccess,IsActive,PasswordHash,MailboxAddress'

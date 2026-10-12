@@ -21,7 +21,7 @@ on:
       voyageplex_mailbox_ops:
         description: "VoyagePlex mailbox inspect/configure/verify"
         type: choice
-        options: [none, inspect, backup, rollout, configure, verify]
+        options: [none, inspect, backup, rollout, configure, verify, progress]
         default: none
         required: false
       tomy_smoke:
@@ -34,7 +34,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-cloud
+  group: ${{ inputs.voyageplex_mailbox_ops == 'progress' && 'voyageplex-mailbox-readonly' || 'deploy-cloud' }}
   queue: max
   cancel-in-progress: false
 
@@ -74,7 +74,7 @@ jobs:
           script: |
             set -euo pipefail
             if [[ "${VOYAGEPLEX_MAILBOX_OPS:-none}" != none ]]; then
-              [[ "$OPS_SERVICE" == voyageplex-api && "$VOYAGEPLEX_MAILBOX_OPS" =~ ^(inspect|backup|rollout|configure|verify)$ && "$OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+              [[ "$OPS_SERVICE" == voyageplex-api && "$VOYAGEPLEX_MAILBOX_OPS" =~ ^(inspect|backup|rollout|configure|verify|progress)$ && "$OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
               cd /opt/rr-portal
               git fetch origin ops/voyageplex-mailboxes-904-20261012
               umask 077

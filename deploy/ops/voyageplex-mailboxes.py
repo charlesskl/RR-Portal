@@ -112,6 +112,7 @@ def install_configuration():
  # Render only in memory; never print compose output containing credentials.
  rendered=json.loads(subprocess.check_output(COMPOSE+['config','--format','json'],text=True))
  assert_safe(rendered['services']['voyageplex-api']['environment'].get('VOYAGEPLEX_HUADENG_MAILBOXES_JSON')==value,'COMPOSE_ENV_NOT_TRANSMITTED')
+ flag=ROOT/'deploy/maintenance/services/voyageplex';flag.parent.mkdir(parents=True,exist_ok=True);flag.touch();switched_at=time.monotonic()
  subprocess.run(COMPOSE+['up','-d','--no-deps','--force-recreate','voyageplex-api'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
  for attempt in range(30):
   try:
@@ -121,6 +122,10 @@ def install_configuration():
   time.sleep(2)
  else:raise RuntimeError('API_NOT_HEALTHY_AFTER_RECREATE')
  assert_safe(configured_env()==final,'RUNNING_CONTAINER_ENV_MISMATCH')
+ time.sleep(max(0,12-(time.monotonic()-switched_at)))
+ healths=[subprocess.check_output(['docker','inspect','-f','{{.State.Health.Status}}','rr-portal-'+service+'-1'],text=True).strip() for service in ['voyageplex-api','voyageplex-web','voyageplex-parser']]
+ if all(h=='healthy' for h in healths):flag.unlink(missing_ok=True)
+ else:raise RuntimeError('VOYAGEPLEX_GROUP_NOT_HEALTHY')
  after=users_by_id()
  for row,entry,desired in resolved:
   a=after[row['Id']]
@@ -219,5 +224,6 @@ try:
   verify_configuration()
  else: raise RuntimeError('INVALID_MODE')
 except Exception as e:
- message=str(e) if isinstance(e,RuntimeError) and str(e).startswith(('AMBIGUOUS_ACCOUNT:','ACCOUNT_SCOPE_MISMATCH:','NOT_IMPLEMENTED','INVALID_MODE')) else type(e).__name__
+ import re
+ message=str(e) if isinstance(e,RuntimeError) and re.fullmatch(r'[A-Z_]+(?::(?:'+ '|'.join(NAMES)+r'))?',str(e)) else type(e).__name__
  print(json.dumps({'failed':True,'safeError':message},ensure_ascii=False));sys.exit(1)

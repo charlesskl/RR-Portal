@@ -70,6 +70,32 @@ def audit(path):
         return {'counts': counts, 'stable': stable, 'owners': ownership,
                 'userIdentity': digest(canonical(users)), 'cursors': cursors}
 
+def stable_differences(snapshot, live):
+    differences = {}
+    with connect(snapshot) as old, connect(live) as current:
+        old.execute('BEGIN')
+        current.execute('BEGIN')
+        for table in STABLE:
+            schema = list(old.execute('PRAGMA table_info(' + quote(table) + ')'))
+            columns = [row[1] for row in schema]
+            primary = [columns.index(row[1]) for row in sorted(schema, key=lambda row: row[5]) if row[5]]
+            require(bool(primary))
+            def indexed(connection):
+                return {canonical([row[index] for index in primary]): list(row)
+                        for row in connection.execute('SELECT * FROM ' + quote(table))}
+            before, after = indexed(old), indexed(current)
+            common = set(before) & set(after)
+            changed = [key for key in common if before[key] != after[key]]
+            added, removed = len(set(after) - set(before)), len(set(before) - set(after))
+            if changed or added or removed:
+                changed_columns = sorted({name for key in changed for index, name in enumerate(columns)
+                                          if before[key][index] != after[key][index]})
+                differences[table] = {'rowsAdded': added, 'rowsRemoved': removed,
+                                      'rowsChanged': len(changed), 'changedColumns': changed_columns}
+                if table == 'Users':
+                    differences[table]['onlyLoginTimestampsChanged'] = not added and not removed and set(changed_columns) <= {'LastLoginAt', 'UpdatedAt'}
+    return differences
+
 def containers():
     result = {}
     for service in SERVICES:
@@ -131,6 +157,9 @@ def verify():
     current = audit(DATA / 'voyageplex.db')
     actual = containers()
     unchanged = [table for table in STABLE if before['stable'][table] == current['stable'][table]]
+    if len(unchanged) != len(STABLE):
+        print(json.dumps({'stableTableDifferences': stable_differences(directory / 'data-runtime/voyageplex.db', DATA / 'voyageplex.db'),
+                          'userIdentityAndPermissionsSame': before['userIdentity'] == current['userIdentity']}, ensure_ascii=True))
     require(len(unchanged) == len(STABLE), 'STABLE_BUSINESS_TABLES')
     require(before['userIdentity'] == current['userIdentity'], 'USER_IDENTITY')
     require(all(current['owners'].get(key) == value for key, value in before['owners'].items()), 'EMAIL_OWNERSHIP')

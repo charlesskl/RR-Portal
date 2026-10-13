@@ -23,6 +23,11 @@ on:
         type: boolean
         required: false
         default: false
+      peise_ocr_ops:
+        description: "Peise safe OCR configuration and synthetic provider diagnostics"
+        type: choice
+        options: [none, diagnose, smoke]
+        default: none
 
 permissions:
   contents: read
@@ -54,6 +59,9 @@ jobs:
           OPS_SERVICE: ${{ inputs.service }}
           OPS_TAIL: ${{ inputs.tail }}
           TOMY_SMOKE: ${{ inputs.tomy_smoke }}
+          PEISE_OCR_OPS: ${{ inputs.peise_ocr_ops }}
+          PEISE_OPS_REF: ${{ github.sha }}
+          PEISE_CONFIGURED_SECRET: ${{ secrets.PEISE_BAILIAN_API_KEY }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -61,9 +69,20 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 5m
-          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE
+          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE,PEISE_OCR_OPS,PEISE_OPS_REF,PEISE_CONFIGURED_SECRET
           script: |
             set -euo pipefail
+            if [[ "${PEISE_OCR_OPS:-none}" != none ]]; then
+              [[ "$OPS_SERVICE" == peise && "$PEISE_OCR_OPS" =~ ^(diagnose|smoke)$ && "$PEISE_OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+              cd /opt/rr-portal
+              git fetch origin ops/peise-ocr-diagnostics-20261013
+              umask 077
+              peise_temporary=$(mktemp -d /tmp/peise-ocr.XXXXXX)
+              trap 'rm -rf "$peise_temporary"' EXIT
+              git show "$PEISE_OPS_REF:deploy/ops/peise-ocr.py" > "$peise_temporary/diagnose.py"
+              python3 "$peise_temporary/diagnose.py" "$PEISE_OCR_OPS"
+              exit 0
+            fi
             # 服务名只允许字母数字和连字符，防止注入
             if [[ ! "$OPS_SERVICE" =~ ^[a-z0-9-]+$ ]]; then
               echo "非法服务名: $OPS_SERVICE" >&2

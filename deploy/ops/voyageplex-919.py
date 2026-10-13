@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -99,7 +100,8 @@ def stable_differences(snapshot, live):
 def concurrent_confirmed_tasks(snapshot, live, directory):
     started = datetime.datetime.strptime(directory.name.removeprefix('voyageplex-pre-919-'), '%Y%m%dT%H%M%S%fZ').replace(tzinfo=datetime.timezone.utc)
     def utc(value):
-        date = datetime.datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        text = re.sub(r'(\.\d{6})\d+', r'\1', str(value).replace('Z', '+00:00'))
+        date = datetime.datetime.fromisoformat(text)
         return date.replace(tzinfo=datetime.timezone.utc) if date.tzinfo is None else date
     accepted = 0
     with connect(snapshot) as old, connect(live) as current:

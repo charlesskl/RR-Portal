@@ -26,14 +26,14 @@ on:
       peise_ocr_ops:
         description: "Peise safe OCR configuration and synthetic provider diagnostics"
         type: choice
-        options: [none, diagnose, smoke, candidates, configure, verify]
+        options: [none, diagnose, smoke, candidates, configure, verify, status]
         default: none
 
 permissions:
   contents: read
 
 concurrency:
-  group: deploy-cloud
+  group: ${{ inputs.peise_ocr_ops == 'status' && 'peise-readonly-status' || 'deploy-cloud' }}
   queue: max
   cancel-in-progress: false
 
@@ -46,14 +46,50 @@ jobs:
         shell: bash
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_SERVICE: ${{ inputs.service }}
+          PEISE_OCR_OPS: ${{ inputs.peise_ocr_ops }}
         run: |
           set -euo pipefail
           if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
             echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
             exit 1
           fi
+          if [[ "$PEISE_OCR_OPS" == status && "$OPS_SERVICE" != peise ]]; then
+            echo 'The read-only status mode requires service=peise.' >&2
+            exit 1
+          fi
+
+      - name: Read Peise deployment status via SSH
+        if: inputs.peise_ocr_ops == 'status'
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 1m
+          script: |
+            set -euo pipefail
+            cd /opt/rr-portal
+            status_head=$(git rev-parse HEAD 2>/dev/null || true)
+            if [[ "$status_head" =~ ^[a-f0-9]{40,64}$ ]]; then
+              printf 'head=%s\n' "$status_head"
+            else
+              printf 'head=unknown\n'
+            fi
+            status_phase=$(head -c 128 deploy/.deploy-state 2>/dev/null || true)
+            case "$status_phase" in
+              pulling|analyze|cleanup|directories|backup|deploy) ;;
+              *) status_phase=unknown ;;
+            esac
+            printf 'deploy_phase=%s\n' "$status_phase"
+            docker inspect --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}} restart_count={{.RestartCount}} started_at={{.State.StartedAt}} oom_killed={{.State.OOMKilled}}' rr-portal-peise-1 2>/dev/null || printf 'container_status=unknown\n'
+            ps -eo pid=,etime=,comm= | awk '$3 ~ /^(git(-remote-http(s)?)?|docker(-compose|-buildx)?|curl|python([0-9]+(\.[0-9]+)*)?|tar|gzip|pigz|cp|chown|rsync|ssh)$/ {printf "process pid=%s elapsed=%s comm=%s\n", $1, $2, $3}'
 
       - name: Fetch service logs via SSH
+        if: inputs.peise_ocr_ops != 'status'
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           OPS_SERVICE: ${{ inputs.service }}

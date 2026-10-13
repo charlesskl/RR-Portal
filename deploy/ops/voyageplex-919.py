@@ -19,10 +19,15 @@ SERVICES = ['voyageplex-web', 'voyageplex-api', 'voyageplex-parser']
 STABLE = ['Users', 'ShipmentTasks', 'FactoryMappings', 'ExportTemplates',
           'InspectionMappings', 'ProductInfos', 'ProductNameMappings', 'MailSystemSettings']
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+CHECK_LABELS = {'CHECK_FAILED', 'STABLE_BUSINESS_TABLES', 'USER_IDENTITY', 'EMAIL_OWNERSHIP',
+                'SERVER_ENV', 'CONTAINER_HEALTH', 'CONTAINER_IMAGES', 'CONTAINER_CONFIG',
+                'MAILBOX_CURSORS', 'API_HEALTH', 'PARSER_HEALTH', 'PUBLIC_API_HEALTH',
+                'ANONYMOUS_USERS', 'ANONYMOUS_SHIPMENTS', 'PARSER_SOURCE', 'POLICY_VERSION',
+                'API_SYMBOL', 'MAIN_REVISION'}
 
-def require(condition):
+def require(condition, label='CHECK_FAILED'):
     if not condition:
-        raise RuntimeError('CHECK_FAILED')
+        raise RuntimeError(label if label in CHECK_LABELS else 'CHECK_FAILED')
 
 def run(arguments):
     result = subprocess.run(arguments, cwd=ROOT, stdout=subprocess.PIPE,
@@ -126,31 +131,35 @@ def verify():
     current = audit(DATA / 'voyageplex.db')
     actual = containers()
     unchanged = [table for table in STABLE if before['stable'][table] == current['stable'][table]]
-    require(len(unchanged) == len(STABLE) and before['userIdentity'] == current['userIdentity'])
-    require(all(current['owners'].get(key) == value for key, value in before['owners'].items()))
-    require(file_hash(ROOT / '.env.cloud.production') == before['envDigest'])
-    require(all(actual[key]['health'] == 'healthy' and actual[key]['image'] != before['containers'][key]['image']
-                and actual[key]['configDigest'] == before['containers'][key]['configDigest'] for key in SERVICES))
+    require(len(unchanged) == len(STABLE), 'STABLE_BUSINESS_TABLES')
+    require(before['userIdentity'] == current['userIdentity'], 'USER_IDENTITY')
+    require(all(current['owners'].get(key) == value for key, value in before['owners'].items()), 'EMAIL_OWNERSHIP')
+    require(file_hash(ROOT / '.env.cloud.production') == before['envDigest'], 'SERVER_ENV')
+    require(all(actual[key]['health'] == 'healthy' for key in SERVICES), 'CONTAINER_HEALTH')
+    require(all(actual[key]['image'] != before['containers'][key]['image'] for key in SERVICES), 'CONTAINER_IMAGES')
+    require(all(actual[key]['configDigest'] == before['containers'][key]['configDigest'] for key in SERVICES), 'CONTAINER_CONFIG')
     for key, values in before['cursors'].items():
         after = current['cursors'].get(key)
         require(after is not None and values[0] == after[0] and values[4] == after[4]
-                and values[3] == after[3] and (values[1] != after[1] or int(after[2]) >= int(values[2])))
+                and values[3] == after[3] and (values[1] != after[1] or int(after[2]) >= int(values[2])), 'MAILBOX_CURSORS')
     api = 'http://' + actual['voyageplex-api']['ip'] + ':5088'
     parser = 'http://' + actual['voyageplex-parser']['ip'] + ':8091'
-    require(get(api + '/api/health')[0] == 200 and get(parser + '/health')[0] == 200)
-    require(get('http://127.0.0.1/voyageplex/api/health')[0] == 200)
-    require(get(api + '/api/users')[0] == 401 and get(api + '/api/shipments')[0] == 401)
+    require(get(api + '/api/health')[0] == 200, 'API_HEALTH')
+    require(get(parser + '/health')[0] == 200, 'PARSER_HEALTH')
+    require(get('http://127.0.0.1/voyageplex/api/health')[0] == 200, 'PUBLIC_API_HEALTH')
+    require(get(api + '/api/users')[0] == 401, 'ANONYMOUS_USERS')
+    require(get(api + '/api/shipments')[0] == 401, 'ANONYMOUS_SHIPMENTS')
     app = 'apps/船务部/VoyagePlex船务协同系统'
     for file in ['app/parsing_policy.py', 'app/main.py']:
         reviewed = run(['git', 'show', 'HEAD:' + app + '/services/email-parser/' + file])
         deployed = run(['docker', 'exec', 'rr-portal-voyageplex-parser-1', 'cat', '/app/' + file])
-        require(digest(reviewed) == digest(deployed))
+        require(digest(reviewed) == digest(deployed), 'PARSER_SOURCE')
     policy = json.loads(run(['docker', 'exec', 'rr-portal-voyageplex-parser-1', 'python', '-c',
                             'import json;from app.parsing_policy import POLICY_VERSION,RULES;print(json.dumps({"version":POLICY_VERSION,"rules":len(RULES)}))']))
-    require(policy['version'] == '2026-10-13.3')
-    require(b'WarehouseSoRules' in run(['docker', 'exec', 'rr-portal-voyageplex-api-1', 'cat', '/app/VoyagePlex.Api.dll']))
+    require(policy['version'] == '2026-10-13.3', 'POLICY_VERSION')
+    require(b'WarehouseSoRules' in run(['docker', 'exec', 'rr-portal-voyageplex-api-1', 'cat', '/app/VoyagePlex.Api.dll']), 'API_SYMBOL')
     commit = run(['git', 'rev-parse', 'HEAD']).decode().strip()
-    require(commit == run(['git', 'rev-parse', 'origin/main']).decode().strip())
+    require(commit == run(['git', 'rev-parse', 'origin/main']).decode().strip(), 'MAIN_REVISION')
     return {'verified': True, 'sourceCommit': commit, 'backup': str(directory),
             'stableBusinessTablesPreserved': unchanged, 'originalUserIdentityAndPermissionsPreserved': True,
             'existingEmailOwnershipPreserved': True, 'independentMailboxCursorsPreserved': True,
@@ -164,6 +173,7 @@ if __name__ == '__main__':
     try:
         require(len(sys.argv) == 2 and sys.argv[1] in {'backup', 'verify'})
         print(json.dumps(backup() if sys.argv[1] == 'backup' else verify(), ensure_ascii=True))
-    except Exception:
-        print(json.dumps({'failed': True, 'safeError': 'VOYAGEPLEX_919_OPS_FAILED'}))
+    except Exception as error:
+        label = str(error) if isinstance(error, RuntimeError) and str(error) in CHECK_LABELS else 'UNEXPECTED'
+        print(json.dumps({'failed': True, 'safeError': 'VOYAGEPLEX_919_OPS_FAILED', 'failedCheck': label}))
         sys.exit(1)

@@ -26,7 +26,7 @@ on:
       peise_ocr_ops:
         description: "Peise safe OCR configuration and synthetic provider diagnostics"
         type: choice
-        options: [none, diagnose, smoke]
+        options: [none, diagnose, smoke, candidates]
         default: none
 
 permissions:
@@ -73,7 +73,7 @@ jobs:
           script: |
             set -euo pipefail
             if [[ "${PEISE_OCR_OPS:-none}" != none ]]; then
-              [[ "$OPS_SERVICE" == peise && "$PEISE_OCR_OPS" =~ ^(diagnose|smoke)$ && "$PEISE_OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+              [[ "$OPS_SERVICE" == peise && "$PEISE_OCR_OPS" =~ ^(diagnose|smoke|candidates)$ && "$PEISE_OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
               cd /opt/rr-portal
               git fetch origin ops/peise-ocr-diagnostics-20261013
               umask 077

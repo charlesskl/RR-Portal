@@ -56,7 +56,23 @@ try:
   except requests.Timeout:result['provider']={'category':'timeout'}
   except requests.RequestException:result['provider']={'category':'network_error'}
  else:result['provider']={'category':'not_called_missing_key_or_unapproved_endpoint'}
- if os.environ.get('PEISE_OPS_MODE')=='smoke' and result['provider'].get('httpStatus')==200:
+ candidate=None
+ if os.environ.get('PEISE_OPS_MODE')=='candidates' and key and allowed:
+  try:
+   available=requests.get(base+'/models',headers={'Authorization':'Bearer '+key},timeout=(10,20),allow_redirects=False)
+   listed=available.json().get('data',[]) if available.status_code==200 else []
+   result['knownVisionModelsListed']=[name for name in sorted(known_models) if any(isinstance(item,dict) and item.get('id')==name for item in listed)]
+  except (requests.RequestException,ValueError,AttributeError):result['knownVisionModelsListed']=[]
+  result['candidateModels']=[]
+  for name in ['qwen3-vl-plus','qwen3-vl-flash']:
+   try:
+    candidate_payload={'model':name,'messages':[{'role':'user','content':'Reply OK only.'}],'max_tokens':4,'temperature':0}
+    trial=requests.post(base+'/chat/completions',headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'},json=candidate_payload,timeout=(10,30),allow_redirects=False)
+    result['candidateModels'].append({'model':name,'httpStatus':trial.status_code})
+    if trial.status_code==200:candidate=name;break
+   except requests.RequestException:result['candidateModels'].append({'model':name,'category':'network_or_timeout'})
+  if candidate:os.environ['BAILIAN_MODEL']=candidate
+ if (os.environ.get('PEISE_OPS_MODE')=='smoke' and result['provider'].get('httpStatus')==200) or candidate:
   from PIL import Image,ImageDraw
   from app.services.ocr_llm import parse_image_llm
   image=Image.new('RGB',(700,150),'white');draw=ImageDraw.Draw(image)
@@ -68,7 +84,7 @@ try:
   try:
    rows=parse_image_llm(buffer.getvalue(),{'test-peise-001':1})
    matching=[r for r in rows if r.get('purchase_code','').upper()=='TEST-PEISE-001' and r.get('quantity')==2 and r.get('unit_price')==3]
-   result['syntheticImage']={'passed':len(matching)==1,'rows':len(rows),'seconds':round(time.monotonic()-started,1),'businessImageSent':False}
+   result['syntheticImage']={'passed':len(matching)==1,'model':candidate or (model if model in known_models else '[other-model]'),'rows':len(rows),'seconds':round(time.monotonic()-started,1),'businessImageSent':False}
   except Exception as error:
    result['syntheticImage']={'passed':False,'category':getattr(error,'code','legacy_unclassified_error') if getattr(error,'code',None) in {'not_configured','timeout','network','unauthorized','forbidden','rate_limit','service','http','response','invalid_json','unexpected'} else 'legacy_unclassified_error'}
  after=business_state();result['businessDataUnchanged']=before==after;result['businessWritesPerformed']=False
@@ -79,7 +95,7 @@ except Exception:
 
 def main():
     mode = sys.argv[1]
-    if mode not in ['diagnose', 'smoke']:
+    if mode not in ['diagnose', 'smoke', 'candidates']:
         raise RuntimeError('INVALID_DIAGNOSTIC_MODE')
     projected = json.loads(command(['docker','compose','-f','docker-compose.cloud.yml','--env-file','.env.cloud.production','config','--format','json']))
     key = projected['services']['peise']['environment'].get('BAILIAN_API_KEY','') or ''

@@ -86,7 +86,7 @@ jobs:
             esac
             printf 'deploy_phase=%s\n' "$status_phase"
             docker inspect --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}} restart_count={{.RestartCount}} started_at={{.State.StartedAt}} oom_killed={{.State.OOMKilled}}' rr-portal-peise-1 2>/dev/null || printf 'container_status=unknown\n'
-            ps -eo pid=,etime=,comm= | awk '$3 ~ /^(git(-remote-http(s)?)?|docker(-compose|-buildx)?|curl|python([0-9]+(\.[0-9]+)*)?|tar|gzip|pigz|cp|chown|rsync|ssh)$/ {printf "process pid=%s elapsed=%s comm=%s\n", $1, $2, $3}'
+            ps -eo pid=,etime=,comm= | awk '$3 ~ /^(git(-remote-http(s)?)?|docker(-compose|-buildx)?|curl|python([0-9]+(\.[0-9]+)*)?|pip([0-9]+(\.[0-9]+)*)?|apt-get|apt|dpkg|http|https|cc1|gcc|make|rustc|cargo|ld|cc|tar|gzip|pigz|cp|chown|rsync|ssh)$/ {printf "process pid=%s elapsed=%s comm=%s\n", $1, $2, $3}'
 
       - name: Fetch service logs via SSH
         if: inputs.peise_ocr_ops != 'status'

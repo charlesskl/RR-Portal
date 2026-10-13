@@ -96,6 +96,31 @@ def stable_differences(snapshot, live):
                     differences[table]['onlyLoginTimestampsChanged'] = not added and not removed and set(changed_columns) <= {'LastLoginAt', 'UpdatedAt'}
     return differences
 
+def concurrent_confirmed_tasks(snapshot, live, directory):
+    started = datetime.datetime.strptime(directory.name.removeprefix('voyageplex-pre-919-'), '%Y%m%dT%H%M%S%fZ').replace(tzinfo=datetime.timezone.utc)
+    def utc(value):
+        date = datetime.datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        return date.replace(tzinfo=datetime.timezone.utc) if date.tzinfo is None else date
+    accepted = 0
+    with connect(snapshot) as old, connect(live) as current:
+        old.execute('BEGIN')
+        current.execute('BEGIN')
+        old_ids = {row[0] for row in old.execute('SELECT Id FROM ShipmentTasks')}
+        for identifier, created, company, sources in current.execute('SELECT Id,CreatedAt,Company,SourceEmailsJson FROM ShipmentTasks'):
+            if identifier in old_ids:
+                continue
+            require(utc(created) > started, 'STABLE_BUSINESS_TABLES')
+            linked = False
+            for source in json.loads(sources):
+                if source.get('relation') != '创建来源':
+                    continue
+                record = current.execute('SELECT Status,HandlingStatus,HandlingOutcome,TaskIdsJson,ReviewedAt,Company FROM ImportEmailItems WHERE Id=?', (source.get('id'),)).fetchone()
+                if record and record[0] in {'confirmed', 'duplicate_confirmed'} and record[1] == 'Processed' and record[2] == 'Task' and identifier in json.loads(record[3]) and record[4] and utc(record[4]) > started and record[5] == company:
+                    linked = True
+            require(linked, 'STABLE_BUSINESS_TABLES')
+            accepted += 1
+    return accepted
+
 def containers():
     result = {}
     for service in SERVICES:
@@ -157,10 +182,15 @@ def verify():
     current = audit(DATA / 'voyageplex.db')
     actual = containers()
     unchanged = [table for table in STABLE if before['stable'][table] == current['stable'][table]]
+    added_confirmed_tasks = 0
     if len(unchanged) != len(STABLE):
-        print(json.dumps({'stableTableDifferences': stable_differences(directory / 'data-runtime/voyageplex.db', DATA / 'voyageplex.db'),
+        differences = stable_differences(directory / 'data-runtime/voyageplex.db', DATA / 'voyageplex.db')
+        print(json.dumps({'stableTableDifferences': differences,
                           'userIdentityAndPermissionsSame': before['userIdentity'] == current['userIdentity']}, ensure_ascii=True))
-    require(len(unchanged) == len(STABLE), 'STABLE_BUSINESS_TABLES')
+        if set(differences) == {'ShipmentTasks'} and differences['ShipmentTasks']['rowsRemoved'] == 0 and differences['ShipmentTasks']['rowsChanged'] == 0:
+            added_confirmed_tasks = concurrent_confirmed_tasks(directory / 'data-runtime/voyageplex.db', DATA / 'voyageplex.db', directory)
+            require(added_confirmed_tasks == differences['ShipmentTasks']['rowsAdded'], 'STABLE_BUSINESS_TABLES')
+    require(len(unchanged) == len(STABLE) or (len(unchanged) == len(STABLE) - 1 and added_confirmed_tasks > 0), 'STABLE_BUSINESS_TABLES')
     require(before['userIdentity'] == current['userIdentity'], 'USER_IDENTITY')
     require(all(current['owners'].get(key) == value for key, value in before['owners'].items()), 'EMAIL_OWNERSHIP')
     require(file_hash(ROOT / '.env.cloud.production') == before['envDigest'], 'SERVER_ENV')
@@ -191,6 +221,7 @@ def verify():
     require(commit == run(['git', 'rev-parse', 'origin/main']).decode().strip(), 'MAIN_REVISION')
     return {'verified': True, 'sourceCommit': commit, 'backup': str(directory),
             'stableBusinessTablesPreserved': unchanged, 'originalUserIdentityAndPermissionsPreserved': True,
+            'allOriginalShipmentTaskRowsPreserved': True, 'concurrentConfirmedTasksAdded': added_confirmed_tasks,
             'existingEmailOwnershipPreserved': True, 'independentMailboxCursorsPreserved': True,
             'serverAndContainerConfigurationPreserved': True, 'allThreeImagesUpdatedAndHealthy': True,
             'parserSourceMatchesCurrentMain': True, 'policyVersion': policy['version'],

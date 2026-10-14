@@ -6,7 +6,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
-import { filterOrders, type OrderRow, type OrderFilter } from "@/lib/orderFilter";
+import { inProductionQuantity, filterOrders, type OrderRow, type OrderFilter } from "@/lib/orderFilter";
 import { STATUS_META, ACTIVE_STATUSES } from "@/lib/orderStatus";
 import DatePicker from "./DatePicker";
 import CompletePendingDialog from "./CompletePendingDialog";
@@ -79,7 +79,7 @@ export default function OrdersTable({ orders, isAdmin }: { orders: OrderRow[]; i
         <MetricCard label="未完工订单" value={stats.active} tone="mint" sub={`总数 ${stats.total} 张`} />
         <MetricCard label="未排期" value={stats.unscheduled} tone={stats.unscheduled > 0 ? "blue" : "muted"} sub="需要填写工序排期" />
         <MetricCard label="交期风险" value={stats.risk} tone={stats.risk > 0 ? "red" : "muted"} sub={`已超 ${stats.overdue} · 预计超 ${stats.late}`} />
-        <MetricCard label="在产数量（件）" value={stats.inProductionQty} tone="blue" sub="在产订单剩余数量合计" />
+        <MetricCard label="在产数量（件）" value={stats.inProductionQty} tone="blue" sub="已排期及在产订单欠数合计" />
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4">
@@ -250,7 +250,7 @@ function buildStats(orders: OrderRow[]) {
   const overdue = active.filter((o) => o.riskLevel === "overdue").length;
   const late = active.filter((o) => o.riskLevel === "late").length;
   return {
-    inProductionQty: orders.filter(o => o.status === "in_production").reduce((sum, o) => sum + (o.inProductionRemainingQty ?? 0), 0),
+    inProductionQty: inProductionQuantity(orders),
     total: orders.filter((o) => o.status !== "archived").length,
     active: active.length,
     unscheduled: active.filter((o) => o.scheduled === false).length,

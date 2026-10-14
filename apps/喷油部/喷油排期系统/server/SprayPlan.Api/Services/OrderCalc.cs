@@ -12,14 +12,21 @@ public static class OrderCalc
     // 整单总数：各行各部位数量之和
     public static int OrderTotalQty(IEnumerable<OrderPartQty> partQtys) => partQtys.Sum(q => q.Qty);
 
-    // 各部位剩余数合计；多工序按最少完成量计算，软删计划不参与。
-    public static int RemainingQty(Order order) => order.PartQtys.GroupBy(q => q.PartName).Sum(group =>
+    // 与订单总览“订单欠数”一致：最大部位需求减去全部部位的最少完成量。
+    // 同部位多工序取最少累计实绩，软删计划不参与，欠数不低于 0。
+    public static int RemainingQty(Order order)
     {
-        var demand = group.Sum(q => q.Qty);
-        var steps = order.Plans.Where(p => p.DeletedAt == null && p.PartName == group.Key)
-            .GroupBy(p => p.StepNo).Select(step => step.Sum(p => p.GoodQty ?? 0)).ToList();
-        return Math.Max(0, demand - (steps.Count == 0 ? 0 : steps.Min()));
-    });
+        var demand = order.PartQtys.GroupBy(q => q.PartName)
+            .ToDictionary(group => group.Key, group => group.Sum(q => q.Qty));
+        if (demand.Count == 0) return 0;
+        var completed = demand.Select(part =>
+        {
+            var steps = order.Plans.Where(p => p.DeletedAt == null && p.PartName == part.Key)
+                .GroupBy(p => p.StepNo).Select(step => step.Sum(p => p.GoodQty ?? 0)).ToList();
+            return steps.Count == 0 ? 0 : Math.Min(part.Value, steps.Min());
+        }).Min();
+        return Math.Max(0, demand.Values.Max() - completed);
+    }
 
     // 部位单件综合价 = 核 + 人工 + 油漆
     public static double PartComprehensivePrice(double unitCost, double laborPrice, double paintCost)

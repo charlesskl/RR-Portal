@@ -4,6 +4,7 @@
 // 数据来自 GET /api/schedule/overview；网格聚合/占用/配色由 @/lib/scheduleOverview 纯函数算。
 // 第一期只读；「点格子跳周排」联动留下一步。
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { invalidateClientCache } from "@/lib/clientCache";
 import { buildOverviewGrid, cellKey, dateRange, type CellItem, type OverviewLine, type OverviewPlan } from "@/lib/scheduleOverview";
 import { cachedJson } from "@/lib/clientCache";
 import { apiFetch } from "@/lib/apiFetch";
@@ -47,6 +48,8 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
   const [detailRemark, setDetailRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [newPlanDate, setNewPlanDate] = useState("");
+  const [dateReason, setDateReason] = useState("");
 
   const load = useCallback(async () => {
     if (!from || !to) { setErr("请选择起止日期"); setData(null); return; }
@@ -96,10 +99,30 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
 
   const openDetail = (next: DetailState) => {
     setDetail(next);
+    setNewPlanDate(next.date); setDateReason("");
     setTodayQty(next.item.goodQty?.toString() ?? "");
     setInboundQty(next.item.inboundQty?.toString() ?? "");
     setDetailRemark(next.item.remark ?? "");
     setSaveError("");
+  };
+
+  const savePlanDate = async () => {
+    if (!detail || !newPlanDate || newPlanDate === detail.date) return;
+    setSaving(true); setSaveError("");
+    try {
+      const res = await fetch("/api/plans/reschedule", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ changes: [{ id: detail.item.id, originalDate: detail.date, newDate: newPlanDate }], reason: dateReason }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "日期调整失败");
+      invalidateClientCache("/api/orders"); invalidateClientCache("/api/schedule");
+      // 将查看范围延伸至新日期，移动后的计划仍可在看板上看到。
+      if (newPlanDate < from) setFrom(newPlanDate);
+      if (newPlanDate > to) setTo(newPlanDate);
+      setDetail(null); await load();
+    } catch (e) { setSaveError(e instanceof Error ? e.message : "日期调整失败"); }
+    finally { setSaving(false); }
   };
 
   const saveTodayProduction = async () => {
@@ -259,6 +282,13 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
               <div><dt>人数</dt><dd>{detail.item.workerCount || "-"}</dd></div>
               <div><dt>拉别产能上限</dt><dd>{detail.line.dailyLimit > 0 ? `${(detail.line.dailyLimit / 10000)}万` : "不卡"}</dd></div>
             </dl>
+            <div className="sc-entry-grid">
+              {detail.item.goodQty != null || detail.item.inboundQty != null ? <p>已录实绩，不能调整日期。</p> : <>
+                <label>调整计划日期<input disabled={saving} type="date" value={newPlanDate} onChange={e => setNewPlanDate(e.target.value)} /></label>
+                <label>调整原因<input disabled={saving} value={dateReason} onChange={e => setDateReason(e.target.value)} placeholder="如停机、缺料（可选）" /></label>
+                <button type="button" disabled={saving || !newPlanDate || newPlanDate === detail.date} onClick={savePlanDate}>保存日期调整</button>
+              </>}
+            </div>
             <div className="sc-entry-grid">
               <label>今日生产数<input type="number" min={0} step={1} value={todayQty} onChange={(e) => setTodayQty(e.target.value)} /></label>
               <label>实际入库数<input type="number" min={0} step={1} value={inboundQty} onChange={(e) => setInboundQty(e.target.value)} /></label>

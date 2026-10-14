@@ -48,7 +48,7 @@ public class DashboardApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Dashboard_InProductionQuantity_MatchesOverviewRemainingParts()
+    public async Task Dashboard_InProductionQuantity_IncludesScheduledAndMatchesOverviewRemainingQty()
     {
         await LoginAsync("clerk", "clerk123");
         await _factory.WithDbAsync(async db => {
@@ -61,12 +61,17 @@ public class DashboardApiTests : IAsyncLifetime
                 ExternalOrderNo = "RECEIVED", Status = "received", OrderDate = DateTime.UtcNow,
                 PartQtys = new() { new() { PartName = "头", Qty = 500 } }
             });
+            foreach (var status in new[] { "scheduled", "completed", "archived", "draft" })
+                db.Orders.Add(new SprayPlan.Api.Entities.Order {
+                    ExternalOrderNo = status, Status = status, OrderDate = DateTime.UtcNow,
+                    PartQtys = new() { new() { PartName = "头", Qty = 50 }, new() { PartName = "脚", Qty = 50 } }
+                });
             await db.SaveChangesAsync();
         });
         var stats = await _client.GetFromJsonAsync<JsonElement>("/api/dashboard");
-        Assert.Equal(160, stats.GetProperty("inProductionQty").GetInt32());
+        Assert.Equal(150, stats.GetProperty("inProductionQty").GetInt32());
         var overview = await _client.GetFromJsonAsync<JsonElement>("/api/orders/overview");
-        Assert.Contains(overview.EnumerateArray(), o => o.GetProperty("inProductionRemainingQty").GetInt32() == 160);
+        Assert.Contains(overview.EnumerateArray(), o => o.GetProperty("remainingQty").GetInt32() == 100);
     }
 
     [Fact]

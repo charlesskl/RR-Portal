@@ -14,3 +14,6 @@ public record UpdatePlanRequest(double? PlannedQty, List<string>? MachineNos, in
 public record PlanUpdated(int Id, int? GoodQty, int? InboundQty, double? ProductionValue, string Status, int PlannedQty, List<string> MachineNos);
 public record PlanDeleted(int Id, DateTime? DeletedAt);
 public record PlanDto(int Id, DateTime PlanDate, string PlanType, int LineId, int OrderId, string ItemName, string PartName, int? SourcePartId, List<string> MachineNos, int PlannedQty, int WorkerCount, int StepNo, string Craft, int? StandardStepCount, string? StandardCraft, bool CraftAdjusted, int? GoodQty, int? InboundQty, int? ReportedQty, int DefectQty, double WorkHours, double? ProductionValue, string Status, string? Remark, string CreatedBy, DateTime CreatedAt, string? LastModifiedBy, DateTime LastModifiedAt, string ModificationHistory, DateTime? DeletedAt, string? DeletedBy);
+
+public record PlanDateChange(int Id, string OriginalDate, string NewDate);
+public record ReschedulePlansRequest(List<PlanDateChange>? Changes, string? Reason);

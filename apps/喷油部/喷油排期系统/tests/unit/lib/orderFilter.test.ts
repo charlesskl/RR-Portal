@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { filterOrders, type OrderRow } from "@/lib/orderFilter";
+import { inProductionQuantity, filterOrders, type OrderRow } from "@/lib/orderFilter";
 
 const rows: OrderRow[] = [
   { id: 1, externalOrderNo: "ZWZ001", productNo: "GH-1", orderDate: "2026-05-20", deliveryDate: "2026-06-10", status: "received",      isMA: false, isUrgent: false, totalQty: 100, pendingProduct: false },
@@ -38,5 +38,14 @@ describe("filterOrders", () => {
   });
   it("交货日范围", () => {
     expect(filterOrders(rows, { view: "normal", deliveryFrom: "2026-06-09" }).map((x) => x.id)).toEqual([1]);
+  });
+});
+
+
+describe("inProductionQuantity", () => {
+  it("汇总已排期和在产的订单欠数，不累加所有部位需求", () => {
+    const input = rows.map(row => ({ ...row, remainingQty: row.status === "scheduled" ? 247917 : row.status === "in_production" ? 5100 : 999999 }));
+    input.push({ ...rows[1], id: 6, remainingQty: 270132 });
+    expect(inProductionQuantity(input)).toBe(523149);
   });
 });

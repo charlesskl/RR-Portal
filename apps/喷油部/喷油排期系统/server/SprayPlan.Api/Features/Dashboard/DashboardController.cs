@@ -25,7 +25,7 @@ public class DashboardController(AppDbContext db) : ControllerBase
         var ordersActive = await db.Orders.CountAsync(o => o.Status == "in_production");
         var activeOrders = await db.Orders.AsNoTracking().AsSplitQuery()
             .Include(o => o.PartQtys).Include(o => o.Plans.Where(p => p.DeletedAt == null))
-            .Where(o => o.Status == "in_production").ToListAsync();
+            .Where(o => (o.Status == "scheduled" || o.Status == "in_production") && !o.PendingProduct).ToListAsync();
         var inProductionQty = activeOrders.Sum(OrderCalc.RemainingQty);
         // 已逾期：交货日已过 且 未作废（deliveryDate 为 null 不计入，与现有 lt 语义一致）
         var overdue = await db.Orders.CountAsync(o => o.DeliveryDate < now && o.Status != "archived");

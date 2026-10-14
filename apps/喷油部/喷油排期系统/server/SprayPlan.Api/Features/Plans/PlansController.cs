@@ -162,6 +162,47 @@ public class PlansController(AppDbContext db) : ControllerBase
         return StatusCode(201, new CreatePlansResult(plans.Count));
     }
 
+    // 日期调整采用整批校验后保存，避免部分移动；原日期用于防止覆盖他人修改。
+    [HttpPost("reschedule")]
+    [Authorize(Roles = "clerk,manager,admin")]
+    public async Task<IActionResult> Reschedule([FromBody] ReschedulePlansRequest req)
+    {
+        if (req.Changes is null || req.Changes.Count == 0 || req.Changes.Select(c => c.Id).Distinct().Count() != req.Changes.Count)
+            return BadRequest(new { error = "请选择需要调整的计划，不能重复提交" });
+        var dates = new Dictionary<int, (DateTime Original, DateTime Next)>();
+        foreach (var change in req.Changes)
+        {
+            if (!DateTime.TryParseExact(change.OriginalDate, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var original) ||
+                !DateTime.TryParseExact(change.NewDate, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var next))
+                return BadRequest(new { error = "日期格式不正确" });
+            dates[change.Id] = (DateTime.SpecifyKind(original, DateTimeKind.Utc), DateTime.SpecifyKind(next, DateTimeKind.Utc));
+        }
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var ids = dates.Keys.ToList();
+        var plans = await db.ProductionPlans.Include(p => p.Order).Where(p => ids.Contains(p.Id) && p.DeletedAt == null).ToListAsync();
+        if (plans.Count != ids.Count) return NotFound(new { error = "部分计划已撤销或不属于当前厂区，请刷新" });
+        if (plans.Any(p => p.Status == "recorded" || p.GoodQty != null || p.InboundQty != null || p.ReportedQty != null))
+            return BadRequest(new { error = "已录实绩的计划不能调整日期，请只选择未录实绩的计划" });
+        if (plans.Any(p => p.Order is null || p.Order.Status is "completed" or "archived"))
+            return BadRequest(new { error = "完工或作废订单不能调整排期" });
+        if (plans.Any(p => p.PlanDate.Date != dates[p.Id].Original))
+            return Conflict(new { error = "排期已被修改，请刷新后重新调整" });
+        var now = DateTime.UtcNow;
+        foreach (var plan in plans)
+        {
+            var next = dates[plan.Id].Next;
+            if (plan.PlanDate == next) continue;
+            var history = ParseHistory(plan.ModificationHistory);
+            history.Add(new { field = "planDate", oldValue = ScheduleCalc.Ymd(plan.PlanDate), newValue = ScheduleCalc.Ymd(next), reason = req.Reason?.Trim(), by = CurrentUser(), at = now });
+            plan.ModificationHistory = JsonSerializer.Serialize(history);
+            plan.PlanDate = next;
+            plan.LastModifiedBy = CurrentUser(); plan.LastModifiedAt = now;
+            plan.Order!.LastUpdatedBy = CurrentUser(); plan.Order.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync(); await transaction.CommitAsync();
+        return Ok(new { adjustedPlans = plans.Count });
+    }
+
     // PATCH /api/plans/{id} —— 改计划字段 或 录实绩（goodQty→算产值+status recorded+改值留痕）
     [HttpPatch("{id:int}")]
     [Authorize(Roles = "clerk,manager,admin")]
@@ -183,6 +224,17 @@ public class PlansController(AppDbContext db) : ControllerBase
 
         var p = await db.ProductionPlans.FindAsync(id);
         if (p is null) return NotFound(new { error = "计划不存在" });
+        if (req.PlanDate is not null && DateUtil.ParseUtc(req.PlanDate) != p.PlanDate)
+        {
+            if (p.DeletedAt != null || p.Status == "recorded" || p.GoodQty != null || p.InboundQty != null || p.ReportedQty != null)
+                return BadRequest(new { error = "已撤销或已录实绩的计划不能调整日期" });
+            var owner = await db.Orders.FindAsync(p.OrderId);
+            if (owner is null || owner.Status is "completed" or "archived")
+                return BadRequest(new { error = "完工或作废订单不能调整排期" });
+            var history = ParseHistory(p.ModificationHistory);
+            history.Add(new { field = "planDate", oldValue = ScheduleCalc.Ymd(p.PlanDate), newValue = ScheduleCalc.Ymd(DateUtil.ParseUtc(req.PlanDate)), by = CurrentUser(), at = DateTime.UtcNow });
+            p.ModificationHistory = JsonSerializer.Serialize(history);
+        }
 
         // ── 计划字段 ──
         if (req.PlannedQty is not null) p.PlannedQty = (int)req.PlannedQty.Value;

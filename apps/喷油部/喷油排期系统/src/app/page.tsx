@@ -30,7 +30,7 @@ export default async function Dashboard() {
 
   const STATS = [
     { label: "订单总数（张）",   value: ordersTotal,   dot: "bg-mint-400" },
-    { label: "在产数量（件）",   value: inProductionQty,  dot: "bg-sky",     hint: "在产订单剩余数量合计" },
+    { label: "在产数量（件）",   value: inProductionQty,  dot: "bg-sky",     hint: "已排期及在产订单欠数合计" },
     { label: "已逾期订单（张）", value: overdue,       dot: "bg-rose",    hint: "交货日已过且未作废" },
     { label: "产品款数（款）",   value: productsCount, dot: "bg-purple" },
   ];

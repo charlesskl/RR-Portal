@@ -574,7 +574,7 @@ def tracked_source_diff():
         pure = pathlib.PurePosixPath(name)
         require(name.startswith(APP + '/') and not pure.is_absolute() and '..' not in pure.parts,
                 'trackedDiffApplicationScope')
-        # Runtime/private files are never inspected; only the tracked empty placeholders are source metadata.
+        # Runtime/private files are never inspected; the two tracked placeholders are source metadata.
         relative = pure.relative_to(APP)
         placeholder = str(relative) in {'data/.gitkeep', 'storage/pdf/.gitkeep'}
         require(not any(part.startswith('.env') for part in relative.parts)
@@ -611,8 +611,6 @@ def tracked_source_diff():
                 kind = 'regular'
             else:
                 kind = 'other-type-content-not-read'
-        if placeholder:
-            require(head == b'' and content == b'', 'trackedPlaceholderContentsEmpty')
         same_content = head is not None and content is not None and head == content
         text_line_endings_only = False
         if head is not None and content is not None and head != content and b'\x00' not in head + content:
@@ -624,6 +622,8 @@ def tracked_source_diff():
                 pass
         changes.append({'path': str(relative), 'changeType': status, 'headGitMode': old_mode,
             'diffGitMode': new_mode, 'diskGitMode': disk_mode, 'diskPermissions': permissions, 'diskKind': kind,
+            'headBytes': len(head) if head is not None else None,
+            'diskBytes': len(content) if content is not None else None,
             'headSha256': hashlib.sha256(head).hexdigest() if head is not None else None,
             'diskSha256': hashlib.sha256(content).hexdigest() if content is not None else None,
             'onlyModeChange': same_content and old_mode != disk_mode,

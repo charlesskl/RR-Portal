@@ -314,7 +314,7 @@ class PreflightGitTests(unittest.TestCase):
         self.source.chmod(0o644)
         self.keep = self.app / 'data/.gitkeep'
         self.keep.parent.mkdir()
-        self.keep.write_bytes(b'')
+        self.keep.write_bytes(b'\n')
         self.keep.chmod(0o644)
         self.git('init', '-q')
         self.git('config', 'user.name', 'Offline Test')
@@ -358,6 +358,8 @@ class PreflightGitTests(unittest.TestCase):
         self.assertTrue(row['onlyModeChange'])
         self.assertFalse(row['onlyLineEndingChange'])
         self.assertEqual(row['headSha256'], row['diskSha256'])
+        self.assertEqual(1, row['headBytes'])
+        self.assertEqual(1, row['diskBytes'])
         self.assertEqual(0o777, self.keep.stat().st_mode & 0o777)
         self.assertEqual(index, (self.root / '.git/index').read_bytes())
 
@@ -389,11 +391,17 @@ class PreflightGitTests(unittest.TestCase):
         self.assertIsNotNone(row['headSha256'])
         self.assertIsNone(row['diskSha256'])
 
-    def test_placeholder_with_content_is_rejected_without_printing_it(self):
+    def test_placeholder_content_difference_is_hashed_and_backup_still_rejects_it(self):
         self.keep.write_bytes(b'private-data-must-not-be-an-allowed-placeholder')
-        with self.assertRaises(RuntimeError):
-            self.preflight()
-        self.assertEqual('trackedPlaceholderContentsEmpty', ops.FAILED)
+        result = self.preflight()
+        row, = result['trackedDifferences']
+        self.assertFalse(row['onlyModeChange'])
+        self.assertNotEqual(row['headSha256'], row['diskSha256'])
+        self.assertNotIn('private-data-must-not', json.dumps(result))
+        with patch.object(ops, 'ROOT', self.root), patch.object(ops, 'BEFORE', self.before):
+            with self.assertRaises(RuntimeError):
+                ops.backup()
+        self.assertEqual('trackedApplicationSourceClean', ops.FAILED)
 
     def test_env_directory_gitkeep_does_not_bypass_tracked_source_scope(self):
         private = self.app / '.env-private/.gitkeep'

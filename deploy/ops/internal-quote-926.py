@@ -431,6 +431,19 @@ def api_audit(app, base, features=False):
                     and isinstance(completion, dict), 'summaryReadApis')
             require(all('share_amounts' in col for col in summary['summary_columns'])
                     and any(col.get('share_amounts') for col in summary['summary_columns']), 'summaryShareMetadata')
+            gross_column = [col for col in summary['summary_columns'] if col.get('code') == 'total_gross_before_tax_rate']
+            require(len(gross_column) == 1 and gross_column[0].get('share_amounts') == ['total_gross_before_tax'],
+                    'pr926GrossRateAmountMetadata')
+            for row in summary['rows']:
+                values = row.get('summary_values', {})
+                amount = decimal.Decimal(str(values.get('production_amount')))
+                gross = decimal.Decimal(str(values.get('total_gross_before_tax')))
+                rate = decimal.Decimal(str(values.get('total_gross_before_tax_rate')))
+                expected = gross / amount if amount else decimal.Decimal(0)
+                require(all(value.is_finite() for value in [amount,gross,rate,expected])
+                        and abs(rate-expected) <= decimal.Decimal('1e-12'), 'pr926GrossRateActualRead')
+            result['pr926GrossRateAmountMetadataVerified'] = True
+            result['pr926GrossRateActualRowsVerified'] = True
             result['summaryShareMetadataVerified'] = True
             result['summaryReadApisVerified'] = True
     finally:
@@ -669,10 +682,10 @@ def runtime_and_frontend_files(app, commit):
                'mixed-sku.js':['planSupplier','BEAUTYMINI'],
                'mixed-quotation.js':['mixed-import-options','选择导入方式'],
                'summary.js':['share_amounts','share_unit']}
-    require(all(marker in texts.get(name,'') for name,items in markers.items() for marker in items), 'deployed926FeatureMarkers')
+    require(all(marker in texts.get(name,'') for name,items in markers.items() for marker in items), 'preservedEarlierFrontendFeatures')
     return {'runtimeFilesMatchSource':True,'runtimeFilesVerified':len(changed),
             'publicFrontendFilesMatchContainerAndSource':True,'publicFrontendFilesVerified':len(urls)+3,
-            'frontend926FeatureMarkersVerified':True}
+            'preservedEarlierFrontendFeatureMarkersVerified':True}
 
 
 def verify():
@@ -723,6 +736,8 @@ def verify():
               'readOnlyProbeWindowDatabaseStable':probe_window_stable,
               'authenticatedListReadsPreserved':api_same,'authenticatedReadApisVerified':True,
               'summaryShareMetadataVerified':api['summaryShareMetadataVerified'],
+              'pr926GrossRateAmountMetadataVerified':api['pr926GrossRateAmountMetadataVerified'],
+              'pr926GrossRateActualRowsVerified':api['pr926GrossRateActualRowsVerified'],
               'existingStaffIsolationVerified':api['existingStaffIsolationVerified'],
               'tableCounts':{t:v['rows'] for t,v in current['tables'].items()},
               'uploadsUnchanged':uploads_same,'uploadFiles':uploads['files'],'uploadBytes':uploads['bytes'],

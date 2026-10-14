@@ -779,5 +779,3 @@ if __name__ == '__main__':
         kind = type(error).__name__ if type(error).__name__ in {'RuntimeError','KeyError','TypeError','ValueError','JSONDecodeError','FileNotFoundError'} else 'Other'
         print(json.dumps({'failed':True,'safeError':'IQ_926_OPS_FAILED','failedCheck':FAILED_CHECK,'errorType':kind}))
         sys.exit(1)
-
-

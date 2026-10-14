@@ -6,7 +6,7 @@ on:
       mode:
         description: "Private schema/config backup / read-only PR923 or PR924 verification"
         type: choice
-        options: [backup, verify]
+        options: [backup, verify, diagnose]
         default: backup
       phase:
         description: "PR being deployed (sequential phases)"
@@ -54,7 +54,7 @@ jobs:
             echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
             exit 1
           fi
-          [[ "$INDO_OPS_MODE" =~ ^(backup|verify)$ && "$INDO_OPS_PHASE" =~ ^(923|924)$ ]] || exit 1
+          [[ "$INDO_OPS_MODE" =~ ^(backup|verify|diagnose)$ && "$INDO_OPS_PHASE" =~ ^(923|924)$ ]] || exit 1
           [[ "$INDO_OPS_BEFORE" =~ ^[a-f0-9]{40}$ && "$INDO_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
           if [[ "$INDO_OPS_MODE" = backup ]]; then
             [[ -z "$INDO_OPS_BACKUP" && "$INDO_OPS_BEFORE" = "$INDO_OPS_TARGET" ]] || exit 1
@@ -81,7 +81,7 @@ jobs:
           envs: INDO_OPS_MODE,INDO_OPS_REF,INDO_OPS_PHASE,INDO_OPS_BEFORE,INDO_OPS_TARGET,INDO_OPS_BACKUP
           script: |
             set -euo pipefail
-            [[ "$INDO_OPS_MODE" =~ ^(backup|verify)$ && "$INDO_OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$INDO_OPS_MODE" =~ ^(backup|verify|diagnose)$ && "$INDO_OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
             [[ "$INDO_OPS_PHASE" =~ ^(923|924)$ && "$INDO_OPS_BEFORE" =~ ^[a-f0-9]{40}$ && "$INDO_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
             if [[ "$INDO_OPS_MODE" = backup ]]; then
               [[ -z "$INDO_OPS_BACKUP" && "$INDO_OPS_BEFORE" = "$INDO_OPS_TARGET" ]] || exit 1

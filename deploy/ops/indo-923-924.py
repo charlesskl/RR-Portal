@@ -670,10 +670,119 @@ def verify():
     return result
 
 
+def diagnostic_core_state():
+    checkpoint('readOnlyCoreLifecycleMetadata')
+    result = {}
+    template = ('{"running":{{json .State.Running}},"status":{{json .State.Status}},'
+                '"startedAt":{{json .State.StartedAt}},"finishedAt":{{json .State.FinishedAt}},'
+                '"restartCount":{{json .RestartCount}},"oomKilled":{{json .State.OOMKilled}},'
+                '"createdAt":{{json .Created}},'
+                '"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}}}')
+    for service in CORE_SERVICES:
+        identifier = run(COMPOSE + ['ps', '-a', '-q', service]).decode().strip()
+        if not identifier:
+            result[service] = {'exists': False}
+            continue
+        require(bool(re.fullmatch(r'[a-f0-9]{12,64}', identifier)), 'oneCoreContainerPerService')
+        value = json.loads(run(['docker', 'inspect', '-f', template, identifier]))
+        require(set(value) == {'running', 'status', 'startedAt', 'finishedAt', 'restartCount',
+                               'oomKilled', 'createdAt', 'health'})
+        require(all(isinstance(value[key], bool) for key in ['running', 'oomKilled']))
+        require(isinstance(value['restartCount'], int) and value['restartCount'] >= 0)
+        require(value['status'] in ['created', 'running', 'paused', 'restarting', 'removing', 'exited', 'dead'])
+        require(value['health'] in ['none', 'starting', 'healthy', 'unhealthy'])
+        require(all(re.fullmatch(r'\d{4}-\d{2}-\d{2}T[0-9:.]+Z', value[key])
+                    for key in ['startedAt', 'finishedAt', 'createdAt']))
+        result[service] = {'exists': True, 'containerId': identifier, **value}
+    return result
+
+
+def diagnose():
+    # Separate from verify(): report discrepancies without accepting a changed
+    # core container as a passing deployment, and never repair or restart it.
+    require(PHASE == '924', 'diagnosePhase924Only')
+    directory, before = selected_backup()
+    source_tree = checkout_source_proof(TARGET_COMMIT, deployed=True)
+    core_before_probe = diagnostic_core_state()
+    current = audit()
+    app, base = app_context()
+    runtime = runtime_config(app)
+    identities = role_identities()
+    identity_same = identities == before['roleIdentities']
+    token = read_token(app, identities['admin'])
+    api = api_audit(base, token, verify=True)
+    del token
+    roles_same = role_audit(app, base, identities) == before['roles']
+    health, body = get(base + '/api/health')
+    health_same = health == 200 and json.loads(body).get('ok') is True
+    public_health, _ = get('http://127.0.0.1/indo-shipping/health')
+    unauthorized, _ = get(base + '/api/material-alerts')
+    purchase_unauthorized, _ = get(base + '/api/purchase')
+    frontend = frontend_audit(app)
+    final = audit()
+    core_after_probe = diagnostic_core_state()
+    source_stable = checkout_source_proof(TARGET_COMMIT, deployed=True) == source_tree
+    runtime_stable = runtime_config(app) == runtime
+    inventory_same = set(before['tables']) == set(current['tables'])
+    table_checks = {}
+    for table in sorted(set(before['tables']) | set(current['tables'])):
+        prior, now = before['tables'].get(table), current['tables'].get(table)
+        table_checks[table] = {'unchanged': prior == now,
+                               'beforeRows': prior.get('rows') if prior else None,
+                               'currentRows': now.get('rows') if now else None}
+    changed_tables = [table for table, values in table_checks.items() if not values['unchanged']]
+    core_checks = {}
+    changed_core = []
+    for service in CORE_SERVICES:
+        prior, now = before['coreContainers'][service], core_after_probe[service]
+        id_same = now.get('containerId') == prior['containerId']
+        started_same = now.get('startedAt') == prior['startedAt']
+        if not (id_same and started_same):
+            changed_core.append(service)
+        core_checks[service] = {'beforeContainerId': prior['containerId'],
+                               'beforeStartedAt': prior['startedAt'],
+                               'containerIdUnchanged': id_same, 'startedAtUnchanged': started_same,
+                               **now}
+    state_same = before['stateSettings'] == current['stateSettings']
+    users_same = before['tables']['Users'] == current['tables']['Users']
+    checks = {'businessDataUnchanged': not changed_tables and state_same,
+              'stateSettingsPreserved': state_same, 'usersAndPermissionsPreserved': users_same,
+              'databaseTableInventoryPreserved': inventory_same,
+              'schemaColumnsPreserved': before['schemaSha256'] == current['schemaSha256'],
+              'pricePrecisionVerified': price_preserved(before['priceColumn'], current['priceColumn']),
+              'trackingSchemaVerified': current['trackingSchema'] is True and current['rawRowsType'] in ['text', 'json', 'jsonb'],
+              'existingTrackingAndPlacedPreserved': api == before['api'],
+              'existingProbeRolesPreserved': identity_same,
+              'existingAdminAndOrdinaryReadOnlyBoundaryVerified': roles_same,
+              'completeContainerEnvironmentIdentical': runtime['configEnvSha256'] == before['runtime']['configEnvSha256'],
+              'privateEnvironmentPreserved': file_hash(private_env_file()) == file_hash(directory / 'env.before'),
+              'deployedImageChanged': runtime['imageId'] != before['runtime']['imageId'],
+              'deployedImageHealthy': runtime['healthy'],
+              'coreContainersUnchanged': not changed_core,
+              'coreServicesRunning': all(state.get('running') is True for state in core_after_probe.values()),
+              'coreServicesHealthyWhenConfigured': all(state.get('health') in ['healthy', 'none']
+                                                       for state in core_after_probe.values()),
+              'readOnlyProbesLeftDataUnchanged': current == final,
+              'coreLifecycleStableDuringDiagnosis': core_before_probe == core_after_probe,
+              'runtimeStableDuringDiagnosis': runtime_stable,
+              'exactTargetMatchesMain': source_stable,
+              'health': health_same, 'publicHealth': public_health == 200,
+              'authBoundaryVerified': unauthorized == purchase_unauthorized == 401}
+    result = {'diagnosticComplete': True, 'strictVerificationPassed': all(checks.values()),
+              'phase': PHASE, 'backup': str(directory), 'beforeSourceCommit': before['sourceCommit'],
+              'sourceCommit': TARGET_COMMIT, 'sourceTreeSha256': source_tree,
+              'changedCoreServices': changed_core, 'coreLifecycle': core_checks,
+              'changedTables': changed_tables, 'tableChecks': table_checks,
+              'businessWritesPerformed': False, 'credentialsChanged': False,
+              'restoreExecuted': False, 'serviceRestartsPerformed': False, **checks}
+    result.update(frontend)
+    return result
+
+
 def main():
     global PHASE, BEFORE_COMMIT, TARGET_COMMIT, BACKUP_PATH
     mode, PHASE, BEFORE_COMMIT, TARGET_COMMIT, BACKUP_PATH = sys.argv[1:]
-    require(mode in ['backup', 'verify'], 'modeValidation')
+    require(mode in ['backup', 'verify', 'diagnose'], 'modeValidation')
     require(PHASE in ['923', '924'], 'phaseValidation')
     require(all(re.fullmatch(r'[a-f0-9]{40}', value) for value in [BEFORE_COMMIT, TARGET_COMMIT]),
             'commitValidation')
@@ -686,7 +795,7 @@ def main():
     else:
         require(BEFORE_COMMIT != TARGET_COMMIT and re.fullmatch(
             r'/opt/rr-portal/deploy/backups/indo-pre-' + PHASE + r'-[0-9]{8}T[0-9]{12}Z', BACKUP_PATH), 'verifyArguments')
-    result = backup() if mode == 'backup' else verify()
+    result = backup() if mode == 'backup' else diagnose() if mode == 'diagnose' else verify()
     if mode == 'verify' and not result['verified']:
         checks = [('businessDataUnchanged', 'businessRowHashesPreserved'),
                   ('stateSettingsPreserved', 'stateSettingsPreserved'),

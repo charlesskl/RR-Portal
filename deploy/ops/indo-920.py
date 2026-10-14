@@ -253,8 +253,6 @@ def runtime_patch_proof(before, current, directory):
         require(len(result) == len(values), 'runtimePatchNoDuplicateEnvironmentKeys')
         return result
 
-    checkpoint('runtimePatchOldImageDefaults')
-    old_defaults = image_environment(before['runtime']['imageId'])
     checkpoint('runtimePatchNewImageDefaults')
     new_defaults = image_environment(current['imageId'])
     def effective_digest(defaults):
@@ -262,14 +260,26 @@ def runtime_patch_proof(before, current, directory):
         items = sorted(key + '=' + value for key, value in values.items())
         return hashlib.sha256(json.dumps(items, ensure_ascii=True, separators=(',', ':')).encode()).hexdigest()
 
-    # Exact reconstruction anchors every prior/current container environment value;
-    # unchanged compose and private env prove configured secrets remain the same.
-    require(effective_digest(old_defaults) == before['runtime']['configEnvSha256'], 'runtimePatchPriorEnvironmentReconstructed')
+    # Old image metadata may no longer exist. Reconstruct only the two bounded
+    # patch fields and require the entire prior environment hash to match exactly.
+    version_keys = ['DOTNET_VERSION', 'ASPNET_VERSION']
+    require(not set(version_keys) & set(configured), 'runtimePatchVersionsNotConfigured')
     require(effective_digest(new_defaults) == current['configEnvSha256'], 'runtimePatchCurrentEnvironmentReconstructed')
-    changed = sorted(key for key in set(old_defaults) | set(new_defaults) if old_defaults.get(key) != new_defaults.get(key))
-    require(bool(changed) and set(changed) <= {'DOTNET_VERSION', 'ASPNET_VERSION'}, 'runtimePatchOnlyVersionKeys')
-    require(all(re.fullmatch(r'8\.0\.\d+', old_defaults.get(key, '')) and re.fullmatch(r'8\.0\.\d+', new_defaults.get(key, '')) for key in changed), 'runtimePatchSameMajorMinor')
-    require(all(int(new_defaults[key].split('.')[2]) > int(old_defaults[key].split('.')[2]) for key in changed), 'runtimePatchVersionsOnlyAdvance')
+    require(all(re.fullmatch(r'8\.0\.(?:0|[1-9][0-9]*)', new_defaults.get(key, '')) for key in version_keys), 'runtimePatchSameMajorMinor')
+    current_patches = [int(new_defaults[key].split('.')[2]) for key in version_keys]
+    require(all(patch <= 256 for patch in current_patches), 'runtimePatchSearchBounded')
+    matches = []
+    for dotnet in range(current_patches[0] + 1):
+        for aspnet in range(current_patches[1] + 1):
+            candidate = {**new_defaults, 'DOTNET_VERSION': '8.0.' + str(dotnet), 'ASPNET_VERSION': '8.0.' + str(aspnet)}
+            if effective_digest(candidate) == before['runtime']['configEnvSha256']:
+                matches.append(candidate)
+    require(len(matches) == 1, 'runtimePatchPriorEnvironmentExactlyReconstructed')
+    old_defaults = matches[0]
+    require(any(int(old_defaults[key].split('.')[2]) < current_patches[index]
+                for index, key in enumerate(version_keys)), 'runtimePatchVersionsOnlyAdvance')
+    changed = sorted(key for key in version_keys if old_defaults[key] != new_defaults[key])
+    require(bool(changed), 'runtimePatchVersionsOnlyAdvance')
     print(json.dumps({'baseRuntimeVersionKeysChanged': changed, 'priorEnvironmentExactlyReconstructed': True,
                       'currentEnvironmentExactlyReconstructed': True, 'configuredEnvironmentAndSecretsPreserved': True}))
     return changed

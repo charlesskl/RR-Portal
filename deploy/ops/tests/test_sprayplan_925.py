@@ -9,6 +9,7 @@ import io
 import json
 import pathlib
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -300,6 +301,148 @@ class OpsTests(unittest.TestCase):
                     ops.main(case)
             backup.assert_not_called()
             verify.assert_not_called()
+
+
+class PreflightGitTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='sprayplan-preflight-offline-')
+        self.root = pathlib.Path(self.temporary.name)
+        self.app = self.root / ops.APP
+        self.app.mkdir(parents=True)
+        self.source = self.app / 'source.txt'
+        self.source.write_bytes(b'private-source-content-not-in-diagnostic-output\nsecond-line\n')
+        self.source.chmod(0o644)
+        self.keep = self.app / 'data/.gitkeep'
+        self.keep.parent.mkdir()
+        self.keep.write_bytes(b'')
+        self.keep.chmod(0o644)
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Offline Test')
+        self.git('config', 'user.email', 'offline@example.invalid')
+        self.git('config', 'core.fileMode', 'true')
+        self.git('add', '--', ops.APP)
+        self.git('commit', '-qm', 'isolated fixture')
+        self.before = self.git('rev-parse', 'HEAD').decode().strip()
+        self.git('update-ref', 'refs/remotes/origin/main', self.before)
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.root, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, check=True).stdout
+
+    def preflight(self):
+        with patch.object(ops, 'ROOT', self.root), patch.object(ops, 'BEFORE', self.before):
+            return ops.preflight()
+
+    def test_clean_repo_has_no_tracked_differences_and_no_writes(self):
+        before = self.source.read_bytes()
+        index = (self.root / '.git/index').read_bytes()
+        result = self.preflight()
+        self.assertTrue(result['trackedApplicationSourceClean'])
+        self.assertEqual([], result['trackedDifferences'])
+        self.assertFalse(result['applicationCheckoutWritesPerformed'])
+        self.assertEqual(index, (self.root / '.git/index').read_bytes())
+        self.assertEqual(before, self.source.read_bytes())
+
+    def test_placeholder_mode_only_is_reported_without_restoring_mode(self):
+        self.keep.chmod(0o777)
+        index = (self.root / '.git/index').read_bytes()
+        result = self.preflight()
+        row, = result['trackedDifferences']
+        self.assertEqual('data/.gitkeep', row['path'])
+        self.assertEqual('100644', row['headGitMode'])
+        self.assertEqual('100755', row['diskGitMode'])
+        self.assertEqual('0777', row['diskPermissions'])
+        self.assertTrue(row['onlyModeChange'])
+        self.assertFalse(row['onlyLineEndingChange'])
+        self.assertEqual(row['headSha256'], row['diskSha256'])
+        self.assertEqual(0o777, self.keep.stat().st_mode & 0o777)
+        self.assertEqual(index, (self.root / '.git/index').read_bytes())
+
+    def test_content_difference_is_hashed_but_never_printed(self):
+        self.source.write_bytes(b'private-changed-content-must-not-be-shown\n')
+        result = self.preflight()
+        row, = result['trackedDifferences']
+        self.assertFalse(row['onlyModeChange'])
+        self.assertFalse(row['onlyLineEndingChange'])
+        self.assertNotEqual(row['headSha256'], row['diskSha256'])
+        self.assertNotIn('private-source-content', json.dumps(result))
+        self.assertNotIn('private-changed-content', json.dumps(result))
+
+    def test_crlf_only_is_distinguished_from_content_and_mode_changes(self):
+        self.source.write_bytes(self.source.read_bytes().replace(b'\n', b'\r\n'))
+        row, = self.preflight()['trackedDifferences']
+        self.assertTrue(row['onlyLineEndingChange'])
+        self.assertFalse(row['onlyModeChange'])
+        self.source.chmod(0o755)
+        row, = self.preflight()['trackedDifferences']
+        self.assertFalse(row['onlyLineEndingChange'])
+        self.assertFalse(row['onlyModeChange'])
+
+    def test_deleted_source_has_only_head_hash_and_missing_disk(self):
+        self.source.unlink()
+        row, = self.preflight()['trackedDifferences']
+        self.assertEqual('D', row['changeType'])
+        self.assertEqual('missing', row['diskKind'])
+        self.assertIsNotNone(row['headSha256'])
+        self.assertIsNone(row['diskSha256'])
+
+    def test_placeholder_with_content_is_rejected_without_printing_it(self):
+        self.keep.write_bytes(b'private-data-must-not-be-an-allowed-placeholder')
+        with self.assertRaises(RuntimeError):
+            self.preflight()
+        self.assertEqual('trackedPlaceholderContentsEmpty', ops.FAILED)
+
+    def test_env_directory_gitkeep_does_not_bypass_tracked_source_scope(self):
+        private = self.app / '.env-private/.gitkeep'
+        private.parent.mkdir()
+        private.write_bytes(b'')
+        self.git('add', '--', str(private.relative_to(self.root)))
+        with self.assertRaises(RuntimeError):
+            self.preflight()
+        self.assertEqual('trackedSourceOnly', ops.FAILED)
+
+    def test_other_private_directory_gitkeep_is_not_treated_as_source_placeholder(self):
+        private = self.app / 'uploads/customer/.gitkeep'
+        private.parent.mkdir(parents=True)
+        private.write_bytes(b'')
+        self.git('add', '--', str(private.relative_to(self.root)))
+        with self.assertRaises(RuntimeError):
+            self.preflight()
+        self.assertEqual('trackedSourceOnly', ops.FAILED)
+
+    def test_staged_addition_is_tracked_but_untracked_business_and_other_apps_are_ignored(self):
+        added = self.app / 'added.ts'
+        added.write_text('private-added-source')
+        self.git('add', '--', str(added.relative_to(self.root)))
+        (self.app / 'data/customer-records.db').write_bytes(b'private-business-data')
+        (self.root / 'outside.txt').write_text('private-other-app')
+        self.git('add', '--', 'outside.txt')
+        row, = self.preflight()['trackedDifferences']
+        self.assertEqual('added.ts', row['path'])
+        self.assertEqual('A', row['changeType'])
+        self.assertIsNone(row['headSha256'])
+        self.assertIsNotNone(row['diskSha256'])
+
+    def test_symlink_type_change_hashes_target_only_without_reading_outside_file(self):
+        outside = self.root / 'outside-secret'
+        outside.write_bytes(b'private-external-secret-not-readable')
+        self.source.unlink()
+        self.source.symlink_to(outside)
+        row, = self.preflight()['trackedDifferences']
+        self.assertEqual('T', row['changeType'])
+        self.assertEqual('symlink-target-only', row['diskKind'])
+        self.assertEqual(hashlib.sha256(bytes(str(outside), 'utf-8')).hexdigest(), row['diskSha256'])
+        self.assertNotEqual(hashlib.sha256(outside.read_bytes()).hexdigest(), row['diskSha256'])
+
+    def test_preflight_main_requires_exact_before_target_and_empty_backup(self):
+        with patch.object(ops, 'preflight') as preflight:
+            for target, backup in [('a' * 40, ''), (ops.BEFORE, '/tmp/old-backup')]:
+                with self.assertRaises(RuntimeError):
+                    ops.main(['preflight', ops.BEFORE, target, backup])
+            preflight.assert_not_called()
 
 
 if __name__ == '__main__':

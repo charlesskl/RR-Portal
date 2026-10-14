@@ -7,7 +7,7 @@ on:
         description: "Private online SQLite backup or read-only verification of both SprayPlan environments"
         type: choice
         required: true
-        options: [backup, verify, diagnose]
+        options: [backup, verify, diagnose, preflight]
         default: backup
       before_commit:
         description: "Exact pre-deployment main SHA"
@@ -46,9 +46,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-          [[ "$SPRAY_OPS_MODE" =~ ^(backup|verify|diagnose)$ ]] || exit 1
+          [[ "$SPRAY_OPS_MODE" =~ ^(backup|verify|diagnose|preflight)$ ]] || exit 1
           [[ "$SPRAY_OPS_BEFORE" = dfc6e4dd807bd5b5e8b2f1e2e883499590f5f890 && "$SPRAY_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
-          if [[ "$SPRAY_OPS_MODE" = backup ]]; then
+          if [[ "$SPRAY_OPS_MODE" = backup || "$SPRAY_OPS_MODE" = preflight ]]; then
             [[ -z "$SPRAY_OPS_BACKUP" && "$SPRAY_OPS_BEFORE" = "$SPRAY_OPS_TARGET" ]] || exit 1
           else
             [[ "$SPRAY_OPS_BEFORE" != "$SPRAY_OPS_TARGET" ]] || exit 1
@@ -73,9 +73,9 @@ jobs:
           envs: SPRAY_OPS_MODE,SPRAY_OPS_REF,SPRAY_OPS_BEFORE,SPRAY_OPS_TARGET,SPRAY_OPS_BACKUP
           script: |
             set -euo pipefail
-            [[ "$SPRAY_OPS_MODE" =~ ^(backup|verify|diagnose)$ && "$SPRAY_OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$SPRAY_OPS_MODE" =~ ^(backup|verify|diagnose|preflight)$ && "$SPRAY_OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
             [[ "$SPRAY_OPS_BEFORE" = dfc6e4dd807bd5b5e8b2f1e2e883499590f5f890 && "$SPRAY_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
-            if [[ "$SPRAY_OPS_MODE" = backup ]]; then
+            if [[ "$SPRAY_OPS_MODE" = backup || "$SPRAY_OPS_MODE" = preflight ]]; then
               [[ -z "$SPRAY_OPS_BACKUP" && "$SPRAY_OPS_BEFORE" = "$SPRAY_OPS_TARGET" ]] || exit 1
             else
               [[ "$SPRAY_OPS_BEFORE" != "$SPRAY_OPS_TARGET" ]] || exit 1

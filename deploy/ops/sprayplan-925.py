@@ -544,6 +544,103 @@ def snapshot_now(service, directory):
     return target, audit
 
 
+def git_readonly(args, label):
+    # Avoid optional index/stat-cache writes and configured external diff/fsmonitor hooks.
+    global FAILED
+    FAILED = label
+    environment = dict(os.environ)
+    environment['GIT_OPTIONAL_LOCKS'] = '0'
+    value = subprocess.run(['git', '-c', 'core.fsmonitor=false', '-c', 'core.quotepath=false'] + args,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=ROOT,
+                           env=environment, timeout=60)
+    require(value.returncode == 0, label)
+    return value.stdout
+
+
+def tracked_source_diff():
+    raw = git_readonly(['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--raw', '-z',
+                        '--abbrev=40', 'HEAD', '--', APP], 'readOnlyTrackedSourceDiff')
+    records = raw.split(b'\x00')
+    require(records[-1] == b'' and (len(records) - 1) % 2 == 0, 'trackedDiffRawStructure')
+    changes = []
+    for i in range(0, len(records) - 1, 2):
+        fields = records[i].decode('ascii').split()
+        require(len(fields) == 5 and fields[0].startswith(':'), 'trackedDiffRawFields')
+        old_mode, new_mode, old_blob, new_blob, status = fields[0][1:], *fields[1:]
+        require(re.fullmatch('[0-7]{6}', old_mode) and re.fullmatch('[0-7]{6}', new_mode)
+                and re.fullmatch('[a-f0-9]{40}', old_blob) and re.fullmatch('[a-f0-9]{40}', new_blob)
+                and status in ('A', 'D', 'M', 'T', 'U'), 'trackedDiffMetadata')
+        name = records[i + 1].decode('utf-8')
+        pure = pathlib.PurePosixPath(name)
+        require(name.startswith(APP + '/') and not pure.is_absolute() and '..' not in pure.parts,
+                'trackedDiffApplicationScope')
+        # Runtime/private files are never inspected; only the tracked empty placeholders are source metadata.
+        relative = pure.relative_to(APP)
+        placeholder = str(relative) in {'data/.gitkeep', 'storage/pdf/.gitkeep'}
+        require(not any(part.startswith('.env') for part in relative.parts)
+                and (not any(part in ('data', 'data-test', 'storage', 'storage-test', 'uploads', 'instance')
+                             for part in relative.parts[:-1]) or placeholder), 'trackedSourceOnly')
+        require(not relative.name.endswith(('.db', '.sqlite', '.sqlite3', '.db-wal', '.db-shm')), 'noTrackedBusinessDatabase')
+        head = None
+        if old_mode not in ('000000', '160000'):
+            head = git_readonly(['cat-file', 'blob', old_blob], 'readOnlyHeadBlob')
+            require(len(head) <= LIMIT_FILE, 'trackedHeadBlobSizeLimit')
+        file = ROOT / pure
+        require(all(not parent.is_symlink() for parent in file.parents if parent != ROOT and ROOT in parent.parents),
+                'trackedSourceNoSymlinkAncestors')
+        content, disk_mode, permissions, kind = None, None, None, 'missing'
+        try:
+            metadata = file.lstat()
+        except FileNotFoundError:
+            metadata = None
+        if metadata is not None:
+            permissions = format(stat.S_IMODE(metadata.st_mode), '04o')
+            if stat.S_ISLNK(metadata.st_mode):
+                content = os.fsencode(os.readlink(file))
+                disk_mode, kind = '120000', 'symlink-target-only'
+            elif stat.S_ISREG(metadata.st_mode):
+                require(metadata.st_size <= LIMIT_FILE, 'trackedDiskFileSizeLimit')
+                fd = os.open(file, os.O_RDONLY | os.O_NOFOLLOW)
+                with os.fdopen(fd, 'rb') as source:
+                    before = os.fstat(source.fileno())
+                    content = source.read(before.st_size + 1)
+                    after = os.fstat(source.fileno())
+                require(len(content) == before.st_size and (before.st_ino, before.st_size, before.st_mtime_ns, before.st_mode)
+                        == (after.st_ino, after.st_size, after.st_mtime_ns, after.st_mode), 'trackedDiskFileStable')
+                disk_mode = '100755' if before.st_mode & stat.S_IXUSR else '100644'
+                kind = 'regular'
+            else:
+                kind = 'other-type-content-not-read'
+        if placeholder:
+            require(head == b'' and content == b'', 'trackedPlaceholderContentsEmpty')
+        same_content = head is not None and content is not None and head == content
+        text_line_endings_only = False
+        if head is not None and content is not None and head != content and b'\x00' not in head + content:
+            try:
+                head.decode('utf-8'); content.decode('utf-8')
+                normalize = lambda value: value.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+                text_line_endings_only = normalize(head) == normalize(content)
+            except UnicodeDecodeError:
+                pass
+        changes.append({'path': str(relative), 'changeType': status, 'headGitMode': old_mode,
+            'diffGitMode': new_mode, 'diskGitMode': disk_mode, 'diskPermissions': permissions, 'diskKind': kind,
+            'headSha256': hashlib.sha256(head).hexdigest() if head is not None else None,
+            'diskSha256': hashlib.sha256(content).hexdigest() if content is not None else None,
+            'onlyModeChange': same_content and old_mode != disk_mode,
+            'onlyLineEndingChange': text_line_endings_only and old_mode == disk_mode})
+    return sorted(changes, key=lambda row: row['path'])
+
+
+def preflight():
+    require(source_commit() == source_commit('origin/main') == BEFORE, 'preflightExactPreDeployMain')
+    changes = tracked_source_diff()
+    require(tracked_source_diff() == changes and source_commit() == source_commit('origin/main') == BEFORE,
+            'readOnlyPreflightWindowStable')
+    return {'mode': 'preflight', 'sourceCommit': BEFORE, 'trackedApplicationSourceClean': not changes,
+            'trackedDifferences': changes, 'diagnosticComplete': True, 'sourceContentsPrinted': False,
+            'applicationCheckoutWritesPerformed': False, 'businessWritesPerformed': False, 'serviceRestartsPerformed': False}
+
+
 def backup():
     os.umask(0o077)
     require(source_commit() == source_commit('origin/main') == BEFORE, 'backupExactPreDeployMain')
@@ -681,8 +778,12 @@ def verify(mode, target, path):
 def main(args):
     require(len(args) == 4, 'argumentCount')
     mode, before, target, path = args
-    require(mode in ('backup', 'verify', 'diagnose') and before == BEFORE and re.fullmatch('[a-f0-9]{40}', target),
+    require(mode in ('backup', 'verify', 'diagnose', 'preflight') and before == BEFORE and re.fullmatch('[a-f0-9]{40}', target),
             'exactArguments')
+    if mode == 'preflight':
+        require(target == BEFORE and not path, 'preflightExactTarget')
+        print(json.dumps(preflight(), ensure_ascii=True))
+        return 0
     if mode == 'backup':
         require(target == BEFORE and not path, 'backupExactTarget')
         print(json.dumps(backup(), ensure_ascii=True))

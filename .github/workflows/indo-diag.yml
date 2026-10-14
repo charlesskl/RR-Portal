@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Private schema/config backup / read-only PR920 verification (no raw logs)"
+        description: "Private schema/config backup / read-only PR921 verification (no raw logs)"
         type: choice
         options: [backup, verify]
         default: backup
@@ -50,9 +50,9 @@ jobs:
             set -euo pipefail
             [[ "$INDO_OPS_MODE" =~ ^(backup|verify)$ && "$INDO_OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
-            git fetch origin ops/indo-920-20261014 >/dev/null 2>&1 || { echo 'INDO_920_SCRIPT_FETCH_FAILED'; exit 1; }
+            git fetch origin ops/indo-921-20261014 >/dev/null 2>&1 || { echo 'INDO_921_SCRIPT_FETCH_FAILED'; exit 1; }
             umask 077
-            indo_temporary=$(mktemp -d /tmp/indo-920.XXXXXX)
+            indo_temporary=$(mktemp -d /tmp/indo-921.XXXXXX)
             trap 'rm -rf "$indo_temporary"' EXIT
-            git show "$INDO_OPS_REF:deploy/ops/indo-920.py" > "$indo_temporary/ops.py" 2>/dev/null || { echo 'INDO_920_SCRIPT_READ_FAILED'; exit 1; }
+            git show "$INDO_OPS_REF:deploy/ops/indo-921.py" > "$indo_temporary/ops.py" 2>/dev/null || { echo 'INDO_921_SCRIPT_READ_FAILED'; exit 1; }
             python3 "$indo_temporary/ops.py" "$INDO_OPS_MODE"

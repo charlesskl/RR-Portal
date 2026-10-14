@@ -7,6 +7,7 @@ import hmac
 import importlib.util
 import io
 import json
+import os
 import pathlib
 import sqlite3
 import subprocess
@@ -339,7 +340,8 @@ class PreflightGitTests(unittest.TestCase):
                               stderr=subprocess.PIPE, check=True).stdout
 
     def preflight(self):
-        with patch.object(ops, 'ROOT', self.root), patch.object(ops, 'BEFORE', self.before):
+        with patch.object(ops, 'ROOT', self.root), patch.object(ops, 'BEFORE', self.before), \
+             patch.object(ops, 'extra_sqlite_candidate_metadata', return_value={}):
             return ops.preflight()
 
     def source_guard(self):
@@ -519,6 +521,140 @@ class PreflightGitTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     ops.main(['preflight', ops.BEFORE, target, backup])
             preflight.assert_not_called()
+
+
+class SqliteCandidateTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='sprayplan-candidates-offline-')
+        self.root = pathlib.Path(self.temporary.name)
+        self.handles = []
+        for data, storage in ops.SERVICES.values():
+            (self.root / ops.APP / data).mkdir(parents=True)
+            (self.root / ops.APP / storage).mkdir(parents=True)
+            self.database(self.root / ops.APP / data / 'sprayplan.db')
+
+    def tearDown(self):
+        for db in self.handles:
+            db.close()
+        self.temporary.cleanup()
+
+    def database(self, path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(path) as db:
+            db.execute('CREATE TABLE private_fixture(id INTEGER,value TEXT)')
+            db.execute('INSERT INTO private_fixture VALUES(1,"private-row-never-output")')
+        db.close()
+        return path
+
+    def context(self, service):
+        path = self.root / ops.APP / ops.SERVICES[service][0] / 'sprayplan.db'
+        return 'a' * 64, path, {}, 'private-jwt-never-output'
+
+    def inspect(self, host=None, container=None):
+        with patch.object(ops, 'ROOT', self.root), patch.object(ops, 'app_context', side_effect=self.context), \
+             patch.object(ops, 'host_candidate_fds', side_effect=lambda identities: (host or {'complete': True, 'found': []})
+                          if identities else {'complete': True, 'found': []}), \
+             patch.object(ops, 'run', return_value=json.dumps(container or {'complete': True, 'found': []}).encode()):
+            return ops.extra_sqlite_candidate_metadata()
+
+    def test_known_timestamp_snapshot_only_exposes_metadata_and_not_business_rows(self):
+        path = self.database(self.root / ops.APP / 'data/sprayplan.db.snapshot.20261014-130000')
+        original = path.read_bytes()
+        result = self.inspect()
+        row, = result['sprayplan']['sqliteCandidates']
+        self.assertEqual('sprayplan.db.snapshot.20261014-130000', row['relativePath'])
+        self.assertEqual('timestamp-named-snapshot-candidate', row['category'])
+        self.assertTrue(row['integrityCheckOk'])
+        self.assertEqual('main-file-immutable-ignores-sidecars', row['integrityScope'])
+        self.assertFalse(row['inactiveStatusProven'])
+        self.assertFalse(row['hostOpenFileDescriptorFound'])
+        self.assertNotIn('private-row', json.dumps(result))
+        self.assertNotIn('private-jwt', json.dumps(result))
+        self.assertEqual(original, path.read_bytes())
+
+    def test_unknown_sensitive_filename_and_invalid_timestamp_are_hashed_not_echoed(self):
+        names = ['customer-A-private-orders-2026.sqlite', 'sprayplan.db.bak.20261399-250000']
+        for name in names:
+            self.database(self.root / ops.APP / 'storage' / name)
+        rows = self.inspect()['sprayplan']['sqliteCandidates']
+        self.assertEqual(2, len(rows))
+        self.assertTrue(all(row['category'] == 'unknown-sqlite-path' and 'relativePath' not in row for row in rows))
+        text = json.dumps(rows)
+        self.assertNotIn('customer-A', text)
+        self.assertNotIn('20261399', text)
+        self.assertEqual({hashlib.sha256(n.encode()).hexdigest() for n in names}, {r['pathSha256'] for r in rows})
+
+    def test_candidate_wal_is_reported_but_immutable_check_never_checkpoints_it(self):
+        path = self.database(self.root / ops.APP / 'data-test/sprayplan.db.bak.20261014-130100')
+        db = sqlite3.connect(path)
+        self.handles.append(db)
+        db.execute('PRAGMA journal_mode=WAL')
+        db.execute('PRAGMA wal_autocheckpoint=0')
+        db.execute('INSERT INTO private_fixture VALUES(2,"private-wal-row")')
+        db.commit()
+        before = {ending: pathlib.Path(str(path) + ending).read_bytes() for ending in ('-wal', '-shm')}
+        row, = self.inspect(host={'complete': True, 'found': [0]})['sprayplan-test']['sqliteCandidates']
+        self.assertTrue(row['sidecars']['-wal']['exists'])
+        self.assertTrue(row['sidecars']['-shm']['exists'])
+        self.assertTrue(row['hostOpenFileDescriptorFound'])
+        self.assertFalse(row['inactiveStatusProven'])
+        self.assertEqual(before, {ending: pathlib.Path(str(path) + ending).read_bytes() for ending in ('-wal', '-shm')})
+
+    def test_live_primary_and_sidecars_and_non_sqlite_files_are_excluded(self):
+        live = self.root / ops.APP / 'data/sprayplan.db'
+        for ending in ('-wal', '-shm', '-journal'):
+            pathlib.Path(str(live) + ending).write_bytes(b'SQLite format 3\x00private-not-readable')
+        (live.parent / 'not-a-database.pdf').write_bytes(b'%PDF private document')
+        self.assertEqual([], self.inspect()['sprayplan']['sqliteCandidates'])
+
+    def test_symlink_candidate_is_rejected_without_following_outside_database(self):
+        outside = self.database(self.root / 'outside.sqlite')
+        (self.root / ops.APP / 'data/linked.sqlite').symlink_to(outside)
+        with self.assertRaises(RuntimeError):
+            self.inspect()
+        self.assertEqual('sqliteCandidateNoSymlinkFiles', ops.FAILED)
+
+    def test_nonregular_fifo_is_rejected_before_opening_or_blocking(self):
+        os.mkfifo(self.root / ops.APP / 'data/private-pipe')
+        with self.assertRaises(RuntimeError):
+            self.inspect()
+        self.assertEqual('candidateScanRegularFile', ops.FAILED)
+
+    def test_fifo_sidecar_is_rejected_by_regular_file_guard_without_opening(self):
+        candidate = self.database(self.root / ops.APP / 'data/sprayplan.db.snapshot.20261014-130000')
+        os.mkfifo(str(candidate) + '-wal')
+        with self.assertRaises(RuntimeError):
+            self.inspect()
+        self.assertEqual('sqliteCandidateRegularFile', ops.FAILED)
+
+    def test_fd_probe_unavailable_is_unknown_not_false(self):
+        self.database(self.root / ops.APP / 'data/sprayplan.db.bak.20261014-130000')
+        row, = self.inspect(host={'complete': False, 'found': []}, container={'complete': False, 'found': []})['sprayplan']['sqliteCandidates']
+        self.assertIsNone(row['hostOpenFileDescriptorFound'])
+        self.assertIsNone(row['containerOpenFileDescriptorFound'])
+        self.assertFalse(row['hostFdProbeComplete'])
+        self.assertFalse(row['containerFdProbeComplete'])
+
+    def test_host_fd_probe_matches_inode_and_reports_all_hardlink_candidates(self):
+        path = self.database(self.root / 'candidate.sqlite')
+        metadata = path.stat()
+        identity = (str(metadata.st_dev), str(metadata.st_ino))
+        proc = self.root / 'fake-proc'
+        descriptors = proc / '1234/fd'
+        descriptors.mkdir(parents=True)
+        (descriptors / '3').symlink_to(path)
+        self.assertEqual({'complete': True, 'found': [0, 1]}, ops.host_candidate_fds([identity, identity], proc))
+        self.assertEqual({'complete': False, 'found': []}, ops.host_candidate_fds([identity], self.root / 'missing-proc'))
+
+    def test_candidate_hardlink_to_live_primary_is_flagged_without_raw_inode_output(self):
+        source = self.root / ops.APP / 'data/sprayplan.db'
+        alias = source.parent / 'sprayplan.db.snapshot.20261014-130000'
+        os.link(source, alias)
+        row, = self.inspect()['sprayplan']['sqliteCandidates']
+        self.assertTrue(row['sameAsLivePrimaryFile'])
+        self.assertFalse(row['inactiveStatusProven'])
+        self.assertNotIn('st_ino', json.dumps(row))
+        self.assertNotIn('st_dev', json.dumps(row))
 
 
 if __name__ == '__main__':

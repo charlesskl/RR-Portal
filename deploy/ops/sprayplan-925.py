@@ -631,13 +631,179 @@ def tracked_source_diff():
     return sorted(changes, key=lambda row: row['path'])
 
 
+def candidate_file_metadata(path):
+    require(not path.is_symlink(), 'sqliteCandidateNoSymlink')
+    require(stat.S_ISREG(path.lstat().st_mode), 'sqliteCandidateRegularFile')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as source:
+        before = os.fstat(source.fileno())
+        require(stat.S_ISREG(before.st_mode) and 0 <= before.st_size <= LIMIT_FILE, 'sqliteCandidateRegularSizeLimit')
+        sha = hashlib.sha256()
+        for block in iter(lambda: source.read(1024**2), b''):
+            sha.update(block)
+        after = os.fstat(source.fileno())
+    require((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_mode)
+            == (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_mode), 'sqliteCandidateFileStable')
+    return {'exists': True, 'bytes': before.st_size, 'sha256': sha.hexdigest()}, (str(before.st_dev), str(before.st_ino))
+
+
+def immutable_integrity_ok(path):
+    db = None
+    started = time.monotonic()
+    try:
+        db = readonly(path, immutable=True)
+        db.set_progress_handler(lambda: int(time.monotonic() - started > 15), 1000)
+        return db.execute('PRAGMA integrity_check').fetchall() == [('ok',)]
+    except sqlite3.Error:
+        return False
+    finally:
+        if db is not None:
+            db.close()  # __exit__ alone does not close sqlite3.Connection.
+
+
+def host_candidate_fds(identities, proc_root=pathlib.Path('/proc')):
+    complete, found = True, set()
+    targets = {}
+    for index, identity in enumerate(identities):
+        targets.setdefault(identity, []).append(index)
+    if not identities:
+        return {'complete': True, 'found': []}
+    if not proc_root.is_dir():
+        return {'complete': False, 'found': []}
+    try:
+        processes = list(proc_root.iterdir())
+    except OSError:
+        return {'complete': False, 'found': []}
+    for process in processes:
+        if not process.name.isdigit():
+            continue
+        try:
+            descriptors = list((process / 'fd').iterdir())
+        except FileNotFoundError:
+            continue
+        except OSError:
+            complete = False
+            continue
+        for descriptor in descriptors:
+            try:
+                value = descriptor.stat()
+            except FileNotFoundError:
+                continue
+            except OSError:
+                complete = False
+                continue
+            identity = (str(value.st_dev), str(value.st_ino))
+            if identity in targets:
+                found.update(targets[identity])
+    return {'complete': complete, 'found': sorted(found)}
+
+
+CANDIDATE_FDS = r"""
+const fs=require('fs');const targets=JSON.parse(fs.readFileSync(0,'utf8'));
+const ids=new Map();targets.forEach((v,i)=>{let k=v.join('/');ids.set(k,[...(ids.get(k)||[]),i]);});let complete=true,found=new Set(),pids=[];
+try{pids=fs.readdirSync('/proc');}catch(e){complete=false;}
+for(const pid of pids.filter(v=>/^\d+$/.test(v))){
+ let fds;try{fds=fs.readdirSync('/proc/'+pid+'/fd');}catch(e){if(e.code!=='ENOENT')complete=false;continue;}
+ for(const fd of fds){try{let v=fs.statSync('/proc/'+pid+'/fd/'+fd,{bigint:true}),indices=ids.get(v.dev.toString()+'/'+v.ino.toString());if(indices)indices.forEach(i=>found.add(i));}
+ catch(e){if(e.code!=='ENOENT')complete=false;}}
+}process.stdout.write(JSON.stringify({complete,found:[...found].sort((a,b)=>a-b)}));
+"""
+
+
+def extra_sqlite_candidate_metadata():
+    result = {}
+    for service in SERVICES:
+        container, live_db, env, secret = app_context(service)
+        require(live_db == ROOT / APP / SERVICES[service][0] / 'sprayplan.db', 'candidateVerifiedLiveDatabasePath')
+        live_metadata = live_db.stat()
+        live_identity = (str(live_metadata.st_dev), str(live_metadata.st_ino))
+        excluded = {live_db} | {pathlib.Path(str(live_db) + ending) for ending in ('-wal', '-shm', '-journal')}
+        rows, identities, scanned, total = [], [], 0, 0
+        for root_name in SERVICES[service]:
+            root = ROOT / APP / root_name
+            require(root.is_dir() and not root.is_symlink(), 'sqliteCandidateBindRoot')
+            for directory, directories, files in os.walk(root, followlinks=False):
+                directories.sort()
+                parent = pathlib.Path(directory)
+                require(not parent.is_symlink() and all(not (parent / name).is_symlink() for name in directories),
+                        'sqliteCandidateNoSymlinkDirectories')
+                for name in sorted(files):
+                    path = parent / name
+                    require(not path.is_symlink(), 'sqliteCandidateNoSymlinkFiles')
+                    if path in excluded:
+                        continue
+                    require(stat.S_ISREG(path.lstat().st_mode), 'candidateScanRegularFile')
+                    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                    with os.fdopen(fd, 'rb') as source:
+                        metadata = os.fstat(source.fileno())
+                        require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= LIMIT_FILE, 'candidateScanRegularSizeLimit')
+                        header = source.read(16)
+                    scanned += 1; total += metadata.st_size
+                    require(scanned <= LIMIT_FILES and total <= LIMIT_BYTES, 'candidateScanInventoryLimits')
+                    if header != b'SQLite format 3\x00':
+                        continue
+                    relative = str(path.relative_to(root))
+                    known = re.fullmatch(r'sprayplan\.db\.(bak|snapshot)\.([0-9]{8}-[0-9]{6})', relative)
+                    if known:
+                        try:
+                            datetime.datetime.strptime(known[2], '%Y%m%d-%H%M%S')
+                        except ValueError:
+                            known = None
+                    file_metadata, identity = candidate_file_metadata(path)
+                    index = len(identities); identities.append(identity)
+                    row = {'service': service, 'rootName': root_name, **file_metadata,
+                           'category': 'timestamp-named-' + known[1] + '-candidate' if known else 'unknown-sqlite-path',
+                           'integrityCheckOk': immutable_integrity_ok(path),
+                           'integrityScope': 'main-file-immutable-ignores-sidecars', 'inactiveStatusProven': False,
+                           'sameAsLivePrimaryFile': identity == live_identity}
+                    if known:
+                        row['relativePath'] = relative
+                    else:
+                        row['pathSha256'] = hashlib.sha256(relative.encode()).hexdigest()
+                    sidecars, sidecar_indices = {}, []
+                    for ending in ('-wal', '-shm', '-journal'):
+                        sidecar = pathlib.Path(str(path) + ending)
+                        require(not sidecar.is_symlink(), 'candidateSidecarNoSymlink')
+                        if sidecar.exists():
+                            sidecars[ending], identity = candidate_file_metadata(sidecar)
+                            sidecar_indices.append(len(identities)); identities.append(identity)
+                        else:
+                            sidecars[ending] = {'exists': False, 'bytes': None, 'sha256': None}
+                    row['sidecars'] = sidecars
+                    require(candidate_file_metadata(path)[0] == file_metadata, 'candidateIntegrityWindowStable')
+                    rows.append((row, [index] + sidecar_indices))
+        host = host_candidate_fds(identities)
+        if identities:
+            try:
+                container_fds = json.loads(run(['docker', 'exec', '-i', container, 'node', '-e', CANDIDATE_FDS],
+                    data=json.dumps(identities).encode(), check='readOnlyCandidateContainerFds:' + service))
+            except Exception:
+                container_fds = {'complete': False, 'found': []}
+        else:
+            container_fds = {'complete': True, 'found': []}
+        for probe in (host, container_fds):
+            require(set(probe) == {'complete', 'found'} and type(probe['complete']) is bool
+                    and isinstance(probe['found'], list) and all(type(i) is int and 0 <= i < len(identities) for i in probe['found']),
+                    'candidateFdProbeMetadata')
+        for row, indices in rows:
+            for label, probe in [('host', host), ('container', container_fds)]:
+                found = any(index in probe['found'] for index in indices)
+                row[label + 'OpenFileDescriptorFound'] = True if found else (False if probe['complete'] else None)
+                row[label + 'FdProbeComplete'] = probe['complete']
+        result[service] = {'scannedRegularFiles': scanned, 'sqliteCandidates': [row for row, indices in rows],
+                           'businessRowsRead': False, 'sqliteWritesPerformed': False}
+    return result
+
+
 def preflight():
     require(source_commit() == source_commit('origin/main') == BEFORE, 'preflightExactPreDeployMain')
     changes = tracked_source_diff()
+    candidates = extra_sqlite_candidate_metadata()
     require(tracked_source_diff() == changes and source_commit() == source_commit('origin/main') == BEFORE,
             'readOnlyPreflightWindowStable')
+    require(extra_sqlite_candidate_metadata() == candidates, 'readOnlySqliteCandidateWindowStable')
     return {'mode': 'preflight', 'sourceCommit': BEFORE, 'trackedApplicationSourceClean': not changes,
-            'trackedDifferences': changes, 'diagnosticComplete': True, 'sourceContentsPrinted': False,
+            'trackedDifferences': changes, 'extraSqliteCandidateMetadata': candidates, 'diagnosticComplete': True, 'sourceContentsPrinted': False,
             'applicationCheckoutWritesPerformed': False, 'businessWritesPerformed': False, 'serviceRestartsPerformed': False}
 
 

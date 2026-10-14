@@ -3,6 +3,7 @@
 import { getSession } from "@/lib/session";
 import { redirect } from "next/navigation";
 import ScheduleTabs from "./ScheduleTabs";
+import { canEditPlanDates } from "@/lib/planDateAdjustment";
 
 // .NET GET /api/lines 返回结构（对齐 server/.../Basic/LineDtos.cs）
 type DotnetMachine = { id: number; machineNo: string; lineId: number; machineType: string; isUV: boolean; isActive: boolean };
@@ -30,7 +31,7 @@ export default async function SchedulePage({ searchParams }: { searchParams?: { 
 
   // 首屏只渲染排期总览。周排所需的拉别、订单和急单在用户点开周排后再加载。
   const orderId = Number(searchParams?.orderId ?? 0) || undefined;
-  return <ScheduleTabs orderFilter={orderId ? {
+  return <ScheduleTabs canEdit={canEditPlanDates(session.role)} orderFilter={orderId ? {
     orderId,
     orderNo: searchParams?.orderNo ?? `#${orderId}`,
     from: searchParams?.from,

@@ -10,12 +10,14 @@ import { cachedJson } from "@/lib/clientCache";
 import { apiFetch } from "@/lib/apiFetch";
 import Link from "next/link";
 import ExportDialog from "../recording/ExportDialog";
+import { isPlanDate } from "@/lib/planDateAdjustment";
 
 type Resp = { lines: OverviewLine[]; plans: OverviewPlan[] };
 type View = "today" | "month" | "lastMonth" | "custom";
 type DetailState = { date: string; line: OverviewLine; item: CellItem };
 type AdjustTarget = { planId: number; date: string; lineId: number };
 type OverviewProps = {
+  canAdjustDates?: boolean;
   orderFilter?: { orderId: number; orderNo: string; from?: string; to?: string };
   pendingOrderCount?: number;
   pendingUrgentCount?: number;
@@ -32,7 +34,7 @@ const parseYmd = (s: string) => { const [y, m, d] = s.split("-").map(Number); re
 const MINI_BG = { ok: "sc-bg-ok", busy: "sc-bg-busy", over: "sc-bg-over" } as const;
 const MINI_TX = { ok: "sc-ut-ok", busy: "sc-ut-busy", over: "sc-ut-over" } as const;
 
-export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, pendingUrgentCount = 0, onCreatePlan, onPlanUrgent, onAdjustPlan }: OverviewProps) {
+export default function ScheduleOverview({ orderFilter, canAdjustDates = false, pendingOrderCount = 0, pendingUrgentCount = 0, onCreatePlan, onPlanUrgent, onAdjustPlan }: OverviewProps) {
   const [view, setView] = useState<View>("today");
   const [from, setFrom] = useState<string>(() => orderFilter?.from || ymd(new Date()));
   const [to, setTo] = useState<string>(() => {
@@ -107,20 +109,24 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
   };
 
   const savePlanDate = async () => {
-    if (!detail || !newPlanDate || newPlanDate === detail.date) return;
+    if (!detail || !canAdjustDates || !detail.item.canReschedule || !isPlanDate(newPlanDate) || newPlanDate === detail.date) return;
     setSaving(true); setSaveError("");
     try {
-      const res = await fetch("/api/plans/reschedule", {
+      const res = await apiFetch("/api/plans/reschedule", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ changes: [{ id: detail.item.id, originalDate: detail.date, newDate: newPlanDate }], reason: dateReason }),
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "日期调整失败");
       invalidateClientCache("/api/orders"); invalidateClientCache("/api/schedule");
       // 将查看范围延伸至新日期，移动后的计划仍可在看板上看到。
-      if (newPlanDate < from) setFrom(newPlanDate);
-      if (newPlanDate > to) setTo(newPlanDate);
-      setDetail(null); await load();
+      const nextFrom = newPlanDate < from ? newPlanDate : from;
+      const nextTo = newPlanDate > to ? newPlanDate : to;
+      setDetail(null);
+      if (nextFrom !== from || nextTo !== to) {
+        setView("custom"); setFrom(nextFrom); setTo(nextTo);
+        // 范围变更后由 effect 加载新范围，避免旧范围的请求覆盖新数据。
+      } else await load();
     } catch (e) { setSaveError(e instanceof Error ? e.message : "日期调整失败"); }
     finally { setSaving(false); }
   };
@@ -282,19 +288,19 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
               <div><dt>人数</dt><dd>{detail.item.workerCount || "-"}</dd></div>
               <div><dt>拉别产能上限</dt><dd>{detail.line.dailyLimit > 0 ? `${(detail.line.dailyLimit / 10000)}万` : "不卡"}</dd></div>
             </dl>
-            <div className="sc-entry-grid">
-              {detail.item.goodQty != null || detail.item.inboundQty != null ? <p>已录实绩，不能调整日期。</p> : <>
+            {canAdjustDates && <div className="sc-entry-grid">
+              {!detail.item.canReschedule ? <p>该计划已录实绩或订单已完工、作废，不能调整日期。</p> : <>
                 <label>调整计划日期<input disabled={saving} type="date" value={newPlanDate} onChange={e => setNewPlanDate(e.target.value)} /></label>
                 <label>调整原因<input disabled={saving} value={dateReason} onChange={e => setDateReason(e.target.value)} placeholder="如停机、缺料（可选）" /></label>
-                <button type="button" disabled={saving || !newPlanDate || newPlanDate === detail.date} onClick={savePlanDate}>保存日期调整</button>
+                <button type="button" className="sc-date-save" disabled={saving || !isPlanDate(newPlanDate) || newPlanDate === detail.date} onClick={savePlanDate}>保存日期调整</button>
               </>}
-            </div>
+            </div>}
             <div className="sc-entry-grid">
               <label>今日生产数<input type="number" min={0} step={1} value={todayQty} onChange={(e) => setTodayQty(e.target.value)} /></label>
               <label>实际入库数<input type="number" min={0} step={1} value={inboundQty} onChange={(e) => setInboundQty(e.target.value)} /></label>
               <label>备注<textarea rows={2} value={detailRemark} onChange={(e) => setDetailRemark(e.target.value)} placeholder="填写异常、补数或其他说明" /></label>
             </div>
-            {saveError && <p className="sc-save-error">{saveError}</p>}
+            {saveError && <p role="alert" className="sc-save-error">{saveError}</p>}
             <div className="sc-dialog-ft">
               {onAdjustPlan && (
                 <button
@@ -392,6 +398,8 @@ const CSS = `
   .sc-entry-grid label { color:#64748b; font-size:12px; font-weight:600; display:flex; flex-direction:column; gap:6px; }
   .sc-entry-grid input, .sc-entry-grid textarea { width:100%; border:1px solid #dbe4df; border-radius:8px; padding:8px 10px; color:#111827; font:inherit; font-weight:400; resize:vertical; }
   .sc-entry-grid input:focus, .sc-entry-grid textarea:focus { outline:none; border-color:#34d399; box-shadow:0 0 0 2px rgba(52,211,153,.16); }
+  .sc-date-save { justify-self:start; border:0; border-radius:10px; background:#047857; color:#fff; padding:9px 14px; font:inherit; font-weight:600; cursor:pointer; }
+  .sc-date-save:disabled { opacity:.5; cursor:default; }
   .sc-save-error { margin:-6px 18px 12px; color:#c91d32; font-size:12px; }
   .sc-dialog-ft { border-top:1px solid #eef2f7; padding:12px 18px; display:flex; gap:10px; justify-content:flex-end; background:#fff; }
   .sc-dialog-ft button { border:1px solid #d1fae5; background:#ecfdf5; color:#047857; border-radius:8px; padding:7px 16px; font-weight:600; cursor:pointer; }

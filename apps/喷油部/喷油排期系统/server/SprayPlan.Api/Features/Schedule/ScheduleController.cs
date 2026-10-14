@@ -133,7 +133,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
             p.Order?.Product?.ProductNo ?? "待补产品",
             p.ItemName, p.PartName, p.StepNo, p.Craft, p.PlannedQty,
             ScheduleCalc.SafeArr(p.MachineNos), p.WorkerCount, p.GoodQty, p.InboundQty, p.Remark,
-            p.Order?.ExternalOrderNo ?? "-")).ToList();
+            p.Order?.ExternalOrderNo ?? "-", PlanDateRules.CanReschedule(p))).ToList();
 
         return Ok(new OverviewResult(lines, planDtos));
     }

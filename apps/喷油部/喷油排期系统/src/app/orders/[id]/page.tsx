@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import Link from "next/link";
 import { DotnetHttpError, dotnetGet } from "@/lib/dotnet";
 import OrderDetailEditor, { type OrderDetailDto } from "./OrderDetailEditor";
+import { canEditPlanDates } from "@/lib/planDateAdjustment";
 
 export default async function OrderDetailPage({ params }: { params: { id: string } }) {
   const session = await getSession();
@@ -29,5 +30,5 @@ export default async function OrderDetailPage({ params }: { params: { id: string
     </div>;
   }
 
-  return <OrderDetailEditor order={dto} lines={lines.filter(line => line.isActive)} isAdmin={session.role === "admin" || session.role === "manager"} />;
+  return <OrderDetailEditor order={dto} lines={lines.filter(line => line.isActive)} isAdmin={session.role === "admin" || session.role === "manager"} canAdjustDates={canEditPlanDates(session.role)} />;
 }

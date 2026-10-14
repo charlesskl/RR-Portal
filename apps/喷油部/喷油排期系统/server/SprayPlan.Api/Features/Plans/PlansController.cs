@@ -42,7 +42,7 @@ public class PlansController(AppDbContext db) : ControllerBase
         standardStepCount, standardCraft, craftAdjusted,
         p.GoodQty, p.InboundQty, p.ReportedQty, p.DefectQty, p.WorkHours,
         p.ProductionValue, p.Status, p.Remark, p.CreatedBy, p.CreatedAt, p.LastModifiedBy, p.LastModifiedAt,
-        p.ModificationHistory, p.DeletedAt, p.DeletedBy);
+        p.ModificationHistory, p.DeletedAt, p.DeletedBy, PlanDateRules.CanReschedule(p));
     }
 
     // GET /api/plans?planDate=&lineId=&orderId=&unrecordedBefore= —— 列计划（排除软删），planDate asc,id asc
@@ -76,7 +76,7 @@ public class PlansController(AppDbContext db) : ControllerBase
             var d = DateUtil.ParseUtc(unrecordedBefore);
             q = q.Where(p => p.PlanDate < d && p.GoodQty == null);
         }
-        var plans = await q.OrderBy(p => p.PlanDate).ThenBy(p => p.Id).ToListAsync();
+        var plans = await q.Include(p => p.Order).OrderBy(p => p.PlanDate).ThenBy(p => p.Id).ToListAsync();
         var standards = await BuildStandardPasses(plans);
         return Ok(plans.Select(p => ToDto(p, standards)));
     }
@@ -167,13 +167,13 @@ public class PlansController(AppDbContext db) : ControllerBase
     [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Reschedule([FromBody] ReschedulePlansRequest req)
     {
-        if (req.Changes is null || req.Changes.Count == 0 || req.Changes.Select(c => c.Id).Distinct().Count() != req.Changes.Count)
+        if (req.Changes is null || req.Changes.Count == 0 || req.Changes.Any(c => c is null) || req.Changes.Select(c => c.Id).Distinct().Count() != req.Changes.Count)
             return BadRequest(new { error = "请选择需要调整的计划，不能重复提交" });
         var dates = new Dictionary<int, (DateTime Original, DateTime Next)>();
         foreach (var change in req.Changes)
         {
-            if (!DateTime.TryParseExact(change.OriginalDate, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var original) ||
-                !DateTime.TryParseExact(change.NewDate, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var next))
+            if (!DateTime.TryParseExact(change.OriginalDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var original) ||
+                !DateTime.TryParseExact(change.NewDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var next))
                 return BadRequest(new { error = "日期格式不正确" });
             dates[change.Id] = (DateTime.SpecifyKind(original, DateTimeKind.Utc), DateTime.SpecifyKind(next, DateTimeKind.Utc));
         }
@@ -181,7 +181,7 @@ public class PlansController(AppDbContext db) : ControllerBase
         var ids = dates.Keys.ToList();
         var plans = await db.ProductionPlans.Include(p => p.Order).Where(p => ids.Contains(p.Id) && p.DeletedAt == null).ToListAsync();
         if (plans.Count != ids.Count) return NotFound(new { error = "部分计划已撤销或不属于当前厂区，请刷新" });
-        if (plans.Any(p => p.Status == "recorded" || p.GoodQty != null || p.InboundQty != null || p.ReportedQty != null))
+        if (plans.Any(PlanDateRules.HasActuals))
             return BadRequest(new { error = "已录实绩的计划不能调整日期，请只选择未录实绩的计划" });
         if (plans.Any(p => p.Order is null || p.Order.Status is "completed" or "archived"))
             return BadRequest(new { error = "完工或作废订单不能调整排期" });
@@ -226,7 +226,7 @@ public class PlansController(AppDbContext db) : ControllerBase
         if (p is null) return NotFound(new { error = "计划不存在" });
         if (req.PlanDate is not null && DateUtil.ParseUtc(req.PlanDate) != p.PlanDate)
         {
-            if (p.DeletedAt != null || p.Status == "recorded" || p.GoodQty != null || p.InboundQty != null || p.ReportedQty != null)
+            if (p.DeletedAt != null || PlanDateRules.HasActuals(p))
                 return BadRequest(new { error = "已撤销或已录实绩的计划不能调整日期" });
             var owner = await db.Orders.FindAsync(p.OrderId);
             if (owner is null || owner.Status is "completed" or "archived")

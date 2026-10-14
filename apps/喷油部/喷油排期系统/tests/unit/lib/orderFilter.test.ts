@@ -48,4 +48,14 @@ describe("inProductionQuantity", () => {
     input.push({ ...rows[1], id: 6, remainingQty: 270132 });
     expect(inProductionQuantity(input)).toBe(523149);
   });
+  it("排除待补产品、完工、作废和未排期，只累计非负欠数", () => {
+    const mk = (patch: Partial<OrderRow>): OrderRow => ({ ...rows[1], remainingQty: 30, ...patch });
+    const input = [mk({}), mk({ status: "in_production", remainingQty: 70 }), mk({ remainingQty: -10 }),
+      mk({ remainingQty: undefined }), mk({ pendingProduct: true }), mk({ status: "completed" }),
+      mk({ status: "archived" }), mk({ status: "received" })];
+    const before = structuredClone(input);
+    expect(inProductionQuantity(input)).toBe(100);
+    expect(input).toEqual(before);
+    expect(inProductionQuantity([])).toBe(0);
+  });
 });

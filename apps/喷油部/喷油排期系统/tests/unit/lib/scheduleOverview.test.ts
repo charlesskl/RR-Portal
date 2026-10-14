@@ -99,4 +99,8 @@ describe("buildOverviewGrid", () => {
     expect(grid[cellKey("2026-06-23", 4)].items[0].craft).toBe("UV");
     expect(grid[cellKey("2026-06-23", 4)].items[0].color).toBe("uv");
   });
+  it("保留服务端日期调整资格，缺少资格时不显示写入口", () => {
+    const grid = buildOverviewGrid([mk({ id: 1, canReschedule: true }), mk({ id: 2, canReschedule: false }), mk({ id: 3 })], lines);
+    expect(grid[cellKey("2026-06-23", 1)].items.map(item => item.canReschedule)).toEqual([true, false, false]);
+  });
 });

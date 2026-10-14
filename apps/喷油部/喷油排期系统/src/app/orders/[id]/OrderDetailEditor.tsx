@@ -21,7 +21,7 @@ export type OrderDetailDto = {
 const pad = (n: number) => String(n).padStart(2, "0");
 const ymd = (value: string | null) => { if (!value) return ""; const d = new Date(value); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 
-export default function OrderDetailEditor({ order, lines, isAdmin }: { order: OrderDetailDto; lines: ProductionLineDto[]; isAdmin: boolean }) {
+export default function OrderDetailEditor({ order, lines, isAdmin, canAdjustDates = false }: { order: OrderDetailDto; lines: ProductionLineDto[]; isAdmin: boolean; canAdjustDates?: boolean }) {
   const router = useRouter();
   const products = order.products?.length ? order.products : (order.product ? [order.product] : []);
   const product = order.product!;
@@ -117,7 +117,7 @@ export default function OrderDetailEditor({ order, lines, isAdmin }: { order: Or
   return <div className="max-w-6xl">
     <div className="flex justify-between items-center mb-6">
       <h1 className="text-2xl font-bold text-text border-l-4 border-mint-400 pl-3">📋 订单 {order.externalOrderNo}</h1>
-      <div className="flex items-center gap-3">{isAdmin && <button onClick={openRevokeActuals} className="text-amber-700 border border-amber-400 rounded-btn px-3 py-1 text-sm">撤销实绩</button>}{canUnschedule && <Link href={`/schedule?orderId=${order.id}&orderNo=${encodeURIComponent(order.externalOrderNo)}`} className="text-sky border border-sky/40 rounded-btn px-3 py-1 text-sm">调整排期日期</Link>}{canUnschedule && <button onClick={unschedule} className="text-rose border border-rose/40 rounded-btn px-3 py-1 text-sm">撤销排期</button>}<span className={`px-3 py-1 rounded-full text-sm ${STATUS_META[order.status]?.cls ?? "bg-gray-100"}`}>{STATUS_META[order.status]?.text ?? order.status}</span></div>
+      <div className="flex items-center gap-3">{isAdmin && <button onClick={openRevokeActuals} className="text-amber-700 border border-amber-400 rounded-btn px-3 py-1 text-sm">撤销实绩</button>}{canUnschedule && canAdjustDates && <Link href={`/schedule?orderId=${order.id}&orderNo=${encodeURIComponent(order.externalOrderNo)}`} className="text-sky border border-sky/40 rounded-btn px-3 py-1 text-sm">调整排期日期</Link>}{canUnschedule && <button onClick={unschedule} className="text-rose border border-rose/40 rounded-btn px-3 py-1 text-sm">撤销排期</button>}<span className={`px-3 py-1 rounded-full text-sm ${STATUS_META[order.status]?.cls ?? "bg-gray-100"}`}>{STATUS_META[order.status]?.text ?? order.status}</span></div>
     </div>
     <div className="bg-white p-5 rounded-card border border-app-border mb-6 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
       <Field label="款号（不可修改）"><div className="font-mono py-2">{products.map(item => item.productNo).join("、") || product.productNo}</div></Field>

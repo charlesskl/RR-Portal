@@ -6,8 +6,8 @@ import ScheduleOverview from "./ScheduleOverview";
 
 type ScheduleOrderFilter = { orderId: number; orderNo: string; from?: string; to?: string };
 
-export default function ScheduleTabs({ orderFilter }: { orderFilter?: ScheduleOrderFilter }) {
+export default function ScheduleTabs({ orderFilter, canEdit = false }: { orderFilter?: ScheduleOrderFilter; canEdit?: boolean }) {
   const [revision, setRevision] = useState(0);
-  return <>{orderFilter && <PlanDateAdjuster orderId={orderFilter.orderId} onSaved={() => setRevision(value => value + 1)} />}
-    <ScheduleOverview key={revision} orderFilter={orderFilter} /></>;
+  return <>{orderFilter && canEdit && <PlanDateAdjuster key={orderFilter.orderId} orderId={orderFilter.orderId} onSaved={() => setRevision(value => value + 1)} />}
+    <ScheduleOverview key={`${orderFilter?.orderId ?? "all"}:${revision}`} orderFilter={orderFilter} canAdjustDates={canEdit} /></>;
 }

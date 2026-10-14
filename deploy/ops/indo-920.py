@@ -241,6 +241,7 @@ def runtime_patch_proof(before, current, directory):
     compose_before = run(['git', 'show', prior_commit + ':docker-compose.cloud.yml'])
     require(compose_before == (ROOT / 'docker-compose.cloud.yml').read_bytes(), 'runtimePatchComposeUnchanged')
     require(file_hash(private_env_file()) == file_hash(directory / 'env.before'), 'runtimePatchEnvironmentFileUnchanged')
+    checkpoint('runtimePatchComposeEnvironment')
     configured = json.loads(run(COMPOSE + ['config', '--format', 'json']))['services']['indo-shipping']['environment']
     require(isinstance(configured, dict) and all(isinstance(value, str) for value in configured.values()))
 
@@ -252,7 +253,9 @@ def runtime_patch_proof(before, current, directory):
         require(len(result) == len(values), 'runtimePatchNoDuplicateEnvironmentKeys')
         return result
 
+    checkpoint('runtimePatchOldImageDefaults')
     old_defaults = image_environment(before['runtime']['imageId'])
+    checkpoint('runtimePatchNewImageDefaults')
     new_defaults = image_environment(current['imageId'])
     def effective_digest(defaults):
         values = {**defaults, **configured}
@@ -551,6 +554,7 @@ def main():
 if __name__ == '__main__':
     try:
         sys.exit(main())
-    except Exception:
-        print(json.dumps({'failed': True, 'safeError': 'INDO_920_OPS_FAILED', 'failedCheck': FAILED_CHECK}))
+    except Exception as error:
+        error_type = type(error).__name__ if type(error).__name__ in {'RuntimeError', 'KeyError', 'TypeError', 'ValueError', 'JSONDecodeError', 'FileNotFoundError'} else 'Other'
+        print(json.dumps({'failed': True, 'safeError': 'INDO_920_OPS_FAILED', 'failedCheck': FAILED_CHECK, 'errorType': error_type}))
         sys.exit(1)

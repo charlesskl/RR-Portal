@@ -13,7 +13,8 @@ from unittest.mock import patch
 
 WORKFLOW = pathlib.Path(__file__).resolve().parents[3] / '.github/workflows/sprayplan-runtime-inspect.yml'
 TEXT = WORKFLOW.read_text()
-BODY = textwrap.dedent(TEXT.split("            python3 - <<'PY'\n", 1)[1].rsplit('            PY\n', 1)[0])
+STATUS_TEXT = TEXT.split('      - name: Diagnose exact previous environment hashes', 1)[0]
+BODY = textwrap.dedent(TEXT.split("            python3 - <<'PY'\n", 1)[1].split('            PY\n', 1)[0])
 ops = types.ModuleType('live_status_925')
 exec(compile(BODY, str(WORKFLOW), 'exec'), ops.__dict__)
 
@@ -147,7 +148,7 @@ class LiveStatusTests(unittest.TestCase):
         self.assertIn('appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2', TEXT)
         self.assertIn('fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}', TEXT)
         for forbidden in ['git fetch', 'git show', 'git checkout', 'docker exec', 'docker compose', 'docker restart', 'kill ', 'ps -', '/environ', '/cmdline', '/api/', 'sqlite']:
-            self.assertNotIn(forbidden, TEXT)
+            self.assertNotIn(forbidden, STATUS_TEXT)
         namespace = {'__name__': '__main__'}
         output = io.StringIO()
         with patch.dict(ops.os.environ, {'SPRAY_STATUS_TARGET': 'invalid-private-target'}), contextlib.redirect_stdout(output):

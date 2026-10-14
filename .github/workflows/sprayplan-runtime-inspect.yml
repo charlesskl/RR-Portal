@@ -1,96 +1,224 @@
-name: SprayPlan Runtime Inspect
-
-# 一次性诊断：确认喷油排期系统（sprayplan）后端进程运行目录、DLL 版本、
-# 源码是否含 SavePricing、是否存在新旧发布目录混用。
-# 第 1-7 节为用户提供的原始命令（逐字执行）；第 8 节为容器内补充检查
-# （sprayplan 跑在 Docker 容器里，宿主机 ps/find 看不到容器内进程与文件）。
+name: PR925 Read-only Live Deployment Status
 
 on:
   workflow_dispatch:
+    inputs:
+      target_commit:
+        description: "Only the exact PR925 deployed main SHA"
+        type: string
+        required: true
+        default: "87844f57efe1b3387c9a18b51f4736489d01be98"
 
 permissions:
   contents: read
 
 concurrency:
-  group: deploy-cloud
+  group: sprayplan-deployment-status-925
   queue: max
   cancel-in-progress: false
 
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 4
     steps:
-      - name: Validate SSH host fingerprint
+      - name: Validate fingerprint and fixed target
         shell: bash
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          SPRAY_STATUS_TARGET: ${{ inputs.target_commit }}
         run: |
           set -euo pipefail
-          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
-            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
-            exit 1
-          fi
+          [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+          [[ "$SPRAY_STATUS_TARGET" = 87844f57efe1b3387c9a18b51f4736489d01be98 ]] || exit 1
 
-      - name: Run inspect script via SSH
+      - name: Read live version, container lifecycle and aggregate resource activity
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          SPRAY_STATUS_TARGET: ${{ inputs.target_commit }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 8m
+          command_timeout: 2m
+          envs: SPRAY_STATUS_TARGET
           script: |
-            echo "=== 1. 查找喷油系统进程 ==="
-            ps -ef | grep -E "SprayPlan.Api|dotnet|next-server|next start" | grep -v grep
+            set -euo pipefail
+            [[ "$SPRAY_STATUS_TARGET" = 87844f57efe1b3387c9a18b51f4736489d01be98 ]] || exit 1
+            python3 - <<'PY'
+            import json, os, pathlib, re, shutil, subprocess, time
 
-            echo "=== 2. 查看 5080/8400 端口对应进程 ==="
-            sudo ss -lntp | grep -E ":5080|:8400"
+            TARGET = '87844f57efe1b3387c9a18b51f4736489d01be98'
+            SERVICES = ('sprayplan', 'sprayplan-test')
+            GROUPS = {
+                'git': {'git'},
+                'container': {'docker', 'dockerd', 'containerd', 'buildkit-runc'},
+                'build': {'buildkitd', 'docker-buildx', 'make', 'cmake', 'ninja', 'cc', 'gcc', 'g++', 'cc1', 'cc1plus', 'ld'},
+                'node': {'node', 'npm', 'npm ci', 'npm run build', 'npm exec prisma', 'next-server'},
+                'package': {'apt', 'apt-get', 'dpkg'},
+                'dotnet': {'dotnet'},
+                'transfer': {'curl', 'wget'},
+                'archive': {'tar', 'gzip', 'xz', 'bzip2'},
+            }
+            INSPECT = '{"containerId":{{json .Id}},"createdAt":{{json .Created}},"startedAt":{{json .State.StartedAt}},"running":{{json .State.Running}},"status":{{json .State.Status}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}},"imageId":{{json .Image}},"restartCount":{{json .RestartCount}},"oomKilled":{{json .State.OOMKilled}}}'
 
-            echo "=== 3. 查看后端进程实际运行目录和程序 ==="
-            PID=$(pgrep -f "SprayPlan.Api" | head -1)
-            echo "后端 PID=$PID"
-            if [ -n "$PID" ]; then
-              sudo readlink -f /proc/$PID/cwd
-              sudo readlink -f /proc/$PID/exe
-              sudo tr '\0' ' ' < /proc/$PID/cmdline
-              echo
-            fi
 
-            echo "=== 4. 查找服务器上的后端源码或发布目录 ==="
-            sudo find /opt /var/www /www /data /home -type f \
-              \( -name "SprayPlan.Api.dll" -o -name "OrdersController.cs" \) \
-              2>/dev/null
+            def command(args, directory=None):
+                try:
+                    value = subprocess.run(args, cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                           timeout=12, env={**os.environ, 'GIT_OPTIONAL_LOCKS': '0'})
+                    if value.returncode == 0 and len(value.stdout) <= 65536:
+                        return value.stdout
+                except Exception:
+                    pass
+                return None
 
-            echo "=== 5. 检查运行版本是否支持订单核价保存 ==="
-            sudo grep -R -n \
-              "SavePricing\|同时创建草稿核价\|UnitPrice" \
-              /opt /var/www /www /data /home \
-              --include="ImportDtos.cs" \
-              --include="OrdersController.cs" \
-              --include="ImportClient.tsx" \
-              2>/dev/null | head -100
 
-            echo "=== 6. 检查后端 DLL 更新时间 ==="
-            sudo find /opt /var/www /www /data /home -name "SprayPlan.Api.dll" \
-              -exec ls -lh --time-style=long-iso {} \; 2>/dev/null
+            def source(directory):
+                raw = command(['git', 'rev-parse', 'HEAD'], directory)
+                head = raw.decode('ascii').strip() if raw is not None and raw.isascii() else None
+                if head is None or re.fullmatch('[a-f0-9]{40}', head) is None:
+                    return {'complete': False, 'head': None, 'matchesTarget': None}
+                return {'complete': True, 'head': head, 'matchesTarget': head == TARGET}
 
-            echo "=== 7. 查看可能的服务配置 ==="
-            sudo systemctl list-units --type=service --all | grep -Ei "spray|plan|dotnet"
 
-            echo "=== 8. 容器内补充检查（sprayplan 运行在 Docker 中） ==="
-            echo "--- 8.1 容器进程 ---"
-            docker exec rr-portal-sprayplan-1 ps aux 2>/dev/null | grep -E "dotnet|node" | grep -v grep || echo "(容器无 ps 命令或无匹配)"
-            echo "--- 8.2 容器内 DLL 位置与更新时间 ---"
-            docker exec rr-portal-sprayplan-1 sh -c 'ls -lh /app/publish/SprayPlan.Api.dll 2>/dev/null || find /app -maxdepth 3 -name "SprayPlan.Api.dll" -exec ls -lh {} \;' 2>/dev/null || echo "(读取失败)"
-            echo "--- 8.3 容器内 DLL 是否含 SavePricing 字符串 ---"
-            docker exec rr-portal-sprayplan-1 sh -c 'DLL=$(find /app -maxdepth 3 -name "SprayPlan.Api.dll" | head -1); echo "DLL=$DLL"; grep -c "SavePricing" "$DLL" 2>/dev/null || echo 0' 2>/dev/null || echo "(读取失败)"
-            echo "--- 8.4 宿主机仓库 HEAD 与关键文件时间 ---"
-            cd /opt/rr-portal && git log -1 --format='%h %ci %s' 2>/dev/null
-            ls -lh --time-style=long-iso "apps/喷油部/喷油排期系统/server/SprayPlan.Api/Features/Orders/OrdersController.cs" 2>/dev/null
-            echo "--- 8.5 仓库源码是否含 SavePricing ---"
-            grep -rn "SavePricing" "apps/喷油部/喷油排期系统/server/SprayPlan.Api/Features/Orders/" 2>/dev/null | head -10
-            echo "--- 8.6 是否存在多个发布/检出目录 ---"
-            find /opt /var/www /www /data /home -maxdepth 4 -type d \( -name "*sprayplan*" -o -name "*SprayPlan*" -o -name "*喷油*" \) 2>/dev/null | head -20
+            def container(service):
+                empty = {'complete': False, 'metadata': None}
+                raw = command(['docker', 'inspect', '--format', INSPECT, 'rr-portal-' + service + '-1'])
+                try:
+                    row = json.loads(raw) if raw is not None else None
+                    fields = {'containerId', 'createdAt', 'startedAt', 'running', 'status', 'health', 'imageId', 'restartCount', 'oomKilled'}
+                    valid = isinstance(row, dict) and set(row) == fields
+                    if not valid:
+                        return empty
+                    valid = (isinstance(row['containerId'], str) and re.fullmatch('[a-f0-9]{64}', row['containerId']) is not None
+                             and isinstance(row['imageId'], str) and re.fullmatch('sha256:[a-f0-9]{64}', row['imageId']) is not None
+                             and all(isinstance(row[k], str) and re.fullmatch('[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z', row[k]) is not None for k in ('createdAt', 'startedAt'))
+                             and type(row['running']) is bool and type(row['oomKilled']) is bool
+                             and type(row['restartCount']) is int and row['restartCount'] >= 0
+                             and row['status'] in {'created', 'running', 'paused', 'restarting', 'removing', 'exited', 'dead'}
+                             and row['health'] in {'none', 'starting', 'healthy', 'unhealthy'})
+                    return {'complete': True, 'metadata': row} if valid else empty
+                except Exception:
+                    return empty
+
+
+            def memory(proc):
+                try:
+                    rows = (proc / 'meminfo').read_text().splitlines()
+                    values = [int(m[1]) * 1024 for row in rows if (m := re.fullmatch(r'MemAvailable:\s+([0-9]+)\s+kB', row))]
+                    if len(values) == 1:
+                        return {'complete': True, 'availableBytes': values[0]}
+                except Exception:
+                    pass
+                return {'complete': False, 'availableBytes': None}
+
+
+            def disk(directory):
+                try:
+                    value = shutil.disk_usage(directory)
+                    return {'complete': True, 'freeBytes': value.free, 'totalBytes': value.total}
+                except Exception:
+                    return {'complete': False, 'freeBytes': None, 'totalBytes': None}
+
+
+            def processes(proc):
+                counts, identities, complete = {k: 0 for k in GROUPS}, {}, True
+                try:
+                    entries = list(proc.iterdir())
+                except Exception:
+                    return False, counts, identities
+                for entry in entries:
+                    if not entry.name.isdigit():
+                        continue
+                    try:
+                        name = (entry / 'comm').read_text().strip()
+                        group = next((k for k, names in GROUPS.items() if name in names), None)
+                        if group is None:
+                            continue
+                        fields = (entry / 'stat').read_text().rsplit(')', 1)[1].split()
+                        cpu, born = int(fields[11]) + int(fields[12]), int(fields[19])
+                        if cpu < 0 or born < 0:
+                            raise ValueError('invalid-counter')
+                        counts[group] += 1
+                        identities[(entry.name, born)] = (group, cpu)
+                    except FileNotFoundError:
+                        continue  # Kernel processes may exit while being sampled.
+                    except Exception:
+                        complete = False
+                return complete, counts, identities
+
+
+            def network(proc):
+                try:
+                    rows = (proc / 'net/dev').read_text().splitlines()
+                    values, saw_device = {}, False
+                    for row in rows:
+                        if ':' not in row:
+                            continue
+                        name, raw = row.split(':', 1)
+                        fields = raw.split()
+                        if len(fields) < 16:
+                            return None
+                        rx, tx = int(fields[0]), int(fields[8])
+                        if rx < 0 or tx < 0:
+                            return None
+                        saw_device = True
+                        if name.strip() != 'lo':
+                            values[name.strip()] = (rx, tx)
+                    return values if saw_device else None
+                except Exception:
+                    return None
+
+
+            def observation(proc=pathlib.Path('/proc'), directory=pathlib.Path('/opt/rr-portal'), pause=time.sleep):
+                git = source(directory)
+                containers = {s: container(s) for s in SERVICES}
+                first_process, first_network = processes(proc), network(proc)
+                started = time.monotonic()
+                pause(2)
+                duration = time.monotonic() - started
+                last_process, last_network = processes(proc), network(proc)
+                process_complete = first_process[0] and last_process[0]
+                ticks = None
+                if process_complete and set(first_process[2]) == set(last_process[2]):
+                    ticks = {g: 0 for g in GROUPS}
+                    for identity, (group, current) in last_process[2].items():
+                        before_group, old = first_process[2][identity]
+                        if group != before_group or current < old:
+                            ticks = None
+                            break
+                        ticks[group] += current - old
+                net_complete = first_network is not None and last_network is not None and set(first_network) == set(last_network)
+                rx = tx = None
+                if net_complete and any(last_network[k][0] < first_network[k][0] or last_network[k][1] < first_network[k][1] for k in first_network):
+                    net_complete = False
+                if net_complete:
+                    rx = sum(v[0] for v in last_network.values()) - sum(v[0] for v in first_network.values())
+                    tx = sum(v[1] for v in last_network.values()) - sum(v[1] for v in first_network.values())
+                    if rx < 0 or tx < 0:
+                        net_complete, rx, tx = False, None, None
+                return {'mode': 'live-deployment-status-925', 'target': TARGET, 'source': git, 'containers': containers,
+                        'memory': memory(proc), 'disk': disk(directory),
+                        'knownHostProcessClasses': {'complete': process_complete, 'counts': last_process[1] if process_complete else None,
+                                                   'cpuTicksDeltaSameProcesses': ticks, 'scope': 'host-comm-classes-no-command-arguments'},
+                        'network': {'complete': net_complete, 'rxBytesDelta': rx, 'txBytesDelta': tx,
+                                    'scope': 'all-non-loopback-devices-aggregate', 'sampleSeconds': round(duration, 3)},
+                        'diagnosticComplete': True, 'causeInferred': False, 'businessRowsRead': False,
+                        'configEnvironmentRead': False, 'logsRead': False, 'sourceWritesPerformed': False,
+                        'containerChangesPerformed': False}
+
+
+            if __name__ == '__main__':
+                if os.environ.get('SPRAY_STATUS_TARGET') != TARGET:
+                    print(json.dumps({'error': 'INVALID_FIXED_TARGET', 'readOnly': True}))
+                    raise SystemExit(1)
+                try:
+                    print(json.dumps(observation(), ensure_ascii=True))
+                except Exception:
+                    print(json.dumps({'error': 'LIVE_STATUS_OBSERVATION_UNAVAILABLE', 'readOnly': True,
+                                      'causeInferred': False, 'businessRowsRead': False, 'sourceWritesPerformed': False,
+                                      'containerChangesPerformed': False}))
+            PY

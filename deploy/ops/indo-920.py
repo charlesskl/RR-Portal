@@ -482,6 +482,237 @@ def frontend_audit(app):
             'purchaseAmountRoundingMarkerPresent': True, 'versionedAssets': len(urls)}
 
 
+PURCHASE_DIAGNOSTIC_TABLES = ('audit_logs', 'purchase_orders', 'po_items')
+PURCHASE_HEADER_UPDATE_FIELDS = {'po_no', 'supplier', 'status', 'order_date', 'delivery_date', 'notes'}
+PURCHASE_ITEM_UPDATE_FIELDS = {'product_code', 'material_id', 'material_name', 'qty', 'price',
+    'currency', 'notes', 'category', 'spec', 'usage_qty', 'ordered_qty', 'material_qty',
+    'spoilage_qty', 'purchase_qty', 'purchase_unit', 'ship_unit', 'net_per_pc', 'eta', 'tomy_po'}
+
+
+def copy_text(token):
+    """Decode a single PG text-COPY token; exact \\N alone is NULL."""
+    if token == b'\\N':
+        return None
+    value = bytearray()
+    index = 0
+    escapes = {ord(key): ord(value) for key, value in
+               [('b', '\b'), ('f', '\f'), ('n', '\n'), ('r', '\r'), ('t', '\t'), ('v', '\v'), ('\\', '\\')]}
+    while index < len(token):
+        byte = token[index]; index += 1
+        if byte != 92:
+            value.append(byte); continue
+        require(index < len(token))
+        byte = token[index]; index += 1
+        if byte in escapes:
+            value.append(escapes[byte])
+        elif 48 <= byte <= 55:
+            digits = bytes([byte])
+            while index < len(token) and len(digits) < 3 and 48 <= token[index] <= 55:
+                digits += bytes([token[index]]); index += 1
+            require(int(digits, 8) <= 255); value.append(int(digits, 8))
+        elif byte == ord('x'):
+            digits = b''
+            while index < len(token) and len(digits) < 2 and token[index] in b'0123456789abcdefABCDEF':
+                digits += bytes([token[index]]); index += 1
+            require(bool(digits)); value.append(int(digits, 16))
+        else:
+            value.append(byte)
+    require(0 not in value)
+    return value.decode('utf-8')
+
+
+def copy_blocks(data):
+    blocks = {}
+    active = None
+    for line in data.split(b'\n'):
+        if active is not None:
+            if line == b'\\.':
+                active = None
+            else:
+                require(len(line) <= 8 * 1024 * 1024)
+                fields = line.split(b'\t')
+                require(len(fields) == len(blocks[active]['columns']))
+                blocks[active]['rows'].append(fields)
+        elif line.startswith(b'COPY '):
+            match = re.fullmatch(rb'COPY indo_shipping\.(?:"(audit_logs|purchase_orders|po_items)"|(audit_logs|purchase_orders|po_items)) \(([^\r\n]+)\) FROM stdin;', line)
+            require(match is not None)
+            name = (match[1] or match[2]).decode()
+            require(name not in blocks)
+            columns = []
+            for item in match[3].split(b', '):
+                identifier = re.fullmatch(rb'(?:"([A-Za-z_][A-Za-z0-9_]*)"|([A-Za-z_][A-Za-z0-9_]*))', item)
+                require(identifier is not None); columns.append((identifier[1] or identifier[2]).decode())
+            require(columns and columns[0] == 'id' and len(columns) == len(set(columns)))
+            blocks[name] = {'columns': columns, 'rows': []}; active = name
+    require(active is None and set(blocks) == set(PURCHASE_DIAGNOSTIC_TABLES))
+    return blocks
+
+
+def normalized_copy_rows(block, types):
+    columns = block['columns']
+    require(set(columns) == set(types))
+    def unique_object(pairs):
+        require(len(pairs) == len({key for key, _ in pairs}))
+        return dict(pairs)
+    def finite_json(value):
+        if isinstance(value, decimal.Decimal):
+            require(value.is_finite())
+        elif isinstance(value, dict):
+            for item in value.values(): finite_json(item)
+        elif isinstance(value, list):
+            for item in value: finite_json(item)
+    result = {}
+    for fields in block['rows']:
+        row = {}
+        for column, token in zip(columns, fields):
+            kind = types[column]
+            require(kind in {'int2', 'int4', 'int8', 'numeric', 'bool', 'json', 'jsonb',
+                             'text', 'varchar', 'bpchar', 'date', 'timestamp', 'timestamptz'})
+            if token == b'\\N':
+                value = None
+            elif kind in {'int2', 'int4', 'int8', 'numeric'}:
+                value = decimal.Decimal(token.decode('ascii')); require(value.is_finite())
+                if kind != 'numeric': require(value == value.to_integral_value())
+            elif kind == 'bool':
+                require(token in [b't', b'f']); value = token == b't'
+            elif kind in {'json', 'jsonb'}:
+                parsed = json.loads(copy_text(token), parse_float=decimal.Decimal,
+                    parse_constant=lambda _: require(False), object_pairs_hook=unique_object)
+                finite_json(parsed)
+                # Both tokens come from the same PostgreSQL engine. Preserve exact
+                # JSON bytes; Decimal.normalize() can alias values beyond 28 digits.
+                value = token
+            else:
+                # Both sides are emitted by PostgreSQL COPY. Preserve escaped text
+                # byte-for-byte, including literal \\N, whitespace and field types.
+                value = token
+            row[column] = (kind, value)
+        identifier = row['id'][1]
+        require(types['id'] in {'int2', 'int4', 'int8'} and identifier is not None
+                and identifier > 0 and identifier not in result)
+        result[identifier] = row
+    return result
+
+
+def purchase_update_diagnostic(directory, before, current):
+    """Explain a bounded concurrent update; this never changes strict acceptance."""
+    result = {'diagnosticComplete': False, 'authenticatedPurchaseUpdateConsistent': False,
+              'businessWritesPerformed': False, 'restoreExecuted': False,
+              'rowCounts': {name: {'baseline': before['tables'][name]['rows'],
+                                  'current': current['tables'][name]['rows']}
+                            for name in PURCHASE_DIAGNOSTIC_TABLES}}
+    process = None
+    try:
+        checkpoint('readOnlyPurchaseUpdateDiagnostic')
+        with (directory / 'indo_shipping.dump').open('rb') as stream:
+            restored = subprocess.run(['docker', 'exec', '-i', cid('db'), 'pg_restore',
+                '--data-only', '--schema=indo_shipping', '--strict-names',
+                '--table=audit_logs', '--table=purchase_orders', '--table=po_items', '--file=-'],
+                stdin=stream, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=ROOT, timeout=180)
+        require(restored.returncode == 0 and len(restored.stdout) <= 128 * 1024 * 1024)
+        baseline = copy_blocks(restored.stdout); del restored
+        process = subprocess.Popen(sql_command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, cwd=ROOT, bufsize=0)
+        metadata_sql = """BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL DateStyle TO 'ISO, YMD';
+SELECT json_build_object('timezone',current_setting('TimeZone'),'columns',
+ (SELECT json_agg(json_build_object('table',table_name,'column',column_name,'type',udt_name) ORDER BY table_name,ordinal_position)
+ FROM information_schema.columns WHERE table_schema='indo_shipping' AND table_name IN ('audit_logs','purchase_orders','po_items')),
+ 'users',(SELECT json_agg(json_build_object('id',"Id",'username',"Username",'active',"IsActive")) FROM indo_shipping."Users"));
+"""
+        process.stdin.write(metadata_sql.encode()); process.stdin.flush()
+        metadata = json.loads(read_line(process))
+        require(metadata['timezone'] in ['UTC', 'Etc/UTC'])
+        observed = {}
+        type_maps = {}
+        for name in PURCHASE_DIAGNOSTIC_TABLES:
+            entries = [entry for entry in metadata['columns'] if entry['table'] == name]
+            columns = [entry['column'] for entry in entries]
+            require(columns == baseline[name]['columns'] and len(columns) == len(set(columns)))
+            type_maps[name] = {entry['column']: entry['type'] for entry in entries}
+            marker = ('INDO_920_COPY_END_' + os.urandom(16).hex()).encode()
+            query = 'COPY (SELECT ' + ','.join('"' + column + '"' for column in columns)
+            query += ' FROM indo_shipping."' + name + '" ORDER BY id) TO STDOUT;\nSELECT \'' + marker.decode() + '\';\n'
+            process.stdin.write(query.encode()); process.stdin.flush()
+            rows = []
+            while True:
+                require(bool(select.select([process.stdout], [], [], 60)[0]))
+                line = process.stdout.readline(8 * 1024 * 1024 + 1)
+                require(line.endswith(b'\n') and len(line) <= 8 * 1024 * 1024)
+                line = line[:-1]
+                if line == marker: break
+                fields = line.split(b'\t'); require(len(fields) == len(columns)); rows.append(fields)
+                require(len(rows) <= current['tables'][name]['rows'])
+            observed[name] = {'columns': columns, 'rows': rows}
+        process.stdin.write(audit_sql(list(current['tables'])).encode()); process.stdin.flush()
+        same_snapshot = json.loads(read_line(process)) == current
+        finish_snapshot(process)
+        result['snapshotMatchesVerification'] = same_snapshot
+        if not same_snapshot:
+            result['retryRequired'] = True
+            return result
+        old, new = {}, {}
+        for name in PURCHASE_DIAGNOSTIC_TABLES:
+            require(len(baseline[name]['rows']) == before['tables'][name]['rows']
+                    and len(observed[name]['rows']) == current['tables'][name]['rows'])
+            old[name] = normalized_copy_rows(baseline[name], type_maps[name])
+            new[name] = normalized_copy_rows(observed[name], type_maps[name])
+        preserved = all(new['audit_logs'].get(key) == row for key, row in old['audit_logs'].items())
+        additions = set(new['audit_logs']) - set(old['audit_logs'])
+        same_ids = {name: set(old[name]) == set(new[name]) for name in ['purchase_orders', 'po_items']}
+        changed = {name: {key for key in set(old[name]) & set(new[name]) if old[name][key] != new[name][key]}
+                   for name in same_ids}
+        fields = {name: sorted({column for key in changed[name] for column in old[name][key]
+                               if old[name][key][column] != new[name][key][column]}) for name in same_ids}
+        result.update({'baselineAuditRowsPreserved': preserved, 'oneAuditEventAdded': len(additions) == 1,
+                       'businessRowIdsPreserved': all(same_ids.values()), 'changedFields': fields,
+                       'changedRowCounts': {name: len(keys) for name, keys in changed.items()},
+                       'usersTablePreserved': before['tables']['Users'] == current['tables']['Users']})
+        if len(additions) != 1:
+            return result
+        event = new['audit_logs'][next(iter(additions))]
+        text = lambda column: copy_text(event[column][1]) if event[column][1] is not None else None
+        expected = (text('module'), text('action'), text('entity_type')) == ('purchase', 'update', 'purchase_order')
+        entity_text = text('entity_id')
+        entity = decimal.Decimal(entity_text) if entity_text and re.fullmatch(r'[1-9][0-9]*', entity_text) else None
+        user = next((user for user in metadata['users'] if user['id'] == event['user_id'][1]), None)
+        username = text('username')
+        actor = user is not None and user['active'] is True and bool(username and username.strip()) and username == user['username']
+        stamp = text('occurred_at')
+        occurred = datetime.datetime.fromisoformat(stamp) if stamp else None
+        require(occurred is not None and occurred.tzinfo is None)
+        occurred = occurred.replace(tzinfo=datetime.timezone.utc)
+        match = re.fullmatch(r'indo-pre-920-(\d{8}T\d{12}Z)', directory.name)
+        require(match is not None)
+        backed_up = datetime.datetime.strptime(match[1], '%Y%m%dT%H%M%S%fZ').replace(tzinfo=datetime.timezone.utc)
+        in_window = backed_up - datetime.timedelta(seconds=1) <= occurred <= datetime.datetime.now(datetime.timezone.utc)
+        related = entity is not None and changed['purchase_orders'] == {entity} and bool(changed['po_items'])
+        related = related and all(old['po_items'][key]['po_id'][1] == entity == new['po_items'][key]['po_id'][1]
+                                  for key in changed['po_items'])
+        allowed = set(fields['purchase_orders']) <= PURCHASE_HEADER_UPDATE_FIELDS and set(fields['po_items']) <= PURCHASE_ITEM_UPDATE_FIELDS
+        # Audit details carry only corroboration internally; never output the payload.
+        raw_detail = json.loads(copy_text(observed['audit_logs']['rows'][next(i for i, row in enumerate(observed['audit_logs']['rows'])
+            if decimal.Decimal(row[0].decode()) in additions)][baseline['audit_logs']['columns'].index('details')]), parse_float=decimal.Decimal)
+        detail_matches = (isinstance(raw_detail, dict) and type(raw_detail.get('id')) is int
+            and type(raw_detail.get('item_count')) is int and raw_detail['id'] == entity
+            and raw_detail['item_count'] == sum(row['po_id'][1] == entity for row in new['po_items'].values()))
+        result.update({'diagnosticComplete': True, 'auditEventMatchesUpdate': expected,
+                       'activeAccountAndAuditUsernameMatch': actor, 'auditTimeInBackupWindow': in_window,
+                       'allChangedRowsMatchAuditEntity': related, 'changedFieldsAllowedByUpdate': allowed,
+                       'auditDetailsMatchEntityAndItemCount': detail_matches})
+        if expected:
+            result['newAuditEvents'] = [{'module': 'purchase', 'action': 'update',
+                                       'entityType': 'purchase_order', 'occurredAtUtc': occurred.isoformat()}]
+        result['authenticatedPurchaseUpdateConsistent'] = all([preserved, len(additions) == 1,
+            all(same_ids.values()), result['usersTablePreserved'], expected, actor, in_window, related, allowed, detail_matches])
+        return result
+    except Exception:
+        result['safeDiagnosticError'] = 'PURCHASE_UPDATE_DIAGNOSTIC_INCOMPLETE'
+        return result
+    finally:
+        if process is not None: close_snapshot(process)
+
+
 def verify():
     directory, before = latest_backup()
     current = audit()
@@ -540,6 +771,10 @@ def verify():
               'deployedImageHealthy': runtime['healthy'], 'coreContainersUnchanged': scope_same,
               'businessWritesPerformed': False, 'credentialsChanged': False}
     result.update(frontend_audit(app))
+    if changed == sorted(PURCHASE_DIAGNOSTIC_TABLES):
+        result['diagnostic'] = purchase_update_diagnostic(directory, before, current)
+        result['diagnostic']['apiBaselineFieldsChanged'] = sorted(key for key in api
+            if before['api'].get(key) != api[key])
     return result
 
 

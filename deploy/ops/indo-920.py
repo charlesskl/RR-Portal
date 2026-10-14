@@ -234,6 +234,44 @@ def private_env_file():
     return file
 
 
+def runtime_patch_proof(before, current, directory):
+    checkpoint('runtimePatchEnvironmentProof')
+    prior_commit = before['sourceCommit']
+    require(bool(re.fullmatch(r'[a-f0-9]{40}', prior_commit)))
+    compose_before = run(['git', 'show', prior_commit + ':docker-compose.cloud.yml'])
+    require(compose_before == (ROOT / 'docker-compose.cloud.yml').read_bytes(), 'runtimePatchComposeUnchanged')
+    require(file_hash(private_env_file()) == file_hash(directory / 'env.before'), 'runtimePatchEnvironmentFileUnchanged')
+    configured = json.loads(run(COMPOSE + ['config', '--format', 'json']))['services']['indo-shipping']['environment']
+    require(isinstance(configured, dict) and all(isinstance(value, str) for value in configured.values()))
+
+    def image_environment(image):
+        require(bool(re.fullmatch(r'sha256:[a-f0-9]{64}', image)))
+        values = json.loads(run(['docker', 'image', 'inspect', '-f', '{{json .Config.Env}}', image]))
+        require(isinstance(values, list) and all(isinstance(item, str) and '=' in item for item in values))
+        result = dict(item.split('=', 1) for item in values)
+        require(len(result) == len(values), 'runtimePatchNoDuplicateEnvironmentKeys')
+        return result
+
+    old_defaults = image_environment(before['runtime']['imageId'])
+    new_defaults = image_environment(current['imageId'])
+    def effective_digest(defaults):
+        values = {**defaults, **configured}
+        items = sorted(key + '=' + value for key, value in values.items())
+        return hashlib.sha256(json.dumps(items, ensure_ascii=True, separators=(',', ':')).encode()).hexdigest()
+
+    # Exact reconstruction anchors every prior/current container environment value;
+    # unchanged compose and private env prove configured secrets remain the same.
+    require(effective_digest(old_defaults) == before['runtime']['configEnvSha256'], 'runtimePatchPriorEnvironmentReconstructed')
+    require(effective_digest(new_defaults) == current['configEnvSha256'], 'runtimePatchCurrentEnvironmentReconstructed')
+    changed = sorted(key for key in set(old_defaults) | set(new_defaults) if old_defaults.get(key) != new_defaults.get(key))
+    require(bool(changed) and set(changed) <= {'DOTNET_VERSION', 'ASPNET_VERSION'}, 'runtimePatchOnlyVersionKeys')
+    require(all(re.fullmatch(r'8\.0\.\d+', old_defaults.get(key, '')) and re.fullmatch(r'8\.0\.\d+', new_defaults.get(key, '')) for key in changed), 'runtimePatchSameMajorMinor')
+    require(all(int(new_defaults[key].split('.')[2]) > int(old_defaults[key].split('.')[2]) for key in changed), 'runtimePatchVersionsOnlyAdvance')
+    print(json.dumps({'baseRuntimeVersionKeysChanged': changed, 'priorEnvironmentExactlyReconstructed': True,
+                      'currentEnvironmentExactlyReconstructed': True, 'configuredEnvironmentAndSecretsPreserved': True}))
+    return changed
+
+
 def canonical(value):
     if value is None:
         return ['null']
@@ -442,6 +480,8 @@ def verify():
     app, base = app_context()
     runtime = runtime_config(app)
     configuration_same = runtime['configEnvSha256'] == before['runtime'].get('configEnvSha256')
+    runtime_version_keys = [] if configuration_same else runtime_patch_proof(before, runtime, directory)
+    configuration_preserved = configuration_same or bool(runtime_version_keys)
     image_changed = runtime['imageId'] != before['runtime'].get('imageId')
     scope_same = core_containers() == before['coreContainers']
     environment_same = file_hash(private_env_file()) == file_hash(directory / 'env.before')
@@ -463,7 +503,7 @@ def verify():
     api_same = api == before['api']
     precision = price_preserved(before['priceColumn'], current['priceColumn'])
     schema = current['trackingSchema'] is True and current['rawRowsType'] in ['text', 'json', 'jsonb']
-    require(configuration_same, 'runtimeConfigurationPreserved')
+    require(configuration_preserved, 'runtimeConfigurationPreserved')
     require(environment_same, 'privateEnvironmentPreserved')
     require(image_changed, 'deployedImageChanged')
     require(scope_same and core_containers() == before['coreContainers'], 'coreContainerScopePreserved')
@@ -480,7 +520,9 @@ def verify():
               'authenticatedReadApisVerified': True, 'trackingAdjustmentFieldsVerified': True,
               'adjustmentHistoryReadVerified': True,
               'sourceCommit': commit, 'beforeSourceCommit': before['sourceCommit'],
-              'sourceMatchesMain': True, 'runtimeConfigurationPreserved': configuration_same,
+              'sourceMatchesMain': True, 'runtimeConfigurationPreserved': configuration_preserved,
+              'completeContainerEnvironmentIdentical': configuration_same,
+              'baseRuntimeVersionKeysChanged': runtime_version_keys,
               'privateEnvironmentPreserved': environment_same, 'deployedImageChanged': image_changed,
               'deployedImageHealthy': runtime['healthy'], 'coreContainersUnchanged': scope_same,
               'businessWritesPerformed': False, 'credentialsChanged': False}

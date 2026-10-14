@@ -16,6 +16,7 @@ SERVICES = ('sprayplan', 'sprayplan-test')
 OVERRIDES = {'NODE_ENV', 'NEXT_PUBLIC_BASE_PATH', 'DOTNET_API_URL', 'DATA_PATH', 'TZ'}
 PROTECTED = {'JWT_SECRET', 'JWT_ISSUER', 'Jwt__Secret', 'Jwt__Issuer', 'SPRAYPLAN_DB_PATH',
              'SPRAYPLAN_BASE_PATH', 'HOSTNAME', 'PATH', 'PWD', 'OLDPWD', 'SHLVL', '_'}
+VERSION_KEYS = ('DOTNET_VERSION', 'ASPNET_VERSION')
 CONFIG = ('docker-compose.cloud.yml', APP + '/Dockerfile', APP + '/docker-entrypoint.sh',
           APP + '/next.config.mjs', APP + '/prisma/schema.prisma',
           APP + '/server/SprayPlan.Api/Program.cs', APP + '/server/SprayPlan.Api/Data/AppDbContext.cs',
@@ -238,12 +239,85 @@ def diagnose():
             'sourceWritesPerformed': False, 'containerChangesPerformed': False, 'businessRowsRead': False}
 
 
+def version_candidate(configuration, baseline_hash, service):
+    # Enumerate public runtime version metadata only. No secret, path or other key is guessed.
+    require(service in SERVICES and valid_hash(baseline_hash), 'fixedVersionCandidateInputs')
+    require(all(key in configuration for key in VERSION_KEYS), 'bothCurrentPublicVersionKeys:' + service)
+    matches, candidate = 0, None
+    for dotnet_patch in range(100):
+        for aspnet_patch in range(100):
+            value = dict(configuration)
+            value['DOTNET_VERSION'] = '8.0.' + str(dotnet_patch)
+            value['ASPNET_VERSION'] = '8.0.' + str(aspnet_patch)
+            if env_hash(value) == baseline_hash:
+                matches += 1
+                candidate = value
+    require(matches == 1, 'uniqueCompleteConfigVersionFingerprintMatch:' + service)
+    return candidate
+
+
+def diagnose_version_service(service, old, with_state=False):
+    current, configuration = container(service)
+    new_image = image(current['imageId'], service, 'new')
+    require(all(key in configuration and configuration[key] == new_image.get(key)
+                and re.fullmatch(r'8\.0\.(0|[1-9][0-9]?)', configuration[key]) is not None
+                for key in VERSION_KEYS), 'currentImageConfigPublicVersionsAgree:' + service)
+    active = processes(current['containerId'], service)
+    for environment in active.values():
+        require(environment.get('HOSTNAME') == current['hostname']
+                and all(environment.get(key) == configuration[key] for key in VERSION_KEYS),
+                'currentImageConfigProcessPublicVersionsAgree:' + service)
+    reconstructed = version_candidate(configuration, old['configEnvSha256'], service)
+    for kind, environment in active.items():
+        prior = dict(environment)
+        for key in VERSION_KEYS:
+            prior[key] = reconstructed[key]
+        prior['HOSTNAME'] = old['containerHostname']
+        proof = old['processEnvironments'][kind]
+        require(env_hash(prior, process=True) == proof['completeSha256']
+                and env_hash({k: v for k, v in prior.items() if k != 'HOSTNAME'}, process=True)
+                == proof['withoutHostnameSha256'], 'oldProcessVersionFingerprintExact:' + service + ':' + kind)
+    require(container(service) == (current, configuration)
+            and processes(current['containerId'], service) == active, 'versionFingerprintObservationWindowStable:' + service)
+    result = {'newImageAvailable': True, 'legacyImageRead': False,
+              'candidateCombinationsChecked': 10000, 'uniqueFullConfigFingerprintMatch': True,
+              'candidateScope': 'DOTNET_VERSION-and-ASPNET_VERSION-each-8.0.0-through-8.0.99',
+              'oldApiCompleteAndWithoutHostnameFingerprintsMatched': True,
+              'oldWebCompleteAndWithoutHostnameFingerprintsMatched': True,
+              'changedPublicVersionKeys': sorted(key for key in VERSION_KEYS if configuration[key] != reconstructed[key]),
+              'allOtherConfigAndProcessEnvironmentPreserved': True, 'automaticHostnameLifecycleValidated': True,
+              'priorRuntimeBinaryVersionVerified': False, 'priorImageInheritanceVerified': False,
+              'environmentObservationWindowStable': True}
+    return (result, (current, configuration, active)) if with_state else result
+
+
+def diagnose_version_fingerprint():
+    value, environment_hash = baseline()
+    services, observed = {}, {}
+    for service in SERVICES:
+        services[service], observed[service] = diagnose_version_service(
+            service, value['services'][service]['runtime'], with_state=True)
+    for service, (current, configuration, active) in observed.items():
+        require(container(service) == (current, configuration)
+                and processes(current['containerId'], service) == active, 'completeVersionFingerprintWindowStable:' + service)
+    assert_source(value, environment_hash)
+    return {'mode': 'environment-version-fingerprint-925', 'sourceCommit': TARGET, 'services': services,
+            'allPriorEnvironmentFingerprintsMatchedExactly': True, 'oldImageRequired': False,
+            'sha256CollisionResistanceAssumed': True, 'verificationGuardChanged': False,
+            'originalStrictVerificationReclassified': False, 'secretsOutputOrSaved': False,
+            'sourceWritesPerformed': False, 'containerChangesPerformed': False, 'businessRowsRead': False}
+
+
 if __name__ == '__main__':
+    method = os.environ.get('SPRAY_ENV_DIAG_METHOD', 'retained-image')
     try:
         require(os.environ.get('SPRAY_STATUS_TARGET') == TARGET, 'fixedTargetInput')
-        print(json.dumps(diagnose(), ensure_ascii=True))
+        require(method in ('retained-image', 'version-fingerprint'), 'fixedDiagnosticMethod')
+        result = diagnose_version_fingerprint() if method == 'version-fingerprint' else diagnose()
+        print(json.dumps(result, ensure_ascii=True))
     except Exception:
-        print(json.dumps({'mode': 'environment-drift-925', 'error': 'ENVIRONMENT_RECONSTRUCTION_UNAVAILABLE',
+        print(json.dumps({'mode': 'environment-version-fingerprint-925' if method == 'version-fingerprint' else 'environment-drift-925',
+                          'error': 'ENVIRONMENT_RECONSTRUCTION_UNAVAILABLE',
                           'failedCheck': FAILED, 'allPriorEnvironmentHashesReconstructedExact': False,
                           'verificationGuardChanged': False, 'secretsOutputOrSaved': False,
                           'sourceWritesPerformed': False, 'containerChangesPerformed': False, 'businessRowsRead': False}))

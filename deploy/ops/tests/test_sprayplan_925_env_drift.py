@@ -49,6 +49,23 @@ class EnvironmentDriftTests(unittest.TestCase):
              patch.object(ops, 'processes', return_value=self.processes):
             return ops.diagnose_service('sprayplan', self.old)
 
+    def version_diagnose(self):
+        with patch.object(ops, 'container', return_value=(self.current, self.config)), \
+             patch.object(ops, 'image', return_value=self.new_image) as image, \
+             patch.object(ops, 'processes', return_value=self.processes):
+            result = ops.diagnose_version_service('sprayplan', self.old)
+            self.assertEqual([(self.current['imageId'], 'sprayplan', 'new')], [call.args for call in image.call_args_list])
+            return result
+
+    def set_prior_versions(self, dotnet, aspnet):
+        prior_config = {**self.config, 'DOTNET_VERSION': dotnet, 'ASPNET_VERSION': aspnet}
+        self.old['configEnvSha256'] = ops.env_hash(prior_config)
+        for kind, current in self.processes.items():
+            prior = {**current, 'DOTNET_VERSION': dotnet, 'ASPNET_VERSION': aspnet, 'HOSTNAME': 'a' * 12}
+            self.old['processEnvironments'][kind] = {'hostname': 'a' * 12,
+                'completeSha256': ops.env_hash(prior, process=True),
+                'withoutHostnameSha256': ops.env_hash({k: v for k, v in prior.items() if k != 'HOSTNAME'}, process=True)}
+
     def test_exact_reconstruction_reports_only_keys_and_proof(self):
         result = self.diagnose()
         self.assertEqual(['ASPNET_VERSION', 'DOTNET_VERSION'], result['imageInheritedChangedKeys'])
@@ -191,6 +208,72 @@ class EnvironmentDriftTests(unittest.TestCase):
         self.assertEqual(expected, ops.env_hash(value, process=True))
         self.assertNotEqual(ops.env_hash(value), ops.env_hash(value, process=True))
 
+    def test_version_fingerprint_exactly_matches_config_and_all_four_process_hashes(self):
+        result = self.version_diagnose()
+        self.assertEqual(['ASPNET_VERSION', 'DOTNET_VERSION'], result['changedPublicVersionKeys'])
+        self.assertEqual(10000, result['candidateCombinationsChecked'])
+        self.assertTrue(result['uniqueFullConfigFingerprintMatch'])
+        self.assertTrue(result['oldApiCompleteAndWithoutHostnameFingerprintsMatched'])
+        self.assertTrue(result['oldWebCompleteAndWithoutHostnameFingerprintsMatched'])
+        self.assertFalse(result['legacyImageRead']); self.assertFalse(result['priorImageInheritanceVerified'])
+        self.assertFalse(result['priorRuntimeBinaryVersionVerified'])
+        for private in ['never-print', '授权码', '/private', '8.0.20', '8.0.21']:
+            self.assertNotIn(private, json.dumps(result))
+
+    def test_version_fingerprint_reports_one_changed_key_without_claiming_two(self):
+        self.set_prior_versions('8.0.20', '8.0.21')
+        self.assertEqual(['DOTNET_VERSION'], self.version_diagnose()['changedPublicVersionKeys'])
+
+    def test_version_fingerprint_does_not_expand_candidate_range(self):
+        self.set_prior_versions('8.0.100', '8.0.20')
+        with self.assertRaises(RuntimeError):
+            self.version_diagnose()
+        self.assertEqual('uniqueCompleteConfigVersionFingerprintMatch:sprayplan', ops.FAILED)
+
+    def test_version_fingerprint_unaccounted_config_drift_has_zero_candidates(self):
+        self.config['PATH'] = '/new-private-path'
+        with self.assertRaises(RuntimeError):
+            self.version_diagnose()
+        self.assertEqual('uniqueCompleteConfigVersionFingerprintMatch:sprayplan', ops.FAILED)
+
+    def test_version_fingerprint_colliding_candidate_hashes_fail_closed(self):
+        with patch.object(ops, 'env_hash', return_value=self.old['configEnvSha256']) as digest:
+            with self.assertRaises(RuntimeError):
+                ops.version_candidate(self.config, self.old['configEnvSha256'], 'sprayplan')
+        self.assertEqual(10000, digest.call_count)
+        self.assertEqual('uniqueCompleteConfigVersionFingerprintMatch:sprayplan', ops.FAILED)
+
+    def test_version_fingerprint_secret_process_drift_is_not_reconstructed(self):
+        self.processes['web']['JWT_SECRET'] = 'private-unaccounted-authorization-code'
+        with self.assertRaises(RuntimeError):
+            self.version_diagnose()
+        self.assertEqual('oldProcessVersionFingerprintExact:sprayplan:web', ops.FAILED)
+
+    def test_version_fingerprint_requires_image_config_and_process_version_agreement(self):
+        for scope in ['image', 'process']:
+            with self.subTest(scope=scope):
+                old_image, old_processes = copy.deepcopy(self.new_image), copy.deepcopy(self.processes)
+                if scope == 'image':
+                    self.new_image['DOTNET_VERSION'] = '8.0.22'
+                else:
+                    self.processes['api']['ASPNET_VERSION'] = '8.0.22'
+                with self.assertRaises(RuntimeError):
+                    self.version_diagnose()
+                self.new_image, self.processes = old_image, old_processes
+
+    def test_version_fingerprint_failure_output_does_not_include_candidates_or_values(self):
+        code = compile(ast.Module(body=[ast.parse(TEXT).body[-1]], type_ignores=[]), 'fingerprint-safe-main', 'exec')
+        output = io.StringIO()
+        with patch.dict(ops.os.environ, {'SPRAY_STATUS_TARGET': ops.TARGET, 'SPRAY_ENV_DIAG_METHOD': 'version-fingerprint'}), \
+             patch.object(ops, 'diagnose_version_fingerprint', side_effect=RuntimeError('private-value=8.0.20')), \
+             patch.object(ops, '__name__', '__main__'), contextlib.redirect_stdout(output):
+            with self.assertRaises(SystemExit):
+                exec(code, ops.__dict__)
+        body = output.getvalue()
+        self.assertNotIn('private-value', body); self.assertNotIn('8.0.20', body)
+        self.assertNotIn('changedPublicVersionKeys', body)
+        self.assertEqual('environment-version-fingerprint-925', json.loads(body)['mode'])
+
     def test_diagnostic_has_no_writes_or_mutating_docker_commands(self):
         for node in ast.walk(ast.parse(TEXT)):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
@@ -205,7 +288,8 @@ class EnvironmentDriftTests(unittest.TestCase):
         body = workflow.read_text().split('      - name: Diagnose exact previous environment hashes', 1)[1]
         embedded = textwrap.dedent(body.split("            python3 - <<'PY'\n", 1)[1].split('            PY\n', 1)[0])
         self.assertEqual(TEXT, embedded)
-        self.assertIn("if: ${{ inputs.observation_mode == 'env-drift' }}", body)
+        self.assertIn("inputs.observation_mode == 'env-drift' || inputs.observation_mode == 'env-fingerprint'", body)
+        self.assertIn('envs: SPRAY_STATUS_TARGET,SPRAY_ENV_DIAG_METHOD', body)
         self.assertIn('default: live-status', workflow.read_text())
         self.assertIn('group: sprayplan-deployment-status-925', workflow.read_text())
         self.assertIn('appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2', body)

@@ -11,6 +11,7 @@ import os
 import pathlib
 import sqlite3
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -261,6 +262,7 @@ class OpsTests(unittest.TestCase):
         core_now['printlink']['restartCount'] = 14
         before = {'coreLifecycle': cores, 'configurationFiles': {'configuration': 'k' * 64},
                   'trackedSourceMetadata': [],
+                  'historicalSqliteArchiveMetadata': {s: {'sqliteCandidates': []} for s in ops.SERVICES},
                   'services': {s: {'database': audit, 'files': files, 'runtime': self.runtime_fixture('old-image')}
                                for s in ops.SERVICES}}
         def api(service, snapshot, deployed):
@@ -272,6 +274,7 @@ class OpsTests(unittest.TestCase):
              patch.object(ops, 'source_commit', return_value='a' * 40), patch.object(ops, 'core_state', return_value=core_now), \
              patch.object(ops, 'configuration', return_value=before['configurationFiles']), \
              patch.object(ops, 'tracked_application_source_guard', return_value=[]), \
+             patch.object(ops, 'static_sqlite_archive_guard', return_value=before['historicalSqliteArchiveMetadata']), \
              patch.object(ops, 'run', side_effect=lambda args, **kwargs: (ops.APP + '/src/mock.ts\n').encode() if '--name-only' in args else b''), \
              patch.object(ops, 'snapshot_now', return_value=(self.db, audit)), \
              patch.object(ops, 'runtime', return_value=self.runtime_fixture('new-image')), \
@@ -556,6 +559,101 @@ class SqliteCandidateTests(unittest.TestCase):
                           if identities else {'complete': True, 'found': []}), \
              patch.object(ops, 'run', return_value=json.dumps(container or {'complete': True, 'found': []}).encode()):
             return ops.extra_sqlite_candidate_metadata()
+
+    def static_fixture(self):
+        expected = {}
+        for service, (data, storage) in ops.SERVICES.items():
+            name = 'sprayplan.db.bak.20261014-130000'
+            path = self.database(self.root / ops.APP / data / name)
+            expected[service] = {name: (path.stat().st_size, hashlib.sha256(path.read_bytes()).hexdigest())}
+        return expected, self.inspect()
+
+    def archive_guard(self, expected, metadata):
+        with patch.object(ops, 'OBSERVED_SQLITE_ARCHIVES', expected), \
+             patch.object(ops, 'extra_sqlite_candidate_metadata', return_value=metadata):
+            return ops.static_sqlite_archive_guard()
+
+    def test_archive_guard_accepts_only_complete_observed_static_metadata(self):
+        expected, metadata = self.static_fixture()
+        self.assertEqual(metadata, self.archive_guard(expected, metadata))
+        self.assertNotIn('private-row', json.dumps(metadata))
+
+    def test_archive_guard_rejects_missing_extra_and_unknown_database_inventory(self):
+        expected, metadata = self.static_fixture()
+        for change in ('missing', 'extra', 'unknown'):
+            value = copy.deepcopy(metadata)
+            rows = value['sprayplan']['sqliteCandidates']
+            if change == 'missing':
+                rows.clear()
+            elif change == 'extra':
+                row = copy.deepcopy(rows[0]); row['relativePath'] = 'sprayplan.db.bak.20261014-140000'; rows.append(row)
+            else:
+                rows[0].pop('relativePath'); rows[0]['pathSha256'] = 'b' * 64
+            with self.subTest(change=change), self.assertRaises(RuntimeError):
+                self.archive_guard(expected, value)
+
+    def test_archive_guard_rejects_changed_bytes_hash_mount_and_unsafe_occupancy(self):
+        expected, metadata = self.static_fixture()
+        cases = [('bytes', 1), ('sha256', 'b' * 64), ('mountName', 'storage'), ('service', 'sprayplan-test'),
+                 ('integrityCheckOk', False), ('sameAsLivePrimaryFile', True), ('hostFdProbeComplete', False),
+                 ('containerFdProbeComplete', False), ('hostOpenFileDescriptorFound', True),
+                 ('containerOpenFileDescriptorFound', None), ('exists', False)]
+        for key, changed in cases:
+            value = copy.deepcopy(metadata)
+            value['sprayplan']['sqliteCandidates'][0][key] = changed
+            with self.subTest(key=key), self.assertRaises(RuntimeError):
+                self.archive_guard(expected, value)
+        for ending in ('-wal', '-shm', '-journal'):
+            value = copy.deepcopy(metadata)
+            value['sprayplan']['sqliteCandidates'][0]['sidecars'][ending] = {'exists': True, 'bytes': 0, 'sha256': 'c' * 64}
+            with self.subTest(sidecar=ending), self.assertRaises(RuntimeError):
+                self.archive_guard(expected, value)
+
+    def test_file_archive_preserves_verified_database_bytes_and_excludes_live_primary(self):
+        expected, metadata = self.static_fixture()
+        rows = self.archive_guard(expected, metadata)['sprayplan']['sqliteCandidates']
+        path = self.root / ops.APP / 'data' / rows[0]['relativePath']
+        original = path.read_bytes()
+        archive = self.root / 'files.tar'
+        with patch.object(ops, 'ROOT', self.root), patch.object(ops, 'OBSERVED_SQLITE_ARCHIVES', expected):
+            inventory = ops.file_inventory('sprayplan', archive, rows)
+            ops.validate_archive(archive, inventory)
+            with self.assertRaises(RuntimeError):
+                ops.file_inventory('sprayplan')
+        with tarfile.open(archive) as tar:
+            self.assertEqual(['data/' + rows[0]['relativePath']], tar.getnames())
+            self.assertEqual(original, tar.extractfile(tar.getmembers()[0]).read())
+        self.assertEqual(original, path.read_bytes())
+
+    def test_file_archive_rejects_database_changes_after_metadata_verification(self):
+        expected, metadata = self.static_fixture()
+        rows = self.archive_guard(expected, metadata)['sprayplan']['sqliteCandidates']
+        path = self.root / ops.APP / 'data' / rows[0]['relativePath']
+        db = sqlite3.connect(path)
+        db.execute('INSERT INTO private_fixture VALUES(2,"private-changed-row")'); db.commit(); db.close()
+        with patch.object(ops, 'ROOT', self.root), patch.object(ops, 'OBSERVED_SQLITE_ARCHIVES', expected):
+            with self.assertRaises(RuntimeError):
+                ops.file_inventory('sprayplan', sqlite_archives=rows)
+        self.assertEqual('noUnaccountedLiveSqliteFiles', ops.FAILED)
+
+    def test_file_archive_rejects_new_sidecars_after_metadata_verification(self):
+        expected, metadata = self.static_fixture()
+        rows = self.archive_guard(expected, metadata)['sprayplan']['sqliteCandidates']
+        path = self.root / ops.APP / 'data' / rows[0]['relativePath']
+        pathlib.Path(str(path) + '-wal').write_bytes(b'private-wal')
+        with patch.object(ops, 'ROOT', self.root), patch.object(ops, 'OBSERVED_SQLITE_ARCHIVES', expected):
+            with self.assertRaises(RuntimeError):
+                ops.file_inventory('sprayplan', sqlite_archives=rows)
+        self.assertEqual('noUnaccountedLiveSqliteFiles', ops.FAILED)
+
+    def test_file_archive_rejects_unobserved_database_even_if_known_files_are_valid(self):
+        expected, metadata = self.static_fixture()
+        rows = self.archive_guard(expected, metadata)['sprayplan']['sqliteCandidates']
+        self.database(self.root / ops.APP / 'data' / 'sprayplan.db.bak.20261014-140000')
+        with patch.object(ops, 'ROOT', self.root), patch.object(ops, 'OBSERVED_SQLITE_ARCHIVES', expected):
+            with self.assertRaises(RuntimeError):
+                ops.file_inventory('sprayplan', sqlite_archives=rows)
+        self.assertEqual('noUnaccountedLiveSqliteFiles', ops.FAILED)
 
     def test_known_timestamp_snapshot_only_exposes_metadata_and_not_business_rows(self):
         path = self.database(self.root / ops.APP / 'data/sprayplan.db.snapshot.20261014-130000')

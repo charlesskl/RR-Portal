@@ -36,6 +36,33 @@ CONFIG = ('docker-compose.cloud.yml', APP + '/Dockerfile', APP + '/docker-entryp
           APP + '/server/SprayPlan.Api/Features/Auth/AuthController.cs',
           APP + '/server/SprayPlan.Api/Features/Users/UsersController.cs')
 COMPOSE = ['docker', 'compose', '-f', 'docker-compose.cloud.yml', '--env-file', '.env.cloud.production']
+# Exact historical files observed read-only in successful preflight run 38574066611.
+OBSERVED_SQLITE_ARCHIVES = {
+    'sprayplan': {
+        'sprayplan.db.bak.20260722-080540': (147456, 'e412653ec38178c5b188d87ed76f8c097f29d9ad279ade3f83eda923df037893'),
+        'sprayplan.db.bak.20260825-093516': (380928, 'd8b3d83d5bb0aa56345a76891b1252a7095f79e65c697c232fb24b78fe3c3943'),
+        'sprayplan.db.bak.20260825-094156': (380928, 'd8b3d83d5bb0aa56345a76891b1252a7095f79e65c697c232fb24b78fe3c3943'),
+        'sprayplan.db.bak.20260825-094523': (385024, 'f05be63a161b6e4ca872d54c0888833e09afa51d682ab3b152ae0eefd43fcccf'),
+        'sprayplan.db.bak.20260825-095324': (385024, 'f05be63a161b6e4ca872d54c0888833e09afa51d682ab3b152ae0eefd43fcccf'),
+        'sprayplan.db.bak.20260825-100557': (385024, 'df3fc01d9020bdcea3a82b9a68cc08fe1eafe0bca39b98560929f8e5b1b8f374'),
+        'sprayplan.db.bak.20260909-202638': (466944, '1e0db0bb9555d4b6f64842218cf5b1f1bd291c7eff90d09cd6dc5ce5412a3e86'),
+        'sprayplan.db.bak.20260909-203232': (466944, '1e0db0bb9555d4b6f64842218cf5b1f1bd291c7eff90d09cd6dc5ce5412a3e86'),
+        'sprayplan.db.bak.20260910-152122': (466944, '051d5401128e70762df6878bfa645d2888a0859571013544f4915bea8fff11fe'),
+        'sprayplan.db.bak.20260915-091733': (466944, 'f7e78142f89c31253c3fc485a2d9afc0a2506ba18fd31305f08b035271276980'),
+        'sprayplan.db.bak.20260915-115213': (466944, 'dcbac4918124fdf393e376136e4ea923fd5d88a466d0ed76361d37251c42b56b'),
+        'sprayplan.db.snapshot.20260907-090604': (466944, '19362779a187d7fcf106978ac2e7d2309d81227c4a27af2b189c7977b1ebcbb2'),
+        'sprayplan.db.snapshot.20260911-092004': (466944, 'ffa35ae0db8761df502d555568f5ab8f78ddc35824823be8b5b0f241730340b8'),
+        'sprayplan.db.snapshot.20260915-113526': (466944, 'a66ecbed2e565e2bdc6f844dd66d8d44c151a07463fb0c322390cf819a3349da'),
+        'sprayplan.db.snapshot.20260915-115300': (466944, '42b0fa67949a38aa776494b1ce45636b4f96d8200fcbe75fd5d5cf4ce45fa3ef'),
+    },
+    'sprayplan-test': {
+        'sprayplan.db.bak.20260907-090604': (135168, '426733c797240be002859db2c2d7ffc168c993d4a56b47d14d8ea7de9fb8272e'),
+        'sprayplan.db.bak.20260911-092004': (466944, '28a3eb73972f5f2a9594cdb9a6dbb8586fe7058b5d046afe694cba7b1da0cfba'),
+        'sprayplan.db.bak.20260915-113526': (466944, 'dadae94ac99b4fce7647de01edaebf6929c8db8a7bdef9fac8d8203b0c065d0a'),
+        'sprayplan.db.bak.20260915-115300': (466944, 'a66ecbed2e565e2bdc6f844dd66d8d44c151a07463fb0c322390cf819a3349da'),
+    },
+}
+
 LIMIT_FILES, LIMIT_BYTES, LIMIT_FILE = 20000, 2 * 1024**3, 64 * 1024**2
 FAILED = 'entrypoint'
 ALLOWED_BASES = {'http://127.0.0.1/'}
@@ -246,8 +273,9 @@ def process_environment_comparison(before, after):
             'afterCompleteProcessHashes': {p: after['processEnvironments'][p]['completeSha256'] for p in ('api', 'web')}}
 
 
-def file_inventory(service, archive=None):
+def file_inventory(service, archive=None, sqlite_archives=None):
     rows, total = [], 0
+    approved = {row['relativePath']: (row['bytes'], row['sha256']) for row in (sqlite_archives or [])}
     tar = tarfile.open(archive, 'x') if archive else None
     try:
         for name in SERVICES[service]:
@@ -263,7 +291,8 @@ def file_inventory(service, archive=None):
                         continue
                     path = parent / filename
                     require(not path.is_symlink(), 'noSymlinkFiles')
-                    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+                    require(stat.S_ISREG(path.lstat().st_mode), 'mountedFileRegular')
+                    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
                     with os.fdopen(fd, 'rb') as source:
                         before = os.fstat(source.fileno())
                         require(stat.S_ISREG(before.st_mode) and before.st_size <= LIMIT_FILE, 'regularFileSizeLimit')
@@ -271,10 +300,17 @@ def file_inventory(service, archive=None):
                         after = os.fstat(source.fileno())
                         require(len(content) == before.st_size and (before.st_ino, before.st_size, before.st_mtime_ns)
                                 == (after.st_ino, after.st_size, after.st_mtime_ns), 'mountedFileStable')
-                    require(not content.startswith(b'SQLite format 3\x00'), 'noUnaccountedLiveSqliteFiles')
+                    relative_file = str(path.relative_to(root))
+                    if content.startswith(b'SQLite format 3\x00'):
+                        actual = (len(content), hashlib.sha256(content).hexdigest())
+                        require(name == SERVICES[service][0] and approved.get(relative_file) == actual
+                                and OBSERVED_SQLITE_ARCHIVES[service].get(relative_file) == actual
+                                and all(not pathlib.Path(str(path) + ending).exists()
+                                        and not pathlib.Path(str(path) + ending).is_symlink()
+                                        for ending in ('-wal', '-shm', '-journal')), 'noUnaccountedLiveSqliteFiles')
                     total += len(content)
                     require(total <= LIMIT_BYTES and len(rows) < LIMIT_FILES, 'mountedFileInventoryLimits')
-                    relative = name + '/' + str(path.relative_to(root))
+                    relative = name + '/' + relative_file
                     rows.append({'path': relative, 'bytes': len(content), 'sha256': hashlib.sha256(content).hexdigest()})
                     if tar:
                         info = tarfile.TarInfo(relative)
@@ -751,7 +787,7 @@ def extra_sqlite_candidate_metadata():
                             known = None
                     file_metadata, identity = candidate_file_metadata(path)
                     index = len(identities); identities.append(identity)
-                    row = {'service': service, 'rootName': root_name, **file_metadata,
+                    row = {'service': service, 'mountName': root_name, **file_metadata,
                            'category': 'timestamp-named-' + known[1] + '-candidate' if known else 'unknown-sqlite-path',
                            'integrityCheckOk': immutable_integrity_ok(path),
                            'integrityScope': 'main-file-immutable-ignores-sidecars', 'inactiveStatusProven': False,
@@ -807,6 +843,26 @@ def preflight():
             'applicationCheckoutWritesPerformed': False, 'businessWritesPerformed': False, 'serviceRestartsPerformed': False}
 
 
+def static_sqlite_archive_guard():
+    metadata = extra_sqlite_candidate_metadata()
+    require(set(metadata) == set(SERVICES), 'historicalSqliteArchiveServiceInventory')
+    for service in SERVICES:
+        rows = metadata[service]['sqliteCandidates']
+        expected = OBSERVED_SQLITE_ARCHIVES[service]
+        require(len(rows) == len(expected) and {row.get('relativePath') for row in rows} == set(expected),
+                'exactObservedHistoricalSqliteArchiveInventory:' + service)
+        for row in rows:
+            require(row['service'] == service and row['mountName'] == SERVICES[service][0]
+                    and row['exists'] is True and (row['bytes'], row['sha256']) == expected[row['relativePath']]
+                    and row['integrityCheckOk'] is True and row['sameAsLivePrimaryFile'] is False
+                    and row['hostFdProbeComplete'] is True and row['containerFdProbeComplete'] is True
+                    and row['hostOpenFileDescriptorFound'] is False and row['containerOpenFileDescriptorFound'] is False
+                    and set(row['sidecars']) == {'-wal', '-shm', '-journal'}
+                    and all(value == {'exists': False, 'bytes': None, 'sha256': None} for value in row['sidecars'].values()),
+                    'observedHistoricalSqliteArchiveSafe:' + service)
+    return metadata
+
+
 def tracked_application_source_guard():
     changes = tracked_source_diff()
     # PR925 preflight independently confirmed these two directory markers have only
@@ -828,6 +884,7 @@ def backup():
     os.umask(0o077)
     require(source_commit() == source_commit('origin/main') == BEFORE, 'backupExactPreDeployMain')
     source_metadata = tracked_application_source_guard()
+    sqlite_metadata = static_sqlite_archive_guard()
     BACKUPS.mkdir(parents=True, exist_ok=True)
     require(not BACKUPS.is_symlink(), 'privateBackupRoot')
     directory = BACKUPS / ('sprayplan-pre-925-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
@@ -841,21 +898,24 @@ def backup():
     archive_configuration(directory / 'configuration.tar', configs)
     baseline = {'sourceCommit': BEFORE, 'deploymentLabel': 'PR925', 'services': {}, 'configurationFiles': configs,
                 'trackedSourceMetadata': source_metadata,
+                'historicalSqliteArchiveMetadata': sqlite_metadata,
                 'coreLifecycle': core, 'onlineSqliteBackupApi': True, 'businessWritesPerformed': False}
     for service in SERVICES:
         snapshot, audit = snapshot_now(service, directory)
         current_runtime = runtime(service)
-        files = file_inventory(service, directory / (service + '.tar'))
+        files = file_inventory(service, directory / (service + '.tar'), sqlite_metadata[service]['sqliteCandidates'])
         validate_archive(directory / (service + '.tar'), files)
         api = api_audit(service, snapshot)
         with tempfile.TemporaryDirectory(prefix='sprayplan-925-check-') as temporary:
             _, stable = snapshot_now(service, pathlib.Path(temporary))
-        require(stable == audit and file_inventory(service) == files and runtime(service) == current_runtime,
+        require(stable == audit and file_inventory(service, sqlite_archives=sqlite_metadata[service]['sqliteCandidates']) == files
+                and runtime(service) == current_runtime,
                 'baselineDataAndConfigurationStable:' + service)
         baseline['services'][service] = {'database': audit, 'files': files, 'runtime': current_runtime, 'api': api}
     require(core_state() == core and configuration() == configs and file_hash(envfile) == file_hash(directory / 'env.before')
             and source_commit() == source_commit('origin/main') == BEFORE
-            and tracked_application_source_guard() == source_metadata, 'completeBaselineStable')
+            and tracked_application_source_guard() == source_metadata
+            and static_sqlite_archive_guard() == sqlite_metadata, 'completeBaselineStable')
     (directory / 'baseline.json').write_text(json.dumps(baseline, ensure_ascii=True))
     (directory / 'baseline.json').chmod(0o600)
     names = ['baseline.json', 'env.before', 'configuration.tar'] + [s + ext for s in SERVICES for ext in ('.db', '.tar')]
@@ -865,6 +925,7 @@ def backup():
     return {'backup': str(directory), 'sourceCommit': BEFORE, 'privateArchivesVerified': True,
             'onlineSqliteBackupApi': True, 'startupSafetyChecksPassed': True,
             'allowedPlaceholderModeDifferences': source_metadata,
+            'historicalSqliteArchivesArchived': {s: len(v['sqliteCandidates']) for s, v in sqlite_metadata.items()},
             'services': {s: {'tableCounts': {n: t['rows'] for n, t in b['database']['tables'].items()},
                             'attachmentFiles': b['files']['files'], 'attachmentBytes': b['files']['bytes'],
                             'api': b['api']} for s, b in baseline['services'].items()},
@@ -903,11 +964,13 @@ def verify(mode, target, path):
     changed = run(['git', '-c', 'core.quotepath=false', 'diff', '--name-only', BEFORE, target], check='deploymentChangedPaths').decode().splitlines()
     require(bool(changed) and all(name.startswith(APP + '/') for name in changed), 'deploymentOnlyRequestedApplication')
     source_metadata = tracked_application_source_guard()
+    sqlite_metadata = static_sqlite_archive_guard()
     core = core_state()
     initial_config = configuration()
     initial_env = file_hash(ROOT / '.env.cloud.production')
     checks = {'exactSourceVersion': actual == target == source_commit('origin/main'),
               'trackedPlaceholderModesPreserved': source_metadata == before['trackedSourceMetadata'],
+              'historicalSqliteArchivesPreserved': sqlite_metadata == before['historicalSqliteArchiveMetadata'],
               'configurationFilesPreserved': initial_config == before['configurationFiles'],
               'productionEnvironmentPreserved': initial_env == file_hash(directory / 'env.before'),
               'coreLifecyclePreserved': core == before['coreLifecycle'], 'coreHealthy': core_healthy(core)}
@@ -918,7 +981,7 @@ def verify(mode, target, path):
             snapshot, audit = snapshot_now(service, pathlib.Path(temporary))
             previous = before['services'][service]
             current = runtime(service)
-            mounted_files = file_inventory(service)
+            mounted_files = file_inventory(service, sqlite_archives=sqlite_metadata[service]['sqliteCandidates'])
             observed[service] = (audit, current, mounted_files)
             environment = process_environment_comparison(previous['runtime'], current)
             flags = {'allTablesPreserved': audit == previous['database'],
@@ -949,10 +1012,11 @@ def verify(mode, target, path):
         previous_audit, previous_runtime, previous_files = observed[service]
         services[service]['checks'].update({'databaseVerificationWindowStable': final_audit == previous_audit,
             'completeRuntimeVerificationWindowStable': runtime(service) == previous_runtime,
-            'mountedFilesVerificationWindowStable': file_inventory(service) == previous_files})
+            'mountedFilesVerificationWindowStable': file_inventory(service, sqlite_archives=sqlite_metadata[service]['sqliteCandidates']) == previous_files})
     final_core = core_state()
     checks.update({'coreVerificationWindowStable': final_core == core, 'finalCoreHealthy': core_healthy(final_core),
                    'trackedSourceMetadataVerificationWindowStable': tracked_application_source_guard() == source_metadata,
+                   'historicalSqliteArchiveVerificationWindowStable': static_sqlite_archive_guard() == sqlite_metadata,
                    'sourceVerificationWindowStable': source_commit() == source_commit('origin/main') == actual,
                    'environmentVerificationWindowStable': file_hash(ROOT / '.env.cloud.production') == initial_env,
                    'configurationVerificationWindowStable': configuration() == initial_config})

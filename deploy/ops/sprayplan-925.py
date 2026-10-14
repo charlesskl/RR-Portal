@@ -48,10 +48,12 @@ def require(value, label):
         raise RuntimeError('SPRAYPLAN_925_CHECK_FAILED')
 
 
-def run(args, data=None, timeout=180):
+def run(args, data=None, timeout=180, check='commandSucceeded'):
+    global FAILED
+    FAILED = check
     value = subprocess.run(args, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            cwd=ROOT, timeout=timeout)
-    require(value.returncode == 0, 'commandSucceeded')
+    require(value.returncode == 0, check)
     return value.stdout
 
 
@@ -131,13 +133,13 @@ def sqlite_audit(path):
 
 def cid(service):
     require(service in set(SERVICES) | set(CORE), 'knownService')
-    value = run(COMPOSE + ['ps', '-a', '-q', service]).decode().strip()
+    value = run(COMPOSE + ['ps', '-a', '-q', service], check='resolveContainer:' + service).decode().strip()
     require(bool(re.fullmatch(r'[a-f0-9]{12,64}', value)), 'oneContainerPerService')
     return value
 
 
 def inspect(identifier):
-    return json.loads(run(['docker', 'inspect', identifier]))[0]
+    return json.loads(run(['docker', 'inspect', identifier], check='readContainerMetadata'))[0]
 
 
 def core_state():
@@ -208,7 +210,7 @@ for(const id of fs.readdirSync('/proc').filter(v=>/^\d+$/.test(v))){
 def runtime(service):
     identifier, db, env, secret = app_context(service)
     value = inspect(identifier)
-    process = json.loads(run(['docker', 'exec', identifier, 'node', '-e', PROCESS_ENV]))
+    process = json.loads(run(['docker', 'exec', identifier, 'node', '-e', PROCESS_ENV], check='readRuntimeProcessEnvironments:' + service))
     require(set(process) == {'api', 'web'} and all(set(v) == {'completeSha256', 'withoutHostnameSha256', 'hostname'}
             and re.fullmatch('[a-f0-9]{64}', v['completeSha256'])
             and re.fullmatch('[a-f0-9]{64}', v['withoutHostnameSha256']) for v in process.values()),
@@ -217,7 +219,7 @@ def runtime(service):
     for host_name, container_name in [(APP + '/docker-entrypoint.sh', '/app/docker-entrypoint.sh'),
                                       (APP + '/next.config.mjs', '/app/next.config.mjs'),
                                       (APP + '/server/SprayPlan.Api/appsettings.json', '/app/server/SprayPlan.Api/appsettings.json')]:
-        require(run(['docker', 'exec', identifier, 'cat', container_name]) == (ROOT / host_name).read_bytes(),
+        require(run(['docker', 'exec', identifier, 'cat', container_name], check='readStartupConfiguration:' + service) == (ROOT / host_name).read_bytes(),
                 'runtimeStartupConfigurationMatchesSource')
     return {'configEnvSha256': digest(sorted(value['Config']['Env'])), 'processEnvironments': process,
             'containerId': identifier,
@@ -339,7 +341,7 @@ def validate_configuration_archive(path, expected):
 
 def source_commit(ref='HEAD'):
     require(ref in ('HEAD', 'origin/main'), 'knownSourceRef')
-    value = run(['git', 'rev-parse', ref]).decode().strip()
+    value = run(['git', 'rev-parse', ref], check='readSourceRevision:' + ref).decode().strip()
     require(bool(re.fullmatch('[a-f0-9]{40}', value)), 'validSourceCommit')
     return value
 
@@ -518,7 +520,7 @@ process.stdout.write(JSON.stringify({buildId:fs.readFileSync('/app/.next/BUILD_I
 
 def frontend_audit(service):
     identifier = cid(service)
-    info = json.loads(run(['docker', 'exec', identifier, 'node', '-e', ASSET_INFO]))
+    info = json.loads(run(['docker', 'exec', identifier, 'node', '-e', ASSET_INFO], check='readCompiledAssets:' + service))
     require(isinstance(info['assets'], list) and bool(info['assets']), 'builtStaticAssetsPresent')
     require(set(info['compiledFeatures']) == {'PlanDateRules', 'CanReschedule', 'HasActuals', 'Reschedule', 'InProductionRemainingQty'}
             and all(value is True for value in info['compiledFeatures'].values()), 'compiledBackendNewFeatureSymbolsPresent')
@@ -545,7 +547,7 @@ def snapshot_now(service, directory):
 def backup():
     os.umask(0o077)
     require(source_commit() == source_commit('origin/main') == BEFORE, 'backupExactPreDeployMain')
-    run(['git', 'diff', '--quiet', 'HEAD', '--', APP])
+    run(['git', 'diff', '--quiet', 'HEAD', '--', APP], check='trackedApplicationSourceClean')
     BACKUPS.mkdir(parents=True, exist_ok=True)
     require(not BACKUPS.is_symlink(), 'privateBackupRoot')
     directory = BACKUPS / ('sprayplan-pre-925-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
@@ -614,10 +616,10 @@ def selected_backup(path):
 def verify(mode, target, path):
     directory, before = selected_backup(path)
     actual = source_commit()
-    run(['git', 'merge-base', '--is-ancestor', BEFORE, target])
-    changed = run(['git', '-c', 'core.quotepath=false', 'diff', '--name-only', BEFORE, target]).decode().splitlines()
+    run(['git', 'merge-base', '--is-ancestor', BEFORE, target], check='deploymentSourceAncestry')
+    changed = run(['git', '-c', 'core.quotepath=false', 'diff', '--name-only', BEFORE, target], check='deploymentChangedPaths').decode().splitlines()
     require(bool(changed) and all(name.startswith(APP + '/') for name in changed), 'deploymentOnlyRequestedApplication')
-    run(['git', 'diff', '--quiet', 'HEAD', '--', APP])
+    run(['git', 'diff', '--quiet', 'HEAD', '--', APP], check='trackedApplicationSourceClean')
     core = core_state()
     initial_config = configuration()
     initial_env = file_hash(ROOT / '.env.cloud.production')

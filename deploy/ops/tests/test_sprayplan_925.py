@@ -259,6 +259,7 @@ class OpsTests(unittest.TestCase):
         core_now = copy.deepcopy(cores)
         core_now['printlink']['restartCount'] = 14
         before = {'coreLifecycle': cores, 'configurationFiles': {'configuration': 'k' * 64},
+                  'trackedSourceMetadata': [],
                   'services': {s: {'database': audit, 'files': files, 'runtime': self.runtime_fixture('old-image')}
                                for s in ops.SERVICES}}
         def api(service, snapshot, deployed):
@@ -269,6 +270,7 @@ class OpsTests(unittest.TestCase):
         with patch.object(ops, 'ROOT', self.root), patch.object(ops, 'selected_backup', return_value=(archive, before)), \
              patch.object(ops, 'source_commit', return_value='a' * 40), patch.object(ops, 'core_state', return_value=core_now), \
              patch.object(ops, 'configuration', return_value=before['configurationFiles']), \
+             patch.object(ops, 'tracked_application_source_guard', return_value=[]), \
              patch.object(ops, 'run', side_effect=lambda args, **kwargs: (ops.APP + '/src/mock.ts\n').encode() if '--name-only' in args else b''), \
              patch.object(ops, 'snapshot_now', return_value=(self.db, audit)), \
              patch.object(ops, 'runtime', return_value=self.runtime_fixture('new-image')), \
@@ -316,6 +318,10 @@ class PreflightGitTests(unittest.TestCase):
         self.keep.parent.mkdir()
         self.keep.write_bytes(b'\n')
         self.keep.chmod(0o644)
+        self.storage_keep = self.app / 'storage/pdf/.gitkeep'
+        self.storage_keep.parent.mkdir(parents=True)
+        self.storage_keep.write_bytes(b'\n')
+        self.storage_keep.chmod(0o644)
         self.git('init', '-q')
         self.git('config', 'user.name', 'Offline Test')
         self.git('config', 'user.email', 'offline@example.invalid')
@@ -335,6 +341,68 @@ class PreflightGitTests(unittest.TestCase):
     def preflight(self):
         with patch.object(ops, 'ROOT', self.root), patch.object(ops, 'BEFORE', self.before):
             return ops.preflight()
+
+    def source_guard(self):
+        with patch.object(ops, 'ROOT', self.root):
+            return ops.tracked_application_source_guard()
+
+    def permitted_markers(self):
+        self.keep.chmod(0o777)
+        self.storage_keep.chmod(0o777)
+
+    def test_source_guard_preserves_exact_observed_marker_modes_and_git_index(self):
+        self.assertEqual([], self.source_guard())
+        self.permitted_markers()
+        index = (self.root / '.git/index').read_bytes()
+        changes = self.source_guard()
+        self.assertEqual({'data/.gitkeep', 'storage/pdf/.gitkeep'}, {r['path'] for r in changes})
+        self.assertEqual(changes, self.source_guard())
+        self.assertEqual(index, (self.root / '.git/index').read_bytes())
+        self.assertEqual(0o777, self.keep.stat().st_mode & 0o777)
+        self.assertEqual(0o777, self.storage_keep.stat().st_mode & 0o777)
+
+    def test_source_guard_rejects_extra_executable_source_mode(self):
+        self.permitted_markers()
+        self.source.chmod(0o755)
+        with self.assertRaises(RuntimeError):
+            self.source_guard()
+        self.assertEqual('trackedApplicationSourceClean', ops.FAILED)
+
+    def test_source_guard_rejects_code_content_changes_with_valid_markers(self):
+        self.permitted_markers()
+        self.source.write_bytes(b'private-code-change')
+        with self.assertRaises(RuntimeError):
+            self.source_guard()
+        self.assertEqual('trackedApplicationSourceClean', ops.FAILED)
+
+    def test_source_guard_rejects_marker_permission_drift(self):
+        self.permitted_markers()
+        self.source_guard()
+        self.keep.chmod(0o775)
+        with self.assertRaises(RuntimeError):
+            self.source_guard()
+        self.assertEqual('trackedApplicationSourceClean', ops.FAILED)
+
+    def test_source_guard_rejects_marker_content_changes_with_valid_modes(self):
+        self.permitted_markers()
+        self.keep.write_bytes(b'\r\n')
+        with self.assertRaises(RuntimeError):
+            self.source_guard()
+        self.assertEqual('trackedApplicationSourceClean', ops.FAILED)
+
+    def test_source_guard_rejects_marker_type_change(self):
+        self.permitted_markers()
+        self.keep.unlink()
+        self.keep.symlink_to(self.source)
+        with self.assertRaises(RuntimeError):
+            self.source_guard()
+        self.assertEqual('trackedApplicationSourceClean', ops.FAILED)
+
+    def test_source_guard_rejects_incomplete_observed_marker_pair(self):
+        self.keep.chmod(0o777)
+        with self.assertRaises(RuntimeError):
+            self.source_guard()
+        self.assertEqual('trackedApplicationSourceClean', ops.FAILED)
 
     def test_clean_repo_has_no_tracked_differences_and_no_writes(self):
         before = self.source.read_bytes()

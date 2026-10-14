@@ -641,10 +641,27 @@ def preflight():
             'applicationCheckoutWritesPerformed': False, 'businessWritesPerformed': False, 'serviceRestartsPerformed': False}
 
 
+def tracked_application_source_guard():
+    changes = tracked_source_diff()
+    # PR925 preflight independently confirmed these two directory markers have only
+    # historical chmod 0777 drift. Preserve their permissions; all code content,
+    # executable source modes and every other tracked path remain strict.
+    marker_hash = hashlib.sha256(b'\n').hexdigest()
+    expected = {'changeType': 'M', 'headGitMode': '100644', 'diffGitMode': '100755',
+                'diskGitMode': '100755', 'diskPermissions': '0777', 'diskKind': 'regular',
+                'headBytes': 1, 'diskBytes': 1, 'headSha256': marker_hash, 'diskSha256': marker_hash,
+                'onlyModeChange': True, 'onlyLineEndingChange': False}
+    require(not changes or (len(changes) == 2
+            and {row['path'] for row in changes} == {'data/.gitkeep', 'storage/pdf/.gitkeep'}
+            and all({key: value for key, value in row.items() if key != 'path'} == expected for row in changes)),
+            'trackedApplicationSourceClean')
+    return changes
+
+
 def backup():
     os.umask(0o077)
     require(source_commit() == source_commit('origin/main') == BEFORE, 'backupExactPreDeployMain')
-    run(['git', 'diff', '--quiet', 'HEAD', '--', APP], check='trackedApplicationSourceClean')
+    source_metadata = tracked_application_source_guard()
     BACKUPS.mkdir(parents=True, exist_ok=True)
     require(not BACKUPS.is_symlink(), 'privateBackupRoot')
     directory = BACKUPS / ('sprayplan-pre-925-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
@@ -657,6 +674,7 @@ def backup():
     (directory / 'env.before').chmod(0o600)
     archive_configuration(directory / 'configuration.tar', configs)
     baseline = {'sourceCommit': BEFORE, 'deploymentLabel': 'PR925', 'services': {}, 'configurationFiles': configs,
+                'trackedSourceMetadata': source_metadata,
                 'coreLifecycle': core, 'onlineSqliteBackupApi': True, 'businessWritesPerformed': False}
     for service in SERVICES:
         snapshot, audit = snapshot_now(service, directory)
@@ -670,7 +688,8 @@ def backup():
                 'baselineDataAndConfigurationStable:' + service)
         baseline['services'][service] = {'database': audit, 'files': files, 'runtime': current_runtime, 'api': api}
     require(core_state() == core and configuration() == configs and file_hash(envfile) == file_hash(directory / 'env.before')
-            and source_commit() == source_commit('origin/main') == BEFORE, 'completeBaselineStable')
+            and source_commit() == source_commit('origin/main') == BEFORE
+            and tracked_application_source_guard() == source_metadata, 'completeBaselineStable')
     (directory / 'baseline.json').write_text(json.dumps(baseline, ensure_ascii=True))
     (directory / 'baseline.json').chmod(0o600)
     names = ['baseline.json', 'env.before', 'configuration.tar'] + [s + ext for s in SERVICES for ext in ('.db', '.tar')]
@@ -679,6 +698,7 @@ def backup():
     (directory / 'manifest.json').chmod(0o600)
     return {'backup': str(directory), 'sourceCommit': BEFORE, 'privateArchivesVerified': True,
             'onlineSqliteBackupApi': True, 'startupSafetyChecksPassed': True,
+            'allowedPlaceholderModeDifferences': source_metadata,
             'services': {s: {'tableCounts': {n: t['rows'] for n, t in b['database']['tables'].items()},
                             'attachmentFiles': b['files']['files'], 'attachmentBytes': b['files']['bytes'],
                             'api': b['api']} for s, b in baseline['services'].items()},
@@ -716,11 +736,12 @@ def verify(mode, target, path):
     run(['git', 'merge-base', '--is-ancestor', BEFORE, target], check='deploymentSourceAncestry')
     changed = run(['git', '-c', 'core.quotepath=false', 'diff', '--name-only', BEFORE, target], check='deploymentChangedPaths').decode().splitlines()
     require(bool(changed) and all(name.startswith(APP + '/') for name in changed), 'deploymentOnlyRequestedApplication')
-    run(['git', 'diff', '--quiet', 'HEAD', '--', APP], check='trackedApplicationSourceClean')
+    source_metadata = tracked_application_source_guard()
     core = core_state()
     initial_config = configuration()
     initial_env = file_hash(ROOT / '.env.cloud.production')
     checks = {'exactSourceVersion': actual == target == source_commit('origin/main'),
+              'trackedPlaceholderModesPreserved': source_metadata == before['trackedSourceMetadata'],
               'configurationFilesPreserved': initial_config == before['configurationFiles'],
               'productionEnvironmentPreserved': initial_env == file_hash(directory / 'env.before'),
               'coreLifecyclePreserved': core == before['coreLifecycle'], 'coreHealthy': core_healthy(core)}
@@ -765,6 +786,7 @@ def verify(mode, target, path):
             'mountedFilesVerificationWindowStable': file_inventory(service) == previous_files})
     final_core = core_state()
     checks.update({'coreVerificationWindowStable': final_core == core, 'finalCoreHealthy': core_healthy(final_core),
+                   'trackedSourceMetadataVerificationWindowStable': tracked_application_source_guard() == source_metadata,
                    'sourceVerificationWindowStable': source_commit() == source_commit('origin/main') == actual,
                    'environmentVerificationWindowStable': file_hash(ROOT / '.env.cloud.production') == initial_env,
                    'configurationVerificationWindowStable': configuration() == initial_config})

@@ -771,8 +771,10 @@ def verify():
               'deployedImageHealthy': runtime['healthy'], 'coreContainersUnchanged': scope_same,
               'businessWritesPerformed': False, 'credentialsChanged': False}
     result.update(frontend_audit(app))
-    if changed == sorted(PURCHASE_DIAGNOSTIC_TABLES):
+    if set(PURCHASE_DIAGNOSTIC_TABLES) <= set(changed):
         result['diagnostic'] = purchase_update_diagnostic(directory, before, current)
+        result['diagnostic']['diagnosedTables'] = list(PURCHASE_DIAGNOSTIC_TABLES)
+        result['diagnostic']['additionalChangedTables'] = sorted(set(changed) - set(PURCHASE_DIAGNOSTIC_TABLES))
         result['diagnostic']['apiBaselineFieldsChanged'] = sorted(key for key in api
             if before['api'].get(key) != api[key])
     return result

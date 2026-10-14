@@ -1,7 +1,30 @@
-name: Indo Shipping Diag
+name: PR926 Two Application Diag
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Private backups or read-only verification of internal-quote and indo-shipping"
+        type: choice
+        required: true
+        options: [backup, verify, diagnose]
+        default: backup
+      before_commit:
+        description: "Exact pre-deployment main SHA"
+        type: string
+        required: true
+      target_commit:
+        description: "Exact main SHA (same as before_commit for backup; merge SHA for verify)"
+        type: string
+        required: true
+      quote_backup_path:
+        description: "Exact private internal-quote backup returned by backup"
+        type: string
+        required: false
+      indo_backup_path:
+        description: "Exact private indo-shipping backup returned by backup"
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -14,32 +37,70 @@ concurrency:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - name: Validate SSH host fingerprint
+      - name: Validate SSH fingerprint and exact arguments
         shell: bash
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          DUAL_OPS_MODE: ${{ inputs.mode }}
+          DUAL_OPS_BEFORE: ${{ inputs.before_commit }}
+          DUAL_OPS_TARGET: ${{ inputs.target_commit }}
+          DUAL_OPS_QUOTE_BACKUP: ${{ inputs.quote_backup_path }}
+          DUAL_OPS_INDO_BACKUP: ${{ inputs.indo_backup_path }}
         run: |
           set -euo pipefail
-          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
-            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
-            exit 1
+          [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+          [[ "$DUAL_OPS_MODE" =~ ^(backup|verify|diagnose)$ ]] || exit 1
+          [[ "$DUAL_OPS_BEFORE" = 77e10142ecfd07c6aba732ae3a2cc449fcdc9e6c && "$DUAL_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          if [[ "$DUAL_OPS_MODE" = backup ]]; then
+            [[ -z "$DUAL_OPS_QUOTE_BACKUP" && -z "$DUAL_OPS_INDO_BACKUP" && "$DUAL_OPS_BEFORE" = "$DUAL_OPS_TARGET" ]] || exit 1
+          else
+            [[ "$DUAL_OPS_BEFORE" != "$DUAL_OPS_TARGET" ]] || exit 1
+            [[ "$DUAL_OPS_QUOTE_BACKUP" =~ ^/opt/rr-portal/deploy/backups/internal-quote-pre-926-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
+            [[ "$DUAL_OPS_INDO_BACKUP" =~ ^/opt/rr-portal/deploy/backups/indo-pre-926-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
           fi
 
-      - name: Fetch indo-shipping container logs via SSH
+      - name: Private backups or read-only deployment checks
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          DUAL_OPS_MODE: ${{ inputs.mode }}
+          DUAL_OPS_REF: ${{ github.sha }}
+          DUAL_OPS_BEFORE: ${{ inputs.before_commit }}
+          DUAL_OPS_TARGET: ${{ inputs.target_commit }}
+          DUAL_OPS_QUOTE_BACKUP: ${{ inputs.quote_backup_path }}
+          DUAL_OPS_INDO_BACKUP: ${{ inputs.indo_backup_path }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 5m
+          command_timeout: 18m
+          envs: DUAL_OPS_MODE,DUAL_OPS_REF,DUAL_OPS_BEFORE,DUAL_OPS_TARGET,DUAL_OPS_QUOTE_BACKUP,DUAL_OPS_INDO_BACKUP
           script: |
             set -euo pipefail
-            echo "== 容器状态 =="
-            docker ps -a --filter name=indo-shipping --format 'table {{.Names}}\t{{.Status}}'
-            echo "== 最近 100 行日志 =="
-            docker logs rr-portal-indo-shipping-1 --tail 100 2>&1 || true
+            [[ "$DUAL_OPS_MODE" =~ ^(backup|verify|diagnose)$ && "$DUAL_OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$DUAL_OPS_BEFORE" = 77e10142ecfd07c6aba732ae3a2cc449fcdc9e6c && "$DUAL_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            if [[ "$DUAL_OPS_MODE" = backup ]]; then
+              [[ -z "$DUAL_OPS_QUOTE_BACKUP" && -z "$DUAL_OPS_INDO_BACKUP" && "$DUAL_OPS_BEFORE" = "$DUAL_OPS_TARGET" ]] || exit 1
+            else
+              [[ "$DUAL_OPS_BEFORE" != "$DUAL_OPS_TARGET" ]] || exit 1
+              [[ "$DUAL_OPS_QUOTE_BACKUP" =~ ^/opt/rr-portal/deploy/backups/internal-quote-pre-926-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
+              [[ "$DUAL_OPS_INDO_BACKUP" =~ ^/opt/rr-portal/deploy/backups/indo-pre-926-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
+            fi
+            cd /opt/rr-portal
+            git fetch origin main ops/dual-926-20261014 >/dev/null 2>&1 || { echo 'DUAL_926_SCRIPT_FETCH_FAILED'; exit 1; }
+            umask 077
+            dual_temporary=$(mktemp -d /tmp/dual-926.XXXXXX)
+            trap 'rm -rf "$dual_temporary"' EXIT
+            git show "$DUAL_OPS_REF:deploy/ops/internal-quote-926.py" > "$dual_temporary/quote.py" 2>/dev/null || { echo 'DUAL_926_QUOTE_SCRIPT_READ_FAILED'; exit 1; }
+            git show "$DUAL_OPS_REF:deploy/ops/indo-926.py" > "$dual_temporary/indo.py" 2>/dev/null || { echo 'DUAL_926_INDO_SCRIPT_READ_FAILED'; exit 1; }
+            set +e
+            python3 "$dual_temporary/quote.py" "$DUAL_OPS_MODE" "$DUAL_OPS_BEFORE" "$DUAL_OPS_TARGET" "$DUAL_OPS_QUOTE_BACKUP"
+            quote_result=$?
+            python3 "$dual_temporary/indo.py" "$DUAL_OPS_MODE" "$DUAL_OPS_BEFORE" "$DUAL_OPS_TARGET" "$DUAL_OPS_INDO_BACKUP"
+            indo_result=$?
+            set -e
+            printf '{"dualChecksComplete":true,"quoteExitCode":%d,"indoExitCode":%d,"businessWritesPerformed":false,"serviceRestartsPerformed":false}\n' "$quote_result" "$indo_result"
+            [[ "$quote_result" = 0 && "$indo_result" = 0 ]]

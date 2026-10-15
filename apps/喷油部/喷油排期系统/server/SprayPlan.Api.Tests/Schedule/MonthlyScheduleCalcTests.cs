@@ -44,22 +44,22 @@ public class MonthlyScheduleCalcTests
     }
 
     [Fact]
-    public void SkipsWeekend()
+    public void SaturdayWorksSundayRests()
     {
-        // 300 件/日100：06-25,06-26,(27/28 周末跳过),06-29
+        // 300 件/日100：06-25,06-26,06-27（周六生产）
         var r = MonthlyScheduleCalc.Generate(new[] { Order(1, "2026-07-13", 300) }, Lines(), "2026-06-25", 2, Cal());
         var dates = r.Rows.Select(x => x.PlanDate).OrderBy(d => d).ToList();
-        Assert.Equal(new[] { "2026-06-25", "2026-06-26", "2026-06-29" }, dates);
+        Assert.Equal(new[] { "2026-06-25", "2026-06-26", "2026-06-27" }, dates);
     }
 
     [Fact]
     public void SkipsHoliday_AllowsWorkdayMakeup()
     {
-        // 200 件/日100，06-26 设为节假日：06-25,(06-26 跳过),06-29
+        // 200 件/日100，06-26 设为节假日：06-25,(06-26 跳过),06-27
         var r = MonthlyScheduleCalc.Generate(new[] { Order(1, "2026-07-13", 200) }, Lines(),
             "2026-06-25", 2, Cal(off: new[] { "2026-06-26" }));
         var dates = r.Rows.Select(x => x.PlanDate).OrderBy(d => d).ToList();
-        Assert.Equal(new[] { "2026-06-25", "2026-06-29" }, dates);
+        Assert.Equal(new[] { "2026-06-25", "2026-06-27" }, dates);
     }
 
     [Fact]

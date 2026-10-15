@@ -132,6 +132,9 @@ public class PlansController(AppDbContext db) : ControllerBase
                 return BadRequest(new { error = "工序无效（手喷/移印/自动喷/UV）" });
         }
 
+        var calendar = new ProductionCalendar(await db.Holidays.AsNoTracking().ToListAsync());
+        if (plans.Any(p => !calendar.IsWorkday(DateUtil.ParseUtc(p.PlanDate!))))
+            return BadRequest(new { error = "计划包含周日或休假日，请选择工作日" });
         var by = CurrentUser();
         var rows = plans.Select(p => new ProductionPlan
         {
@@ -169,12 +172,14 @@ public class PlansController(AppDbContext db) : ControllerBase
     {
         if (req.Changes is null || req.Changes.Count == 0 || req.Changes.Any(c => c is null) || req.Changes.Select(c => c.Id).Distinct().Count() != req.Changes.Count)
             return BadRequest(new { error = "请选择需要调整的计划，不能重复提交" });
+        var calendar = new ProductionCalendar(await db.Holidays.AsNoTracking().ToListAsync());
         var dates = new Dictionary<int, (DateTime Original, DateTime Next)>();
         foreach (var change in req.Changes)
         {
             if (!DateTime.TryParseExact(change.OriginalDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var original) ||
                 !DateTime.TryParseExact(change.NewDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var next))
                 return BadRequest(new { error = "日期格式不正确" });
+            if (!calendar.IsWorkday(next)) return BadRequest(new { error = $"{ScheduleCalc.Ymd(next)} 是休息日，请选择工作日" });
             dates[change.Id] = (DateTime.SpecifyKind(original, DateTimeKind.Utc), DateTime.SpecifyKind(next, DateTimeKind.Utc));
         }
         await using var transaction = await db.Database.BeginTransactionAsync();
@@ -235,6 +240,9 @@ public class PlansController(AppDbContext db) : ControllerBase
             history.Add(new { field = "planDate", oldValue = ScheduleCalc.Ymd(p.PlanDate), newValue = ScheduleCalc.Ymd(DateUtil.ParseUtc(req.PlanDate)), by = CurrentUser(), at = DateTime.UtcNow });
             p.ModificationHistory = JsonSerializer.Serialize(history);
         }
+
+        if (req.PlanDate is not null && !new ProductionCalendar(await db.Holidays.AsNoTracking().ToListAsync()).IsWorkday(DateUtil.ParseUtc(req.PlanDate)))
+            return BadRequest(new { error = "所选日期是休息日，请选择工作日" });
 
         // ── 计划字段 ──
         if (req.PlannedQty is not null) p.PlannedQty = (int)req.PlannedQty.Value;

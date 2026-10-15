@@ -23,6 +23,16 @@ public class HolidaysController(AppDbContext db) : ControllerBase
         return Ok(filtered.Select(h => new HolidayDto(h.Id, ScheduleCalc.Ymd(h.Date), h.Type, h.Remark)));
     }
 
+    [HttpPost("reflow")]
+    [Authorize(Roles = "clerk,manager,admin")]
+    public async Task<IActionResult> Reflow()
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var adjusted = await ProductionCalendar.Reflow(db, User.FindFirst("username")?.Value ?? "unknown");
+        await transaction.CommitAsync();
+        return Ok(new { adjustedPlans = adjusted });
+    }
+
     [HttpPost]
     [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Create([FromBody] CreateHolidayRequest req)
@@ -40,7 +50,10 @@ public class HolidaysController(AppDbContext db) : ControllerBase
 
         var holiday = new Holiday { Date = date, Type = type, Remark = string.IsNullOrEmpty(req.Remark) ? null : req.Remark };
         db.Holidays.Add(holiday);
+        await using var transaction = await db.Database.BeginTransactionAsync();
         await db.SaveChangesAsync();
+        await ProductionCalendar.Reflow(db, User.FindFirst("username")?.Value ?? "unknown");
+        await transaction.CommitAsync();
         return StatusCode(201, new HolidayDto(holiday.Id, ScheduleCalc.Ymd(holiday.Date), holiday.Type, holiday.Remark));
     }
 
@@ -69,7 +82,10 @@ public class HolidaysController(AppDbContext db) : ControllerBase
             holiday.Date = date;
         }
 
+        await using var transaction = await db.Database.BeginTransactionAsync();
         await db.SaveChangesAsync();
+        await ProductionCalendar.Reflow(db, User.FindFirst("username")?.Value ?? "unknown");
+        await transaction.CommitAsync();
         return Ok(new HolidayDto(holiday.Id, ScheduleCalc.Ymd(holiday.Date), holiday.Type, holiday.Remark));
     }
 
@@ -80,7 +96,10 @@ public class HolidaysController(AppDbContext db) : ControllerBase
         var holiday = await db.Holidays.FindAsync(id);
         if (holiday is null) return NotFound(new { error = "记录不存在" });
         db.Holidays.Remove(holiday);   // 节假日是配置数据，真删
+        await using var transaction = await db.Database.BeginTransactionAsync();
         await db.SaveChangesAsync();
+        await ProductionCalendar.Reflow(db, User.FindFirst("username")?.Value ?? "unknown");
+        await transaction.CommitAsync();
         return Ok(new { id });
     }
 }

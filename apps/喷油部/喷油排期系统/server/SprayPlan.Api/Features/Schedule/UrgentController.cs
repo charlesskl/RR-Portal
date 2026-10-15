@@ -207,6 +207,10 @@ public class UrgentController(AppDbContext db) : ControllerBase
                 return BadRequest(new { error = $"所选停单顺延 {days} 天后会超期或缺少交货日：{string.Join("、", unsafeOrders)}" });
         }
 
+        var productionCalendar = new ProductionCalendar(await db.Holidays.AsNoTracking().ToListAsync());
+        if (parsedRows.Any(x => !productionCalendar.IsWorkday(x.Date)))
+            return BadRequest(new { error = "急单计划包含休息日，请选择工作日" });
+
         // 节假日集合（覆盖一个足够宽的窗口：被停单计划最晚日 + X + 缓冲）
         var holidayRows = await db.Holidays.ToListAsync();
         var rest = holidayRows.Where(h => h.Type == "holiday").Select(h => h.Date.Date).ToHashSet();
@@ -282,7 +286,7 @@ public class UrgentController(AppDbContext db) : ControllerBase
         var blocked = new HashSet<DateTime>();
         for (var d = from; d <= to; d = d.AddDays(1))
         {
-            bool weekend = d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday;
+            bool weekend = d.DayOfWeek == DayOfWeek.Sunday;
             bool isRest = (weekend || rest.Contains(d)) && !workOverride.Contains(d);
             if (isRest) blocked.Add(d);
         }

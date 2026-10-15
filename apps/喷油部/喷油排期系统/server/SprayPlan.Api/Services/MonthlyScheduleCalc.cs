@@ -26,7 +26,7 @@ public static class MonthlyScheduleCalc
         var ymd = ScheduleCalc.Ymd(d);
         if (cal.OnDays.Contains(ymd)) return true;
         if (cal.OffDays.Contains(ymd)) return false;
-        return d.DayOfWeek != DayOfWeek.Saturday && d.DayOfWeek != DayOfWeek.Sunday;
+        return d.DayOfWeek != DayOfWeek.Sunday;
     }
     static DateTime NextWorkday(DateTime from, Calendar cal)
     {

@@ -2,6 +2,7 @@
 import { apiFetch } from "@/lib/apiFetch";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { invalidateClientCache } from "@/lib/clientCache";
 import { lineLabel } from "@/lib/line";
 
 type Line = { id: number; name: string; workshop: string; leaderName: string | null; craftType: string; isActive: boolean; dailyCapacityLimit: number };
@@ -101,20 +102,25 @@ export default function BasicDataManager({ lines, machines, holidays, craftAlias
   }
 
   // ---- 节假日操作 ----
+  async function reflowCalendar() {
+    if (await send("/api/holidays/reflow", "POST", {})) {
+      invalidateClientCache("/api/schedule"); invalidateClientCache("/api/orders"); router.refresh();
+    }
+  }
   async function addHoliday() {
     if (!newHoliday.date) { setErr("请选择日期"); return; }
-    if (await send("/api/holidays", "POST", newHoliday)) { setNewHoliday({ date: "", type: "holiday", remark: "" }); router.refresh(); }
+    if (await send("/api/holidays", "POST", newHoliday)) { setNewHoliday({ date: "", type: "holiday", remark: "" }); invalidateClientCache("/api/schedule"); invalidateClientCache("/api/orders"); router.refresh(); }
   }
   function startEditHoliday(h: Holiday) {
     setEditHolidayId(h.id);
     setEditHoliday({ date: h.date, type: h.type, remark: h.remark ?? "" });
   }
   async function saveHoliday(id: number) {
-    if (await send(`/api/holidays/${id}`, "PATCH", editHoliday)) { setEditHolidayId(null); router.refresh(); }
+    if (await send(`/api/holidays/${id}`, "PATCH", editHoliday)) { setEditHolidayId(null); invalidateClientCache("/api/schedule"); invalidateClientCache("/api/orders"); router.refresh(); }
   }
   async function removeHoliday(id: number) {
     if (!confirm("删除该节假日记录？")) return;
-    if (await send(`/api/holidays/${id}`, "DELETE")) router.refresh();
+    if (await send(`/api/holidays/${id}`, "DELETE")) { invalidateClientCache("/api/schedule"); invalidateClientCache("/api/orders"); router.refresh(); }
   }
 
   // ---- 工序对照表操作 ----
@@ -297,7 +303,8 @@ export default function BasicDataManager({ lines, machines, holidays, craftAlias
             <input className={INPUT} placeholder="备注（如 春节）" value={newHoliday.remark} onChange={(e) => setNewHoliday({ ...newHoliday, remark: e.target.value })} />
             <button onClick={addHoliday} className={BTN}>+ 新增</button>
           </div>
-          <p className="text-xs text-text-secondary mb-3">月排会跳过「休息」日；「补班」表示该周末要上班、可排产。⚠️ 法定节假日以国务院公布为准，每年初核对一次。</p>
+          <p className="text-xs text-text-secondary mb-3">默认周一至周六生产、周日休息；「休息」和「补班」设置优先。保存后自动顺延受影响的未来未录实绩计划，已录实绩保持不变。</p>
+          <button type="button" className={LINK + " mb-3 text-sm"} onClick={reflowCalendar}>按工作日历重排未生产计划</button>
           <div className="flex items-center gap-2 mb-3">
             <span className="text-sm text-text-secondary">查看月份：</span>
             <input className={INPUT} type="month" value={holidayMonth} onChange={(e) => setHolidayMonth(e.target.value)} />

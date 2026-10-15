@@ -1,7 +1,27 @@
-name: Indo Shipping Diag
+name: PR927 RR Private Backup and Read-only Verification
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'rr-production only: read-only preflight, private backup, or read-only verification'
+        type: choice
+        required: true
+        options: [preflight, backup, verify]
+        default: preflight
+      before_commit:
+        description: 'Exact pre-deployment main SHA'
+        type: string
+        required: true
+        default: '87844f57efe1b3387c9a18b51f4736489d01be98'
+      target_commit:
+        description: 'Exact main SHA; same as before_commit for preflight/backup'
+        type: string
+        required: true
+      backup_path:
+        description: 'Exact private backup path returned by backup; verify only'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -14,32 +34,61 @@ concurrency:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Validate SSH host fingerprint
+      - name: Validate exact branch, SHA arguments and SSH fingerprint
         shell: bash
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          RR_OPS_BRANCH: ${{ github.ref }}
+          RR_OPS_REF: ${{ github.sha }}
+          RR_OPS_MODE: ${{ inputs.mode }}
+          RR_OPS_BEFORE: ${{ inputs.before_commit }}
+          RR_OPS_TARGET: ${{ inputs.target_commit }}
+          RR_OPS_BACKUP: ${{ inputs.backup_path }}
         run: |
           set -euo pipefail
-          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
-            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
-            exit 1
+          [[ "$RR_OPS_BRANCH" = refs/heads/ops/rr-927-20261015 ]] || exit 1
+          [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+          [[ "$RR_OPS_REF" =~ ^[a-f0-9]{40}$ && "$RR_OPS_MODE" =~ ^(preflight|backup|verify)$ ]] || exit 1
+          [[ "$RR_OPS_BEFORE" = 87844f57efe1b3387c9a18b51f4736489d01be98 && "$RR_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          if [[ "$RR_OPS_MODE" = verify ]]; then
+            [[ "$RR_OPS_TARGET" != "$RR_OPS_BEFORE" && "$RR_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/rr-pre-927-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
+          else
+            [[ "$RR_OPS_TARGET" = "$RR_OPS_BEFORE" && -z "$RR_OPS_BACKUP" ]] || exit 1
           fi
 
-      - name: Fetch indo-shipping container logs via SSH
+      - name: Fixed rr-production private backup or read-only verification
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          RR_OPS_BRANCH: ${{ github.ref }}
+          RR_OPS_REF: ${{ github.sha }}
+          RR_OPS_MODE: ${{ inputs.mode }}
+          RR_OPS_BEFORE: ${{ inputs.before_commit }}
+          RR_OPS_TARGET: ${{ inputs.target_commit }}
+          RR_OPS_BACKUP: ${{ inputs.backup_path }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 5m
+          command_timeout: 12m
+          envs: RR_OPS_BRANCH,RR_OPS_REF,RR_OPS_MODE,RR_OPS_BEFORE,RR_OPS_TARGET,RR_OPS_BACKUP
           script: |
             set -euo pipefail
-            echo "== 容器状态 =="
-            docker ps -a --filter name=indo-shipping --format 'table {{.Names}}\t{{.Status}}'
-            echo "== 最近 100 行日志 =="
-            docker logs rr-portal-indo-shipping-1 --tail 100 2>&1 || true
+            [[ "$RR_OPS_BRANCH" = refs/heads/ops/rr-927-20261015 ]] || exit 1
+            [[ "$RR_OPS_REF" =~ ^[a-f0-9]{40}$ && "$RR_OPS_MODE" =~ ^(preflight|backup|verify)$ ]] || exit 1
+            [[ "$RR_OPS_BEFORE" = 87844f57efe1b3387c9a18b51f4736489d01be98 && "$RR_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            if [[ "$RR_OPS_MODE" = verify ]]; then
+              [[ "$RR_OPS_TARGET" != "$RR_OPS_BEFORE" && "$RR_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/rr-pre-927-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
+            else
+              [[ "$RR_OPS_TARGET" = "$RR_OPS_BEFORE" && -z "$RR_OPS_BACKUP" ]] || exit 1
+            fi
+            cd /opt/rr-portal
+            git fetch origin main ops/rr-927-20261015 >/dev/null 2>&1 || { echo 'RR_927_SCRIPT_FETCH_FAILED'; exit 1; }
+            umask 077
+            rr_temporary=$(mktemp -d /tmp/rr-927.XXXXXX)
+            trap 'rm -rf "$rr_temporary"' EXIT
+            git show "$RR_OPS_REF:deploy/ops/rr-927.py" > "$rr_temporary/ops.py" 2>/dev/null || { echo 'RR_927_SCRIPT_READ_FAILED'; exit 1; }
+            python3 "$rr_temporary/ops.py" "$RR_OPS_MODE" "$RR_OPS_BEFORE" "$RR_OPS_TARGET" "$RR_OPS_BACKUP"

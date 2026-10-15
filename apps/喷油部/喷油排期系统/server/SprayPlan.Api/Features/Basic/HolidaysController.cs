@@ -52,7 +52,7 @@ public class HolidaysController(AppDbContext db) : ControllerBase
         db.Holidays.Add(holiday);
         await using var transaction = await db.Database.BeginTransactionAsync();
         await db.SaveChangesAsync();
-        await ProductionCalendar.Reflow(db, User.FindFirst("username")?.Value ?? "unknown");
+        await ProductionCalendar.ReflowSharedCalendar(db, User.FindFirst("username")?.Value ?? "unknown");
         await transaction.CommitAsync();
         return StatusCode(201, new HolidayDto(holiday.Id, ScheduleCalc.Ymd(holiday.Date), holiday.Type, holiday.Remark));
     }
@@ -84,7 +84,7 @@ public class HolidaysController(AppDbContext db) : ControllerBase
 
         await using var transaction = await db.Database.BeginTransactionAsync();
         await db.SaveChangesAsync();
-        await ProductionCalendar.Reflow(db, User.FindFirst("username")?.Value ?? "unknown");
+        await ProductionCalendar.ReflowSharedCalendar(db, User.FindFirst("username")?.Value ?? "unknown");
         await transaction.CommitAsync();
         return Ok(new HolidayDto(holiday.Id, ScheduleCalc.Ymd(holiday.Date), holiday.Type, holiday.Remark));
     }
@@ -98,7 +98,7 @@ public class HolidaysController(AppDbContext db) : ControllerBase
         db.Holidays.Remove(holiday);   // 节假日是配置数据，真删
         await using var transaction = await db.Database.BeginTransactionAsync();
         await db.SaveChangesAsync();
-        await ProductionCalendar.Reflow(db, User.FindFirst("username")?.Value ?? "unknown");
+        await ProductionCalendar.ReflowSharedCalendar(db, User.FindFirst("username")?.Value ?? "unknown");
         await transaction.CommitAsync();
         return Ok(new { id });
     }

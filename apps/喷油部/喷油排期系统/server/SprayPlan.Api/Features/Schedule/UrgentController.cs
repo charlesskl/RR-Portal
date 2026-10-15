@@ -175,6 +175,7 @@ public class UrgentController(AppDbContext db) : ControllerBase
         if (req.Rows is null || req.Rows.Count == 0)
             return BadRequest(new { error = "急单排期行为空" });
 
+        using var tx = await db.Database.BeginTransactionAsync();
         var now = DateTime.UtcNow;
         var user = CurrentUser();
         var parsedRows = req.Rows.Select(r => new { r, Date = DateUtil.ParseUtc(r.PlanDate).Date }).ToList();
@@ -215,8 +216,6 @@ public class UrgentController(AppDbContext db) : ControllerBase
         var holidayRows = await db.Holidays.ToListAsync();
         var rest = holidayRows.Where(h => h.Type == "holiday").Select(h => h.Date.Date).ToHashSet();
         var workOverride = holidayRows.Where(h => h.Type == "workday").Select(h => h.Date.Date).ToHashSet();
-
-        using var tx = await db.Database.BeginTransactionAsync();
 
         // 1) 写急单计划行
         foreach (var x in parsedRows)

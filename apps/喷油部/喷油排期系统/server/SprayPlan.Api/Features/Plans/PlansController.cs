@@ -132,6 +132,7 @@ public class PlansController(AppDbContext db) : ControllerBase
                 return BadRequest(new { error = "工序无效（手喷/移印/自动喷/UV）" });
         }
 
+        await using var transaction = await db.Database.BeginTransactionAsync();
         var calendar = new ProductionCalendar(await db.Holidays.AsNoTracking().ToListAsync());
         if (plans.Any(p => !calendar.IsWorkday(DateUtil.ParseUtc(p.PlanDate!))))
             return BadRequest(new { error = "计划包含周日或休假日，请选择工作日" });
@@ -162,6 +163,7 @@ public class PlansController(AppDbContext db) : ControllerBase
         foreach (var o in toUpdate) { o.Status = "scheduled"; o.LastUpdatedBy = by; }
 
         await db.SaveChangesAsync();
+        await transaction.CommitAsync();
         return StatusCode(201, new CreatePlansResult(plans.Count));
     }
 
@@ -172,6 +174,7 @@ public class PlansController(AppDbContext db) : ControllerBase
     {
         if (req.Changes is null || req.Changes.Count == 0 || req.Changes.Any(c => c is null) || req.Changes.Select(c => c.Id).Distinct().Count() != req.Changes.Count)
             return BadRequest(new { error = "请选择需要调整的计划，不能重复提交" });
+        await using var transaction = await db.Database.BeginTransactionAsync();
         var calendar = new ProductionCalendar(await db.Holidays.AsNoTracking().ToListAsync());
         var dates = new Dictionary<int, (DateTime Original, DateTime Next)>();
         foreach (var change in req.Changes)
@@ -182,7 +185,6 @@ public class PlansController(AppDbContext db) : ControllerBase
             if (!calendar.IsWorkday(next)) return BadRequest(new { error = $"{ScheduleCalc.Ymd(next)} 是休息日，请选择工作日" });
             dates[change.Id] = (DateTime.SpecifyKind(original, DateTimeKind.Utc), DateTime.SpecifyKind(next, DateTimeKind.Utc));
         }
-        await using var transaction = await db.Database.BeginTransactionAsync();
         var ids = dates.Keys.ToList();
         var plans = await db.ProductionPlans.Include(p => p.Order).Where(p => ids.Contains(p.Id) && p.DeletedAt == null).ToListAsync();
         if (plans.Count != ids.Count) return NotFound(new { error = "部分计划已撤销或不属于当前厂区，请刷新" });
@@ -227,10 +229,13 @@ public class PlansController(AppDbContext db) : ControllerBase
         if (req.GoodQty is not null && req.GoodQty < 0)
             return BadRequest(new { error = "实际生产数必须 ≥ 0" });
 
+        await using var transaction = await db.Database.BeginTransactionAsync();
         var p = await db.ProductionPlans.FindAsync(id);
         if (p is null) return NotFound(new { error = "计划不存在" });
         if (req.PlanDate is not null && DateUtil.ParseUtc(req.PlanDate) != p.PlanDate)
         {
+            if (!new ProductionCalendar(await db.Holidays.AsNoTracking().ToListAsync()).IsWorkday(DateUtil.ParseUtc(req.PlanDate)))
+                return BadRequest(new { error = "所选日期是休息日，请选择工作日" });
             if (p.DeletedAt != null || PlanDateRules.HasActuals(p))
                 return BadRequest(new { error = "已撤销或已录实绩的计划不能调整日期" });
             var owner = await db.Orders.FindAsync(p.OrderId);
@@ -240,9 +245,6 @@ public class PlansController(AppDbContext db) : ControllerBase
             history.Add(new { field = "planDate", oldValue = ScheduleCalc.Ymd(p.PlanDate), newValue = ScheduleCalc.Ymd(DateUtil.ParseUtc(req.PlanDate)), by = CurrentUser(), at = DateTime.UtcNow });
             p.ModificationHistory = JsonSerializer.Serialize(history);
         }
-
-        if (req.PlanDate is not null && !new ProductionCalendar(await db.Holidays.AsNoTracking().ToListAsync()).IsWorkday(DateUtil.ParseUtc(req.PlanDate)))
-            return BadRequest(new { error = "所选日期是休息日，请选择工作日" });
 
         // ── 计划字段 ──
         if (req.PlannedQty is not null) p.PlannedQty = (int)req.PlannedQty.Value;
@@ -335,6 +337,7 @@ public class PlansController(AppDbContext db) : ControllerBase
 
         p.LastModifiedBy = CurrentUser();
         await db.SaveChangesAsync();
+        await transaction.CommitAsync();
         return Ok(new PlanUpdated(p.Id, p.GoodQty, p.InboundQty, p.ProductionValue, p.Status, p.PlannedQty, ScheduleCalc.SafeArr(p.MachineNos)));
     }
 

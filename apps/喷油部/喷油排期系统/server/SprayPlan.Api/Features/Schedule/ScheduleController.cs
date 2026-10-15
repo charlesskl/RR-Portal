@@ -315,9 +315,14 @@ public class ScheduleController(AppDbContext db) : ControllerBase
         if (req.Draft.Any(d => d.LineId <= 0))
             return BadRequest(new { error = "草稿缺拉别，请重新生成" });
 
+        await using var transaction = await db.Database.BeginTransactionAsync();
         var draftRows = req.Draft
             .Select(d => new { Row = d, PlanDate = DateUtil.ParseUtc(d.PlanDate) })
             .ToList();
+        // 预览可能早于最近一次日历调整；保存前重验，且必须先于 rebuild 的软删。
+        var calendar = new ProductionCalendar(await db.Holidays.AsNoTracking().ToListAsync());
+        if (draftRows.Any(x => !calendar.IsWorkday(x.PlanDate)))
+            return BadRequest(new { error = "草稿包含周日或休假日，请按最新工作日历重新生成" });
         if (draftRows.Any(x =>
             x.Row.OrderId <= 0 ||
             x.Row.LineId <= 0 ||
@@ -385,6 +390,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
         foreach (var o in toUp) { o.Status = "scheduled"; o.LastUpdatedBy = by; }
 
         await db.SaveChangesAsync();
+        await transaction.CommitAsync();
         return Ok(new CommitAutoResult(req.Draft.Count, cleared));
     }
 

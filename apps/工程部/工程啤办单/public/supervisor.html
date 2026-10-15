@@ -111,6 +111,7 @@
       <div class="status-filter d-flex flex-wrap gap-1">
         <button class="btn btn-sm btn-outline-secondary active" onclick="filterSupStatus('',this)">全部</button>
         <button class="btn btn-sm" style="background:#fd7e14;color:#fff;border-color:#fd7e14" onclick="filterSupStatus('待审核',this)">待审核</button>
+        <button class="btn btn-sm" style="background:#0f766e;color:#fff;border-color:#0f766e" onclick="filterSupStatus('待报价',this)">待报价</button>
         <button class="btn btn-sm" style="background:#7c3aed;color:#fff;border-color:#7c3aed" onclick="filterSupStatus('待经理审核',this)">待经理审核</button>
         <button class="btn btn-sm btn-warning"  onclick="filterSupStatus('待生产',this)">待生产</button>
         <button class="btn btn-sm btn-info"     onclick="filterSupStatus('生产中',this)">生产中</button>
@@ -232,6 +233,7 @@ function showDashboard() {
 
 // ─── 订单列表 ─────────────────────────────────────────────────────────────────
 const statusBadge = s => ({
+  '待报价': '<span class="badge" style="background:#0f766e">待报价</span>',
   '待审核': '<span class="badge" style="background:#fd7e14">待审核</span>',
   '待经理审核': '<span class="badge" style="background:#7c3aed">待经理审核</span>',
   '待生产': '<span class="badge badge-pending">待生产</span>',
@@ -267,7 +269,7 @@ function loadSupOrders() {
       orders = orders.filter(o => o.supervisor === currentSupervisor);
       if (supFilter) orders = orders.filter(o => o.status === supFilter);
       orders.sort((a, b) => {
-        const so = { '待审核':0,'待经理审核':1,'待生产':2,'生产中':3,'已完成':4,'已驳回':5 };
+        const so = { '待审核':0,'待报价':1,'待经理审核':2,'待生产':3,'生产中':4,'已完成':5,'已驳回':6 };
         const oa = so[a.status] ?? 9, ob = so[b.status] ?? 9;
         if (oa !== ob) return oa - ob;
         return b.id - a.id;
@@ -349,6 +351,12 @@ function openSupReview(id, orderNum, viewOnly = false) {
     });
 }
 
+function assemblyReviewImage(orderId, filename) {
+  if (!filename) return '-';
+  const url = `${API_BASE}/api/assembly-images/${encodeURIComponent(orderId)}/${encodeURIComponent(filename)}`;
+  return `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="夹具图片" style="max-width:100px;max-height:64px"></a>`;
+}
+
 function renderSupDetails(order, type) {
   const header = `
     <div class="row g-2 mb-3 p-2 rounded" style="background:#fff3e0">
@@ -384,10 +392,10 @@ function renderSupDetails(order, type) {
       <td>${esc(it.required_date||'-')}</td><td>${esc(it.return_time||'-')}</td><td>${esc(it.notes||'-')}</td>
     </tr>`).join('');
   } else if (type === 'assembly') {
-    thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>日期</th><th>备注</th><th>完成时间</th></tr>';
+    thead = '<tr><th>序号</th><th>名称</th><th>图片</th><th>数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th><th>备注</th></tr>';
     rows = items.map((it, i) => `<tr>
       <td>${i+1}</td><td>${esc(it.product_name||'-')}</td>
-      <td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.notes||'-')}</td><td>${esc(it.completion_time||'-')}</td>
+      <td>${assemblyReviewImage(order.id, it.image)}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${it.price == null || it.price === '' ? '-' : esc(String(it.price))}</td><td>${esc(it.completion_time||'-')}</td><td>${esc(it.notes||'-')}</td>
     </tr>`).join('');
   } else {
     thead = '<tr><th>客名</th><th>名称</th><th>样板数量</th><th>提供胶件时间</th><th>收到胶件时间</th><th>工程需求完成时间</th><th>喷油交货时间</th><th>工程师/PMC</th><th>备注</th></tr>';
@@ -398,17 +406,17 @@ function renderSupDetails(order, type) {
     </tr>`).join('');
   }
 
-  return header + `<div class="table-responsive"><table class="table table-bordered table-sm"><thead class="table-light">${thead}</thead><tbody>${rows}</tbody></table></div>`;
+  return header + `<div class="table-responsive"><table class="table table-bordered table-sm"${type === 'assembly' ? ' style="min-width:740px"' : ''}><thead class="table-light">${thead}</thead><tbody>${rows}</tbody></table></div>`;
 }
 
 async function submitSupReview(action) {
   const rejectReason = document.getElementById('supRejectReason').value.trim();
-  const approveStatus = '待经理审核';
+  const approveStatus = supTab === 'assembly' ? '待报价' : '待经理审核';
   const newStatus = action === 'approve' ? approveStatus : '已驳回';
   const pin = sessionStorage.getItem('sup_pin') || '';
 
   try {
-    if (action === 'reject') {
+    if (action === 'reject' && supTab !== 'assembly') {
       const order = await (await apiFetch(`/api/${supTab}/${supReviewingId}`)).json();
       const { items, ...header } = order;
       await apiFetch(`/api/${supTab}/${supReviewingId}`, {
@@ -420,14 +428,14 @@ async function submitSupReview(action) {
       const resp = await apiFetch(`/api/${supTab}/${supReviewingId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus, pin, reviewer_name: currentSupervisor, reviewer_role: 'supervisor' })
+        body: JSON.stringify({ status: newStatus, reason: rejectReason, pin, reviewer_name: currentSupervisor, reviewer_role: 'supervisor' })
       });
       const result = await resp.json();
-      if (result.error) { showToast(result.error, 'danger'); return; }
+      if (!resp.ok || result.error) { showToast(result.error || '操作失败', 'danger'); return; }
     }
     bootstrap.Modal.getInstance(document.getElementById('supReviewModal'))?.hide();
     showToast(action === 'approve'
-      ? '审核通过！已转交经理审核'
+      ? (supTab === 'assembly' ? '审核通过！已转夹具部报价' : '审核通过！已转交经理审核')
       : '已驳回', action === 'approve' ? 'success' : 'danger');
     loadSupOrders();
     checkPendingReviews();

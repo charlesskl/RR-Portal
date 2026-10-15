@@ -13,6 +13,8 @@
     .items-table input.w-date { min-width: 90px; max-width: 100px; }
     .items-table input:focus { position: relative; z-index: 10; min-width: 200px; box-shadow: 0 0 0 3px rgba(41,128,185,.3); }
     .items-table td { overflow: visible; }
+    #orderList { overflow-x: auto; }
+    #orderList table { min-width: 720px; }
   </style>
 </head>
 <body class="bg-light">
@@ -33,7 +35,7 @@
     <div class="d-flex flex-wrap align-items-center gap-2">
       <div class="status-filter d-flex flex-wrap gap-1">
         <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
-        <button class="btn btn-sm" style="background:#0d9488;color:#fff;border-color:#0d9488" onclick="filterStatus('待报价',this)">待报价</button>
+        <button class="btn btn-sm" style="background:#0f766e;color:#fff;border-color:#0f766e" onclick="filterStatus('待报价',this)">待报价</button>
         <button class="btn btn-sm" style="background:#fd7e14;color:#fff;border-color:#fd7e14" onclick="filterStatus('待审核',this)">待审核</button>
         <button class="btn btn-sm" style="background:#7c3aed;color:#fff;border-color:#7c3aed" onclick="filterStatus('待经理审核',this)">待经理审核</button>
         <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
@@ -68,11 +70,17 @@
         <input type="hidden" id="asm-status" value="待审核">
         <div class="row g-3 mb-3">
           <div class="col-md-3"><label class="form-label fw-bold">申请人 <span class="text-danger">*</span></label><input class="form-control" id="asm-applicant" placeholder="您的姓名"></div>
-          <div class="col-md-3"><label class="form-label fw-bold">货号 <span class="text-danger">*</span></label><input class="form-control" id="asm-order_number" placeholder="如 3寸暴力熊"></div>
-          <div class="col-md-3"><label class="form-label fw-bold">货名</label><input class="form-control" id="asm-product_name" placeholder="货名"></div>
-          <div class="col-md-3"><label class="form-label fw-bold">客名</label>
+          <div class="col-md-3"><label class="form-label fw-bold">货号</label><input class="form-control" id="asm-order_number" placeholder="选填"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">货名 <span class="text-danger">*</span></label><input class="form-control" id="asm-product_name" placeholder="货名"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">客名 <span class="text-danger">*</span></label>
             <select class="form-select" id="asm-client_name">
               <option value="">请选择客户</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold" for="asm-supervisor">主管 <span class="text-danger">*</span></label>
+            <select class="form-select" id="asm-supervisor" required>
+              <option value="">请选择主管</option>
+              <option>段新辉</option><option>唐海林</option><option>蒙海欢</option><option>万志勇</option><option>章发东</option><option>刘际维</option><option>甘勇辉</option><option>王玉国</option>
             </select>
           </div>
           <div class="col-md-3"><label class="form-label fw-bold">车间</label>
@@ -134,20 +142,21 @@
 </div>
 
 <!-- ═══════════════════ 报价 Modal ═══════════════════ -->
-<div class="modal fade" id="quoteModal" tabindex="-1" data-bs-backdrop="static">
-  <div class="modal-dialog modal-lg">
+<div class="modal fade" id="quoteModal" tabindex="-1" data-bs-backdrop="static" aria-labelledby="quoteTitle">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
-      <div class="modal-header" style="background:#0d9488;color:#fff">
-        <h5 class="modal-title"><i class="bi bi-cash-coin me-2"></i>夹具报价 — <span id="quoteOrderLabel"></span></h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      <div class="modal-header" style="background:#0f766e;color:#fff">
+        <h5 class="modal-title" id="quoteTitle"><i class="bi bi-cash-coin me-2"></i>夹具报价 — <span id="quoteOrderLabel"></span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭报价"></button>
       </div>
       <div class="modal-body">
         <p class="text-muted small mb-2"><i class="bi bi-info-circle me-1"></i>请为每项夹具填写价格和完成时间，提交后单据进入「待经理审核」，由工程经理审核。</p>
+        <div id="quoteError" class="alert alert-danger" role="alert" hidden></div>
         <div id="quoteBody"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-        <button class="btn btn-primary" style="background:#0d9488;border-color:#0d9488" onclick="submitQuote()"><i class="bi bi-check-lg me-1"></i>提交报价</button>
+        <button id="quoteSubmitBtn" class="btn btn-primary" style="background:#0f766e;border-color:#0f766e" onclick="submitQuote()" disabled><i class="bi bi-check-lg me-1"></i>提交报价</button>
       </div>
     </div>
   </div>
@@ -196,7 +205,7 @@ function loadOrders() {
 }
 
 const statusBadge = s => ({
-  '待报价': '<span class="badge" style="background:#0d9488">待报价</span>',
+  '待报价': '<span class="badge" style="background:#0f766e">待报价</span>',
   '待审核': '<span class="badge" style="background:#fd7e14">待审核</span>',
   '待经理审核': '<span class="badge" style="background:#7c3aed">待经理审核</span>',
   '待生产': '<span class="badge badge-pending">待生产</span>',
@@ -229,7 +238,7 @@ function renderOrderList(orders) {
       <td class="text-nowrap">${statusBadge(o.status)}</td>
       <td class="text-nowrap" onclick="event.stopPropagation()">
         <div class="btn-group btn-group-sm">
-          ${canQuote  ? `<button class="btn text-white" style="background:#0d9488" onclick="openQuoteModal(${o.id})" title="填写报价"><i class="bi bi-cash-coin me-1"></i>报价</button>` : ''}
+          ${canQuote  ? `<button class="btn text-white" style="background:#0f766e" onclick="openQuoteModal(${o.id})" title="填写报价"><i class="bi bi-cash-coin me-1"></i>报价</button>` : ''}
           ${canEdit   ? `<button class="btn btn-outline-primary" onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>` : ''}
           ${canDelete ? `<button class="btn btn-outline-danger"  onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>` : ''}
           ${canStart  ? `<button class="btn btn-info text-white" onclick="changeStatus(${o.id},'生产中')" title="开始生产"><i class="bi bi-play-fill me-1"></i>开始</button>` : ''}
@@ -269,6 +278,7 @@ function openNewModal() {
   document.getElementById('asm-order_number').value = '';
   document.getElementById('asm-product_name').value = '';
   document.getElementById('asm-client_name').value = '';
+  document.getElementById('asm-supervisor').value = '';
   document.getElementById('asm-workshop').value = '';
   document.getElementById('asm-reason').value = '';
   document.getElementById('asm-status').value = '待审核';
@@ -295,6 +305,7 @@ function editOrder(id) {
       document.getElementById('asm-order_number').value = order.order_number || '';
       document.getElementById('asm-product_name').value = order.product_name || '';
       document.getElementById('asm-client_name').value = order.client_name || '';
+      document.getElementById('asm-supervisor').value = order.supervisor || '';
       document.getElementById('asm-workshop').value = order.workshop || '';
       document.getElementById('asm-reason').value = order.reason || '';
       document.getElementById('asm-status').value = (order.status === '已驳回') ? '待审核' : order.status;
@@ -464,7 +475,9 @@ function saveOrder() {
   const applicant = document.getElementById('asm-applicant').value.trim();
   if (!applicant) { alert('请填写申请人姓名'); return; }
   const orderNumber = document.getElementById('asm-order_number').value.trim();
-  if (!orderNumber) { alert('请填写货号'); return; }
+  if (!document.getElementById('asm-product_name').value.trim()) { alert('请填写货名'); return; }
+  if (!document.getElementById('asm-client_name').value) { alert('请选择客户'); return; }
+  if (!document.getElementById('asm-supervisor').value) { alert('请选择主管，单据需先交主管审核'); return; }
 
   const items = collectRows('asmItemsBody', asmFields);
   if (!items.length || items.every(it => !it.product_name)) {
@@ -481,6 +494,7 @@ function saveOrder() {
     order_number:  orderNumber,
     product_name:  document.getElementById('asm-product_name').value || null,
     client_name:   document.getElementById('asm-client_name').value || null,
+    supervisor:    document.getElementById('asm-supervisor').value,
     workshop:      document.getElementById('asm-workshop').value || null,
     reason:        document.getElementById('asm-reason').value || null,
     status:        document.getElementById('asm-status').value,
@@ -504,68 +518,133 @@ function saveOrder() {
     .catch(() => showToast('保存失败', 'danger'));
 }
 
-// ─── 报价（待报价 → 填价格 → 待审核）─────────────────────────────────────────
+// ─── 报价（待报价 → 一次保存全部报价并转待经理审核）─────────────────────────
 let _quoteOrderId = null;
 let _quoteItems = [];
+let _quoteVersion = null;
+let _quoteRequestSeq = 0;
+let _quoteSubmitting = false;
 
-function openQuoteModal(id) {
-  apiFetch(`/api/assembly/${id}`)
-    .then(r => r.json())
-    .then(order => {
-      if (order.status !== '待报价') { showToast('该单据当前不在「待报价」状态', 'danger'); return; }
-      _quoteOrderId = id;
-      _quoteItems = order.items || [];
-      document.getElementById('quoteOrderLabel').textContent = order.order_number || `#${id}`;
-      const rows = _quoteItems.map((it, i) => `
+function quoteError(message = '') {
+  const box = document.getElementById('quoteError');
+  box.textContent = message;
+  box.hidden = !message;
+}
+
+function setQuoteBusy(busy) {
+  _quoteSubmitting = busy;
+  document.querySelectorAll('#quoteModal button, #quoteBody input').forEach(el => { el.disabled = busy; });
+  const submit = document.getElementById('quoteSubmitBtn');
+  submit.disabled = busy || !_quoteOrderId;
+  submit.textContent = busy ? '正在提交…' : '提交报价';
+}
+
+async function quoteResponse(response) {
+  let data;
+  try { data = await response.json(); } catch (_) {
+    throw new Error(`服务器响应无法读取（${response.status}），请稍后重试`);
+  }
+  if (!response.ok || data?.error) {
+    throw new Error(data?.error || `请求失败（${response.status}），请稍后重试`);
+  }
+  return data;
+}
+
+async function openQuoteModal(id) {
+  if (_quoteSubmitting) return;
+  const request = ++_quoteRequestSeq;
+  _quoteOrderId = null;
+  _quoteVersion = null;
+  _quoteItems = [];
+  quoteError();
+  setQuoteBusy(false);
+  document.getElementById('quoteOrderLabel').textContent = `#${id}`;
+  document.getElementById('quoteBody').textContent = '正在加载报价明细…';
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('quoteModal')).show();
+  try {
+    const order = await quoteResponse(await apiFetch(`/api/assembly/${id}`));
+    if (request !== _quoteRequestSeq) return;
+    if (order.status !== '待报价') throw new Error('该单据当前不在「待报价」状态，请关闭后刷新列表');
+    if (!Array.isArray(order.items) || !order.items.length || !order.updated_at) {
+      throw new Error('该单据缺少报价明细或版本信息，请关闭后刷新列表');
+    }
+    _quoteItems = order.items;
+    _quoteVersion = order.updated_at;
+    document.getElementById('quoteOrderLabel').textContent = order.order_number || order.product_name || `#${id}`;
+    const rows = _quoteItems.map((it, i) => `
         <tr>
           <td class="text-center text-muted">${i + 1}</td>
           <td>${esc(it.product_name || '-')}</td>
           <td class="text-center">${esc(it.quantity || '-')}</td>
           <td>${esc(it.required_date || '-')}</td>
-          <td><input type="number" class="form-control form-control-sm" name="quote_price" data-idx="${i}"
-              value="${it.price === null || it.price === undefined ? '' : esc(it.price)}" step="0.01" min="0" placeholder="0.00"></td>
-          <td><input type="date" class="form-control form-control-sm" name="quote_completion" data-idx="${i}"
-              value="${esc(it.completion_time || '')}"></td>
+          <td><input type="number" class="form-control" name="quote_price" data-idx="${i}" aria-label="第${i + 1}项价格"
+              value="${it.price === null || it.price === undefined ? '' : esc(String(it.price))}" step="0.01" min="0" placeholder="0.00" required></td>
+          <td><input type="date" class="form-control" name="quote_completion" data-idx="${i}" aria-label="第${i + 1}项完成日期"
+              value="${esc(it.completion_time || '')}" min="0001-01-01" max="9999-12-31" required></td>
         </tr>`).join('');
-      document.getElementById('quoteBody').innerHTML = _quoteItems.length ? `
-        <table class="table table-bordered table-sm mb-0">
+    document.getElementById('quoteBody').innerHTML = `
+      <div class="table-responsive">
+        <table class="table table-bordered table-sm mb-0" style="min-width:650px">
           <thead class="table-dark">
             <tr><th style="width:50px">序号</th><th>名称</th><th style="width:70px">数量</th><th>要求完成日期</th><th style="width:130px">价格</th><th style="width:150px">完成时间</th></tr>
           </thead>
           <tbody>${rows}</tbody>
-        </table>` : '<div class="text-muted small">（无明细行）</div>';
-      new bootstrap.Modal(document.getElementById('quoteModal')).show();
-    })
-    .catch(() => showToast('加载失败', 'danger'));
+        </table>
+      </div>`;
+    _quoteOrderId = id;
+    setQuoteBusy(false);
+  } catch (error) {
+    if (request === _quoteRequestSeq) quoteError(error.message || '加载失败，请关闭后重试');
+  }
 }
 
-function submitQuote() {
-  if (!_quoteOrderId) return;
-  const items = _quoteItems.map(it => ({ ...it }));
-  document.querySelectorAll('#quoteBody [name="quote_price"]').forEach(inp => {
-    const i = +inp.dataset.idx;
-    if (items[i]) items[i].price = inp.value.trim() || null;
-  });
-  document.querySelectorAll('#quoteBody [name="quote_completion"]').forEach(inp => {
-    const i = +inp.dataset.idx;
-    if (items[i]) items[i].completion_time = inp.value.trim() || null;
-  });
-  const hdrs = { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('夹具部') };
-  apiFetch(`/api/assembly/${_quoteOrderId}`, { method: 'PUT', headers: hdrs, body: JSON.stringify({ items }) })
-    .then(r => r.json())
-    .then(d => {
-      if (d.error) { showToast(d.error, 'danger'); return; }
-      return apiFetch(`/api/assembly/${_quoteOrderId}/status`, { method: 'PATCH', headers: hdrs, body: JSON.stringify({ status: '待经理审核' }) })
-        .then(r => r.json())
-        .then(d2 => {
-          if (d2.error) { showToast(d2.error, 'danger'); return; }
-          bootstrap.Modal.getInstance(document.getElementById('quoteModal'))?.hide();
-          showToast('报价已提交，单据进入「待经理审核」', 'success');
-          loadOrders();
-        });
-    })
-    .catch(() => showToast('提交失败，请重试', 'danger'));
+async function submitQuote() {
+  if (!_quoteOrderId || _quoteSubmitting) return;
+  quoteError();
+  const items = [];
+  for (let i = 0; i < _quoteItems.length; i++) {
+    const price = document.querySelector(`#quoteBody [name="quote_price"][data-idx="${i}"]`);
+    const completion = document.querySelector(`#quoteBody [name="quote_completion"][data-idx="${i}"]`);
+    if (!price || !completion) { quoteError('报价明细不完整，请关闭后重新打开'); return; }
+    if (!price.reportValidity() || !completion.reportValidity()) return;
+    if (!price.value.trim() || !Number.isFinite(Number(price.value)) || Number(price.value) < 0) {
+      quoteError(`第 ${i + 1} 项请填写有效的非负价格`); price.focus(); return;
+    }
+    const date = completion.value;
+    const parsed = new Date(date + 'T00:00:00Z');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || +date.slice(0, 4) < 1 || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+      quoteError(`第 ${i + 1} 项请填写有效的完成日期`); completion.focus(); return;
+    }
+    items.push({ id: _quoteItems[i].id, price: price.value.trim(), completion_time: date });
+  }
+  setQuoteBusy(true);
+  try {
+    await quoteResponse(await apiFetch(`/api/assembly/${_quoteOrderId}/quote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('夹具部') },
+      body: JSON.stringify({ expected_updated_at: _quoteVersion, items })
+    }));
+    setQuoteBusy(false);
+    bootstrap.Modal.getInstance(document.getElementById('quoteModal'))?.hide();
+    showToast('报价已提交，单据进入「待经理审核」', 'success');
+    loadOrders();
+  } catch (error) {
+    quoteError(error.message || '提交失败，请稍后重试；已填写内容已保留');
+  } finally {
+    setQuoteBusy(false);
+  }
 }
+
+document.getElementById('quoteModal').addEventListener('hide.bs.modal', event => {
+  if (_quoteSubmitting) event.preventDefault();
+});
+document.getElementById('quoteModal').addEventListener('hidden.bs.modal', () => {
+  ++_quoteRequestSeq;
+  _quoteOrderId = null;
+  _quoteItems = [];
+  _quoteVersion = null;
+  setQuoteBusy(false);
+});
 
 // ─── 状态变更 ────────────────────────────────────────────────────────────────
 function changeStatus(id, newStatus) {
@@ -574,7 +653,7 @@ function changeStatus(id, newStatus) {
 
   apiFetch(`/api/assembly/${id}/status`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('夹具部') },
     body: JSON.stringify({ status: newStatus })
   })
     .then(r => r.json())

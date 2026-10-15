@@ -26,11 +26,20 @@
     .asm-img-cell { min-width: 110px; }
     .asm-drop { display:inline-flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
       width:100%; min-width:96px; padding:6px 4px; border:1.5px dashed #adb5bd; border-radius:6px;
-      color:#6c757d; font-size:12px; cursor:pointer; background:#fafbfc; transition:all .15s; user-select:none; }
+      color:#495057; font-size:12px; cursor:pointer; background:#fafbfc; transition:all .15s; user-select:none; }
     .asm-drop:hover { border-color:#0d6efd; color:#0d6efd; background:#f0f6ff; }
     .asm-drop i { font-size:18px; }
     .asm-img-cell.dragover .asm-drop, .asm-img-cell.dragover { border-color:#0d6efd; background:#e7f1ff; color:#0d6efd; }
     .asm-row-preview img { max-height:44px; max-width:96px; border-radius:4px; border:1px solid #ddd; cursor:pointer; }
+    .asm-drop:focus-visible, .asm-row-preview button:focus-visible { outline:3px solid #0d6efd; outline-offset:2px; }
+    .asm-img-message { max-width:140px; overflow-wrap:anywhere; }
+    @media (max-width:767px) {
+      .navbar .container-fluid > .d-flex { width:100%; flex-wrap:wrap; }
+      .nav-dept-link { white-space:nowrap; }
+      #orderList { overflow-x:auto; }
+      #orderList table { min-width:700px; }
+      #asmModal input, #asmModal select { font-size:16px; }
+    }
   </style>
 </head>
 <body class="bg-light">
@@ -69,7 +78,7 @@
     <div class="d-flex flex-wrap align-items-center gap-2">
       <div class="status-filter d-flex flex-wrap gap-1">
         <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
-        <button class="btn btn-sm" style="background:#0d9488;color:#fff;border-color:#0d9488" onclick="filterStatus('待报价',this)">待报价</button>
+        <button class="btn btn-sm" style="background:#0f766e;color:#fff;border-color:#0f766e" onclick="filterStatus('待报价',this)">待报价</button>
         <button class="btn btn-sm" style="background:#fd7e14;color:#fff;border-color:#fd7e14" onclick="filterStatus('待审核',this)">待审核</button>
         <button class="btn btn-sm" style="background:#7c3aed;color:#fff;border-color:#7c3aed" onclick="filterStatus('待经理审核',this)">待经理审核</button>
         <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
@@ -325,7 +334,7 @@
 
 <!-- ═══════════════════ 夹具申请单 Modal ═══════════════════ -->
 <div class="modal fade" id="asmModal" tabindex="-1" data-bs-backdrop="static">
-  <div class="modal-dialog modal-xl">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header" style="background:#2980b9;color:#fff">
         <h5 class="modal-title"><i class="bi bi-gear-wide-connected me-2"></i><span id="asmModalTitle">新建夹具申请单</span></h5>
@@ -336,15 +345,15 @@
         <input type="hidden" id="asm-status" value="待审核">
         <div class="row g-3 mb-3">
           <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="asm-order_number" placeholder="如 157149（选填）"></div>
-          <div class="col-md-3"><label class="form-label fw-bold">产品名称 <span class="text-danger">*</span></label><input class="form-control" id="asm-product_name" placeholder="产品名称"></div>
+          <div class="col-md-3"><label class="form-label fw-bold" for="asm-product_name">产品名称 <span class="text-danger">*</span></label><input class="form-control" id="asm-product_name" placeholder="产品名称" required></div>
           <div class="col-md-3"><label class="form-label fw-bold">客名 <span class="text-danger">*</span></label>
-            <select class="form-select" id="asm-client_name">
+            <select class="form-select" id="asm-client_name" aria-label="客名" required>
               <option value="">请选择客户</option>
             </select>
           </div>
           <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="asm-date"></div>
-          <div class="col-md-3"><label class="form-label fw-bold">主管</label>
-            <select class="form-select" id="asm-supervisor">
+          <div class="col-md-3"><label class="form-label fw-bold" for="asm-supervisor">主管 <span class="text-danger">*</span></label>
+            <select class="form-select" id="asm-supervisor" required>
               <option value="">请选择主管</option>
               <option>段新辉</option><option>唐海林</option><option>蒙海欢</option><option>万志勇</option><option>章发东</option><option>刘际维</option><option>甘勇辉</option><option>王玉国</option>
             </select>
@@ -368,7 +377,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-        <button class="btn btn-primary" style="background:#2980b9;border-color:#2980b9" onclick="saveOrder('assembly')"><i class="bi bi-save me-1"></i>保存</button>
+        <button class="btn btn-primary" id="asmSaveBtn" style="background:#2980b9;border-color:#2980b9" onclick="saveOrder('assembly')"><i class="bi bi-save me-1"></i>保存</button>
       </div>
     </div>
   </div>
@@ -594,7 +603,7 @@ function loadOrders() {
 }
 
 // 主管审核后的状态，普通用户不可编辑/删除；主管/经理可以
-const lockedStatuses = ['待经理审核', '待生产', '生产中', '已完成'];
+const lockedStatuses = ['待报价', '待经理审核', '待生产', '生产中', '已完成'];
 let _supervisors = [], _managers = [];
 apiFetch('/api/roles').then(r => r.json()).then(d => { _supervisors = d.supervisors || []; _managers = d.managers || []; }).catch(() => {});
 function isPrivileged() { return _supervisors.includes(currentUser) || _managers.includes(currentUser); }
@@ -609,7 +618,7 @@ function applyNavPermissions() {
 const isLocked = s => lockedStatuses.includes(s) && !isPrivileged();
 
 const statusBadge = s => ({
-  '待报价': '<span class="badge" style="background:#0d9488">待报价</span>',
+  '待报价': '<span class="badge" style="background:#0f766e">待报价</span>',
   '待审核': '<span class="badge" style="background:#fd7e14">待审核</span>',
   '待经理审核': '<span class="badge" style="background:#7c3aed">待经理审核</span>',
   '待生产': '<span class="badge badge-pending">待生产</span>',
@@ -1285,6 +1294,8 @@ function editAsmOrder(id) {
   apiFetch(`/api/assembly/${id}`)
     .then(r => r.json())
     .then(order => {
+      if (order.error) { showToast(order.error, 'danger'); return; }
+      if (!canModifyOrder(order.status)) { showToast('审核后的单据仅经理可修改', 'danger'); return; }
       document.getElementById('asmModalTitle').textContent = `编辑夹具申请单 #${id}`;
       document.getElementById('asm-id').value = order.id;
       document.getElementById('asm-order_number').value = order.order_number || '';
@@ -1300,33 +1311,54 @@ function editAsmOrder(id) {
       _asmRowSeq = 0;
       (order.items || []).forEach(it => addAsmRow(it));
       if (!order.items || !order.items.length) addAsmRow();
+      updateAsmSaveButton();
       new bootstrap.Modal(document.getElementById('asmModal')).show();
     })
     .catch(() => showToast('加载失败', 'danger'));
 }
 
 const asmItemFields = ['product_name','quantity','required_date','price','completion_time'];
+let _asmSaving = false;
+document.getElementById('asmModal').addEventListener('hide.bs.modal', event => {
+  if (_asmSaving) event.preventDefault();
+});
+
+function updateAsmSaveButton() {
+  const pending = Array.from(document.querySelectorAll('#asmItemsBody tr')).some(tr => tr._imgPending);
+  const btn = document.getElementById('asmSaveBtn');
+  btn.disabled = _asmSaving || pending;
+  btn.textContent = _asmSaving ? '保存中…' : pending ? '图片处理中…' : '保存';
+}
 
 function saveAsmOrder() {
+  if (_asmSaving) return;
+  const rows = Array.from(document.querySelectorAll('#asmItemsBody tr'));
+  if (rows.some(tr => tr._imgPending)) { showToast('图片正在处理，请稍后保存', 'warning'); return; }
+  if (rows.some(tr => tr._imgError)) { showToast('有图片处理失败，请重新选择或移除后保存', 'danger'); return; }
   const orderNumber = document.getElementById('asm-order_number').value.trim();
   if (!document.getElementById('asm-product_name').value.trim()) { alert('请填写产品名称'); return; }
   if (!document.getElementById('asm-client_name').value) { alert('请选择客户'); return; }
-  const items = collectRows('asmItemsBody', asmItemFields);
-  if (!items.length || items.every(it => !it.product_name)) { alert('请至少填写一项夹具名称'); return; }
-  if (!currentUser) { showLoginModal(); return; }
-
-  // 明细行图片：image 为已存服务端文件名，new_image 为本次新上传（dataURL，服务端落盘）
-  document.querySelectorAll('#asmItemsBody tr').forEach((tr, i) => {
+  if (!document.getElementById('asm-supervisor').value) { alert('请选择负责审核的主管'); return; }
+  for (const input of document.querySelectorAll('#asmItemsBody input[name]')) {
+    if (!input.reportValidity()) return;
+  }
+  // 字段与图片先按同一 DOM 行收集，再跳过完全空白行，保持图片与夹具对应。
+  const items = rows.map(tr => {
+    const item = {};
+    asmItemFields.forEach(f => { item[f] = tr.querySelector(`[name="${f}"]`).value.trim() || null; });
     const st = tr._img || {};
-    if (!items[i]) return;
-    items[i].image = st.name || null;
-    if (st.dataUrl) items[i].new_image = st.dataUrl;
-  });
+    item.image = st.name || null;
+    if (st.dataUrl) item.new_image = st.dataUrl;
+    return item;
+  }).filter(item => Object.values(item).some(value => value !== null && value !== ''));
+  if (!items.length) { alert('请至少填写一项夹具名称'); return; }
+  if (items.some(it => !it.product_name)) { alert('请填写所有明细行的夹具名称，或删除未完成的行'); return; }
+  if (!currentUser) { showLoginModal(); return; }
 
   const id = document.getElementById('asm-id').value;
   const body = {
     order_number: orderNumber,
-    product_name: document.getElementById('asm-product_name').value || null,
+    product_name: document.getElementById('asm-product_name').value.trim(),
     client_name: document.getElementById('asm-client_name').value || null,
     date: document.getElementById('asm-date').value || null,
     supervisor: document.getElementById('asm-supervisor').value || null,
@@ -1338,16 +1370,31 @@ function saveAsmOrder() {
   const url = id ? `/api/assembly/${id}` : '/api/assembly';
   const method = id ? 'PUT' : 'POST';
   const hdrs = { 'Content-Type': 'application/json', 'X-User': encodeURIComponent(currentUser) };
-
-  apiFetch(url, { method, headers: hdrs, body: JSON.stringify(body) })
-    .then(r => r.json())
+  const payload = JSON.stringify(body);
+  if (new Blob([payload]).size > 10 * 1024 * 1024) { showToast('图片总大小超过10MB，请减少图片后保存', 'danger'); return; }
+  // 保留表单直到服务器确认，阻止重复提交及保存期间更改图片。
+  _asmSaving = true;
+  document.querySelectorAll('#asmModal input, #asmModal select, #asmModal button').forEach(el => { el.disabled = true; });
+  updateAsmSaveButton();
+  apiFetch(url, { method, headers: hdrs, body: payload })
+    .then(async r => {
+      const data = await r.json();
+      if (!r.ok || data.error) throw new Error(data.error || '服务器未能保存单据');
+      return data;
+    })
     .then(data => {
       if (data.error) { showToast(data.error, 'danger'); return; }
+      _asmSaving = false;
       bootstrap.Modal.getInstance(document.getElementById('asmModal'))?.hide();
       showToast(id ? '更新成功！' : '创建成功！', 'success');
       loadOrders();
     })
-    .catch(() => showToast('保存失败', 'danger'));
+    .catch(error => showToast('保存失败：' + error.message, 'danger'))
+    .finally(() => {
+      _asmSaving = false;
+      document.querySelectorAll('#asmModal input, #asmModal select, #asmModal button').forEach(el => { el.disabled = false; });
+      updateAsmSaveButton();
+    });
 }
 
 // ─── 问题查看与处理 ───────────────────────────────────────────────────────────
@@ -1429,6 +1476,8 @@ function showToast(msg, type = 'success') {
 let reviewingOrderId = null;
 let reviewingOrderSupervisor = null;
 let reviewingOrderStatus = null;
+let reviewingOrderType = null;
+let _reviewSubmitting = false;
 let pendingChangePinUser = null;
 
 async function submitChangePin() {
@@ -1464,7 +1513,10 @@ async function submitChangePin() {
 }
 
 function reviewOrder(id, orderNum) {
+  if (_reviewSubmitting) return;
   reviewingOrderId = id;
+  reviewingOrderType = currentTab;
+  const type = reviewingOrderType;
   reviewingOrderSupervisor = null;
   reviewingOrderStatus = null;
   document.getElementById('reviewOrderLabel').textContent = orderNum || `#${id}`;
@@ -1473,14 +1525,21 @@ function reviewOrder(id, orderNum) {
   document.getElementById('reviewPinError').classList.add('d-none');
   document.getElementById('rejectReasonError').classList.add('d-none');
   document.getElementById('reviewOrderDetails').innerHTML = '<div class="text-center text-muted py-4">加载中...</div>';
+  document.querySelectorAll('#reviewModal button[onclick^="submitReview"]').forEach(btn => { btn.disabled = true; });
   new bootstrap.Modal(document.getElementById('reviewModal')).show();
 
-  apiFetch(`/api/${currentTab}/${id}`)
-    .then(r => r.json())
+  apiFetch(`/api/${type}/${id}`)
+    .then(async r => {
+      const order = await r.json();
+      if (!r.ok || order.error) throw new Error(order.error || '加载单据失败');
+      return order;
+    })
     .then(order => {
+      if (reviewingOrderId !== id || reviewingOrderType !== type) return;
       reviewingOrderSupervisor = order.supervisor || null;
       reviewingOrderStatus = order.status || null;
-      document.getElementById('reviewOrderDetails').innerHTML = renderReviewDetails(order, currentTab);
+      document.getElementById('reviewOrderDetails').innerHTML = renderReviewDetails(order, type);
+      document.querySelectorAll('#reviewModal button[onclick^="submitReview"]').forEach(btn => { btn.disabled = false; });
     })
     .catch(() => {
       document.getElementById('reviewOrderDetails').innerHTML = '<div class="text-danger">加载单据失败</div>';
@@ -1512,6 +1571,7 @@ function renderReviewDetails(order, type) {
     headerHtml = `
     <div class="row g-2 mb-3">
       <div class="col-6 col-md-3"><div class="text-muted small">货号</div><div class="fw-bold">${esc(order.order_number || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">产品名称</div><div>${esc(order.product_name || '-')}</div></div>
       <div class="col-6 col-md-3"><div class="text-muted small">客名</div><div>${esc(order.client_name || '-')}</div></div>
       <div class="col-6 col-md-3"><div class="text-muted small">申请人</div><div>${esc(order.created_by || '-')}</div></div>
       <div class="col-6 col-md-3"><div class="text-muted small">状态</div><div>${statusBadge(order.status)}</div></div>
@@ -1545,8 +1605,8 @@ function renderReviewDetails(order, type) {
     thead = '<tr><th>序号</th><th>产品编号</th><th>工模编号</th><th>工模名称</th><th>原料</th><th>颜色/编号</th><th>色粉编号</th><th>每啤毛重(g)</th><th>数量</th><th>要求完成日期</th><th>回模时间</th><th>备注</th></tr>';
     rows = items.map(it => `<tr><td>${esc(it.seq_no||'-')}</td><td>${esc(it.product_id||'-')}</td><td>${esc(it.mold_id||'-')}</td><td>${esc(it.mold_name||'-')}</td><td>${esc(it.material||'-')}</td><td>${esc(it.color_code||'-')}</td><td>${esc(it.pigment_no||'-')}</td><td>${esc(it.unit_weight||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.return_time||'-')}</td><td>${esc(it.notes||'-')}</td></tr>`).join('');
   } else if (type === 'assembly') {
-    thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th></tr>';
-    rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.price||'-')}</td><td>${esc(it.completion_time||'-')}</td></tr>`).join('');
+    thead = '<tr><th>序号</th><th>名称</th><th>图片</th><th>数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th></tr>';
+    rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${it.image ? `<a href="${esc(asmImgUrl(order.id, it.image))}" target="_blank" rel="noopener"><img src="${esc(asmImgUrl(order.id, it.image))}" alt="${esc(it.product_name || '夹具')}图片" style="max-width:96px;max-height:60px"></a>` : '-'}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(String(it.price ?? '-'))}</td><td>${esc(it.completion_time||'-')}</td></tr>`).join('');
   } else {
     thead = '<tr><th>客名</th><th>名称</th><th>样板数量</th><th>提供胶件时间</th><th>收到胶件时间</th><th>工程需求完成时间</th><th>喷油交货时间</th><th>工程师/PMC</th><th>备注</th></tr>';
     rows = items.map(it => `<tr><td>${esc(it.client_name||'-')}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.sample_qty||'-')}</td><td>${esc(it.provide_time||'-')}</td><td>${esc(it.receive_time||'-')}</td><td>${esc(it.eng_complete_time||'-')}</td><td>${esc(it.delivery_time||'-')}</td><td>${esc(it.engineer||'-')}</td><td>${esc(it.notes||'-')}</td></tr>`).join('');
@@ -1556,6 +1616,9 @@ function renderReviewDetails(order, type) {
 }
 
 async function submitReview(action) {
+  if (_reviewSubmitting) return;
+  if (!reviewingOrderStatus || !reviewingOrderId) { showToast('请等待单据加载完成后再审核', 'warning'); return; }
+  const type = reviewingOrderType;
   const enteredPin = document.getElementById('reviewPin').value.trim();
   const rejectReason = document.getElementById('rejectReason').value.trim();
 
@@ -1565,6 +1628,10 @@ async function submitReview(action) {
     return;
   }
   document.getElementById('reviewPinError').classList.add('d-none');
+
+  _reviewSubmitting = true;
+  document.querySelectorAll('#reviewModal button').forEach(btn => { btn.disabled = true; });
+  try {
 
   let isManager = false;
   let reviewerName = '';
@@ -1614,20 +1681,23 @@ async function submitReview(action) {
     document.getElementById('reviewPin').focus();
     return;
   }
+  if (type === 'assembly' && (isManager ? reviewingOrderStatus !== '待经理审核' : reviewingOrderStatus !== '待审核')) {
+    showToast(isManager ? '夹具单需先经主管审核并完成报价，再由经理审核' : '主管只能审核待审核的夹具单', 'warning');
+    return;
+  }
 
   let newStatus, toastMsg;
   // 啤办单需经理二级审核；夹具单主管通过后先转夹具部报价（待报价），报价完成后才由经理审核；搪胶/喷油主管通过即可
-  const needManagerReview = currentTab === 'injection' || currentTab === 'assembly';
+  const needManagerReview = type === 'injection' || type === 'assembly';
   if (action === 'reject') {
     newStatus = '已驳回';
     toastMsg = '已驳回';
   } else if (isManager) {
     newStatus = '待生产';
     toastMsg = '经理审核通过！单据已进入待生产';
-  } else if (currentTab === 'assembly') {
-    // 夹具单：主管审核通过 → 待报价（转夹具部报价）；已在待经理审核的单主管不再变更状态
-    newStatus = reviewingOrderStatus === '待经理审核' ? '待经理审核' : '待报价';
-    toastMsg = newStatus === '待报价' ? '主管审核通过！已转夹具部报价' : '主管已确认，仍待经理审核';
+  } else if (type === 'assembly') {
+    newStatus = '待报价';
+    toastMsg = '主管审核通过！已转夹具部报价';
   } else if (!needManagerReview) {
     newStatus = '待生产';
     toastMsg = '主管审核通过！单据已进入待生产';
@@ -1639,7 +1709,7 @@ async function submitReview(action) {
   try {
     const patchBody = { status: newStatus, pin: enteredPin, reviewer_name: reviewerName, reviewer_role: reviewerRole };
     if (action === 'reject' && rejectReason) patchBody.reason = rejectReason;
-    const resp = await apiFetch(`/api/${currentTab}/${reviewingOrderId}/status`, {
+    const resp = await apiFetch(`/api/${type}/${reviewingOrderId}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent(currentUser) },
       body: JSON.stringify(patchBody)
@@ -1651,6 +1721,10 @@ async function submitReview(action) {
     loadOrders();
   } catch (e) {
     showToast('操作失败：' + e.message, 'danger');
+  }
+  } finally {
+    _reviewSubmitting = false;
+    document.querySelectorAll('#reviewModal button').forEach(btn => { btn.disabled = false; });
   }
 }
 
@@ -2342,6 +2416,7 @@ function openNewAsmModal() {
   document.getElementById('asmItemsBody').innerHTML = '';
   _asmRowSeq = 0;
   addAsmRow();
+  updateAsmSaveButton();
   new bootstrap.Modal(document.getElementById('asmModal')).show();
 }
 
@@ -2355,14 +2430,15 @@ function addAsmRow(it={}) {
     <td class="text-center asm-img-cell p-1"
         ondragover="asmImgDragOver(event)" ondragleave="asmImgDragLeave(event)" ondrop="asmImgDrop(event)">
       <input type="file" accept="image/*" hidden onchange="onAsmRowImage(this)">
-      <div class="asm-drop" title="拖拽图片到此处，或点击选择" onclick="asmDropZoneClick(this)">
+      <button type="button" class="asm-drop" title="拖拽图片到此处，或点击选择" onclick="asmDropZoneClick(this)">
         <i class="bi bi-cloud-arrow-up"></i><span>拖入图片</span>
-      </div>
+      </button>
       <span class="asm-row-preview d-inline-block align-middle"></span>
+      <div class="asm-img-message small" role="status" aria-live="polite"></div>
     </td>
     <td>${inp('number','quantity',it.quantity||'','style="width:80px" min="1"')}</td>
     <td>${inp('date','required_date',it.required_date||'')}</td>
-    <td>${inp('number','price',it.price||'','placeholder="价格" step="0.01"')}</td>
+    <td>${inp('number','price',String(it.price ?? ''),'placeholder="价格" step="0.01" min="0"')}</td>
     <td>${inp('text','completion_time',it.completion_time||'','placeholder="完成时间"')}</td>
     <td><button type="button" class="btn btn-sm btn-danger" onclick="removeAsmRow(this)"><i class="bi bi-x-lg"></i></button></td>`;
   document.getElementById('asmItemsBody').appendChild(tr);
@@ -2370,24 +2446,35 @@ function addAsmRow(it={}) {
 }
 
 // ─── 夹具明细行图片（每行一张：tr._img = { name?: 服务端文件名, dataUrl?: 新图 }）───
-function asmImgUrl(orderId, name) { return `${API_BASE}/api/assembly-images/${orderId}/${name}`; }
+function asmImgUrl(orderId, name) { return `${API_BASE}/api/assembly-images/${encodeURIComponent(orderId)}/${encodeURIComponent(name)}`; }
 
 // 客户端压缩：最长边 ≤1280px，JPEG 0.85，避免请求体过大
 function fileToResizedDataURL(file, maxDim = 1280, quality = 0.85) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
+    const timer = setTimeout(() => { cleanup(); img.src = ''; reject(new Error('图片读取超时')); }, 30000);
+    const cleanup = () => { clearTimeout(timer); URL.revokeObjectURL(url); };
     img.onload = () => {
-      let w = img.width, h = img.height;
-      const scale = Math.min(1, maxDim / Math.max(w, h));
-      w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      c.getContext('2d').drawImage(img, 0, 0, w, h);
-      URL.revokeObjectURL(url);
-      resolve(c.toDataURL('image/jpeg', quality));
+      try {
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (!w || !h) throw new Error('图片尺寸无效');
+        const scale = Math.min(1, maxDim / Math.max(w, h));
+        w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+        if (!ctx) throw new Error('浏览器无法处理图片');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        const dataUrl = c.toDataURL('image/jpeg', quality);
+        if (!dataUrl.startsWith('data:image/jpeg;base64,') || dataUrl.length > 7 * 1024 * 1024) throw new Error('压缩后的图片过大');
+        resolve(dataUrl);
+      } catch (error) { reject(error); }
+      finally { cleanup(); }
     };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
+    img.onerror = () => { cleanup(); reject(new Error('图片读取失败')); };
     img.src = url;
   });
 }
@@ -2399,24 +2486,50 @@ function renderAsmRowImage(tr) {
   const orderId = document.getElementById('asm-id').value;
   const src = img.dataUrl || (img.name && orderId ? asmImgUrl(orderId, img.name) : '');
   box.innerHTML = src
-    ? `<img src="${src}" title="点击移除图片" onclick="clearAsmRowImage(this)">`
+    ? `<button type="button" class="btn p-0 border-0" title="点击移除图片" aria-label="移除此行图片" onclick="clearAsmRowImage(this)"><img src="${esc(src)}" alt="夹具图片"></button>`
     : '';
-  drop.style.display = src ? 'none' : '';
+  drop.style.display = src && !tr._imgPending && !tr._imgError ? 'none' : '';
+  drop.querySelector('span').textContent = tr._imgPending ? '重新选择' : '拖入图片';
+  const message = tr.querySelector('.asm-img-message');
+  message.classList.toggle('text-danger', !!tr._imgError);
+  message.textContent = tr._imgPending ? '图片处理中…' : tr._imgError || '';
+  if (tr._imgPending || tr._imgError) {
+    const clear = document.createElement('button');
+    clear.type = 'button'; clear.className = 'btn btn-sm btn-outline-secondary d-block mt-1';
+    clear.textContent = '移除图片'; clear.onclick = () => clearAsmRowImage(clear);
+    message.appendChild(clear);
+  }
 }
 
 function asmDropZoneClick(zone) {
+  if (_asmSaving) return;
   const input = zone.closest('.asm-img-cell').querySelector('input[type=file]');
   input.value = ''; input.click();
 }
 
 function setAsmRowImage(tr, file) {
+  if (_asmSaving) return;
   if (!file || !file.type.startsWith('image/')) { showToast('请选择图片文件', 'warning'); return; }
+  const version = tr._imgVersion = (tr._imgVersion || 0) + 1;
+  tr._imgPending = true;
+  tr._imgError = '';
+  renderAsmRowImage(tr);
+  updateAsmSaveButton();
   fileToResizedDataURL(file)
     .then(dataUrl => {
+      if (!tr.isConnected || tr._imgVersion !== version) return;
       tr._img = { name: tr._img?.name || null, dataUrl };
-      renderAsmRowImage(tr);
     })
-    .catch(() => showToast('图片处理失败: ' + file.name, 'danger'));
+    .catch(error => {
+      if (!tr.isConnected || tr._imgVersion !== version) return;
+      tr._imgError = `图片处理失败：${error.message}，请重新选择或移除`;
+    })
+    .finally(() => {
+      if (!tr.isConnected || tr._imgVersion !== version) return;
+      tr._imgPending = false;
+      renderAsmRowImage(tr);
+      updateAsmSaveButton();
+    });
 }
 
 function onAsmRowImage(input) {
@@ -2428,6 +2541,7 @@ function onAsmRowImage(input) {
 
 function asmImgDragOver(e) {
   e.preventDefault(); e.stopPropagation();
+  if (_asmSaving) return;
   e.currentTarget.classList.add('dragover');
 }
 
@@ -2440,23 +2554,31 @@ function asmImgDrop(e) {
   e.preventDefault(); e.stopPropagation();
   const td = e.currentTarget;
   td.classList.remove('dragover');
+  if (_asmSaving) return;
   const file = Array.from(e.dataTransfer?.files || []).find(f => f.type.startsWith('image/'));
   if (!file) { showToast('请拖入图片文件', 'warning'); return; }
   setAsmRowImage(td.closest('tr'), file);
 }
 
 function clearAsmRowImage(el) {
+  if (_asmSaving) return;
   const tr = el.closest('tr');
+  tr._imgVersion = (tr._imgVersion || 0) + 1;
+  tr._imgPending = false;
+  tr._imgError = '';
   tr._img = {};
   renderAsmRowImage(tr);
+  updateAsmSaveButton();
 }
 
 function removeAsmRow(btn) {
+  if (_asmSaving) return;
   btn.closest('tr').remove();
   document.querySelectorAll('#asmItemsBody tr').forEach((tr, i) => {
     tr.querySelector('.asm-seq').textContent = i + 1;
   });
   _asmRowSeq = document.querySelectorAll('#asmItemsBody tr').length;
+  updateAsmSaveButton();
 }
 
 // ─── 夹具单 Excel 导入 ───
@@ -2553,6 +2675,7 @@ function onAsmExcelSelected() {
         }
 
         if (imported === 0) addAsmRow();
+        updateAsmSaveButton();
         showToast(`成功导入 ${imported} 项夹具`, 'success');
       } catch (err) {
         console.error(err);

@@ -1,7 +1,26 @@
-name: Indo Shipping Diag
+name: PR930 SprayPlan Private Backup and Diag
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Private online SQLite backup or read-only verification of both SprayPlan environments"
+        type: choice
+        required: true
+        options: [backup, verify, diagnose, preflight]
+        default: backup
+      before_commit:
+        description: "Exact pre-deployment main SHA"
+        type: string
+        required: true
+      target_commit:
+        description: "Exact main SHA; same as before_commit for backup"
+        type: string
+        required: true
+      backup_path:
+        description: "Exact private backup returned by backup"
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -14,32 +33,58 @@ concurrency:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
-      - name: Validate SSH host fingerprint
+      - name: Validate host fingerprint and exact arguments
         shell: bash
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          SPRAY_OPS_MODE: ${{ inputs.mode }}
+          SPRAY_OPS_BEFORE: ${{ inputs.before_commit }}
+          SPRAY_OPS_TARGET: ${{ inputs.target_commit }}
+          SPRAY_OPS_BACKUP: ${{ inputs.backup_path }}
         run: |
           set -euo pipefail
-          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
-            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
-            exit 1
+          [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+          [[ "$SPRAY_OPS_MODE" =~ ^(backup|verify|diagnose|preflight)$ ]] || exit 1
+          [[ "$SPRAY_OPS_BEFORE" = 2452792c13999b61c7ce498abbbfbcd2212a744c && "$SPRAY_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          if [[ "$SPRAY_OPS_MODE" = backup || "$SPRAY_OPS_MODE" = preflight ]]; then
+            [[ -z "$SPRAY_OPS_BACKUP" && "$SPRAY_OPS_BEFORE" = "$SPRAY_OPS_TARGET" ]] || exit 1
+          else
+            [[ "$SPRAY_OPS_BEFORE" != "$SPRAY_OPS_TARGET" ]] || exit 1
+            [[ "$SPRAY_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/sprayplan-pre-930-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
           fi
 
-      - name: Fetch indo-shipping container logs via SSH
+      - name: Private backup or read-only deployment verification
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          SPRAY_OPS_MODE: ${{ inputs.mode }}
+          SPRAY_OPS_REF: ${{ github.sha }}
+          SPRAY_OPS_BEFORE: ${{ inputs.before_commit }}
+          SPRAY_OPS_TARGET: ${{ inputs.target_commit }}
+          SPRAY_OPS_BACKUP: ${{ inputs.backup_path }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 5m
+          command_timeout: 23m
+          envs: SPRAY_OPS_MODE,SPRAY_OPS_REF,SPRAY_OPS_BEFORE,SPRAY_OPS_TARGET,SPRAY_OPS_BACKUP
           script: |
             set -euo pipefail
-            echo "== 容器状态 =="
-            docker ps -a --filter name=indo-shipping --format 'table {{.Names}}\t{{.Status}}'
-            echo "== 最近 100 行日志 =="
-            docker logs rr-portal-indo-shipping-1 --tail 100 2>&1 || true
+            [[ "$SPRAY_OPS_MODE" =~ ^(backup|verify|diagnose|preflight)$ && "$SPRAY_OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$SPRAY_OPS_BEFORE" = 2452792c13999b61c7ce498abbbfbcd2212a744c && "$SPRAY_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            if [[ "$SPRAY_OPS_MODE" = backup || "$SPRAY_OPS_MODE" = preflight ]]; then
+              [[ -z "$SPRAY_OPS_BACKUP" && "$SPRAY_OPS_BEFORE" = "$SPRAY_OPS_TARGET" ]] || exit 1
+            else
+              [[ "$SPRAY_OPS_BEFORE" != "$SPRAY_OPS_TARGET" ]] || exit 1
+              [[ "$SPRAY_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/sprayplan-pre-930-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
+            fi
+            cd /opt/rr-portal
+            git fetch origin main ops/sprayplan-930-20261015 >/dev/null 2>&1 || { echo 'SPRAYPLAN_930_SCRIPT_FETCH_FAILED'; exit 1; }
+            umask 077
+            spray_temporary=$(mktemp -d /tmp/sprayplan-930.XXXXXX)
+            trap 'rm -rf "$spray_temporary"' EXIT
+            git show "$SPRAY_OPS_REF:deploy/ops/sprayplan-930.py" > "$spray_temporary/ops.py" 2>/dev/null || { echo 'SPRAYPLAN_930_SCRIPT_READ_FAILED'; exit 1; }
+            python3 "$spray_temporary/ops.py" "$SPRAY_OPS_MODE" "$SPRAY_OPS_BEFORE" "$SPRAY_OPS_TARGET" "$SPRAY_OPS_BACKUP"

@@ -1,0 +1,1146 @@
+"""PR930 private SQLite backups and read-only checks; no restart, login or business writes."""
+import base64
+import datetime
+import hashlib
+import hmac
+import io
+import ipaddress
+import json
+import os
+import pathlib
+import re
+import sqlite3
+import stat
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+ROOT = pathlib.Path('/opt/rr-portal')
+APP = 'apps/喷油部/喷油排期系统'
+BACKUPS = ROOT / 'deploy/backups'
+BEFORE = '2452792c13999b61c7ce498abbbfbcd2212a744c'
+# Filled only from the root agent's final reviewed and tested source manifest.
+# Backup is independent; verify fails closed until the exact nonempty manifest is pinned.
+TESTED_SOURCE = {'reviewedHead': '46986fc9ffce54e22dc2a144e915a2debe96a6e3',
+ 'files': {'apps/喷油部/喷油排期系统/server/SprayPlan.Api.Tests/ApiFactory.cs': '18157f725f23fe18d5ba5678bf0f0c49155cfc595bd740a1723ce0971b5759da',
+           'apps/喷油部/喷油排期系统/server/SprayPlan.Api.Tests/Schedule/CalendarTransactionTests.cs': '03956bd17ba04b86b68ce7748827f157a7abd8582382e98dc587adbadde21a91',
+           'apps/喷油部/喷油排期系统/server/SprayPlan.Api.Tests/Schedule/MonthlyScheduleCalcTests.cs': 'ac1ee5207d0dce4a59c099838a5c017a5d69945d728aa6117547352df7cff783',
+           'apps/喷油部/喷油排期系统/server/SprayPlan.Api.Tests/Schedule/ProductionCalendarRegressionTests.cs': 'a7ebc587228035684c96c4e0b1adfbab09586da5e04cd793785dac5b60add73d',
+           'apps/喷油部/喷油排期系统/server/SprayPlan.Api.Tests/Schedule/ProductionCalendarTests.cs': 'e334e11fcd637af70d7599373e4eb6f88191948cf3c23220987bb94f96d6051b',
+           'apps/喷油部/喷油排期系统/server/SprayPlan.Api/Features/Basic/HolidaysController.cs': '8726a9ecc28babf4791efdfc40c6500c1d353cbd6877dc5a25a29272f2eae053',
+           'apps/喷油部/喷油排期系统/server/SprayPlan.Api/Features/Orders/OrdersController.cs': 'f589f5e24c6a3dc30ad35d6a755649e4a94069a35386c91ecb14de2fca371fc1',
+           'apps/喷油部/喷油排期系统/server/SprayPlan.Api/Features/Plans/PlansController.cs': 'ec3ea529a9c70e4f2b00a32beee5b9829337a2edae852a557c755a5a31db49d9',
+           'apps/喷油部/喷油排期系统/server/SprayPlan.Api/Features/Schedule/ScheduleController.cs': 'e3f9e36dfc94cf02ff511fe1623498b41bf108538eb74dcc219bb8d77adec861',
+           'apps/喷油部/喷油排期系统/server/SprayPlan.Api/Features/Schedule/UrgentController.cs': '3c235ed67a424cd643d62a7585e96fc13c5fe366011cab4095b622067ec0fe6c',
+           'apps/喷油部/喷油排期系统/server/SprayPlan.Api/Services/MonthlyScheduleCalc.cs': '4703295ba0db3ca0939ba380b5cf983ca2231c50a146e3143035fa0e81e5dd2d',
+           'apps/喷油部/喷油排期系统/server/SprayPlan.Api/Services/ProductionCalendar.cs': 'a358a23dd2d7f812c31869661956def54eac3542152884511d5e68b9ac1d1be1',
+           'apps/喷油部/喷油排期系统/src/app/basic/BasicDataManager.tsx': 'f06e97384fd48b696d2345262cee940a49c17c5a134ee5d1d0b351c319fb668c'}}
+SERVICES = {'sprayplan': ('data', 'storage'), 'sprayplan-test': ('data-test', 'storage-test')}
+CORE = ('nginx', 'core', 'db', 'redis', 'printlink')
+REQUIRED = {'users', 'products', 'product_parts', 'orders', 'order_part_qtys', 'production_lines',
+            'machines', 'production_plans', 'holidays', 'craft_aliases', 'equipment_kinds',
+            'inventory_moves', 'inbound_applications'}
+CONFIG = ('docker-compose.cloud.yml', APP + '/Dockerfile', APP + '/docker-entrypoint.sh',
+          APP + '/next.config.mjs', APP + '/prisma/schema.prisma',
+          APP + '/server/SprayPlan.Api/Program.cs', APP + '/server/SprayPlan.Api/Data/AppDbContext.cs',
+          APP + '/server/SprayPlan.Api/Services/JwtService.cs', APP + '/server/SprayPlan.Api/appsettings.json',
+          APP + '/server/SprayPlan.Api/Features/Auth/AuthController.cs',
+          APP + '/server/SprayPlan.Api/Features/Users/UsersController.cs')
+COMPOSE = ['docker', 'compose', '-f', 'docker-compose.cloud.yml', '--env-file', '.env.cloud.production']
+# Exact historical files observed read-only in successful preflight run 38574066611.
+OBSERVED_SQLITE_ARCHIVES = {
+    'sprayplan': {
+        'sprayplan.db.bak.20260722-080540': (147456, 'e412653ec38178c5b188d87ed76f8c097f29d9ad279ade3f83eda923df037893'),
+        'sprayplan.db.bak.20260825-093516': (380928, 'd8b3d83d5bb0aa56345a76891b1252a7095f79e65c697c232fb24b78fe3c3943'),
+        'sprayplan.db.bak.20260825-094156': (380928, 'd8b3d83d5bb0aa56345a76891b1252a7095f79e65c697c232fb24b78fe3c3943'),
+        'sprayplan.db.bak.20260825-094523': (385024, 'f05be63a161b6e4ca872d54c0888833e09afa51d682ab3b152ae0eefd43fcccf'),
+        'sprayplan.db.bak.20260825-095324': (385024, 'f05be63a161b6e4ca872d54c0888833e09afa51d682ab3b152ae0eefd43fcccf'),
+        'sprayplan.db.bak.20260825-100557': (385024, 'df3fc01d9020bdcea3a82b9a68cc08fe1eafe0bca39b98560929f8e5b1b8f374'),
+        'sprayplan.db.bak.20260909-202638': (466944, '1e0db0bb9555d4b6f64842218cf5b1f1bd291c7eff90d09cd6dc5ce5412a3e86'),
+        'sprayplan.db.bak.20260909-203232': (466944, '1e0db0bb9555d4b6f64842218cf5b1f1bd291c7eff90d09cd6dc5ce5412a3e86'),
+        'sprayplan.db.bak.20260910-152122': (466944, '051d5401128e70762df6878bfa645d2888a0859571013544f4915bea8fff11fe'),
+        'sprayplan.db.bak.20260915-091733': (466944, 'f7e78142f89c31253c3fc485a2d9afc0a2506ba18fd31305f08b035271276980'),
+        'sprayplan.db.bak.20260915-115213': (466944, 'dcbac4918124fdf393e376136e4ea923fd5d88a466d0ed76361d37251c42b56b'),
+        'sprayplan.db.snapshot.20260907-090604': (466944, '19362779a187d7fcf106978ac2e7d2309d81227c4a27af2b189c7977b1ebcbb2'),
+        'sprayplan.db.snapshot.20260911-092004': (466944, 'ffa35ae0db8761df502d555568f5ab8f78ddc35824823be8b5b0f241730340b8'),
+        'sprayplan.db.snapshot.20260915-113526': (466944, 'a66ecbed2e565e2bdc6f844dd66d8d44c151a07463fb0c322390cf819a3349da'),
+        'sprayplan.db.snapshot.20260915-115300': (466944, '42b0fa67949a38aa776494b1ce45636b4f96d8200fcbe75fd5d5cf4ce45fa3ef'),
+    },
+    'sprayplan-test': {
+        'sprayplan.db.bak.20260907-090604': (135168, '426733c797240be002859db2c2d7ffc168c993d4a56b47d14d8ea7de9fb8272e'),
+        'sprayplan.db.bak.20260911-092004': (466944, '28a3eb73972f5f2a9594cdb9a6dbb8586fe7058b5d046afe694cba7b1da0cfba'),
+        'sprayplan.db.bak.20260915-113526': (466944, 'dadae94ac99b4fce7647de01edaebf6929c8db8a7bdef9fac8d8203b0c065d0a'),
+        'sprayplan.db.bak.20260915-115300': (466944, 'a66ecbed2e565e2bdc6f844dd66d8d44c151a07463fb0c322390cf819a3349da'),
+    },
+}
+
+LIMIT_FILES, LIMIT_BYTES, LIMIT_FILE = 20000, 2 * 1024**3, 64 * 1024**2
+FAILED = 'entrypoint'
+ALLOWED_BASES = {'http://127.0.0.1/'}
+
+
+def require(value, label):
+    global FAILED
+    FAILED = label
+    if not value:
+        raise RuntimeError('SPRAYPLAN_930_CHECK_FAILED')
+
+
+def run(args, data=None, timeout=180, check='commandSucceeded'):
+    global FAILED
+    FAILED = check
+    value = subprocess.run(args, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           cwd=ROOT, timeout=timeout)
+    require(value.returncode == 0, check)
+    return value.stdout
+
+
+def canonical(value):
+    # Typed encoding distinguishes integers, IEEE-754 precision, text, bytes and NULL.
+    if value is None:
+        return ['null']
+    if type(value) is int:
+        return ['int', str(value)]
+    if type(value) is float:
+        return ['float', value.hex()]
+    if isinstance(value, bytes):
+        return ['bytes', base64.b64encode(value).decode()]
+    require(isinstance(value, str), 'supportedSqliteValueType')
+    return ['text', value]
+
+
+def digest(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def file_hash(path):
+    require(path.is_file() and not path.is_symlink(), 'regularNonSymlinkFile')
+    sha = hashlib.sha256()
+    with path.open('rb') as source:
+        for block in iter(lambda: source.read(1024**2), b''):
+            sha.update(block)
+    return sha.hexdigest()
+
+
+def q(name):
+    require(isinstance(name, str) and '\x00' not in name, 'sqliteIdentifier')
+    return '"' + name.replace('"', '""') + '"'
+
+
+def readonly(path, immutable=False):
+    require(path.is_file() and not path.is_symlink(), 'sqliteSourceExists')
+    uri = path.resolve().as_uri() + '?mode=ro' + ('&immutable=1' if immutable else '')
+    connection = sqlite3.connect(uri, uri=True, timeout=10)
+    connection.execute('PRAGMA query_only=ON')
+    return connection
+
+
+def online_backup(source, target):
+    # SQLite's backup API reads committed WAL pages; never copy a live DB main file alone.
+    require(not target.exists() and not target.is_symlink(), 'newPrivateSnapshotFile')
+    started = time.monotonic()
+    def progress(status, remaining, total):
+        require(time.monotonic() - started < 180, 'sqliteSnapshotTimeout')
+    with readonly(source) as src:
+        with sqlite3.connect(target) as dest:
+            src.backup(dest, pages=256, progress=progress, sleep=0.05)
+    target.chmod(0o600)
+    return sqlite_audit(target)
+
+
+def sqlite_audit(path):
+    with readonly(path, immutable=True) as db:
+        require(db.execute('PRAGMA integrity_check').fetchall() == [('ok',)], 'sqliteSnapshotIntegrity')
+        schema = db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name").fetchall()
+        tables = sorted(row[1] for row in schema if row[0] == 'table')
+        require(REQUIRED <= set(tables), 'requiredSqliteTablesPresent')
+        result = {}
+        for name in tables:
+            columns = db.execute('PRAGMA table_info(' + q(name) + ')').fetchall()
+            # Sorted fixed-size hashes retain duplicate-row multiplicity without exposing any row.
+            hashes = sorted(digest([canonical(v) for v in row])
+                            for row in db.execute('SELECT * FROM ' + q(name)))
+            result[name] = {'rows': len(hashes), 'sha256': hashlib.sha256(''.join(hashes).encode()).hexdigest(),
+                            'columnsSha256': digest(columns)}
+        foreign_keys = db.execute('PRAGMA foreign_key_check').fetchall()
+        return {'tables': result, 'schemaSha256': digest(schema), 'foreignKeyCheckSha256': digest(foreign_keys),
+                'foreignKeyViolations': len(foreign_keys), 'userVersion': db.execute('PRAGMA user_version').fetchone()[0],
+                'applicationId': db.execute('PRAGMA application_id').fetchone()[0],
+                'digestMethod': 'sha256-sorted-typed-full-row-multiset'}
+
+
+def cid(service):
+    require(service in set(SERVICES) | set(CORE), 'knownService')
+    value = run(COMPOSE + ['ps', '-a', '-q', service], check='resolveContainer:' + service).decode().strip()
+    require(bool(re.fullmatch(r'[a-f0-9]{12,64}', value)), 'oneContainerPerService')
+    return value
+
+
+def inspect(identifier):
+    return json.loads(run(['docker', 'inspect', identifier], check='readContainerMetadata'))[0]
+
+
+def core_state():
+    result = {}
+    for service in CORE:
+        identifier = cid(service)
+        value = inspect(identifier)
+        state = value['State']
+        result[service] = {'containerId': identifier, 'startedAt': state['StartedAt'],
+                           'restartCount': value['RestartCount'], 'running': state['Running'],
+                           'status': state['Status'], 'health': state.get('Health', {}).get('Status', 'none'),
+                           'oomKilled': state['OOMKilled']}
+    return result
+
+
+def core_healthy(value):
+    return set(value) == set(CORE) and all(v['running'] and v['status'] == 'running'
+                                         and v['health'] in ('none', 'healthy') for v in value.values())
+
+
+def app_context(service):
+    identifier = cid(service)
+    value = inspect(identifier)
+    require(value['State']['Running'] and value['State'].get('Health', {}).get('Status') == 'healthy',
+            'applicationHealthy:' + service)
+    mounts = {m['Destination']: m for m in value['Mounts']}
+    require(set(mounts) == {'/app/data', '/app/server/SprayPlan.Api/storage'}, 'exactApplicationMounts')
+    data_name, storage_name = SERVICES[service]
+    for destination, name in [('/app/data', data_name), ('/app/server/SprayPlan.Api/storage', storage_name)]:
+        m = mounts[destination]
+        expected = ROOT / APP / name
+        require(m['Type'] == 'bind' and m['RW'] and pathlib.Path(m['Source']) == expected
+                and expected.is_dir() and not expected.is_symlink(), 'persistentApplicationMount:' + service)
+    env = dict(item.split('=', 1) for item in value['Config']['Env'])
+    require(env.get('NEXT_PUBLIC_BASE_PATH') == '/' + service and env.get('DATA_PATH') == '/app/data'
+            and env.get('DOTNET_API_URL') == 'http://127.0.0.1:5080', 'expectedRuntimeRouting:' + service)
+    require(env.get('SPRAYPLAN_DB_PATH', '/app/data/sprayplan.db') == '/app/data/sprayplan.db', 'expectedDatabasePath')
+    root = ROOT / APP / data_name
+    db = root / 'sprayplan.db'
+    require(db.is_file() and not db.is_symlink() and db.stat().st_size > 0, 'existingDatabasePreventsSeed')
+    secret = env.get('JWT_SECRET')
+    if not secret:
+        secret_path = root / 'jwt-secret'
+        require(secret_path.is_file() and not secret_path.is_symlink(), 'existingJwtSecretPreventsGeneration')
+        secret = secret_path.read_text().rstrip('\n')
+    require(isinstance(secret, str) and len(secret.encode()) >= 32, 'existingStrongJwtSecret')
+    networks = value['NetworkSettings']['Networks']
+    addresses = [n['IPAddress'] for name, n in networks.items() if name.endswith('platform-net')]
+    require(len(addresses) == 1 and ipaddress.ip_address(addresses[0]).is_private, 'privateApplicationNetwork')
+    ALLOWED_BASES.add('http://' + addresses[0] + ':8400/' + service)
+    return identifier, db, env, secret
+
+
+VERSION_KEYS = ('DOTNET_VERSION', 'ASPNET_VERSION')
+PROCESS_ENV = r"""
+const fs=require('fs'),crypto=require('crypto');let result={};
+const hash=v=>crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex');
+const isVersion=v=>/^(DOTNET_VERSION|ASPNET_VERSION)=/.test(v);
+for(const id of fs.readdirSync('/proc').filter(v=>/^\d+$/.test(v))){
+ let cmd;try{cmd=fs.readFileSync('/proc/'+id+'/cmdline','utf8').replace(/\0/g,' ');}
+ catch(e){if(e.code==='ENOENT')continue;process.exit(4);}
+ const kind=cmd.startsWith('dotnet publish/SprayPlan.Api.dll')?'api':cmd.startsWith('next-server ')?'web':null;
+ if(kind){if(result[kind])process.exit(2);let env;try{env=fs.readFileSync('/proc/'+id+'/environ','utf8').split('\0').filter(Boolean).sort();}
+ catch(e){process.exit(4);}
+ const host=env.filter(v=>v.startsWith('HOSTNAME='));if(host.length>1)process.exit(3);
+ const versions=Object.fromEntries(env.filter(isVersion).map(v=>{const n=v.indexOf('=');return[v.slice(0,n),v.slice(n+1)];}));
+ result[kind]={completeSha256:hash(env),withoutHostnameSha256:hash(env.filter(v=>!v.startsWith('HOSTNAME='))),
+ withoutVersionMetadataSha256:hash(env.filter(v=>!isVersion(v))),
+ protectedSha256:hash(env.filter(v=>!isVersion(v)&&!v.startsWith('HOSTNAME='))),
+ hostname:host.length?host[0].slice(9):null,versionMetadata:versions};}}
+if(Object.keys(result).length!==2)process.exit(2);process.stdout.write(JSON.stringify(result));
+"""
+
+
+def inherited_versions(environment, image_environment, process):
+    # Only the two public .NET 8 base-image version labels may vary. Every other
+    # container/process key remains in its full protected SHA-256 fingerprint.
+    # All three runtime observations must agree, and every value must be .NET 8.
+    versions = {key: environment.get(key) for key in VERSION_KEYS}
+    require(all(isinstance(value, str) and re.fullmatch(r'8\.0\.(0|[1-9][0-9]*)', value)
+                for value in versions.values()), 'validPublicDotnet8Metadata')
+    require(all(image_environment.get(key) == versions[key] for key in VERSION_KEYS),
+            'publicVersionMetadataInheritedFromActualImage')
+    require(all(row['versionMetadata'] == versions for row in process.values()),
+            'processPublicVersionMetadataMatchesActualImage')
+    return versions
+
+
+def runtime(service):
+    identifier, db, env, secret = app_context(service)
+    value = inspect(identifier)
+    process = json.loads(run(['docker', 'exec', identifier, 'node', '-e', PROCESS_ENV], check='readRuntimeProcessEnvironments:' + service))
+    hashes = {'completeSha256', 'withoutHostnameSha256', 'withoutVersionMetadataSha256', 'protectedSha256'}
+    require(set(process) == {'api', 'web'} and all(set(v) == hashes | {'hostname', 'versionMetadata'}
+            and all(isinstance(v[k], str) and re.fullmatch('[a-f0-9]{64}', v[k]) for k in hashes) for v in process.values()),
+            'bothRuntimeProcessEnvironments')
+    image = json.loads(run(['docker', 'image', 'inspect', '--format', '{{json .Config.Env}}', value['Image']],
+                           check='readActualImageEnvironment:' + service))
+    require(isinstance(image, list) and all(isinstance(v, str) and '=' in v for v in image), 'validActualImageEnvironment')
+    image_env = dict(row.split('=', 1) for row in image)
+    require(len(image_env) == len(image), 'uniqueActualImageEnvironmentKeys')
+    versions = inherited_versions(env, image_env, process)
+    # Secret material is used only in memory. Complete envs are digested, never logged or saved.
+    for host_name, container_name in [(APP + '/docker-entrypoint.sh', '/app/docker-entrypoint.sh'),
+                                      (APP + '/next.config.mjs', '/app/next.config.mjs'),
+                                      (APP + '/server/SprayPlan.Api/appsettings.json', '/app/server/SprayPlan.Api/appsettings.json')]:
+        require(run(['docker', 'exec', identifier, 'cat', container_name], check='readStartupConfiguration:' + service) == (ROOT / host_name).read_bytes(),
+                'runtimeStartupConfigurationMatchesSource')
+    return {'configEnvSha256': digest(sorted(value['Config']['Env'])), 'processEnvironments': process,
+            'protectedConfigEnvSha256': digest(sorted(k + '=' + v for k, v in env.items() if k not in VERSION_KEYS)),
+            'imageInheritedVersionMetadataValidated': True, 'publicVersionMetadata': versions,
+            'containerId': identifier,
+            'containerHostname': value['Config']['Hostname'], 'explicitHostnameConfigured': 'HOSTNAME' in env,
+            'secretSha256': hashlib.sha256(secret.encode()).hexdigest(), 'issuer': env.get('JWT_ISSUER', 'sprayplan'),
+            'imageId': value['Image'], 'healthy': True}
+
+
+def process_environment_comparison(before, after):
+    def automatic(value):
+        return value['explicitHostnameConfigured'] is False and isinstance(value['containerHostname'], str) \
+            and bool(re.fullmatch('[a-f0-9]{64}', value['containerId'])) \
+            and value['containerHostname'] == value['containerId'][:12] and all(p['hostname'] == value['containerHostname']
+                for p in value['processEnvironments'].values())
+    auto = automatic(before) and automatic(after)
+    key = 'protectedSha256' if auto else 'withoutVersionMetadataSha256'
+    metadata = before['imageInheritedVersionMetadataValidated'] is True and after['imageInheritedVersionMetadataValidated'] is True
+    protected = metadata and all(before['processEnvironments'][p][key] == after['processEnvironments'][p][key] for p in ('api', 'web'))
+    complete = all(before['processEnvironments'][p]['completeSha256'] == after['processEnvironments'][p]['completeSha256']
+                   for p in ('api', 'web'))
+    return {'protectedProcessEnvironmentsPreserved': protected, 'completeProcessEnvironmentsIdentical': complete,
+            'imageInheritedVersionMetadataValidated': metadata,
+            'publicVersionMetadataChanged': before['publicVersionMetadata'] != after['publicVersionMetadata'],
+            'automaticHostnameLifecycleValidated': auto, 'comparisonScope': 'all-process-env-except-verified-image-dotnet8-metadata-and-automatic-hostname'
+            if auto else 'all-process-env-except-verified-image-dotnet8-metadata',
+            'beforeCompleteProcessHashes': {p: before['processEnvironments'][p]['completeSha256'] for p in ('api', 'web')},
+            'afterCompleteProcessHashes': {p: after['processEnvironments'][p]['completeSha256'] for p in ('api', 'web')}}
+
+
+def nginx_protected():
+    nginx = cid('nginx')
+    return {name: hashlib.sha256(run(['docker', 'exec', nginx, 'cat', path], check='readNginxProtection:' + name)).hexdigest()
+            for name, path in [('actualConfig', '/etc/nginx/nginx.conf'), ('actualAuthorization', '/etc/nginx/.htpasswd')]}
+
+
+def file_inventory(service, archive=None, sqlite_archives=None):
+    rows, total = [], 0
+    approved = {row['relativePath']: (row['bytes'], row['sha256']) for row in (sqlite_archives or [])}
+    tar = tarfile.open(archive, 'x') if archive else None
+    try:
+        for name in SERVICES[service]:
+            root = ROOT / APP / name
+            require(root.is_dir() and not root.is_symlink(), 'mountedFileRoot')
+            for directory, dirs, files in os.walk(root, followlinks=False):
+                parent = pathlib.Path(directory)
+                require(not parent.is_symlink() and all(not (parent / d).is_symlink() for d in dirs),
+                        'noSymlinkDirectories')
+                for filename in sorted(files):
+                    if name == SERVICES[service][0] and parent == root and filename in {
+                        'sprayplan.db', 'sprayplan.db-wal', 'sprayplan.db-shm', 'sprayplan.db-journal'}:
+                        continue
+                    path = parent / filename
+                    require(not path.is_symlink(), 'noSymlinkFiles')
+                    require(stat.S_ISREG(path.lstat().st_mode), 'mountedFileRegular')
+                    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                    with os.fdopen(fd, 'rb') as source:
+                        before = os.fstat(source.fileno())
+                        require(stat.S_ISREG(before.st_mode) and before.st_size <= LIMIT_FILE, 'regularFileSizeLimit')
+                        content = source.read(before.st_size + 1)
+                        after = os.fstat(source.fileno())
+                        require(len(content) == before.st_size and (before.st_ino, before.st_size, before.st_mtime_ns)
+                                == (after.st_ino, after.st_size, after.st_mtime_ns), 'mountedFileStable')
+                    relative_file = str(path.relative_to(root))
+                    if content.startswith(b'SQLite format 3\x00'):
+                        actual = (len(content), hashlib.sha256(content).hexdigest())
+                        require(name == SERVICES[service][0] and approved.get(relative_file) == actual
+                                and OBSERVED_SQLITE_ARCHIVES[service].get(relative_file) == actual
+                                and all(not pathlib.Path(str(path) + ending).exists()
+                                        and not pathlib.Path(str(path) + ending).is_symlink()
+                                        for ending in ('-wal', '-shm', '-journal')), 'noUnaccountedLiveSqliteFiles')
+                    total += len(content)
+                    require(total <= LIMIT_BYTES and len(rows) < LIMIT_FILES, 'mountedFileInventoryLimits')
+                    relative = name + '/' + relative_file
+                    rows.append({'path': relative, 'bytes': len(content), 'sha256': hashlib.sha256(content).hexdigest()})
+                    if tar:
+                        info = tarfile.TarInfo(relative)
+                        info.size, info.mode, info.mtime = len(content), stat.S_IMODE(before.st_mode), int(before.st_mtime)
+                        tar.addfile(info, io.BytesIO(content))
+        return {'files': len(rows), 'bytes': total, 'sha256': digest(sorted(rows, key=lambda r: r['path']))}
+    finally:
+        if tar:
+            tar.close()
+            pathlib.Path(archive).chmod(0o600)
+
+
+def validate_archive(path, expected):
+    rows, total = [], 0
+    with tarfile.open(path, 'r') as tar:
+        members = tar.getmembers()
+        require(len(members) == expected['files'] and len(members) <= LIMIT_FILES, 'archiveFileCount')
+        require(len({m.name for m in members}) == len(members), 'archiveNoDuplicatePaths')
+        for m in members:
+            name = pathlib.PurePosixPath(m.name)
+            require(m.isfile() and not name.is_absolute() and '..' not in name.parts and 0 <= m.size <= LIMIT_FILE,
+                    'archiveRegularSafeMembers')
+            total += m.size
+            require(total <= LIMIT_BYTES, 'archiveTotalLimit')
+            with tar.extractfile(m) as source:
+                content = source.read(m.size + 1)
+            require(len(content) == m.size, 'archiveContentSize')
+            rows.append({'path': m.name, 'bytes': m.size, 'sha256': hashlib.sha256(content).hexdigest()})
+    require({'files': len(rows), 'bytes': total, 'sha256': digest(sorted(rows, key=lambda r: r['path']))} == expected,
+            'archiveContentMatchesInventory')
+
+
+def private_file(path):
+    require(path.is_file() and not path.is_symlink() and path.stat().st_mode & 0o077 == 0, 'privateFilePermissions')
+
+
+def configuration():
+    return {name: file_hash(ROOT / name) for name in CONFIG}
+
+
+def archive_configuration(path, expected):
+    with tarfile.open(path, 'x') as tar:
+        for name in CONFIG:
+            content = (ROOT / name).read_bytes()
+            require(hashlib.sha256(content).hexdigest() == expected[name], 'configurationStableForBackup')
+            info = tarfile.TarInfo(name)
+            info.size, info.mode = len(content), 0o600
+            tar.addfile(info, io.BytesIO(content))
+    path.chmod(0o600)
+    validate_configuration_archive(path, expected)
+
+
+def validate_configuration_archive(path, expected):
+    with tarfile.open(path, 'r') as tar:
+        members = tar.getmembers()
+        require(len(members) == len(CONFIG) and {m.name for m in members} == set(CONFIG), 'configurationArchiveInventory')
+        for member in members:
+            require(member.isfile() and 0 <= member.size <= LIMIT_FILE, 'configurationArchiveMember')
+            with tar.extractfile(member) as source:
+                content = source.read(member.size + 1)
+            require(len(content) == member.size and hashlib.sha256(content).hexdigest() == expected[member.name],
+                    'configurationArchiveContent')
+
+
+def source_commit(ref='HEAD'):
+    require(ref in ('HEAD', 'origin/main'), 'knownSourceRef')
+    value = run(['git', 'rev-parse', ref], check='readSourceRevision:' + ref).decode().strip()
+    require(bool(re.fullmatch('[a-f0-9]{40}', value)), 'validSourceCommit')
+    return value
+
+
+def get(url, cookie=None):
+    require(any(url == base or url.startswith(base + ('/' if not base.endswith('/') else ''))
+                for base in ALLOWED_BASES), 'validatedLocalGetOnly')
+    headers = {'Cookie': cookie} if cookie else {}
+    request = urllib.request.Request(url, headers=headers, method='GET')
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    try:
+        with opener.open(request, timeout=60) as response:
+            body = response.read(32 * 1024**2 + 1)
+            require(len(body) <= 32 * 1024**2, 'boundedReadOnlyApiResponse')
+            return response.status, body
+    except urllib.error.HTTPError as error:
+        body = error.read(32 * 1024**2 + 1)
+        require(len(body) <= 32 * 1024**2, 'boundedReadOnlyApiErrorResponse')
+        return error.code, body
+
+
+def issue_cookie(user, secret, issuer, factory):
+    def b64(value):
+        return base64.urlsafe_b64encode(value).decode().rstrip('=')
+    role_claim = 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role'
+    claims = {'iss': issuer, 'userId': str(user['id']), 'username': user['username'], role_claim: user['role'],
+              'factoryId': user['factoryId'], 'exp': int(time.time()) + 90}
+    unsigned = b64(b'{"alg":"HS256","typ":"JWT"}') + '.' + b64(json.dumps(claims, separators=(',', ':')).encode())
+    token = unsigned + '.' + b64(hmac.new(secret.encode(), unsigned.encode(), hashlib.sha256).digest())
+    return 'sprayplan_session=' + token + '; sprayplan_factory=' + factory
+
+
+def api_audit(service, snapshot, deployed=False):
+    identifier, db, env, secret = app_context(service)
+    with readonly(snapshot, immutable=True) as connection:
+        connection.row_factory = sqlite3.Row
+        users = [dict(u) for u in connection.execute('SELECT id,username,role,factoryId,isActive FROM users')]
+        admins = [u for u in users if u['role'] == 'admin' and u['isActive']]
+        require(bool(admins), 'existingActiveAdmin')
+        admin = min(admins, key=lambda u: u['id'])
+        factories = ('XINGXIN', 'HUADENG')
+        result = {'adminFactoriesVerified': [], 'ordinaryFactoriesVerified': [], 'ordinaryUnavailable': [],
+                  'unauthenticatedDenied': False, 'orderFilterVerified': False, 'businessWritesPerformed': False}
+        network = inspect(identifier)['NetworkSettings']['Networks']
+        address = next(n['IPAddress'] for name, n in network.items() if name.endswith('platform-net'))
+        prefix = 'http://' + address + ':8400/' + service
+        status, body = get('http://127.0.0.1/' + service + '/api/health')
+        require(status == 200, 'publicHealth:' + service)
+        status, body = get('http://127.0.0.1/' + service + '/api/orders')
+        require(status == 401, 'gatewayBasicAuthenticationRequired:' + service)
+        result['gatewayBasicAuthenticationRequired'] = True
+        result['publicBusinessAndAssetsAuthenticated'] = False
+        status, body = get(prefix + '/api/orders')
+        require(status == 401, 'unauthenticatedApiDenied:' + service)
+        result['unauthenticatedDenied'] = True
+        for factory in factories:
+            candidates = [u for u in users if u['role'] != 'admin' and u['isActive'] and u['factoryId'] == factory]
+            identities = [('admin', admin)]
+            if candidates:
+                identities.append(('ordinary', min(candidates, key=lambda u: u['id'])))
+            else:
+                result['ordinaryUnavailable'].append(factory)
+            for kind, user in identities:
+                cookie = issue_cookie(user, secret, env.get('JWT_ISSUER', 'sprayplan'), factory)
+                try:
+                    for endpoint, table in [('/api/orders', 'orders'), ('/api/lines', 'production_lines')]:
+                        expected = {r[0] for r in connection.execute('SELECT id FROM ' + q(table) + ' WHERE factoryId=?', (factory,))}
+                        status, body = get(prefix + endpoint, cookie)
+                        require(status == 200, kind + 'ReadStatus:' + service + endpoint)
+                        rows = json.loads(body)
+                        require(isinstance(rows, list) and {r['id'] for r in rows} == expected
+                                and len(rows) == len(expected), kind + 'ExactFactoryIsolation:' + service + endpoint)
+                    status, body = get(prefix + '/api/users', cookie)
+                    require(status == (200 if kind == 'admin' else 403), kind + 'UserManagementPermission:' + service)
+                    if kind == 'admin':
+                        visible = json.loads(body)
+                        require({r['id'] for r in visible} == {u['id'] for u in users}, 'adminUsersComplete')
+                    status, body = get(prefix + '/api/orders/overview', cookie)
+                    overview = json.loads(body)
+                    require(status == 200 and isinstance(overview, list), kind + 'OrderOverviewRead:' + service)
+                    if deployed:
+                        verify_deployed_read_features(connection, factory, prefix, cookie, overview, service)
+                        result['remainingQuantityAndPlanEligibilityVerified'] = True
+                    day = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
+                    status, body = get(prefix + '/api/schedule/overview?from=' + day + '&to=' + day, cookie)
+                    require(status == 200 and isinstance(json.loads(body).get('plans'), list), kind + 'ScheduleOverviewRead:' + service)
+                    if deployed:
+                        status, body = get(prefix + '/api/schedule/overview?from=' + day + '&to=' + day + '&orderId=2147483647', cookie)
+                        require(status == 200 and json.loads(body)['plans'] == [], 'nonexistentOrderFilterIsEmpty:' + service)
+                        plan = connection.execute('SELECT p.orderId,MIN(p.planDate),MAX(p.planDate) FROM production_plans p '
+                                                  'JOIN orders o ON o.id=p.orderId AND o.factoryId=p.factoryId '
+                                                  'WHERE p.factoryId=? AND p.deletedAt IS NULL GROUP BY p.orderId ORDER BY p.orderId LIMIT 1',
+                                                  (factory,)).fetchone()
+                        if plan:
+                            # Prisma stores DateTime as exact Unix milliseconds in SQLite.
+                            dates = [datetime.datetime.fromtimestamp(v / 1000, datetime.timezone.utc).strftime('%Y-%m-%d')
+                                     for v in (plan[1], plan[2])]
+                            status, body = get(prefix + '/api/schedule/overview?from=' + dates[0] + '&to=' + dates[1]
+                                               + '&orderId=' + str(plan[0]), cookie)
+                            rows = json.loads(body).get('plans')
+                            expected = {r[0] for r in connection.execute('SELECT p.id FROM production_plans p '
+                                'JOIN orders o ON o.id=p.orderId AND o.factoryId=p.factoryId WHERE p.factoryId=? '
+                                'AND p.orderId=? AND p.deletedAt IS NULL', (factory, plan[0]))}
+                            require(status == 200 and isinstance(rows, list) and {r['id'] for r in rows} == expected
+                                    and all(r['orderId'] == plan[0] for r in rows), 'existingOrderFilterExact:' + service)
+                            verify_plan_eligibility(connection, rows, service)
+                        result['orderFilterVerified'] = True
+                    result[kind + 'FactoriesVerified'].append(factory)
+                finally:
+                    del cookie
+        return result
+
+
+def remaining_quantity(connection, order_id):
+    # Independent relational oracle: each logical part must finish every recorded step;
+    # complete-set quantity is bounded by the least complete required part.
+    order = connection.execute('SELECT factoryId FROM orders WHERE id=?', (order_id,)).fetchone()
+    require(order is not None, 'remainingQuantityExistingOrder')
+    factory = order[0]
+    demands = connection.execute('SELECT partName,SUM(qty) FROM order_part_qtys WHERE orderId=? GROUP BY partName',
+                                 (order_id,)).fetchall()
+    if not demands:
+        return 0
+    completions = []
+    for name, demand in demands:
+        counts = [row[0] for row in connection.execute('SELECT SUM(COALESCE(goodQty,0)) FROM production_plans '
+                  'WHERE orderId=? AND partName=? AND factoryId=? AND deletedAt IS NULL GROUP BY stepNo', (order_id, name, factory))]
+        completions.append(min(demand, min(counts)) if counts else 0)
+    return max(0, max(row[1] for row in demands) - min(completions))
+
+
+def verify_plan_eligibility(connection, rows, service):
+    require(isinstance(rows, list), 'planEligibilityArray:' + service)
+    for row in rows:
+        plan = connection.execute('SELECT p.deletedAt,p.status,p.goodQty,p.inboundQty,p.reportedQty,o.status '
+                                  'FROM production_plans p LEFT JOIN orders o ON o.id=p.orderId AND o.factoryId=p.factoryId WHERE p.id=?',
+                                  (row['id'],)).fetchone()
+        require(plan is not None, 'existingPlanForEligibility:' + service)
+        expected = plan[0] is None and plan[1] != 'recorded' and all(v is None for v in plan[2:5]) \
+            and plan[5] is not None and plan[5] not in ('completed', 'archived')
+        require(type(row.get('canReschedule')) is bool and row['canReschedule'] == expected,
+                'compiledBackendPlanEligibilityExact:' + service)
+
+
+def verify_deployed_read_features(connection, factory, prefix, cookie, overview, service):
+    orders = connection.execute('SELECT id,status,pendingProduct FROM orders WHERE factoryId=?', (factory,)).fetchall()
+    remaining = {order[0]: remaining_quantity(connection, order[0]) for order in orders}
+    require({r['id'] for r in overview} == set(remaining) and len(overview) == len(remaining), 'orderOverviewFactoryComplete')
+    require(all(type(r.get('inProductionRemainingQty')) is int and r['inProductionRemainingQty'] == remaining[r['id']]
+                for r in overview), 'compiledBackendRemainingQuantityExact:' + service)
+    expected_total = sum(remaining[o[0]] for o in orders if o[1] in ('scheduled', 'in_production') and not o[2])
+    status, body = get(prefix + '/api/dashboard', cookie)
+    dashboard = json.loads(body)
+    require(status == 200 and type(dashboard.get('inProductionQty')) is int and dashboard['inProductionQty'] == expected_total,
+            'compiledBackendDashboardRemainingQuantityExact:' + service)
+    status, body = get(prefix + '/api/plans', cookie)
+    rows = json.loads(body)
+    expected = {r[0] for r in connection.execute('SELECT p.id FROM production_plans p JOIN orders o '
+        'ON o.id=p.orderId AND o.factoryId=p.factoryId WHERE p.factoryId=? AND p.deletedAt IS NULL', (factory,))}
+    require(status == 200 and isinstance(rows, list) and len(rows) == len(expected) and {r['id'] for r in rows} == expected,
+            'compiledBackendAllPlansFactoryComplete:' + service)
+    verify_plan_eligibility(connection, rows, service)
+
+
+ASSET_INFO = r"""
+const fs=require('fs'),path=require('path'),crypto=require('crypto');let rows=[];
+function walk(root){for(const e of fs.readdirSync(root,{withFileTypes:true})){const p=path.join(root,e.name);if(e.isDirectory())walk(p);else if(e.isFile()&&/\.(js|css)$/.test(p))rows.push({path:p.slice('/app/.next/static/'.length),bytes:fs.statSync(p).size,sha256:crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')});}}
+walk('/app/.next/static');const assembly=fs.readFileSync('/app/server/SprayPlan.Api/publish/SprayPlan.Api.dll');
+const features=Object.fromEntries(['PlanDateRules','CanReschedule','HasActuals','Reschedule','InProductionRemainingQty','ProductionCalendar','NextWorkday','Reflow','ReflowSharedCalendar'].map(name=>[name,assembly.includes(Buffer.from(name))]));
+process.stdout.write(JSON.stringify({buildId:fs.readFileSync('/app/.next/BUILD_ID','utf8').trim(),assets:rows,compiledFeatures:features,assemblySha256:crypto.createHash('sha256').update(assembly).digest('hex')}));
+"""
+
+
+def frontend_audit(service):
+    identifier = cid(service)
+    info = json.loads(run(['docker', 'exec', identifier, 'node', '-e', ASSET_INFO], check='readCompiledAssets:' + service))
+    require(isinstance(info['assets'], list) and bool(info['assets']), 'builtStaticAssetsPresent')
+    require(set(info['compiledFeatures']) == {'PlanDateRules', 'CanReschedule', 'HasActuals', 'Reschedule', 'InProductionRemainingQty', 'ProductionCalendar', 'NextWorkday', 'Reflow', 'ReflowSharedCalendar'}
+            and all(value is True for value in info['compiledFeatures'].values()), 'compiledBackendNewFeatureSymbolsPresent')
+    network = inspect(identifier)['NetworkSettings']['Networks']
+    address = next(n['IPAddress'] for name, n in network.items() if name.endswith('platform-net'))
+    for asset in info['assets']:
+        path = pathlib.PurePosixPath(asset['path'])
+        require(not path.is_absolute() and '..' not in path.parts and asset['bytes'] >= 0, 'safeStaticAssetPath')
+        status, body = get('http://' + address + ':8400/' + service + '/_next/static/' + urllib.parse.quote(asset['path'], safe='/'))
+        require(status == 200 and len(body) == asset['bytes'] and hashlib.sha256(body).hexdigest() == asset['sha256'],
+                'directApplicationAssetMatchesBuiltContainer:' + service)
+    return {'buildId': info['buildId'], 'assetFiles': len(info['assets']), 'assetsSha256': digest(info['assets']),
+            'allDirectApplicationStaticAssetsMatchContainer': True, 'publicAssetsAuthenticated': False,
+            'compiledBackendNewFeatureSymbolsPresent': True, 'assemblySha256': info['assemblySha256']}
+
+
+def snapshot_now(service, directory):
+    identifier, source, env, secret = app_context(service)
+    target = directory / (service + '.db')
+    audit = online_backup(source, target)
+    return target, audit
+
+
+def git_readonly(args, label):
+    # Avoid optional index/stat-cache writes and configured external diff/fsmonitor hooks.
+    global FAILED
+    FAILED = label
+    environment = dict(os.environ)
+    environment['GIT_OPTIONAL_LOCKS'] = '0'
+    value = subprocess.run(['git', '-c', 'core.fsmonitor=false', '-c', 'core.quotepath=false'] + args,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=ROOT,
+                           env=environment, timeout=60)
+    require(value.returncode == 0, label)
+    return value.stdout
+
+
+def tracked_source_diff():
+    raw = git_readonly(['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--raw', '-z',
+                        '--abbrev=40', 'HEAD', '--', APP], 'readOnlyTrackedSourceDiff')
+    records = raw.split(b'\x00')
+    require(records[-1] == b'' and (len(records) - 1) % 2 == 0, 'trackedDiffRawStructure')
+    changes = []
+    for i in range(0, len(records) - 1, 2):
+        fields = records[i].decode('ascii').split()
+        require(len(fields) == 5 and fields[0].startswith(':'), 'trackedDiffRawFields')
+        old_mode, new_mode, old_blob, new_blob, status = fields[0][1:], *fields[1:]
+        require(re.fullmatch('[0-7]{6}', old_mode) and re.fullmatch('[0-7]{6}', new_mode)
+                and re.fullmatch('[a-f0-9]{40}', old_blob) and re.fullmatch('[a-f0-9]{40}', new_blob)
+                and status in ('A', 'D', 'M', 'T', 'U'), 'trackedDiffMetadata')
+        name = records[i + 1].decode('utf-8')
+        pure = pathlib.PurePosixPath(name)
+        require(name.startswith(APP + '/') and not pure.is_absolute() and '..' not in pure.parts,
+                'trackedDiffApplicationScope')
+        # Runtime/private files are never inspected; the two tracked placeholders are source metadata.
+        relative = pure.relative_to(APP)
+        placeholder = str(relative) in {'data/.gitkeep', 'storage/pdf/.gitkeep'}
+        require(not any(part.startswith('.env') for part in relative.parts)
+                and (not any(part in ('data', 'data-test', 'storage', 'storage-test', 'uploads', 'instance')
+                             for part in relative.parts[:-1]) or placeholder), 'trackedSourceOnly')
+        require(not relative.name.endswith(('.db', '.sqlite', '.sqlite3', '.db-wal', '.db-shm')), 'noTrackedBusinessDatabase')
+        head = None
+        if old_mode not in ('000000', '160000'):
+            head = git_readonly(['cat-file', 'blob', old_blob], 'readOnlyHeadBlob')
+            require(len(head) <= LIMIT_FILE, 'trackedHeadBlobSizeLimit')
+        file = ROOT / pure
+        require(all(not parent.is_symlink() for parent in file.parents if parent != ROOT and ROOT in parent.parents),
+                'trackedSourceNoSymlinkAncestors')
+        content, disk_mode, permissions, kind = None, None, None, 'missing'
+        try:
+            metadata = file.lstat()
+        except FileNotFoundError:
+            metadata = None
+        if metadata is not None:
+            permissions = format(stat.S_IMODE(metadata.st_mode), '04o')
+            if stat.S_ISLNK(metadata.st_mode):
+                content = os.fsencode(os.readlink(file))
+                disk_mode, kind = '120000', 'symlink-target-only'
+            elif stat.S_ISREG(metadata.st_mode):
+                require(metadata.st_size <= LIMIT_FILE, 'trackedDiskFileSizeLimit')
+                fd = os.open(file, os.O_RDONLY | os.O_NOFOLLOW)
+                with os.fdopen(fd, 'rb') as source:
+                    before = os.fstat(source.fileno())
+                    content = source.read(before.st_size + 1)
+                    after = os.fstat(source.fileno())
+                require(len(content) == before.st_size and (before.st_ino, before.st_size, before.st_mtime_ns, before.st_mode)
+                        == (after.st_ino, after.st_size, after.st_mtime_ns, after.st_mode), 'trackedDiskFileStable')
+                disk_mode = '100755' if before.st_mode & stat.S_IXUSR else '100644'
+                kind = 'regular'
+            else:
+                kind = 'other-type-content-not-read'
+        same_content = head is not None and content is not None and head == content
+        text_line_endings_only = False
+        if head is not None and content is not None and head != content and b'\x00' not in head + content:
+            try:
+                head.decode('utf-8'); content.decode('utf-8')
+                normalize = lambda value: value.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+                text_line_endings_only = normalize(head) == normalize(content)
+            except UnicodeDecodeError:
+                pass
+        changes.append({'path': str(relative), 'changeType': status, 'headGitMode': old_mode,
+            'diffGitMode': new_mode, 'diskGitMode': disk_mode, 'diskPermissions': permissions, 'diskKind': kind,
+            'headBytes': len(head) if head is not None else None,
+            'diskBytes': len(content) if content is not None else None,
+            'headSha256': hashlib.sha256(head).hexdigest() if head is not None else None,
+            'diskSha256': hashlib.sha256(content).hexdigest() if content is not None else None,
+            'onlyModeChange': same_content and old_mode != disk_mode,
+            'onlyLineEndingChange': text_line_endings_only and old_mode == disk_mode})
+    return sorted(changes, key=lambda row: row['path'])
+
+
+def candidate_file_metadata(path):
+    require(not path.is_symlink(), 'sqliteCandidateNoSymlink')
+    require(stat.S_ISREG(path.lstat().st_mode), 'sqliteCandidateRegularFile')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as source:
+        before = os.fstat(source.fileno())
+        require(stat.S_ISREG(before.st_mode) and 0 <= before.st_size <= LIMIT_FILE, 'sqliteCandidateRegularSizeLimit')
+        sha = hashlib.sha256()
+        for block in iter(lambda: source.read(1024**2), b''):
+            sha.update(block)
+        after = os.fstat(source.fileno())
+    require((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_mode)
+            == (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_mode), 'sqliteCandidateFileStable')
+    return {'exists': True, 'bytes': before.st_size, 'sha256': sha.hexdigest()}, (str(before.st_dev), str(before.st_ino))
+
+
+def immutable_integrity_ok(path):
+    db = None
+    started = time.monotonic()
+    try:
+        db = readonly(path, immutable=True)
+        db.set_progress_handler(lambda: int(time.monotonic() - started > 15), 1000)
+        return db.execute('PRAGMA integrity_check').fetchall() == [('ok',)]
+    except sqlite3.Error:
+        return False
+    finally:
+        if db is not None:
+            db.close()  # __exit__ alone does not close sqlite3.Connection.
+
+
+def host_candidate_fds(identities, proc_root=pathlib.Path('/proc')):
+    complete, found = True, set()
+    targets = {}
+    for index, identity in enumerate(identities):
+        targets.setdefault(identity, []).append(index)
+    if not identities:
+        return {'complete': True, 'found': []}
+    if not proc_root.is_dir():
+        return {'complete': False, 'found': []}
+    try:
+        processes = list(proc_root.iterdir())
+    except OSError:
+        return {'complete': False, 'found': []}
+    for process in processes:
+        if not process.name.isdigit():
+            continue
+        try:
+            descriptors = list((process / 'fd').iterdir())
+        except FileNotFoundError:
+            continue
+        except OSError:
+            complete = False
+            continue
+        for descriptor in descriptors:
+            try:
+                value = descriptor.stat()
+            except FileNotFoundError:
+                continue
+            except OSError:
+                complete = False
+                continue
+            identity = (str(value.st_dev), str(value.st_ino))
+            if identity in targets:
+                found.update(targets[identity])
+    return {'complete': complete, 'found': sorted(found)}
+
+
+CANDIDATE_FDS = r"""
+const fs=require('fs');const targets=JSON.parse(fs.readFileSync(0,'utf8'));
+const ids=new Map();targets.forEach((v,i)=>{let k=v.join('/');ids.set(k,[...(ids.get(k)||[]),i]);});let complete=true,found=new Set(),pids=[];
+try{pids=fs.readdirSync('/proc');}catch(e){complete=false;}
+for(const pid of pids.filter(v=>/^\d+$/.test(v))){
+ let fds;try{fds=fs.readdirSync('/proc/'+pid+'/fd');}catch(e){if(e.code!=='ENOENT')complete=false;continue;}
+ for(const fd of fds){try{let v=fs.statSync('/proc/'+pid+'/fd/'+fd,{bigint:true}),indices=ids.get(v.dev.toString()+'/'+v.ino.toString());if(indices)indices.forEach(i=>found.add(i));}
+ catch(e){if(e.code!=='ENOENT')complete=false;}}
+}process.stdout.write(JSON.stringify({complete,found:[...found].sort((a,b)=>a-b)}));
+"""
+
+
+def extra_sqlite_candidate_metadata():
+    result = {}
+    for service in SERVICES:
+        container, live_db, env, secret = app_context(service)
+        require(live_db == ROOT / APP / SERVICES[service][0] / 'sprayplan.db', 'candidateVerifiedLiveDatabasePath')
+        live_metadata = live_db.stat()
+        live_identity = (str(live_metadata.st_dev), str(live_metadata.st_ino))
+        excluded = {live_db} | {pathlib.Path(str(live_db) + ending) for ending in ('-wal', '-shm', '-journal')}
+        rows, identities, scanned, total = [], [], 0, 0
+        for root_name in SERVICES[service]:
+            root = ROOT / APP / root_name
+            require(root.is_dir() and not root.is_symlink(), 'sqliteCandidateBindRoot')
+            for directory, directories, files in os.walk(root, followlinks=False):
+                directories.sort()
+                parent = pathlib.Path(directory)
+                require(not parent.is_symlink() and all(not (parent / name).is_symlink() for name in directories),
+                        'sqliteCandidateNoSymlinkDirectories')
+                for name in sorted(files):
+                    path = parent / name
+                    require(not path.is_symlink(), 'sqliteCandidateNoSymlinkFiles')
+                    if path in excluded:
+                        continue
+                    require(stat.S_ISREG(path.lstat().st_mode), 'candidateScanRegularFile')
+                    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                    with os.fdopen(fd, 'rb') as source:
+                        metadata = os.fstat(source.fileno())
+                        require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= LIMIT_FILE, 'candidateScanRegularSizeLimit')
+                        header = source.read(16)
+                    scanned += 1; total += metadata.st_size
+                    require(scanned <= LIMIT_FILES and total <= LIMIT_BYTES, 'candidateScanInventoryLimits')
+                    if header != b'SQLite format 3\x00':
+                        continue
+                    relative = str(path.relative_to(root))
+                    known = re.fullmatch(r'sprayplan\.db\.(bak|snapshot)\.([0-9]{8}-[0-9]{6})', relative)
+                    if known:
+                        try:
+                            datetime.datetime.strptime(known[2], '%Y%m%d-%H%M%S')
+                        except ValueError:
+                            known = None
+                    file_metadata, identity = candidate_file_metadata(path)
+                    index = len(identities); identities.append(identity)
+                    row = {'service': service, 'mountName': root_name, **file_metadata,
+                           'category': 'timestamp-named-' + known[1] + '-candidate' if known else 'unknown-sqlite-path',
+                           'integrityCheckOk': immutable_integrity_ok(path),
+                           'integrityScope': 'main-file-immutable-ignores-sidecars', 'inactiveStatusProven': False,
+                           'sameAsLivePrimaryFile': identity == live_identity}
+                    if known:
+                        row['relativePath'] = relative
+                    else:
+                        row['pathSha256'] = hashlib.sha256(relative.encode()).hexdigest()
+                    sidecars, sidecar_indices = {}, []
+                    for ending in ('-wal', '-shm', '-journal'):
+                        sidecar = pathlib.Path(str(path) + ending)
+                        require(not sidecar.is_symlink(), 'candidateSidecarNoSymlink')
+                        if sidecar.exists():
+                            sidecars[ending], identity = candidate_file_metadata(sidecar)
+                            sidecar_indices.append(len(identities)); identities.append(identity)
+                        else:
+                            sidecars[ending] = {'exists': False, 'bytes': None, 'sha256': None}
+                    row['sidecars'] = sidecars
+                    require(candidate_file_metadata(path)[0] == file_metadata, 'candidateIntegrityWindowStable')
+                    rows.append((row, [index] + sidecar_indices))
+        host = host_candidate_fds(identities)
+        if identities:
+            try:
+                container_fds = json.loads(run(['docker', 'exec', '-i', container, 'node', '-e', CANDIDATE_FDS],
+                    data=json.dumps(identities).encode(), check='readOnlyCandidateContainerFds:' + service))
+            except Exception:
+                container_fds = {'complete': False, 'found': []}
+        else:
+            container_fds = {'complete': True, 'found': []}
+        for probe in (host, container_fds):
+            require(set(probe) == {'complete', 'found'} and type(probe['complete']) is bool
+                    and isinstance(probe['found'], list) and all(type(i) is int and 0 <= i < len(identities) for i in probe['found']),
+                    'candidateFdProbeMetadata')
+        for row, indices in rows:
+            for label, probe in [('host', host), ('container', container_fds)]:
+                found = any(index in probe['found'] for index in indices)
+                row[label + 'OpenFileDescriptorFound'] = True if found else (False if probe['complete'] else None)
+                row[label + 'FdProbeComplete'] = probe['complete']
+        result[service] = {'scannedRegularFiles': scanned, 'sqliteCandidates': [row for row, indices in rows],
+                           'businessRowsRead': False, 'sqliteWritesPerformed': False}
+    return result
+
+
+def preflight():
+    require(source_commit() == source_commit('origin/main') == BEFORE, 'preflightExactPreDeployMain')
+    changes = tracked_source_diff()
+    candidates = extra_sqlite_candidate_metadata()
+    require(tracked_source_diff() == changes and source_commit() == source_commit('origin/main') == BEFORE,
+            'readOnlyPreflightWindowStable')
+    require(extra_sqlite_candidate_metadata() == candidates, 'readOnlySqliteCandidateWindowStable')
+    return {'mode': 'preflight', 'sourceCommit': BEFORE, 'trackedApplicationSourceClean': not changes,
+            'trackedDifferences': changes, 'extraSqliteCandidateMetadata': candidates, 'diagnosticComplete': True, 'sourceContentsPrinted': False,
+            'applicationCheckoutWritesPerformed': False, 'businessWritesPerformed': False, 'serviceRestartsPerformed': False}
+
+
+def static_sqlite_archive_guard():
+    metadata = extra_sqlite_candidate_metadata()
+    require(set(metadata) == set(SERVICES), 'historicalSqliteArchiveServiceInventory')
+    for service in SERVICES:
+        rows = metadata[service]['sqliteCandidates']
+        expected = OBSERVED_SQLITE_ARCHIVES[service]
+        require(len(rows) == len(expected) and {row.get('relativePath') for row in rows} == set(expected),
+                'exactObservedHistoricalSqliteArchiveInventory:' + service)
+        for row in rows:
+            require(row['service'] == service and row['mountName'] == SERVICES[service][0]
+                    and row['exists'] is True and (row['bytes'], row['sha256']) == expected[row['relativePath']]
+                    and row['integrityCheckOk'] is True and row['sameAsLivePrimaryFile'] is False
+                    and row['hostFdProbeComplete'] is True and row['containerFdProbeComplete'] is True
+                    and row['hostOpenFileDescriptorFound'] is False and row['containerOpenFileDescriptorFound'] is False
+                    and set(row['sidecars']) == {'-wal', '-shm', '-journal'}
+                    and all(value == {'exists': False, 'bytes': None, 'sha256': None} for value in row['sidecars'].values()),
+                    'observedHistoricalSqliteArchiveSafe:' + service)
+    return metadata
+
+
+def tracked_application_source_guard():
+    changes = tracked_source_diff()
+    # PR930 preflight independently confirmed these two directory markers have only
+    # historical chmod 0777 drift. Preserve their permissions; all code content,
+    # executable source modes and every other tracked path remain strict.
+    marker_hash = hashlib.sha256(b'\n').hexdigest()
+    expected = {'changeType': 'M', 'headGitMode': '100644', 'diffGitMode': '100755',
+                'diskGitMode': '100755', 'diskPermissions': '0777', 'diskKind': 'regular',
+                'headBytes': 1, 'diskBytes': 1, 'headSha256': marker_hash, 'diskSha256': marker_hash,
+                'onlyModeChange': True, 'onlyLineEndingChange': False}
+    require(not changes or (len(changes) == 2
+            and {row['path'] for row in changes} == {'data/.gitkeep', 'storage/pdf/.gitkeep'}
+            and all({key: value for key, value in row.items() if key != 'path'} == expected for row in changes)),
+            'trackedApplicationSourceClean')
+    return changes
+
+
+def backup():
+    os.umask(0o077)
+    require(source_commit() == source_commit('origin/main') == BEFORE, 'backupExactPreDeployMain')
+    source_metadata = tracked_application_source_guard()
+    sqlite_metadata = static_sqlite_archive_guard()
+    BACKUPS.mkdir(parents=True, exist_ok=True)
+    require(not BACKUPS.is_symlink(), 'privateBackupRoot')
+    directory = BACKUPS / ('sprayplan-pre-930-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
+    directory.mkdir(mode=0o700)
+    configs, core, nginx = configuration(), core_state(), nginx_protected()
+    require(core_healthy(core), 'coreBaselineHealthy')
+    envfile = ROOT / '.env.cloud.production'
+    require(envfile.is_file() and not envfile.is_symlink(), 'privateProductionEnvironmentExists')
+    (directory / 'env.before').write_bytes(envfile.read_bytes())
+    (directory / 'env.before').chmod(0o600)
+    archive_configuration(directory / 'configuration.tar', configs)
+    baseline = {'sourceCommit': BEFORE, 'deploymentLabel': 'PR930', 'services': {}, 'configurationFiles': configs,
+                'trackedSourceMetadata': source_metadata,
+                'historicalSqliteArchiveMetadata': sqlite_metadata,
+                'coreLifecycle': core, 'nginxProtected': nginx, 'onlineSqliteBackupApi': True, 'businessWritesPerformed': False}
+    for service in SERVICES:
+        snapshot, audit = snapshot_now(service, directory)
+        current_runtime = runtime(service)
+        files = file_inventory(service, directory / (service + '.tar'), sqlite_metadata[service]['sqliteCandidates'])
+        validate_archive(directory / (service + '.tar'), files)
+        api = api_audit(service, snapshot)
+        with tempfile.TemporaryDirectory(prefix='sprayplan-930-check-') as temporary:
+            _, stable = snapshot_now(service, pathlib.Path(temporary))
+        require(stable == audit and file_inventory(service, sqlite_archives=sqlite_metadata[service]['sqliteCandidates']) == files
+                and runtime(service) == current_runtime,
+                'baselineDataAndConfigurationStable:' + service)
+        baseline['services'][service] = {'database': audit, 'files': files, 'runtime': current_runtime, 'api': api}
+    require(core_state() == core and nginx_protected() == nginx and configuration() == configs and file_hash(envfile) == file_hash(directory / 'env.before')
+            and source_commit() == source_commit('origin/main') == BEFORE
+            and tracked_application_source_guard() == source_metadata
+            and static_sqlite_archive_guard() == sqlite_metadata, 'completeBaselineStable')
+    (directory / 'baseline.json').write_text(json.dumps(baseline, ensure_ascii=True))
+    (directory / 'baseline.json').chmod(0o600)
+    names = ['baseline.json', 'env.before', 'configuration.tar'] + [s + ext for s in SERVICES for ext in ('.db', '.tar')]
+    manifest = {name: file_hash(directory / name) for name in names}
+    (directory / 'manifest.json').write_text(json.dumps(manifest))
+    (directory / 'manifest.json').chmod(0o600)
+    return {'backup': str(directory), 'sourceCommit': BEFORE, 'privateArchivesVerified': True,
+            'onlineSqliteBackupApi': True, 'startupSafetyChecksPassed': True,
+            'allowedPlaceholderModeDifferences': source_metadata,
+            'historicalSqliteArchivesArchived': {s: len(v['sqliteCandidates']) for s, v in sqlite_metadata.items()},
+            'services': {s: {'tableCounts': {n: t['rows'] for n, t in b['database']['tables'].items()},
+                            'attachmentFiles': b['files']['files'], 'attachmentBytes': b['files']['bytes'],
+                            'api': b['api']} for s, b in baseline['services'].items()},
+            'coreLifecycle': core, 'businessWritesPerformed': False, 'serviceRestartsPerformed': False}
+
+
+def selected_backup(path):
+    directory = pathlib.Path(path)
+    require(directory.parent == BACKUPS and re.fullmatch(r'sprayplan-pre-930-[0-9]{8}T[0-9]{12}Z', directory.name),
+            'explicitPrivateBackupPath')
+    require(BACKUPS.is_dir() and not BACKUPS.is_symlink() and directory.is_dir() and not directory.is_symlink()
+            and directory.stat().st_mode & 0o077 == 0, 'privateBackupDirectoryPermissions')
+    private_file(directory / 'manifest.json')
+    manifest = json.loads((directory / 'manifest.json').read_text())
+    names = {'baseline.json', 'env.before', 'configuration.tar'} | {s + ext for s in SERVICES for ext in ('.db', '.tar')}
+    require(set(manifest) == names, 'exactBackupManifestInventory')
+    for name, expected in manifest.items():
+        private_file(directory / name)
+        require(file_hash(directory / name) == expected, 'privateBackupManifestMatches')
+    baseline = json.loads((directory / 'baseline.json').read_text())
+    require(baseline['sourceCommit'] == BEFORE and baseline['deploymentLabel'] == 'PR930'
+            and baseline['onlineSqliteBackupApi'] is True and set(baseline['services']) == set(SERVICES)
+            and set(baseline['configurationFiles']) == set(CONFIG), 'exactBackupBaseline')
+    validate_configuration_archive(directory / 'configuration.tar', baseline['configurationFiles'])
+    for service in SERVICES:
+        require(sqlite_audit(directory / (service + '.db')) == baseline['services'][service]['database'],
+                'restorableSqliteSnapshotMatchesBaseline')
+        validate_archive(directory / (service + '.tar'), baseline['services'][service]['files'])
+    return directory, baseline
+
+
+def tested_source_guard(target):
+    require(isinstance(TESTED_SOURCE, dict) and set(TESTED_SOURCE) == {'reviewedHead', 'files'}
+            and isinstance(TESTED_SOURCE['reviewedHead'], str)
+            and re.fullmatch('[a-f0-9]{40}', TESTED_SOURCE['reviewedHead']) is not None
+            and isinstance(TESTED_SOURCE['files'], dict) and bool(TESTED_SOURCE['files']),
+            'finalReviewedSourceManifestPinned')
+    require(isinstance(target, str) and re.fullmatch('[a-f0-9]{40}', target) is not None,
+            'exactTestedSourceTarget')
+    expected = TESTED_SOURCE['files']
+    for name, sha in expected.items():
+        require(isinstance(name, str) and name.startswith(APP + '/')
+                and not pathlib.PurePosixPath(name).is_absolute() and '..' not in pathlib.PurePosixPath(name).parts
+                and '\x00' not in name and '\n' not in name and '\r' not in name
+                and name[len(APP) + 1:].split('/')[0] not in {'data', 'data-test', 'storage', 'storage-test'}
+                and isinstance(sha, str) and re.fullmatch('[a-f0-9]{64}', sha) is not None,
+                'safePinnedTestedSourceInventory')
+    changed = git_readonly(['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', BEFORE, target],
+                           'readExactDeploymentChangedSourcePaths').decode('utf-8').split('\x00')
+    require(changed[-1] == '' and len(changed) == len(expected) + 1 and set(changed[:-1]) == set(expected),
+            'allChangedPathsExactlyMatchFinalTestedManifest')
+    for name, expected_hash in expected.items():
+        blob = git_readonly(['show', target + ':' + name], 'readExactDeployedSourceBlob')
+        require(hashlib.sha256(blob).hexdigest() == expected_hash, 'deployedGitBlobMatchesFinalTestedSource')
+        require(file_hash(ROOT / name) == expected_hash, 'actualCheckoutMatchesFinalTestedSource')
+    return {'reviewedHead': TESTED_SOURCE['reviewedHead'], 'testedFiles': len(expected),
+            'manifestSha256': digest(TESTED_SOURCE), 'allChangedPathsPinned': True,
+            'allDeployedGitBlobsAndCheckoutFilesMatchFinalTestedSource': True}
+
+
+def verify(mode, target, path):
+    directory, before = selected_backup(path)
+    actual = source_commit()
+    run(['git', 'merge-base', '--is-ancestor', BEFORE, target], check='deploymentSourceAncestry')
+    changed = run(['git', '-c', 'core.quotepath=false', 'diff', '--name-only', BEFORE, target], check='deploymentChangedPaths').decode().splitlines()
+    require(bool(changed) and all(name.startswith(APP + '/') for name in changed), 'deploymentOnlyRequestedApplication')
+    source_proof = tested_source_guard(target)
+    source_metadata = tracked_application_source_guard()
+    sqlite_metadata = static_sqlite_archive_guard()
+    core = core_state()
+    initial_nginx = nginx_protected()
+    initial_config = configuration()
+    initial_env = file_hash(ROOT / '.env.cloud.production')
+    checks = {'exactSourceVersion': actual == target == source_commit('origin/main'),
+              'finalTestedSourceManifestMatched': source_proof['allDeployedGitBlobsAndCheckoutFilesMatchFinalTestedSource'],
+              'trackedPlaceholderModesPreserved': source_metadata == before['trackedSourceMetadata'],
+              'historicalSqliteArchivesPreserved': sqlite_metadata == before['historicalSqliteArchiveMetadata'],
+              'configurationFilesPreserved': initial_config == before['configurationFiles'],
+              'productionEnvironmentPreserved': initial_env == file_hash(directory / 'env.before'),
+              'actualNginxConfigurationAndAuthorizationPreserved': initial_nginx == before['nginxProtected'],
+              'coreLifecyclePreserved': core == before['coreLifecycle'], 'coreHealthy': core_healthy(core)}
+    services, observed = {}, {}
+    # Do not fail early on an unrelated core restart: both data snapshots and permissions remain reported.
+    for service in SERVICES:
+        with tempfile.TemporaryDirectory(prefix='sprayplan-930-verify-') as temporary:
+            snapshot, audit = snapshot_now(service, pathlib.Path(temporary))
+            previous = before['services'][service]
+            current = runtime(service)
+            mounted_files = file_inventory(service, sqlite_archives=sqlite_metadata[service]['sqliteCandidates'])
+            observed[service] = (audit, current, mounted_files)
+            environment = process_environment_comparison(previous['runtime'], current)
+            flags = {'allTablesPreserved': audit == previous['database'],
+                     'allMountedFilesPreserved': mounted_files == previous['files'],
+                     'protectedConfigEnvPreserved': current['protectedConfigEnvSha256'] == previous['runtime']['protectedConfigEnvSha256'],
+                     'imageInheritedVersionMetadataValidated': current['imageInheritedVersionMetadataValidated'] and previous['runtime']['imageInheritedVersionMetadataValidated'],
+                     'protectedProcessEnvironmentsPreserved': environment['protectedProcessEnvironmentsPreserved'],
+                     'jwtSecretAndIssuerPreserved': current['secretSha256'] == previous['runtime']['secretSha256']
+                     and current['issuer'] == previous['runtime']['issuer'], 'rebuiltImageChanged': current['imageId'] != previous['runtime']['imageId']}
+            api, frontend = None, None
+            try:
+                api = api_audit(service, snapshot, deployed=True)
+                flags['readOnlyApiChecksPassed'] = True
+            except Exception:
+                flags['readOnlyApiChecksPassed'] = False
+                api = {'error': 'READ_ONLY_API_CHECK_FAILED', 'failedCheck': FAILED}
+            try:
+                frontend = frontend_audit(service)
+                flags['directApplicationStaticAssetsVerified'] = True
+            except Exception:
+                flags['directApplicationStaticAssetsVerified'] = False
+                frontend = {'error': 'STATIC_ASSET_CHECK_FAILED', 'failedCheck': FAILED}
+            services[service] = {'checks': flags, 'tableCounts': {n: t['rows'] for n, t in audit['tables'].items()},
+                                 'attachmentFiles': previous['files']['files'], 'api': api, 'frontend': frontend,
+                                 'processEnvironmentComparison': environment}
+    for service in SERVICES:
+        with tempfile.TemporaryDirectory(prefix='sprayplan-930-final-') as temporary:
+            _, final_audit = snapshot_now(service, pathlib.Path(temporary))
+        previous_audit, previous_runtime, previous_files = observed[service]
+        services[service]['checks'].update({'databaseVerificationWindowStable': final_audit == previous_audit,
+            'completeRuntimeVerificationWindowStable': runtime(service) == previous_runtime,
+            'mountedFilesVerificationWindowStable': file_inventory(service, sqlite_archives=sqlite_metadata[service]['sqliteCandidates']) == previous_files})
+    final_core = core_state()
+    checks.update({'nginxProtectionVerificationWindowStable': nginx_protected() == initial_nginx,
+                   'coreVerificationWindowStable': final_core == core, 'finalCoreHealthy': core_healthy(final_core),
+                   'trackedSourceMetadataVerificationWindowStable': tracked_application_source_guard() == source_metadata,
+                   'historicalSqliteArchiveVerificationWindowStable': static_sqlite_archive_guard() == sqlite_metadata,
+                   'sourceVerificationWindowStable': source_commit() == source_commit('origin/main') == actual
+                   and tested_source_guard(target) == source_proof,
+                   'environmentVerificationWindowStable': file_hash(ROOT / '.env.cloud.production') == initial_env,
+                   'configurationVerificationWindowStable': configuration() == initial_config})
+    passed = all(checks.values()) and all(all(s['checks'].values()) for s in services.values())
+    return {'sourceCommit': actual, 'targetCommit': target, 'backup': str(directory), 'checks': checks,
+            'services': services, 'finalTestedSource': source_proof, 'coreBefore': before['coreLifecycle'], 'coreNow': final_core,
+            'strictVerificationPassed': passed, 'diagnosticComplete': True,
+            'businessWritesPerformed': False, 'serviceRestartsPerformed': False}, passed
+
+
+def main(args):
+    require(len(args) == 4, 'argumentCount')
+    mode, before, target, path = args
+    require(mode in ('backup', 'verify', 'diagnose', 'preflight') and before == BEFORE and re.fullmatch('[a-f0-9]{40}', target),
+            'exactArguments')
+    if mode == 'preflight':
+        require(target == BEFORE and not path, 'preflightExactTarget')
+        print(json.dumps(preflight(), ensure_ascii=True))
+        return 0
+    if mode == 'backup':
+        require(target == BEFORE and not path, 'backupExactTarget')
+        print(json.dumps(backup(), ensure_ascii=True))
+        return 0
+    require(target != BEFORE and bool(path), 'verificationExactTargetAndBackup')
+    result, passed = verify(mode, target, path)
+    print(json.dumps(result, ensure_ascii=True))
+    return 0 if passed or mode == 'diagnose' else 1
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except Exception:
+        # Exceptions, SQL, URLs, rows and container stderr can contain private values.
+        print(json.dumps({'error': 'SPRAYPLAN_930_OPS_FAILED', 'failedCheck': FAILED,
+                          'businessWritesPerformed': False, 'serviceRestartsPerformed': False}))
+        sys.exit(1)

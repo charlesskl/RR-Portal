@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import sqlite3
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -955,6 +956,66 @@ class TestedSource930Tests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(RuntimeError):
                 self.check({'reviewedHead':'f'*40,'files':{name:'a'*64}})
             self.assertEqual('safePinnedTestedSourceInventory',ops.FAILED)
+
+
+class BuiltBasicMarkers930Tests(unittest.TestCase):
+    markers = ['按工作日历重排当前厂未生产计划','共享工作日历已保存','正在更新工作日历','请求未完成，请检查网络']
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='spray-basic930-')
+        self.root = pathlib.Path(self.temp.name)
+        self.static = self.root/'static'
+        self.basic = self.static/'chunks/app/basic/page-test123.js'
+        self.basic.parent.mkdir(parents=True)
+        self.basic.write_text(';'.join(self.markers))
+        (self.root/'fixture.dll').write_text('PlanDateRules CanReschedule HasActuals Reschedule InProductionRemainingQty ProductionCalendar NextWorkday Reflow ReflowSharedCalendar')
+        (self.root/'BUILD_ID').write_text('offline-build-id')
+        self.node = os.environ.get('NODE_BINARY') or shutil.which('node')
+        self.assertIsNotNone(self.node, 'Node is required to exercise the actual embedded asset-reader JS')
+
+    def tearDown(self): self.temp.cleanup()
+
+    def read(self):
+        script = ops.ASSET_INFO.replace('/app/.next/static',str(self.static)) \
+            .replace('/app/server/SprayPlan.Api/publish/SprayPlan.Api.dll',str(self.root/'fixture.dll')) \
+            .replace('/app/.next/BUILD_ID',str(self.root/'BUILD_ID'))
+        return json.loads(subprocess.check_output([self.node,'-e',script],stderr=subprocess.PIPE))
+
+    def audited(self, info):
+        with patch.object(ops,'cid',return_value='a'*64),patch.object(ops,'run',return_value=json.dumps(info).encode()), \
+             patch.object(ops,'get') as get:
+            with self.assertRaises(RuntimeError): ops.frontend_audit('sprayplan')
+            get.assert_not_called()
+        self.assertEqual('compiledBasicCalendarUiMarkersPresent',ops.FAILED)
+
+    def test_actual_embedded_js_hashes_basic_page_and_finds_all_four_final_markers(self):
+        info = self.read()
+        self.assertTrue(all(info['compiledFeatures'].values()))
+        self.assertEqual(4,len(info['uiMarkers']))
+        self.assertTrue(all(info['uiMarkers'].values()))
+        self.assertEqual([{'path':'chunks/app/basic/page-test123.js',
+                          'sha256':hashlib.sha256(self.basic.read_bytes()).hexdigest()}],info['basicPageChunks'])
+
+    def test_each_missing_final_ui_marker_fails_before_any_http_probe(self):
+        for omitted in self.markers:
+            with self.subTest(omitted=omitted):
+                self.basic.write_text(';'.join(v for v in self.markers if v!=omitted))
+                info=self.read()
+                self.assertEqual(1,list(info['uiMarkers'].values()).count(False))
+                self.audited(info)
+
+    def test_marker_present_only_in_unrelated_chunk_never_satisfies_basic_page_gate(self):
+        self.basic.write_text('original ui has none of the final markers')
+        (self.static/'unrelated.js').write_text(';'.join(self.markers))
+        info=self.read()
+        self.assertFalse(any(info['uiMarkers'].values()))
+        self.audited(info)
+
+    def test_missing_actual_basic_page_chunk_never_passes_empty_text_match(self):
+        self.basic.rename(self.basic.parent/'not-basic-page.js')
+        info=self.read()
+        self.assertEqual([],info['basicPageChunks'])
+        self.audited(info)
 
 
 if __name__ == '__main__':

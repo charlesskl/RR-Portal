@@ -604,7 +604,10 @@ const fs=require('fs'),path=require('path'),crypto=require('crypto');let rows=[]
 function walk(root){for(const e of fs.readdirSync(root,{withFileTypes:true})){const p=path.join(root,e.name);if(e.isDirectory())walk(p);else if(e.isFile()&&/\.(js|css)$/.test(p))rows.push({path:p.slice('/app/.next/static/'.length),bytes:fs.statSync(p).size,sha256:crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')});}}
 walk('/app/.next/static');const assembly=fs.readFileSync('/app/server/SprayPlan.Api/publish/SprayPlan.Api.dll');
 const features=Object.fromEntries(['PlanDateRules','CanReschedule','HasActuals','Reschedule','InProductionRemainingQty','ProductionCalendar','NextWorkday','Reflow','ReflowSharedCalendar'].map(name=>[name,assembly.includes(Buffer.from(name))]));
-process.stdout.write(JSON.stringify({buildId:fs.readFileSync('/app/.next/BUILD_ID','utf8').trim(),assets:rows,compiledFeatures:features,assemblySha256:crypto.createHash('sha256').update(assembly).digest('hex')}));
+const basic=rows.filter(row=>/^chunks\/app\/basic\/page-[A-Za-z0-9]+\.js$/.test(row.path));
+const basicCode=basic.map(row=>fs.readFileSync(path.join('/app/.next/static',row.path),'utf8')).join('\n');
+const uiMarkers=Object.fromEntries(Object.entries({currentFactoryReflow:'按工作日历重排当前厂未生产计划',sharedCalendarScope:'共享工作日历已保存',busyFeedback:'正在更新工作日历',networkFailureRecovery:'请求未完成，请检查网络'}).map(([key,value])=>[key,basicCode.includes(value)]));
+process.stdout.write(JSON.stringify({buildId:fs.readFileSync('/app/.next/BUILD_ID','utf8').trim(),assets:rows,compiledFeatures:features,basicPageChunks:basic.map(row=>({path:row.path,sha256:row.sha256})),uiMarkers,assemblySha256:crypto.createHash('sha256').update(assembly).digest('hex')}));
 """
 
 
@@ -614,6 +617,9 @@ def frontend_audit(service):
     require(isinstance(info['assets'], list) and bool(info['assets']), 'builtStaticAssetsPresent')
     require(set(info['compiledFeatures']) == {'PlanDateRules', 'CanReschedule', 'HasActuals', 'Reschedule', 'InProductionRemainingQty', 'ProductionCalendar', 'NextWorkday', 'Reflow', 'ReflowSharedCalendar'}
             and all(value is True for value in info['compiledFeatures'].values()), 'compiledBackendNewFeatureSymbolsPresent')
+    require(isinstance(info.get('basicPageChunks'), list) and bool(info['basicPageChunks'])
+            and set(info.get('uiMarkers', {})) == {'currentFactoryReflow', 'sharedCalendarScope', 'busyFeedback', 'networkFailureRecovery'}
+            and all(value is True for value in info['uiMarkers'].values()), 'compiledBasicCalendarUiMarkersPresent')
     network = inspect(identifier)['NetworkSettings']['Networks']
     address = next(n['IPAddress'] for name, n in network.items() if name.endswith('platform-net'))
     for asset in info['assets']:
@@ -624,7 +630,8 @@ def frontend_audit(service):
                 'directApplicationAssetMatchesBuiltContainer:' + service)
     return {'buildId': info['buildId'], 'assetFiles': len(info['assets']), 'assetsSha256': digest(info['assets']),
             'allDirectApplicationStaticAssetsMatchContainer': True, 'publicAssetsAuthenticated': False,
-            'compiledBackendNewFeatureSymbolsPresent': True, 'assemblySha256': info['assemblySha256']}
+            'compiledBackendNewFeatureSymbolsPresent': True, 'compiledBasicCalendarUiMarkersPresent': True,
+            'basicPageChunks': info['basicPageChunks'], 'assemblySha256': info['assemblySha256']}
 
 
 def snapshot_now(service, directory):

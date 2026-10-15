@@ -7,6 +7,7 @@ import { api, type Dictionaries, type Material, type Molding, type MoldingPart, 
 import { MATERIAL_CATEGORIES, inferMaterialCategory } from '../utils/engineeringImport'
 import { resolveMaterialTranslation } from '../utils/materialTranslate'
 import { mergeImportedMaterials, recommendMaterialChoices, resolveMaterialImport, type ImportChoice } from '../utils/materialImportMerge'
+import { mergeImportedMoldings } from '../utils/moldingImportMerge'
 import { MaterialImportReview } from '../components/MaterialImportReview'
 import SupplierProfileEditor from '../components/SupplierProfileEditor'
 import {
@@ -277,15 +278,9 @@ export default function ProductsPage() {
               },
             })
           }
-          // moldings: replace if same moldId/moldName; else append
+          // Match the full style/color variant, not just the shared mold number.
           const existingMoldings = Array.isArray(data.moldings) ? data.moldings : []
-          const mergedMoldings = [...existingMoldings]
-          for (const m of r.moldings) {
-            const dupe = mergedMoldings.find(x => (x.moldId && x.moldId === m.moldId) || (!x.moldId && !m.moldId && x.moldName === m.moldName))
-            if (dupe) Object.assign(dupe, m, { setsPerShot: dupe.setsPerShot, workshop: dupe.workshop, notes: dupe.notes })
-            else mergedMoldings.push(m)
-          }
-          setMoldings(mergedMoldings)
+          setMoldings(mergeImportedMoldings(existingMoldings, r.moldings))
         } catch (error) { throw error }
       } else {
         originalMaterialsRef.current = []

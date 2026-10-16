@@ -155,15 +155,49 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
         var supplier = await c.QuerySingleOrDefaultAsync<SupItem>(@"
             SELECT keyword, full_name AS full FROM dict_supplier WHERE id=@id", new { id });
         if (supplier is null) return NotFound();
-        var referenced = await c.ExecuteScalarAsync<bool>(@"
-            SELECT EXISTS (
-                SELECT 1 FROM materials WHERE lower(trim(COALESCE(supplier, ''))) IN (lower(@keyword), lower(@full))
-                UNION ALL SELECT 1 FROM shipment_items WHERE lower(trim(COALESCE(supplier, ''))) IN (lower(@keyword), lower(@full))
-                UNION ALL SELECT 1 FROM purchase_orders WHERE lower(trim(COALESCE(supplier, ''))) IN (lower(@keyword), lower(@full))
-            )", new { supplier.keyword, supplier.full });
-        if (referenced) return Conflict(new { error = "该供应商已被物料或走货资料使用，不能删除" });
+        var names = new[] { supplier.keyword, supplier.full }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!).Distinct().ToArray();
+        var usages = (await c.QueryAsync<SupplierUsage>(@"
+            WITH names AS (
+                SELECT DISTINCT lower(trim(name)) AS name FROM unnest(@names::text[]) AS aliases(name)
+            ), usages AS (
+                SELECT '物料' AS type, m.id, '' AS document, m.product_code AS productcode,
+                    m.material_code AS materialcode, m.name_zh AS materialname, m.supplier
+                FROM materials m WHERE lower(trim(m.supplier)) IN (SELECT name FROM names)
+                UNION ALL
+                SELECT '采购单', p.id, p.po_no, '', '', '', p.supplier
+                FROM purchase_orders p WHERE lower(trim(p.supplier)) IN (SELECT name FROM names)
+                UNION ALL
+                SELECT '走货明细', i.id, s.container_no, m.product_code, m.material_code, m.name_zh, i.supplier
+                FROM shipment_items i
+                LEFT JOIN shipments s ON s.id = i.shipment_id
+                LEFT JOIN materials m ON m.id = i.material_id
+                WHERE lower(trim(i.supplier)) IN (SELECT name FROM names)
+            ), ranked AS (
+                SELECT *, count(*) OVER () AS total,
+                    row_number() OVER (PARTITION BY type ORDER BY id) AS position
+                FROM usages
+            )
+            SELECT * FROM ranked WHERE position <= 100 ORDER BY type, id", new { names })).ToList();
+        if (usages.Count > 0) return Conflict(new {
+            error = "该供应商已被物料、采购单或走货资料使用，不能删除",
+            total = usages[0].total, truncated = usages[0].total > usages.Count, usages
+        });
         await c.ExecuteAsync("DELETE FROM dict_supplier WHERE id=@id", new { id });
         return Ok(new { ok = true });
+    }
+
+    public sealed class SupplierUsage
+    {
+        public string type { get; set; } = "";
+        public int id { get; set; }
+        public string? document { get; set; }
+        public string? productCode { get; set; }
+        public string? materialCode { get; set; }
+        public string? materialName { get; set; }
+        public string? supplier { get; set; }
+        public long total { get; set; }
     }
 
     private static string NormalizeCustomsCompany(string? customs, string full)

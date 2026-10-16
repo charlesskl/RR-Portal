@@ -273,7 +273,7 @@ test('网页汇总使用后端完整栏目清单并保持固定表格布局', ()
   assert.match(html, /<colgroup id="summary-cols"><\/colgroup>/);
 });
 
-test('汇总导出在当前页面内下载并按业务分区显示不同颜色', () => {
+test('汇总导出在当前页面内下载并按参考表显示负责人及税前税后颜色', () => {
   const source = fs.readFileSync(path.join(__dirname, '../frontend/summary.js'), 'utf8');
   assert.match(source, /fetch\(`\$\{base\}\/api\/quote-summary\/export\/xlsx/);
   assert.match(source, /URL\.createObjectURL\(blob\)/);
@@ -285,8 +285,10 @@ test('汇总导出在当前页面内下载并按业务分区显示不同颜色',
   }]);
   const sheet = workbook.getWorksheet('各客报价汇总');
   const headerColumn = label => sheet.getRow(4).values.findIndex(value => value === label);
-  assert.notEqual(sheet.getCell(4, headerColumn('啤工')).fill.fgColor.argb, sheet.getCell(4, headerColumn('彩盒')).fill.fgColor.argb);
-  assert.notEqual(sheet.getCell(4, headerColumn('彩盒')).fill.fgColor.argb, sheet.getCell(4, headerColumn('电子')).fill.fgColor.argb);
+  assert.equal(sheet.getCell(3, headerColumn('啤工')).value, '张副总');
+  assert.equal(sheet.getCell(3, headerColumn('电子')).value, '胡总');
+  assert.equal(sheet.getCell(4, headerColumn('总未退税前利润率')).fill.fgColor.argb, 'FFFFFF00');
+  assert.equal(sheet.getCell(4, headerColumn('总退税后利润率')).fill.fgColor.argb, 'FF00B0F0');
   assert.equal(sheet.getCell(5, headerColumn('客价确认')).fill.fgColor.argb, 'FFC6EFCE');
 });
 

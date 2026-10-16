@@ -141,6 +141,9 @@ SUMMARY_COLUMNS.forEach(([key]) => {
   if (key.startsWith('total_') && key.endsWith('_share')) SHARE_AMOUNTS[key] = key.slice(0, -6);
 });
 SHARE_AMOUNTS.total_gross_before_tax_rate = 'total_gross_before_tax';
+SHARE_AMOUNTS.total_profit_before_tax_rate = 'total_profit_before_tax';
+SHARE_AMOUNTS.total_gross_after_tax_rate = 'total_gross_after_tax';
+SHARE_AMOUNTS.total_profit_after_tax_rate = 'total_profit_after_tax';
 const SHARE_UNITS = { abs_material_share: 'abs_material_cost', rmb_purchase_share: 'rmb_purchase_cost' };
 
 function calculateSummaryValues(before, after, qty, price, absMaterialCost = 0) {
@@ -187,14 +190,14 @@ function calculateSummaryValues(before, after, qty, price, absMaterialCost = 0) 
   values.profit_after_tax = price-values.cost_after_rebate; values.profit_after_tax_rate = price ? values.profit_after_tax/price : 0;
   values.production_amount=price*qty; values.production_cost=values.cost_with_labor*qty;
   values.total_gross_before_tax=values.gross_before_tax*qty; values.total_gross_before_tax_rate=values.production_amount ? values.total_gross_before_tax/values.production_amount : 0;
-  values.total_profit_before_tax=values.profit_before_tax*qty; values.total_profit_before_tax_rate=values.profit_before_tax_rate;
+  values.total_profit_before_tax=values.profit_before_tax*qty; values.total_profit_before_tax_rate=values.production_amount ? values.total_profit_before_tax/values.production_amount : 0;
   values.total_raw_before_tax=(num(before.imp_mat)+num(before.dom_mat))*qty; values.total_raw_before_tax_share=values.production_amount?values.total_raw_before_tax/values.production_amount:0;
   values.total_labor_before_tax=laborBefore*qty; values.total_labor_before_tax_share=values.production_amount?values.total_labor_before_tax/values.production_amount:0;
   values.total_rmb_purchase=values.rmb_purchase_cost*qty; values.total_rmb_purchase_share=values.production_amount?values.total_rmb_purchase/values.production_amount:0;
   values.total_rebate_reduction=values.rebate_reduction*qty;
   values.total_no_labor_after_tax=values.no_labor_cost_after_tax*qty; values.total_no_labor_after_tax_share=values.production_amount?values.total_no_labor_after_tax/values.production_amount:0;
-  values.total_gross_after_tax=values.gross_after_tax*qty; values.total_gross_after_tax_rate=values.gross_after_tax_rate;
-  values.total_profit_after_tax=values.profit_after_tax*qty; values.total_profit_after_tax_rate=values.profit_after_tax_rate;
+  values.total_gross_after_tax=values.gross_after_tax*qty; values.total_gross_after_tax_rate=values.production_amount ? values.total_gross_after_tax/values.production_amount : 0;
+  values.total_profit_after_tax=values.profit_after_tax*qty; values.total_profit_after_tax_rate=values.production_amount ? values.total_profit_after_tax/values.production_amount : 0;
   values.total_raw_after_tax=values.raw_cost_after_tax*qty; values.total_raw_after_tax_share=values.production_amount?values.total_raw_after_tax/values.production_amount:0;
   values.total_labor_after_tax=values.labor_cost_after_tax*qty; values.total_labor_after_tax_share=values.production_amount?values.total_labor_after_tax/values.production_amount:0;
   Object.entries(SHARE_AMOUNTS).forEach(([key, amount]) => {
@@ -530,10 +533,32 @@ function buildSummaryWorkbook(rows, filters = {}) {
   });
   ws.getColumn(totalShareColumn).width = 14;
   [13, 14, 19, 26].forEach((width, index) => { ws.getColumn(totalShareColumn + 1 + index).width = width; });
+  for (const key of ['markup_before_tax', 'markup_after_tax']) {
+    for (let row = 4; row < rowNo; row++) {
+      const cell = ws.getCell(row, columnByKey[key]);
+      cell.font = { ...cell.font, color: { argb: 'FFFF0000' } };
+    }
+  }
   ws.eachRow(row => row.eachCell(cell => {
     cell.alignment = { ...cell.alignment, horizontal: 'center', vertical: 'middle' };
   }));
   return wb;
+}
+
+function summaryHeaderStyle(key) {
+  const zhang = ['injection_labor','assembly_labor','painting_labor','color_box','libao','carton','plating'];
+  const peng = ['imp_mat','dom_mat','suction','slush','sewing_hair','sewing_cloth'];
+  const hu = ['electronic','battery','hardware','paint_material','other_buy','misc'];
+  const owner = zhang.includes(key) ? '张副总' : peng.includes(key) ? '彭副总' : hu.includes(key) ? '胡总' : '';
+  const ownerFill = owner === '张副总' ? 'FCE4D6' : owner === '彭副总' ? 'FFFF00' : owner === '胡总' ? '9BC2E6' : '';
+  let fill = 'FFFFFF';
+  if (/_after_tax$|_amount$|_share$/.test(key) && !/^total_|^production_|^abs_|^rmb_/.test(key)) fill = 'D9E1F2';
+  const yellow = ['gross_before_tax','gross_before_tax_rate','profit_before_tax','profit_before_tax_rate','markup_before_tax','tax_1_cost','labor_13_cost','freight_9_cost','tax_13_cost','carton_13_cost','slush_3_cost','hair_13_cost','cloth_13_cost','suction_6_cost','rebate_reduction','cost_after_rebate','markup_after_tax','total_gross_before_tax','total_gross_before_tax_rate','total_profit_before_tax','total_profit_before_tax_rate','total_raw_before_tax','total_raw_before_tax_share','total_labor_before_tax','total_labor_before_tax_share'];
+  const blue = ['raw_cost_after_tax','labor_cost_after_tax','no_labor_cost_after_tax','gross_after_tax','gross_after_tax_rate','profit_after_tax','profit_after_tax_rate','total_rebate_reduction','total_no_labor_after_tax','total_no_labor_after_tax_share','total_gross_after_tax','total_gross_after_tax_rate','total_profit_after_tax','total_profit_after_tax_rate','total_raw_after_tax','total_raw_after_tax_share','total_labor_after_tax','total_labor_after_tax_share'];
+  if (yellow.includes(key)) fill = 'FFFF00';
+  if (blue.includes(key)) fill = '00B0F0';
+  const color = ['markup_before_tax','markup_after_tax'].includes(key) ? 'FF0000' : ['cost_without_labor','abs_material_share','total_purchase_price','surtax_04','rmb_purchase_cost'].includes(key) ? '0000FF' : '000000';
+  return { fill, color, owner, owner_fill: ownerFill || fill };
 }
 
 function buildDetailedSummaryWorkbook(rows, filters = {}) {
@@ -544,19 +569,6 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
   const workflow = [['confirmation_status','客价确认'], ['confirmed_by','确认人'], ['confirmed_at','确认时间'], ['note','备注']];
   const columns = [...BASE_SUMMARY_COLUMNS, ...SUMMARY_COLUMNS, ...workflow];
   const columnByKey = Object.fromEntries(columns.map(([key], index) => [key, index + 1]));
-  const headerFillFor = (key, index) => {
-    if (key === 'cost_with_labor' || key === 'cost_without_labor') return 'FFFFFFFF';
-    if (index < BASE_SUMMARY_COLUMNS.length) return 'FFFFFFFF';
-    if (workflow.some(([workflowKey]) => workflowKey === key)) return 'FFFFE699';
-    if (/^(injection_labor|assembly_labor|painting_labor)/.test(key)) return 'FFD9EAF7';
-    if (/^(imp_mat|dom_mat|raw_material|abs_material|total_purchase_price)/.test(key)) return 'FFE2F0D9';
-    if (/^(color_box|libao|suction|carton)/.test(key)) return 'FFFFF2CC';
-    if (/^(plating|electronic|battery|hardware)/.test(key)) return 'FFE4DFEC';
-    if (/^(slush|sewing_hair|sewing_cloth|paint_material)/.test(key)) return 'FFFCE4D6';
-    if (/^(other_buy|misc|freight|cabinet|surtax|rmb_purchase)/.test(key)) return 'FFDDEBF7';
-    if (/^(production_|total_)/.test(key)) return 'FFD9EAD3';
-    return 'FFF4CCCC';
-  };
   const ref = (key, row) => `${ws.getColumn(columnByKey[key]).letter}${row}`;
   const rawKeys = ['injection_labor','assembly_labor','painting_labor','imp_mat','dom_mat','color_box','libao','suction','carton','plating','flocking','electronic','battery','hardware','slush','sewing_hair','sewing_cloth','paint_material','other_buy','misc','freight','cabinet'];
   const formulaFor = (key, row, source) => {
@@ -602,14 +614,14 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
       profit_after_tax:`${price}-${ref('cost_after_rebate',row)}`, profit_after_tax_rate:`IF(${price}=0,0,${ref('profit_after_tax',row)}/${price})`,
       production_amount:`${price}*${qty}`, production_cost:`${qty}*${ref('cost_with_labor',row)}`,
       total_gross_before_tax:`${ref('gross_before_tax',row)}*${qty}`, total_gross_before_tax_rate:`IF(${ref('production_amount',row)}=0,0,${ref('total_gross_before_tax',row)}/${ref('production_amount',row)})`,
-      total_profit_before_tax:`${ref('profit_before_tax',row)}*${qty}`, total_profit_before_tax_rate:ref('profit_before_tax_rate',row),
+      total_profit_before_tax:`${ref('profit_before_tax',row)}*${qty}`, total_profit_before_tax_rate:`IF(${ref('production_amount',row)}=0,0,${ref('total_profit_before_tax',row)}/${ref('production_amount',row)})`,
       total_raw_before_tax:`(${ref('imp_mat',row)}+${ref('dom_mat',row)})*${qty}`, total_raw_before_tax_share:`IF(${ref('production_amount',row)}=0,0,${ref('total_raw_before_tax',row)}/${ref('production_amount',row)})`,
       total_labor_before_tax:`(${labor})*${qty}`, total_labor_before_tax_share:`IF(${ref('production_amount',row)}=0,0,${ref('total_labor_before_tax',row)}/${ref('production_amount',row)})`,
       total_rmb_purchase:`${ref('rmb_purchase_cost',row)}*${qty}`, total_rmb_purchase_share:`IF(${ref('production_amount',row)}=0,0,${ref('total_rmb_purchase',row)}/${ref('production_amount',row)})`,
       total_rebate_reduction:`${ref('rebate_reduction',row)}*${qty}`,
       total_no_labor_after_tax:`${ref('no_labor_cost_after_tax',row)}*${qty}`, total_no_labor_after_tax_share:`IF(${ref('production_amount',row)}=0,0,${ref('total_no_labor_after_tax',row)}/${ref('production_amount',row)})`,
-      total_gross_after_tax:`${ref('gross_after_tax',row)}*${qty}`, total_gross_after_tax_rate:ref('gross_after_tax_rate',row),
-      total_profit_after_tax:`${ref('profit_after_tax',row)}*${qty}`, total_profit_after_tax_rate:ref('profit_after_tax_rate',row),
+      total_gross_after_tax:`${ref('gross_after_tax',row)}*${qty}`, total_gross_after_tax_rate:`IF(${ref('production_amount',row)}=0,0,${ref('total_gross_after_tax',row)}/${ref('production_amount',row)})`,
+      total_profit_after_tax:`${ref('profit_after_tax',row)}*${qty}`, total_profit_after_tax_rate:`IF(${ref('production_amount',row)}=0,0,${ref('total_profit_after_tax',row)}/${ref('production_amount',row)})`,
       total_raw_after_tax:`${ref('raw_cost_after_tax',row)}*${qty}`, total_raw_after_tax_share:`IF(${ref('production_amount',row)}=0,0,${ref('total_raw_after_tax',row)}/${ref('production_amount',row)})`,
       total_labor_after_tax:`${ref('labor_cost_after_tax',row)}*${qty}`, total_labor_after_tax_share:`IF(${ref('production_amount',row)}=0,0,${ref('total_labor_after_tax',row)}/${ref('production_amount',row)})`,
       amount_share_total:`SUM(${AMOUNT_SHARE_KEYS.map(key=>ref(key,row)).join(',')})`,
@@ -622,8 +634,8 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
   // Keep the title within the first screen of this very wide cost table.
   ws.mergeCells('A1:H1');
   ws.getCell('A1').value = `${exportDate.slice(0,4)}年 · 各客产品报价汇总表`;
-  ws.getCell('A1').font = { bold:true, size:18, name:'Microsoft YaHei', color:{argb:'FF153A5B'} };
-  ws.getCell('A1').fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFE7F1FA'} };
+  ws.getCell('A1').font = { bold:true, size:18, name:'Microsoft YaHei', color:{argb:'FF000000'} };
+  ws.getCell('A1').fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFFFFFFF'} };
   ws.getRow(1).height = 38;
   ws.mergeCells('A2:D2'); ws.mergeCells('E2:H2');
   ws.getCell('A2').value = `客户：${filters.customer || '全部客户'}`;
@@ -633,9 +645,17 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
     ws.getCell(address).alignment = { wrapText:true };
   }
   ws.getRow(2).height = Math.max(28, wrappedLineCount(filters.customer || '全部客户', 42)*16);
-  ws.getRow(3).height = 10;
+  ws.getRow(3).height = 24;
   const border = { top:{style:'thin',color:{argb:'FF94A3B8'}}, left:{style:'thin',color:{argb:'FF94A3B8'}}, bottom:{style:'thin',color:{argb:'FF94A3B8'}}, right:{style:'thin',color:{argb:'FF94A3B8'}} };
-  columns.forEach(([key,label],i)=>{ const c=ws.getCell(4,i+1); c.value=label; c.font={bold:true,color:{argb:'FF153A5B'},name:'Microsoft YaHei'}; c.alignment={horizontal:'center',vertical:'middle',wrapText:true}; c.border=border; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:headerFillFor(key,i)}}; });
+  columns.forEach(([key,label],i)=>{ const c=ws.getCell(4,i+1); c.value=label; c.font={bold:true,color:{argb:'FF'+summaryHeaderStyle(key).color},name:'SimSun',size:11}; c.alignment={horizontal:'center',vertical:'middle',wrapText:true}; c.border=border; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF'+summaryHeaderStyle(key).fill}}; });
+  columns.forEach(([key],i) => {
+    const style = summaryHeaderStyle(key), cell = ws.getCell(3,i+1);
+    cell.value = style.owner;
+    cell.font = {name:'SimSun',size:11,bold:true,color:{argb:'FF000000'}};
+    cell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FF'+style.owner_fill}};
+    cell.border = border;
+    cell.alignment = {horizontal:'center',vertical:'middle',wrapText:true};
+  });
   ws.getRow(4).height=52;
   let rowNo=5;
   groupSummaryRows(rows).forEach(group=>{
@@ -706,7 +726,7 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
 }
 
 module.exports = {
-  WORKSHOPS, QUOTE_COMPONENTS, TAX_DEDUCTION_RATES, BASE_SUMMARY_COLUMNS, SUMMARY_COLUMNS, SHARE_AMOUNTS, SHARE_UNITS, AMOUNT_SHARE_KEYS,
+  summaryHeaderStyle, WORKSHOPS, QUOTE_COMPONENTS, TAX_DEDUCTION_RATES, BASE_SUMMARY_COLUMNS, SUMMARY_COLUMNS, SHARE_AMOUNTS, SHARE_UNITS, AMOUNT_SHARE_KEYS,
   afterTaxComponents, calculateSummaryValues, groupSummaryRows, buildQuoteSummary,
   buildSummaryWorkbook: buildDetailedSummaryWorkbook, parseJson,
 };

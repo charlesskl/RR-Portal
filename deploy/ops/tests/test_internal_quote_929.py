@@ -240,13 +240,42 @@ class VerificationOverviewTests(unittest.TestCase):
         self.assertEqual(0,proof['rows'])
 
 
-class PendingFinalSourcePinTests(unittest.TestCase):
-    def test_unreviewed_manifest_refuses_production_source_guard(self):
-        manifest=json.loads((MODULE.parent/'internal-quote-929-source.json').read_text())
-        self.assertEqual({'reviewedHead':None,'files':{}},manifest)
-        with patch.object(ops,'TESTED_SOURCE',manifest),self.assertRaises(RuntimeError):
-            ops.tested_source_guard('f'*40)
-        self.assertEqual('finalReviewedHeadPinned',ops.FAILED_CHECK)
+class RealFinalSourcePinTests(unittest.TestCase):
+    """Exercise the production guard against the actual reviewed 9-file Git diff."""
+    def setUp(self):
+        self.repo=MODULE.parents[2]
+        self.manifest=json.loads((MODULE.parent/'internal-quote-929-source.json').read_text())
+        self.assertEqual('f2c2a60c06c2875a8bb623bc1993e62e75661a19',self.manifest['reviewedHead'])
+        self.assertEqual(9,len(self.manifest['files']))
+        self.temp=tempfile.TemporaryDirectory(prefix='iq929-final-source-')
+        self.checkout=pathlib.Path(self.temp.name)
+        for name in self.manifest['files']:
+            blob=subprocess.check_output(['git','show',self.manifest['reviewedHead']+':'+name],cwd=self.repo)
+            target=self.checkout/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(blob)
+    def tearDown(self):self.temp.cleanup()
+    def check(self,manifest=None):
+        def real_git(args,data=None):
+            return subprocess.check_output(args,input=data,cwd=self.repo,stderr=subprocess.DEVNULL)
+        with patch.object(ops,'ROOT',self.checkout),patch.object(ops,'TESTED_SOURCE',manifest or self.manifest),patch.object(ops,'run',side_effect=real_git):
+            return ops.tested_source_guard(self.manifest['reviewedHead'])
+    def test_all_9_final_reviewed_git_blobs_and_checkout_pass(self):
+        proof=self.check()
+        self.assertEqual(9,proof['testedFiles'])
+        self.assertTrue(proof['allDeployedGitBlobsAndCheckoutFilesMatchFinalTestedSource'])
+    def test_one_bad_real_final_source_hash_is_rejected(self):
+        bad=copy.deepcopy(self.manifest);bad['files'][next(iter(bad['files']))]='0'*64
+        with self.assertRaises(RuntimeError):self.check(bad)
+        self.assertEqual('deployedGitBlobMatchesFinalTestedSource',ops.FAILED_CHECK)
+    def test_missing_or_extra_real_changed_file_is_rejected(self):
+        missing=copy.deepcopy(self.manifest);missing['files'].pop(next(iter(missing['files'])))
+        extra=copy.deepcopy(self.manifest);extra['files'][ops.APP_PREFIX+'backend/services/unreviewed.js']='0'*64
+        for manifest in (missing,extra):
+            with self.subTest(files=len(manifest['files'])),self.assertRaises(RuntimeError):self.check(manifest)
+            self.assertEqual('allChangedPathsExactlyMatchFinalTestedManifest',ops.FAILED_CHECK)
+    def test_actual_final_checkout_drift_is_rejected_even_when_all_git_hashes_match(self):
+        path=self.checkout/next(iter(self.manifest['files']));path.write_bytes(path.read_bytes()+b'\n// unreviewed edit')
+        with self.assertRaises(RuntimeError):self.check()
+        self.assertEqual('actualCheckoutMatchesFinalTestedSource',ops.FAILED_CHECK)
 
 
 if __name__=='__main__':unittest.main()

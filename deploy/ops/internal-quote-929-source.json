@@ -1,4 +1,14 @@
 {
-  "reviewedHead": null,
-  "files": {}
+  "reviewedHead": "f2c2a60c06c2875a8bb623bc1993e62e75661a19",
+  "files": {
+    "apps/业务部/内部报价系统/backend/routes/verifications.js": "bf3a12a8b3cbef4131b028322e61ad9ca50a8e1171ea7a54d86c911e7dd24e84",
+    "apps/业务部/内部报价系统/backend/services/verificationSectionSave.js": "09e5d28c620bc902d23b5407490a178d0e553c87e538547f130c531342c295aa",
+    "apps/业务部/内部报价系统/frontend/summary.html": "86bf715f6afd29fc6ef80b3ea199abc90a614fd0849998c150973452555f50fa",
+    "apps/业务部/内部报价系统/frontend/summary.js": "a2f54d20830236df0f5d669f32072af7776b3fbf49f5004874a8bbe54f6ceaea",
+    "apps/业务部/内部报价系统/frontend/verification.html": "e78e4f4e34a723a8202bc6131bee1acb1abfff63988268623a9acab2e65ed47b",
+    "apps/业务部/内部报价系统/frontend/verification.js": "115236db8943d35f7a04fd37a49d55d2aeedc0b475b20710618f86ef382754d7",
+    "apps/业务部/内部报价系统/tests/frontend-save-protection.test.js": "9e95789c2835e18e75ada6e6ecfc9560476c90b8ee5a2b7e6092e058a30e09b6",
+    "apps/业务部/内部报价系统/tests/save-protection.test.js": "6d80b3aeed61089f4041efe39b3478134d91457d8be549ef18a9271a1a736d4d",
+    "apps/业务部/内部报价系统/tests/verification-section-api.test.js": "a3fccab4d2bd09334aa4c10bad54ddef18b799154467c9284f4fcd2fb2b641ff"
+  }
 }

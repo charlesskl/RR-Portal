@@ -1,6 +1,33 @@
 {
-  "reviewedHead": null,
-  "files": {},
+  "reviewedHead": "15223e95a1d397d83336e32213f47b3bdce33610",
+  "files": {
+    "apps/业务部/内部报价系统/backend/db/verification-source-summaries.json": "01a800716902ae6e6981be3804e767cadf9ce91bc064a87982339cd7261ca563",
+    "apps/业务部/内部报价系统/backend/routes/verificationSummary.js": "7354c72478edea34d6d8adda9d19aabdc4b8ffcf6f69c711178030eaefb34164",
+    "apps/业务部/内部报价系统/backend/routes/verifications.js": "0d23c76b3aa24e71dd5aa4d6cefa37d61d73c98b9d1286246c7671fffdcbe43d",
+    "apps/业务部/内部报价系统/backend/server.js": "65fa2fcbe4997b70488678821b9c0afba03c8d64511324733655c56ae3bd1681",
+    "apps/业务部/内部报价系统/backend/services/sourceSummary.js": "2e81533d4ec62b1afbd322e245e0131de264fdc397379eea063e202baa165f51",
+    "apps/业务部/内部报价系统/backend/services/verificationMetadata.js": "9492b6ab08032538537eba0b913ac1165ffb6881e5c27c5fe4bf4ba9f17f919f",
+    "apps/业务部/内部报价系统/backend/services/verificationSummary.js": "b60a252da591253d034aa832244fdd99ce6d4747c2b39244564f027f9400bd00",
+    "apps/业务部/内部报价系统/backend/services/verificationSummaryTemplate.json": "e0eb3204d07fb3dc06c71af850fcf6f8161080d8948464dc4b2ccbd10bb43518",
+    "apps/业务部/内部报价系统/backend/services/verificationWorkshopExport.js": "3b3640300aaf17ed4615199678d6f1866742db1f68cdbf21fe39a568591c4acc",
+    "apps/业务部/内部报价系统/backend/services/verificationWorkshopTemplate.json": "4abce4a81b886a71832bdadc1b5e6d0deb719b5277913399f6deb97c3d7da00e",
+    "apps/业务部/内部报价系统/backend/services/verificationWorkshops.js": "0184ee3dfbabb181b6e48899ae2d925e831393341cbc59cc51990d091a2a4c09",
+    "apps/业务部/内部报价系统/frontend/excel-formulas.js": "c0ab2bbda24187eaf803e9809ce544364104eee118634c3b1a855a89ad0cadbb",
+    "apps/业务部/内部报价系统/frontend/verification-report-groups.js": "e3a68e86df01a669b9b19c5b3063da904af11a6abb769ccf31e70f23d9e6e735",
+    "apps/业务部/内部报价系统/frontend/verification-summary.html": "5a10c4e24061d700ddb46752726bab90abe2822f909ced22c052b4a8205858c6",
+    "apps/业务部/内部报价系统/frontend/verification-summary.js": "39671687b9921faf03799a1b9dbd8d90b54e44af8ccb61931649511338e27422",
+    "apps/业务部/内部报价系统/frontend/verification.html": "2a0f9bbcb77f167b3ef55f31977e046ede8ab40f756f6ea90794e09b420894f2",
+    "apps/业务部/内部报价系统/frontend/verification.js": "3a499c794f663b65b953f225820f72f958b2a5d3a9467b611d3fc365fdee9353",
+    "apps/业务部/内部报价系统/tests/frontend-save-protection.test.js": "dbdeab60d09a44b502e6e419f8b1182d4a75dfdc1c85e45aa7cb45f4a64c1a12",
+    "apps/业务部/内部报价系统/tests/frontend-verification-summary-save.test.js": "10a4576c617bdd542813a243e3c2e68c22f1e4cf42b5855eddf31bf073805f22",
+    "apps/业务部/内部报价系统/tests/source-summary.test.js": "dffb972483223bb1edd69ae91d0f668e86c46dfe55ec4fdb7316cf4e44773acc",
+    "apps/业务部/内部报价系统/tests/verification-quantity.test.js": "04733f3377e0b2c65cec730f161f9aa7917512a0d0bf961bc6fb63e96725b1b1",
+    "apps/业务部/内部报价系统/tests/verification-summary-api.test.js": "6d36bc2d3f5acbc1fc13411f1eea4ba8c30977285f11965bdda917575a0e45e6",
+    "apps/业务部/内部报价系统/tests/verification-summary-loading.test.js": "f7ca8e8f8b89aa8e0af95ce4e628100cd0e0dd7ddfdf0b68f2626d23805c3c19",
+    "apps/业务部/内部报价系统/tests/verification-summary.test.js": "039a2749ed8c222462bd43f33117441efa34a7248223696ba031520198f31106",
+    "apps/业务部/内部报价系统/tests/verification-workshop-assignment.test.js": "0b39e6898de26c50f4e0448cf4d540df8319195e20120a9683c0be8175e1ca1b",
+    "apps/业务部/内部报价系统/tests/verification-workshops.test.js": "c9bd8a1ce684dc34911d3347b8b93aa133672dabe74fd7826d2e84366c66a4e8"
+  },
   "expectedSummaryColumns": [
     {
       "code": "cost_with_labor",
@@ -1662,6 +1689,818 @@
         "misc_amount",
         "freight_amount"
       ]
+    }
+  ],
+  "expectedVerificationColumns": [
+    {
+      "key": "A",
+      "label": "客名",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "B",
+      "label": "货号",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "C",
+      "label": "货品名称",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "D",
+      "label": "2026年1-7月份实际接单数量",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "E",
+      "label": "货价(HK$)",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "F",
+      "label": "成本(含人工)",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "G",
+      "label": "成本(不含人工)",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "H",
+      "label": "啤工",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "I",
+      "label": "退税后啤工",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "J",
+      "label": "啤工金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "K",
+      "label": "啤工占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "L",
+      "label": "装工",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "M",
+      "label": "退税后装工",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "N",
+      "label": "装工金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "O",
+      "label": "装工占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "P",
+      "label": "喷印工",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "Q",
+      "label": "退税后喷印工",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "R",
+      "label": "喷印工金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "S",
+      "label": "喷印工占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "T",
+      "label": "料价进口料",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "U",
+      "label": "料价国内料",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "V",
+      "label": "退税后原料",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "W",
+      "label": "原料金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "X",
+      "label": "原料占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "Y",
+      "label": "ABS料价成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "Z",
+      "label": "ABS占货价%",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "AA",
+      "label": "总采购价",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AB",
+      "label": "彩盒",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AC",
+      "label": "退税后彩盒",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AD",
+      "label": "彩盒金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AE",
+      "label": "彩盒占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AF",
+      "label": "贴纸",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AG",
+      "label": "退税后贴纸",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AH",
+      "label": "贴纸金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AI",
+      "label": "贴纸占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AJ",
+      "label": "吸塑",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AK",
+      "label": "退税后吸塑",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AL",
+      "label": "吸塑金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AM",
+      "label": "吸塑占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AN",
+      "label": "纸箱",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AO",
+      "label": "退税后纸箱",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AP",
+      "label": "纸箱金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AQ",
+      "label": "纸箱占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AR",
+      "label": "电镀",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AS",
+      "label": "电子",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AT",
+      "label": "退税后电子",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AU",
+      "label": "电子金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AV",
+      "label": "电子占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AW",
+      "label": "电池",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AX",
+      "label": "退税后电池",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AY",
+      "label": "电池金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AZ",
+      "label": "电池占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BA",
+      "label": "五金",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BB",
+      "label": "退税后五金",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BC",
+      "label": "五金金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BD",
+      "label": "五金占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BE",
+      "label": "搪胶",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BF",
+      "label": "退税后搪胶",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BG",
+      "label": "搪胶金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BH",
+      "label": "搪胶占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BI",
+      "label": "车发",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BJ",
+      "label": "退税后车发",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BK",
+      "label": "车发金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BL",
+      "label": "车发占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BM",
+      "label": "车衣",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BN",
+      "label": "退税后车衣",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BO",
+      "label": "车衣金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BP",
+      "label": "车衣占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BQ",
+      "label": "油漆",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BR",
+      "label": "退税后油漆",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BS",
+      "label": "油漆金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BT",
+      "label": "油漆占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BU",
+      "label": "其他外购",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BV",
+      "label": "退税后其他外购",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BW",
+      "label": "其他外购金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BX",
+      "label": "其他外购占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "BY",
+      "label": "杂项",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BZ",
+      "label": "退税后杂项",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CA",
+      "label": "杂项金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CB",
+      "label": "杂项占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CC",
+      "label": "运费",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CD",
+      "label": "吊柜费",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CE",
+      "label": "退税后运费",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CF",
+      "label": "运费金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CG",
+      "label": "运费占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CH",
+      "label": "附加税0.4%",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CI",
+      "label": "人民币采购成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CJ",
+      "label": "人民币采购成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CK",
+      "label": "未退税前毛利",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CL",
+      "label": "未退税前毛利率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CM",
+      "label": "未退税前利润",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CN",
+      "label": "未退税前利润率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CO",
+      "label": "未退税前码点",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CP",
+      "label": "含税1%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CQ",
+      "label": "人工类13%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CR",
+      "label": "运费含税9%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CS",
+      "label": "含税13%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CT",
+      "label": "纸箱(含税13%）成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CU",
+      "label": "搪胶类3%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CV",
+      "label": "车发类13%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CW",
+      "label": "车衣类13%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CX",
+      "label": "吸塑类6%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CY",
+      "label": "总退税可减少成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CZ",
+      "label": "退税及返点后总成本（含人工）",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DA",
+      "label": "退税后码数",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DB",
+      "label": "退税后原料成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DC",
+      "label": "退税后人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DD",
+      "label": "退税后不含人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DE",
+      "label": "退税后毛利",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DF",
+      "label": "退税后毛利率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DG",
+      "label": "退税后利润",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DH",
+      "label": "退税后利润率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DI",
+      "label": "总生产金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DJ",
+      "label": "总生产成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DK",
+      "label": "总未退税前毛利",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DL",
+      "label": "总未退税前毛利率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DM",
+      "label": "总未退税前利润",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DN",
+      "label": "总未退税前利润率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DO",
+      "label": "总未退税前料价",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DP",
+      "label": "总未退税前料价占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DQ",
+      "label": "总未退税人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DR",
+      "label": "总未退税人工成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DS",
+      "label": "总人民币结算外购件成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DT",
+      "label": "总人民币结算外购件成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DU",
+      "label": "总退税及返点减少成本金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DV",
+      "label": "退税后不含人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DW",
+      "label": "退税后不含人工成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DX",
+      "label": "总退税后毛利",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DY",
+      "label": "总退税后毛利率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DZ",
+      "label": "总退税后利润",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "EA",
+      "label": "总退税后利润率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "EB",
+      "label": "总退税后料成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "EC",
+      "label": "总未退税前料成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "ED",
+      "label": "总退税后人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "EE",
+      "label": "总退税后人工成本占比",
+      "hidden": false,
+      "percent": true
     }
   ]
 }

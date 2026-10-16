@@ -1,5 +1,13 @@
 import { expect, it } from 'vitest'
-import { supplierFilterOptions, supplierFilterValue } from './supplierFilters'
+import { sortSuppliersByDisplayName, supplierFilterOptions, supplierFilterValue } from './supplierFilters'
+
+it('sorts displayed names by pinyin without changing source order, putting blanks last', () => {
+  const rows = [{ keyword: '深圳' }, { keyword: ' ', full: '东莞' }, { keyword: '保士特10' }, { keyword: '' }, { keyword: '保士特2' }]
+  const original = [...rows]
+  expect(sortSuppliersByDisplayName(rows).map(r => supplierFilterValue(r, 'displayName')))
+    .toEqual(['保士特2', '保士特10', '东莞', '深圳', ''])
+  expect(rows).toEqual(original)
+})
 
 it('filters supplier display name, falling back to full company name', () => {
   expect(supplierFilterValue({ keyword: '台聚', full: '东莞台聚' }, 'displayName')).toBe('台聚')

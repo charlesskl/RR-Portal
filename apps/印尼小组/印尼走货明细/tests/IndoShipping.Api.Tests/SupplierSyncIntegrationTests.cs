@@ -10,6 +10,68 @@ namespace IndoShipping.Api.Tests;
 public class SupplierSyncIntegrationTests
 {
     [Fact]
+    public async Task Delete_reports_each_usage_and_keeps_supplier_until_all_references_are_removed()
+    {
+        await using var fixture = await Fixture.Create();
+        if (fixture is null) return;
+        var c = fixture.Connection;
+        await AddUsageColumns(c);
+        await c.ExecuteAsync(@"
+            INSERT INTO dict_supplier(keyword,full_name) VALUES ('Alpha','Alpha Company');
+            INSERT INTO materials(supplier,product_code,material_code,name_zh)
+                VALUES (' ALPHA ','L21106','01020096','公仔左右手');
+            INSERT INTO purchase_orders(supplier,po_no) VALUES ('alpha company','PO001');
+            INSERT INTO shipments(id,container_no) VALUES (1,'CONTAINER001');
+            INSERT INTO shipment_items(supplier,shipment_id,material_id) VALUES ('Alpha',1,1),('Alpha',99,99);");
+        var controller = new DictionariesController(fixture.Factory);
+        var conflict = Assert.IsType<ConflictObjectResult>(await controller.DeleteSupplier(1));
+        var report = System.Text.Json.JsonSerializer.SerializeToElement(conflict.Value);
+        Assert.Equal(4, report.GetProperty("total").GetInt32());
+        Assert.False(report.GetProperty("truncated").GetBoolean());
+        var usages = report.GetProperty("usages").EnumerateArray().ToArray();
+        Assert.Contains(usages, u => u.GetProperty("materialCode").GetString() == "01020096"
+            && u.GetProperty("productCode").GetString() == "L21106");
+        Assert.Contains(usages, u => u.GetProperty("document").GetString() == "PO001");
+        Assert.Contains(usages, u => u.GetProperty("document").GetString() == "CONTAINER001");
+        Assert.Contains(usages, u => u.GetProperty("type").GetString() == "走货明细"
+            && u.GetProperty("document").ValueKind == System.Text.Json.JsonValueKind.Null);
+        Assert.Equal(1, await c.ExecuteScalarAsync<int>("SELECT count(*) FROM dict_supplier"));
+        await c.ExecuteAsync("DELETE FROM materials; DELETE FROM purchase_orders; DELETE FROM shipment_items;");
+        Assert.IsType<OkObjectResult>(await controller.DeleteSupplier(1));
+        Assert.IsType<NotFoundResult>(await controller.DeleteSupplier(1));
+    }
+
+    [Fact]
+    public async Task Delete_caps_each_usage_category_and_ignores_empty_supplier_aliases()
+    {
+        await using var fixture = await Fixture.Create();
+        if (fixture is null) return;
+        var c = fixture.Connection;
+        await AddUsageColumns(c);
+        await c.ExecuteAsync(@"
+            INSERT INTO dict_supplier(keyword,full_name) VALUES ('Alpha','Company'),('','Unused Company');
+            INSERT INTO materials(supplier) SELECT 'Alpha' FROM generate_series(1,105);
+            INSERT INTO materials(supplier) VALUES (''),(NULL),('Other');
+            INSERT INTO purchase_orders(supplier,po_no) VALUES ('Company','PO002');");
+        var controller = new DictionariesController(fixture.Factory);
+        var conflict = Assert.IsType<ConflictObjectResult>(await controller.DeleteSupplier(1));
+        var report = System.Text.Json.JsonSerializer.SerializeToElement(conflict.Value);
+        Assert.Equal(106, report.GetProperty("total").GetInt32());
+        Assert.True(report.GetProperty("truncated").GetBoolean());
+        Assert.Equal(101, report.GetProperty("usages").GetArrayLength());
+        Assert.Contains(report.GetProperty("usages").EnumerateArray(), u => u.GetProperty("document").GetString() == "PO002");
+        Assert.IsType<OkObjectResult>(await controller.DeleteSupplier(2));
+        Assert.Equal(108, await c.ExecuteScalarAsync<int>("SELECT count(*) FROM materials"));
+    }
+
+    private static Task<int> AddUsageColumns(NpgsqlConnection c) => c.ExecuteAsync(@"
+        ALTER TABLE materials ADD COLUMN id serial PRIMARY KEY, ADD COLUMN product_code text,
+            ADD COLUMN material_code text, ADD COLUMN name_zh text;
+        ALTER TABLE purchase_orders ADD COLUMN id serial PRIMARY KEY, ADD COLUMN po_no text;
+        ALTER TABLE shipment_items ADD COLUMN id serial PRIMARY KEY, ADD COLUMN shipment_id int, ADD COLUMN material_id int;
+        CREATE TABLE shipments(id int PRIMARY KEY, container_no text);");
+
+    [Fact]
     public async Task Renaming_archive_preserves_all_material_and_document_snapshots()
     {
         await using var fixture = await Fixture.Create();

@@ -96,9 +96,9 @@ def bounded_command(args, source=None, limit=MAX_RESTORE_BYTES):
 
 def baseline_audit_ids(directory, before):
     ops.checkpoint('privateDumpAuditIds')
-    # pg_restore without --dbname emits SQL only. It never connects or restores.
+    # Explicit stdout is required by pg_restore. No --dbname: never connect or restore.
     args = ['docker', 'exec', '-i', ops.cid('db'), 'pg_restore', '--data-only',
-            '--no-owner', '--no-privileges', '--schema=internal_quote', '--table=audit_log']
+            '--no-owner', '--no-privileges', '--schema=internal_quote', '--table=audit_log', '--file=-']
     with (directory / 'internal_quote.dump').open('rb') as source:
         ids = parse_audit_copy_ids(bounded_command(args, source))
     ops.require(len(ids) == before['tables']['audit_log']['rows'], 'auditDumpIdsMatchBaselineRowCount')

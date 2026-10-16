@@ -59,9 +59,19 @@ class CopyParserTests(unittest.TestCase):
                 self.assertEqual([3,7],ids)
                 args=command.call_args.args[0]
                 self.assertIn('--schema=internal_quote',args);self.assertIn('--table=audit_log',args)
-                self.assertFalse(any(value.startswith(('--dbname','-d','--file','-f')) for value in args[5:]))
+                self.assertEqual(['--file=-'],[value for value in args[5:] if value.startswith(('--file','-f'))])
+                self.assertFalse(any(value.startswith(('--dbname','-d')) for value in args[5:]))
             with patch.object(audit.ops,'cid',return_value='a'*64),patch.object(audit,'bounded_command',return_value=copy_data()),self.assertRaises(RuntimeError):
                 audit.baseline_audit_ids(root,{'tables':{'audit_log':{'rows':3}}})
+    def test_restore_argv_explicitly_selects_stdout_and_never_database_execution(self):
+        # PostgreSQL 16 rejects an archive read without either --file or --dbname.
+        # The safe mode is --file=- only; exported SQL is parsed, never executed.
+        with tempfile.TemporaryDirectory() as temporary:
+            root=pathlib.Path(temporary);(root/'internal_quote.dump').write_bytes(b'synthetic archive')
+            with patch.object(audit.ops,'cid',return_value='a'*64),patch.object(audit,'bounded_command',return_value=copy_data()) as command:
+                audit.baseline_audit_ids(root,{'tables':{'audit_log':{'rows':2}}})
+            self.assertEqual(['docker','exec','-i','a'*64,'pg_restore','--data-only','--no-owner',
+                              '--no-privileges','--schema=internal_quote','--table=audit_log','--file=-'],command.call_args.args[0])
 
 
 class SqlTests(unittest.TestCase):

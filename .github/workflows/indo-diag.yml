@@ -7,7 +7,7 @@ on:
         description: 'internal-quote only: private backup or read-only verification'
         type: choice
         required: true
-        options: [backup, verify]
+        options: [backup, verify, diagnose]
         default: backup
       before_commit:
         description: 'Exact pre-deployment main SHA'
@@ -50,12 +50,15 @@ jobs:
           set -euo pipefail
           [[ "$IQ_OPS_BRANCH" = refs/heads/ops/internal-quote-934-20261016 ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-          [[ "$IQ_OPS_REF" =~ ^[a-f0-9]{40}$ && "$IQ_OPS_MODE" =~ ^(backup|verify)$ ]] || exit 1
+          [[ "$IQ_OPS_REF" =~ ^[a-f0-9]{40}$ && "$IQ_OPS_MODE" =~ ^(backup|verify|diagnose)$ ]] || exit 1
           [[ "$IQ_OPS_BEFORE" = a0f261dee99e6ed3a39f2def982de8d5311ec55a && "$IQ_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
-          if [[ "$IQ_OPS_MODE" = verify ]]; then
+          if [[ "$IQ_OPS_MODE" != backup ]]; then
             [[ "$IQ_OPS_TARGET" != "$IQ_OPS_BEFORE" && "$IQ_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/internal-quote-pre-934-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
           else
             [[ "$IQ_OPS_TARGET" = "$IQ_OPS_BEFORE" && -z "$IQ_OPS_BACKUP" ]] || exit 1
+          fi
+          if [[ "$IQ_OPS_MODE" = diagnose ]]; then
+            [[ "$IQ_OPS_TARGET" = bf80f392c024b160b3061f7717c02f08d319a79d && "$IQ_OPS_BACKUP" = /opt/rr-portal/deploy/backups/internal-quote-pre-934-20261016T093057223428Z ]] || exit 1
           fi
 
       - name: Fixed internal-quote private backup or read-only verification
@@ -78,12 +81,15 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$IQ_OPS_BRANCH" = refs/heads/ops/internal-quote-934-20261016 ]] || exit 1
-            [[ "$IQ_OPS_REF" =~ ^[a-f0-9]{40}$ && "$IQ_OPS_MODE" =~ ^(backup|verify)$ ]] || exit 1
+            [[ "$IQ_OPS_REF" =~ ^[a-f0-9]{40}$ && "$IQ_OPS_MODE" =~ ^(backup|verify|diagnose)$ ]] || exit 1
             [[ "$IQ_OPS_BEFORE" = a0f261dee99e6ed3a39f2def982de8d5311ec55a && "$IQ_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
-            if [[ "$IQ_OPS_MODE" = verify ]]; then
+            if [[ "$IQ_OPS_MODE" != backup ]]; then
               [[ "$IQ_OPS_TARGET" != "$IQ_OPS_BEFORE" && "$IQ_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/internal-quote-pre-934-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
             else
               [[ "$IQ_OPS_TARGET" = "$IQ_OPS_BEFORE" && -z "$IQ_OPS_BACKUP" ]] || exit 1
+            fi
+            if [[ "$IQ_OPS_MODE" = diagnose ]]; then
+              [[ "$IQ_OPS_TARGET" = bf80f392c024b160b3061f7717c02f08d319a79d && "$IQ_OPS_BACKUP" = /opt/rr-portal/deploy/backups/internal-quote-pre-934-20261016T093057223428Z ]] || exit 1
             fi
             cd /opt/rr-portal
             git fetch origin main ops/internal-quote-934-20261016 >/dev/null 2>&1 || { echo 'IQ_934_SCRIPT_FETCH_FAILED'; exit 1; }
@@ -92,4 +98,9 @@ jobs:
             trap 'rm -rf "$rr_temporary"' EXIT
             git show "$IQ_OPS_REF:deploy/ops/internal-quote-934.py" > "$rr_temporary/ops.py" 2>/dev/null || { echo 'IQ_934_SCRIPT_READ_FAILED'; exit 1; }
             git show "$IQ_OPS_REF:deploy/ops/internal-quote-934-source.json" > "$rr_temporary/source.json" 2>/dev/null || { echo 'IQ_934_SOURCE_PIN_READ_FAILED'; exit 1; }
-            python3 "$rr_temporary/ops.py" "$IQ_OPS_MODE" "$IQ_OPS_BEFORE" "$IQ_OPS_TARGET" "$IQ_OPS_BACKUP" "$rr_temporary/source.json"
+            if [[ "$IQ_OPS_MODE" = diagnose ]]; then
+              git show "$IQ_OPS_REF:deploy/ops/internal-quote-934-diagnose.py" > "$rr_temporary/diagnose.py" 2>/dev/null || { echo 'IQ_934_DIAG_READ_FAILED'; exit 1; }
+              python3 "$rr_temporary/diagnose.py" "$IQ_OPS_MODE" "$IQ_OPS_BEFORE" "$IQ_OPS_TARGET" "$IQ_OPS_BACKUP" "$rr_temporary/source.json"
+            else
+              python3 "$rr_temporary/ops.py" "$IQ_OPS_MODE" "$IQ_OPS_BEFORE" "$IQ_OPS_TARGET" "$IQ_OPS_BACKUP" "$rr_temporary/source.json"
+            fi

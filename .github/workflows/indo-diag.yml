@@ -1,7 +1,27 @@
-name: Indo Shipping Diag
+name: PR931 Internal Quote Private Backup and Read-only Verification
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'internal-quote only: private backup or read-only verification'
+        type: choice
+        required: true
+        options: [backup, verify]
+        default: backup
+      before_commit:
+        description: 'Exact pre-deployment main SHA'
+        type: string
+        required: true
+        default: '3a3704582279f3bbfe2356a313bfda2165f9da65'
+      target_commit:
+        description: 'Exact main SHA; same as before_commit for preflight/backup'
+        type: string
+        required: true
+      backup_path:
+        description: 'Exact private backup path returned by backup; verify only'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -14,32 +34,62 @@ concurrency:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Validate SSH host fingerprint
+      - name: Validate exact branch, SHA arguments and SSH fingerprint
         shell: bash
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          IQ_OPS_BRANCH: ${{ github.ref }}
+          IQ_OPS_REF: ${{ github.sha }}
+          IQ_OPS_MODE: ${{ inputs.mode }}
+          IQ_OPS_BEFORE: ${{ inputs.before_commit }}
+          IQ_OPS_TARGET: ${{ inputs.target_commit }}
+          IQ_OPS_BACKUP: ${{ inputs.backup_path }}
         run: |
           set -euo pipefail
-          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
-            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
-            exit 1
+          [[ "$IQ_OPS_BRANCH" = refs/heads/ops/internal-quote-931-20261016 ]] || exit 1
+          [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+          [[ "$IQ_OPS_REF" =~ ^[a-f0-9]{40}$ && "$IQ_OPS_MODE" =~ ^(backup|verify)$ ]] || exit 1
+          [[ "$IQ_OPS_BEFORE" = 3a3704582279f3bbfe2356a313bfda2165f9da65 && "$IQ_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          if [[ "$IQ_OPS_MODE" = verify ]]; then
+            [[ "$IQ_OPS_TARGET" != "$IQ_OPS_BEFORE" && "$IQ_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/internal-quote-pre-931-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
+          else
+            [[ "$IQ_OPS_TARGET" = "$IQ_OPS_BEFORE" && -z "$IQ_OPS_BACKUP" ]] || exit 1
           fi
 
-      - name: Fetch indo-shipping container logs via SSH
+      - name: Fixed internal-quote private backup or read-only verification
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          IQ_OPS_BRANCH: ${{ github.ref }}
+          IQ_OPS_REF: ${{ github.sha }}
+          IQ_OPS_MODE: ${{ inputs.mode }}
+          IQ_OPS_BEFORE: ${{ inputs.before_commit }}
+          IQ_OPS_TARGET: ${{ inputs.target_commit }}
+          IQ_OPS_BACKUP: ${{ inputs.backup_path }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 5m
+          command_timeout: 12m
+          envs: IQ_OPS_BRANCH,IQ_OPS_REF,IQ_OPS_MODE,IQ_OPS_BEFORE,IQ_OPS_TARGET,IQ_OPS_BACKUP
           script: |
             set -euo pipefail
-            echo "== 容器状态 =="
-            docker ps -a --filter name=indo-shipping --format 'table {{.Names}}\t{{.Status}}'
-            echo "== 最近 100 行日志 =="
-            docker logs rr-portal-indo-shipping-1 --tail 100 2>&1 || true
+            [[ "$IQ_OPS_BRANCH" = refs/heads/ops/internal-quote-931-20261016 ]] || exit 1
+            [[ "$IQ_OPS_REF" =~ ^[a-f0-9]{40}$ && "$IQ_OPS_MODE" =~ ^(backup|verify)$ ]] || exit 1
+            [[ "$IQ_OPS_BEFORE" = 3a3704582279f3bbfe2356a313bfda2165f9da65 && "$IQ_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            if [[ "$IQ_OPS_MODE" = verify ]]; then
+              [[ "$IQ_OPS_TARGET" != "$IQ_OPS_BEFORE" && "$IQ_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/internal-quote-pre-931-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
+            else
+              [[ "$IQ_OPS_TARGET" = "$IQ_OPS_BEFORE" && -z "$IQ_OPS_BACKUP" ]] || exit 1
+            fi
+            cd /opt/rr-portal
+            git fetch origin main ops/internal-quote-931-20261016 >/dev/null 2>&1 || { echo 'IQ_931_SCRIPT_FETCH_FAILED'; exit 1; }
+            umask 077
+            rr_temporary=$(mktemp -d /tmp/iq-931.XXXXXX)
+            trap 'rm -rf "$rr_temporary"' EXIT
+            git show "$IQ_OPS_REF:deploy/ops/internal-quote-931.py" > "$rr_temporary/ops.py" 2>/dev/null || { echo 'IQ_931_SCRIPT_READ_FAILED'; exit 1; }
+            git show "$IQ_OPS_REF:deploy/ops/internal-quote-931-source.json" > "$rr_temporary/source.json" 2>/dev/null || { echo 'IQ_931_SOURCE_PIN_READ_FAILED'; exit 1; }
+            python3 "$rr_temporary/ops.py" "$IQ_OPS_MODE" "$IQ_OPS_BEFORE" "$IQ_OPS_TARGET" "$IQ_OPS_BACKUP" "$rr_temporary/source.json"

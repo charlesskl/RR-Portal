@@ -1,0 +1,2511 @@
+{
+  "source": "副本2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+  "records": [
+    {
+      "customer": "ZURU",
+      "sku": "77593（汇率7.25）",
+      "product": "4代迷你球恐龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B4"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77593（汇率7.08）",
+      "product": "4代迷你球恐龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B5"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77515（汇率7.25）",
+      "product": "迷你厨艺系列",
+      "workshop": "兴信A",
+      "source": "ZURU!B6"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77515（汇率7.08）",
+      "product": "迷你厨艺系列",
+      "workshop": "兴信A",
+      "source": "ZURU!B7"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77515（汇率6.9）",
+      "product": "迷你厨艺系列",
+      "workshop": "兴信A",
+      "source": "ZURU!B8"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77773（汇率7.25）",
+      "product": "二代迷你厨艺系列",
+      "workshop": "兴信A",
+      "source": "ZURU!B9"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77773（汇率7.08）",
+      "product": "二代迷你厨艺系列",
+      "workshop": "兴信A",
+      "source": "ZURU!B10"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77773（汇率6.9）",
+      "product": "二代迷你厨艺系列",
+      "workshop": "兴信A",
+      "source": "ZURU!B11"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77555（汇率7.25）",
+      "product": "迷你家居系列",
+      "workshop": "兴信A",
+      "source": "ZURU!B12"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77555（汇率7.08）",
+      "product": "迷你家居系列",
+      "workshop": "兴信A",
+      "source": "ZURU!B13"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77555（汇率6.9）",
+      "product": "迷你家居系列",
+      "workshop": "兴信A",
+      "source": "ZURU!B14"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77711（汇率7.25）",
+      "product": "迷你冰箱球",
+      "workshop": "兴信A",
+      "source": "ZURU!B15"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77673（汇率7.25）",
+      "product": "迷你冰箱",
+      "workshop": "兴信A",
+      "source": "ZURU!B16"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77858（汇率7.08）",
+      "product": "厨房四件套",
+      "workshop": "兴信A",
+      "source": "ZURU!B17"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77858（汇率6.9）",
+      "product": "厨房四件套",
+      "workshop": "兴信A",
+      "source": "ZURU!B18"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77843（汇率7.08）",
+      "product": "卡哇伊迷你食物",
+      "workshop": "兴信A",
+      "source": "ZURU!B19"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77843（汇率6.9）",
+      "product": "卡哇伊迷你食物",
+      "workshop": "兴信A",
+      "source": "ZURU!B20"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25251（汇率7.25）",
+      "product": "鸭子",
+      "workshop": "兴信A",
+      "source": "ZURU!B21"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25251（汇率7.08）",
+      "product": "鸭子",
+      "workshop": "兴信A",
+      "source": "ZURU!B22"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25251（汇率6.9）",
+      "product": "鸭子",
+      "workshop": "兴信A",
+      "source": "ZURU!B23"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25252（汇率7.25）",
+      "product": "鳄鱼",
+      "workshop": "兴信A",
+      "source": "ZURU!B24"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25252（汇率7.08）",
+      "product": "鳄鱼",
+      "workshop": "兴信A",
+      "source": "ZURU!B25"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25252（汇率6.9）",
+      "product": "鳄鱼",
+      "workshop": "兴信A",
+      "source": "ZURU!B26"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25253（汇率7.25）",
+      "product": "金鱼",
+      "workshop": "兴信A",
+      "source": "ZURU!B27"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25253（汇率7.08）",
+      "product": "金鱼",
+      "workshop": "兴信A",
+      "source": "ZURU!B28"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25253（汇率6.9）",
+      "product": "金鱼",
+      "workshop": "兴信A",
+      "source": "ZURU!B29"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7163（汇率7.25）",
+      "product": "小鲨鱼",
+      "workshop": "兴信A",
+      "source": "ZURU!B30"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7163（汇率7.08）",
+      "product": "小鲨鱼",
+      "workshop": "兴信A",
+      "source": "ZURU!B31"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7163（汇率6.9）",
+      "product": "小鲨鱼",
+      "workshop": "兴信A",
+      "source": "ZURU!B32"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71126（汇率7.25）",
+      "product": "大白鲨",
+      "workshop": "兴信A",
+      "source": "ZURU!B33"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71152（汇率7.25）",
+      "product": "71152铠甲龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B34"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7127（汇率7.25）",
+      "product": "新颜色恐龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B35"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7132（汇率7.25）",
+      "product": "红色霸王龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B36"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7133（汇率7.25）",
+      "product": "橙色速龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B37"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7151（汇率7.25）",
+      "product": "夜光蜘蛛",
+      "workshop": "兴信A",
+      "source": "ZURU!B38"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7152（汇率7.25）",
+      "product": "夜光蟑螂",
+      "workshop": "兴信A",
+      "source": "ZURU!B39"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7149（汇率7.25）",
+      "product": "夜光蜥蜴",
+      "workshop": "兴信A",
+      "source": "ZURU!B40"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7150（汇率7.25）",
+      "product": "夜光蛇",
+      "workshop": "兴信A",
+      "source": "ZURU!B41"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71101（汇率7.25）",
+      "product": "机甲暴龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B42"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71137（汇率7.25）",
+      "product": "眼镜蛇",
+      "workshop": "兴信A",
+      "source": "ZURU!B43"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9548（汇率7.25）",
+      "product": "鸭妈妈",
+      "workshop": "兴信A",
+      "source": "ZURU!B44"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9548（汇率7.08）",
+      "product": "鸭妈妈",
+      "workshop": "兴信A",
+      "source": "ZURU!B45"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9548（汇率6.9）",
+      "product": "鸭妈妈",
+      "workshop": "兴信A",
+      "source": "ZURU!B46"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9565（汇率7.25）",
+      "product": "松鼠",
+      "workshop": "兴信A",
+      "source": "ZURU!B47"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9565（汇率708）",
+      "product": "松鼠",
+      "workshop": "兴信A",
+      "source": "ZURU!B48"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9565（汇率708）",
+      "product": "松鼠",
+      "workshop": "兴信A",
+      "source": "ZURU!B49"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9543（汇率7.25）",
+      "product": "仓鼠",
+      "workshop": "兴信A",
+      "source": "ZURU!B50"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9543（汇率7.08）",
+      "product": "仓鼠",
+      "workshop": "兴信A",
+      "source": "ZURU!B51"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9543（汇率6.9）",
+      "product": "仓鼠",
+      "workshop": "兴信A",
+      "source": "ZURU!B52"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9283（汇率7.25）",
+      "product": "美人鱼",
+      "workshop": "兴信A",
+      "source": "ZURU!B53"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9283（汇率7.08）",
+      "product": "美人鱼",
+      "workshop": "兴信A",
+      "source": "ZURU!B54"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9283（汇率6.9）",
+      "product": "美人鱼",
+      "workshop": "兴信A",
+      "source": "ZURU!B55"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9574（汇率7.25）",
+      "product": "水豚妈妈",
+      "workshop": "兴信A",
+      "source": "ZURU!B56"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9574（汇率6.9）",
+      "product": "水豚妈妈",
+      "workshop": "兴信A",
+      "source": "ZURU!B57"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71126（汇率7.08）",
+      "product": "大白鲨",
+      "workshop": "兴信A",
+      "source": "ZURU!B58"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71152（汇率7.08）",
+      "product": "71152铠甲龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B59"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7127（汇率7.08）",
+      "product": "新颜色恐龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B60"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7132（汇率7.08）",
+      "product": "红色霸王龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B61"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7133（汇率7.08）",
+      "product": "橙色速龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B62"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7151（汇率7.08）",
+      "product": "夜光蜘蛛",
+      "workshop": "兴信A",
+      "source": "ZURU!B63"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7152（汇率7.08）",
+      "product": "夜光蟑螂",
+      "workshop": "兴信A",
+      "source": "ZURU!B64"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7149（汇率7.08）",
+      "product": "夜光蜥蜴",
+      "workshop": "兴信A",
+      "source": "ZURU!B65"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7150（汇率7.08）",
+      "product": "夜光蛇",
+      "workshop": "兴信A",
+      "source": "ZURU!B66"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71101（汇率7.08）",
+      "product": "机甲暴龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B67"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71137（汇率7.08）",
+      "product": "眼镜蛇",
+      "workshop": "兴信A",
+      "source": "ZURU!B68"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77711（汇率7.08）",
+      "product": "迷你冰箱球",
+      "workshop": "兴信A",
+      "source": "ZURU!B69"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77673（汇率7.08）",
+      "product": "迷你冰箱",
+      "workshop": "兴信A",
+      "source": "ZURU!B70"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71126（汇率6.9）",
+      "product": "大白鲨",
+      "workshop": "兴信A",
+      "source": "ZURU!B71"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71152（汇率6.9）",
+      "product": "71152铠甲龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B72"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7127（汇率6.9）",
+      "product": "新颜色恐龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B73"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7132（汇率6.9）",
+      "product": "红色霸王龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B74"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7133（汇率6.9）",
+      "product": "橙色速龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B75"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7151（汇率6.9）",
+      "product": "夜光蜘蛛",
+      "workshop": "兴信A",
+      "source": "ZURU!B76"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7152（汇率6.9）",
+      "product": "夜光蟑螂",
+      "workshop": "兴信A",
+      "source": "ZURU!B77"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7149（汇率6.9）",
+      "product": "夜光蜥蜴",
+      "workshop": "兴信A",
+      "source": "ZURU!B78"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "7150（汇率6.9）",
+      "product": "夜光蛇",
+      "workshop": "兴信A",
+      "source": "ZURU!B79"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71101（汇率6.9）",
+      "product": "机甲暴龙",
+      "workshop": "兴信A",
+      "source": "ZURU!B80"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71137（汇率6.9）",
+      "product": "眼镜蛇",
+      "workshop": "兴信A",
+      "source": "ZURU!B81"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77711（汇率6.9）",
+      "product": "迷你冰箱球",
+      "workshop": "兴信A",
+      "source": "ZURU!B82"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77673（汇率6.9）",
+      "product": "迷你冰箱",
+      "workshop": "兴信A",
+      "source": "ZURU!B83"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "71172（汇率6.9）",
+      "product": "大脑",
+      "workshop": "兴信A",
+      "source": "ZURU!B84"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9259（汇率7.25）",
+      "product": "猫蛋",
+      "workshop": "华登",
+      "source": "ZURU!B89"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9279（汇率7.25）",
+      "product": "猫蛋二代",
+      "workshop": "华登",
+      "source": "ZURU!B90"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9298（汇率7.25）",
+      "product": "狗蛋四代",
+      "workshop": "华登",
+      "source": "ZURU!B91"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92104（汇率7.25）",
+      "product": "三代猫蛋",
+      "workshop": "华登",
+      "source": "ZURU!B92"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92106（汇率7.25）",
+      "product": "超大一窝蛋",
+      "workshop": "华登",
+      "source": "ZURU!B93"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92107（汇率7.25）",
+      "product": "小摇篮",
+      "workshop": "华登",
+      "source": "ZURU!B94"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92108（汇率7.25）",
+      "product": "大摇篮",
+      "workshop": "华登",
+      "source": "ZURU!B95"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92147（汇率7.25）",
+      "product": "大魔法缸",
+      "workshop": "华登",
+      "source": "ZURU!B96"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92129（汇率7.25）",
+      "product": "野生动物园",
+      "workshop": "华登",
+      "source": "ZURU!B97"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9259（汇率7.08）",
+      "product": "猫蛋",
+      "workshop": "华登",
+      "source": "ZURU!B98"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9279（汇率7.08）",
+      "product": "猫蛋二代",
+      "workshop": "华登",
+      "source": "ZURU!B99"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9298（汇率7.08）",
+      "product": "狗蛋四代",
+      "workshop": "华登",
+      "source": "ZURU!B100"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92104（汇率7.08）",
+      "product": "三代猫蛋",
+      "workshop": "华登",
+      "source": "ZURU!B101"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92106（汇率7.08）",
+      "product": "超大一窝蛋",
+      "workshop": "华登",
+      "source": "ZURU!B102"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92107（汇率7.08）",
+      "product": "小摇篮",
+      "workshop": "华登",
+      "source": "ZURU!B103"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92108（汇率7.08）",
+      "product": "大摇篮",
+      "workshop": "华登",
+      "source": "ZURU!B104"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92147（汇率7.08）",
+      "product": "大魔法缸",
+      "workshop": "华登",
+      "source": "ZURU!B105"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92129（汇率7.08）",
+      "product": "野生动物园",
+      "workshop": "华登",
+      "source": "ZURU!B106"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9279（汇率6.9）",
+      "product": "猫蛋二代",
+      "workshop": "华登",
+      "source": "ZURU!B107"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9298（汇率6.9）",
+      "product": "狗蛋四代无手脚",
+      "workshop": "华登",
+      "source": "ZURU!B108"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92104（汇率6.9）",
+      "product": "长尾巴猫无手脚",
+      "workshop": "华登",
+      "source": "ZURU!B109"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92106（汇率6.9）",
+      "product": "超大一窝蛋",
+      "workshop": "华登",
+      "source": "ZURU!B110"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92107（汇率6.9）",
+      "product": "小摇篮",
+      "workshop": "华登",
+      "source": "ZURU!B111"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92147（汇率6.9）",
+      "product": "大魔法缸",
+      "workshop": "华登",
+      "source": "ZURU!B112"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92129（汇率6.9）",
+      "product": "野生动物园",
+      "workshop": "华登",
+      "source": "ZURU!B113"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77485（汇率7.25）",
+      "product": "3代迷你包包",
+      "workshop": "兴信B",
+      "source": "ZURU!B120"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77485（汇率7.08）",
+      "product": "3代迷你包包",
+      "workshop": "兴信B",
+      "source": "ZURU!B121"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77485（汇率6.9）",
+      "product": "3代迷你包包",
+      "workshop": "兴信B",
+      "source": "ZURU!B122"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77770（汇率7.25）",
+      "product": "4代迷你包包",
+      "workshop": "兴信B",
+      "source": "ZURU!B123"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77770（汇率7.08）",
+      "product": "4代迷你包包",
+      "workshop": "兴信B",
+      "source": "ZURU!B124"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77770（汇率6.9）",
+      "product": "4代迷你包包",
+      "workshop": "兴信B",
+      "source": "ZURU!B125"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77794（汇率7.25）",
+      "product": "唱片机",
+      "workshop": "兴信B",
+      "source": "ZURU!B126"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77772（汇率7.25）",
+      "product": "唱片球",
+      "workshop": "兴信B",
+      "source": "ZURU!B127"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77794（汇率7.08）",
+      "product": "唱片机",
+      "workshop": "兴信B",
+      "source": "ZURU!B128"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77772（汇率7.08）",
+      "product": "唱片球",
+      "workshop": "兴信B",
+      "source": "ZURU!B129"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77794（汇率6.9）",
+      "product": "唱片机",
+      "workshop": "兴信B",
+      "source": "ZURU!B130"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77772（汇率6.9）",
+      "product": "唱片球",
+      "workshop": "兴信B",
+      "source": "ZURU!B131"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77685（汇率7.25）",
+      "product": "迷你恐龙",
+      "workshop": "兴信B",
+      "source": "ZURU!B132"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77685（汇率7.08）",
+      "product": "迷你恐龙",
+      "workshop": "兴信B",
+      "source": "ZURU!B133"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77685（汇率6.9）",
+      "product": "迷你恐龙",
+      "workshop": "兴信B",
+      "source": "ZURU!B134"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "77907（汇率6.9）",
+      "product": "双色迷你龙",
+      "workshop": "兴信B",
+      "source": "ZURU!B135"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9238（汇率7.25）",
+      "product": "魔法仙女",
+      "workshop": "兴信B",
+      "source": "ZURU!B136"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9258（汇率7.25）",
+      "product": "一窝蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B137"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9258（汇率7.08）",
+      "product": "一窝蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B138"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9296（汇率7.25）",
+      "product": "小窝蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B139"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9296（汇率7.08）",
+      "product": "小窝蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B140"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9296（汇率6.9）",
+      "product": "小窝蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B141"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92119（汇率7.25）",
+      "product": "冰雪蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B142"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92119（汇率7.08）",
+      "product": "冰雪蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B143"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92119（汇率6.9）",
+      "product": "冰雪蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B144"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9281（汇率7.25）",
+      "product": "皇冠公仔",
+      "workshop": "兴信B",
+      "source": "ZURU!B145"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9281（汇率7.08）",
+      "product": "皇冠公仔",
+      "workshop": "兴信B",
+      "source": "ZURU!B146"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9297（汇率7.25）",
+      "product": "恶魔蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B147"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9297（汇率7.08）",
+      "product": "恶魔蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B148"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9285（汇率7.25）",
+      "product": "摇头小狗1PK装",
+      "workshop": "兴信B",
+      "source": "ZURU!B149"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9285（汇率7.08）",
+      "product": "摇头小狗1PK装",
+      "workshop": "兴信B",
+      "source": "ZURU!B150"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9284（汇率7.25）",
+      "product": "摇头小狗3PK装",
+      "workshop": "兴信B",
+      "source": "ZURU!B151"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92105（汇率7.25）",
+      "product": "尿布蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B152"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92105（汇率7.08）",
+      "product": "尿布蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B153"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92105（汇率7.08）",
+      "product": "尿布蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B154"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9561（汇率7.25）",
+      "product": "魔法小鸟",
+      "workshop": "兴信B",
+      "source": "ZURU!B155"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9561（汇率7.08）",
+      "product": "魔法小鸟",
+      "workshop": "兴信B",
+      "source": "ZURU!B156"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9561（汇率6.9）",
+      "product": "魔法小鸟",
+      "workshop": "兴信B",
+      "source": "ZURU!B157"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25282（汇率7.25）",
+      "product": "鲨鱼",
+      "workshop": "兴信B",
+      "source": "ZURU!B158"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25282（汇率7.08）",
+      "product": "鲨鱼",
+      "workshop": "兴信B",
+      "source": "ZURU!B159"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25282（汇率6.9）",
+      "product": "鲨鱼",
+      "workshop": "兴信B",
+      "source": "ZURU!B160"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92125（汇率7.25）",
+      "product": "一窝猫蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B161"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92125（汇率7.08）",
+      "product": "一窝猫蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B162"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92125（（汇率6.9）",
+      "product": "一窝猫蛋",
+      "workshop": "兴信B",
+      "source": "ZURU!B163"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92146（汇率7.08）",
+      "product": "小魔法瓶",
+      "workshop": "兴信B",
+      "source": "ZURU!B164"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92146（汇率6.9）",
+      "product": "小魔法瓶",
+      "workshop": "兴信B",
+      "source": "ZURU!B165"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15704（汇率7.25）",
+      "product": "Baby婴儿系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B4"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15704（汇率7.08）",
+      "product": "Baby婴儿系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B5"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15704（汇率6.9）",
+      "product": "Baby婴儿系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B6"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15706（汇率7.25）",
+      "product": "Baby钥匙扣系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B7"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15706（汇率7.08）",
+      "product": "Baby钥匙扣系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B8"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15706（汇率6.9）",
+      "product": "Baby钥匙扣系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B9"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15733（汇率7.25）",
+      "product": "大公仔",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B10"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15733（汇率7.08）",
+      "product": "大公仔",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B11"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15733（汇率6.9）",
+      "product": "大公仔",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B12"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15743SLD（汇率7.25）",
+      "product": "18寸COSTCO系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B13"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15743SLD（汇率7.08）",
+      "product": "18寸COSTCO系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B14"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15743SLD（汇率6.9）",
+      "product": "18寸COSTCO系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B15"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15759（汇率7.25）",
+      "product": "粉色Baby系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B16"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15759（汇率7.08）",
+      "product": "粉色Baby系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B17"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15759（汇率6.9）",
+      "product": "粉色Baby系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B18"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15756（汇率7.25）",
+      "product": "海绵宝宝钥匙扣系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B19"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15756（汇率7.08）",
+      "product": "海绵宝宝钥匙扣系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B20"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15756（汇率6.9）",
+      "product": "海绵宝宝钥匙扣系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B21"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15797（汇率7.25）",
+      "product": "圆圆动物系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B22"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15797（汇率7.08）",
+      "product": "圆圆动物系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B23"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15797（汇率6.9）",
+      "product": "圆圆动物系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B24"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15758（汇率7.25）",
+      "product": "18寸动物系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B25"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15758（汇率7.08）",
+      "product": "18寸动物系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B26"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15758（汇率6.9）",
+      "product": "18寸动物系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B27"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15789（汇率7.25）",
+      "product": "猫钥匙扣7代系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B28"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15789（汇率7.08）",
+      "product": "猫钥匙扣7代系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B29"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15789（汇率6.9）",
+      "product": "猫钥匙扣7代系列",
+      "workshop": "华登",
+      "source": "ZURU (富格乐)!B30"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15727（汇率7.25）",
+      "product": "毛毛系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B38"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15727（汇率7.08）",
+      "product": "毛毛系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B39"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15727（汇率6.9）",
+      "product": "毛毛系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B40"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15732（汇率7.25）",
+      "product": "母婴系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B41"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15732（汇率7.08）",
+      "product": "母婴系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B42"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15728（汇率7.25）",
+      "product": "机芯系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B43"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15728（汇率7.08）",
+      "product": "机芯系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B44"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15728（汇率6.9）",
+      "product": "机芯系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B45"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15710（汇率7.25）",
+      "product": "精灵系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B46"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15710（汇率7.08）",
+      "product": "精灵系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B47"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15710（汇率6.9）",
+      "product": "精灵系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B48"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15731（汇率7.25）",
+      "product": "宠物系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B49"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15731（汇率7.08）",
+      "product": "宠物系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B50"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15731（汇率6.9）",
+      "product": "宠物系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B51"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15750（汇率7.25）",
+      "product": "老人系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B52"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15750（汇率7.08）",
+      "product": "老人系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B53"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15750（汇率6.9）",
+      "product": "老人系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B54"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15757（汇率7.25）",
+      "product": "婚礼系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B55"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15757（汇率7.08）",
+      "product": "婚礼系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B56"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15757（汇率6.9）",
+      "product": "婚礼系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B57"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15774（汇率7.25）",
+      "product": "情人系列二代",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B58"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15774（汇率7.08）",
+      "product": "情人系列二代",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B59"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15774（汇率6.9）",
+      "product": "情人系列二代",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B60"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15754（汇率7.25）",
+      "product": "明星系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B61"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15754（汇率7.08）",
+      "product": "明星系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B62"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15754（汇率6.9）",
+      "product": "明星系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B63"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15780（汇率7.25）",
+      "product": "花束系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B64"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15780（汇率7.08）",
+      "product": "花束系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B65"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15780（汇率6.9）",
+      "product": "花束系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B66"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15787（汇率7.08）",
+      "product": "独角兽系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B67"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15787（汇率6.9）",
+      "product": "独角兽系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B68"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15788（汇率7.08）",
+      "product": "Nipple系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B69"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15788（汇率6.9）",
+      "product": "Nipple系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B70"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "157131（汇率6.9）",
+      "product": "9寸缺牙系列",
+      "workshop": "兴信B",
+      "source": "ZURU (富格乐)!B71"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15714（汇率7.08）",
+      "product": "度假系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B76"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15714（汇率7.25）",
+      "product": "度假系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B77"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15714（汇率6.9）",
+      "product": "度假系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B78"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15726（汇率7.25）",
+      "product": "拼接系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B79"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15726（汇率7.08）",
+      "product": "拼接系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B80"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15726（汇率6.9）",
+      "product": "拼接系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B81"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15729（汇率7.25）",
+      "product": "圣诞系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B82"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15729（汇率7.08）",
+      "product": "圣诞系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B83"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15729（汇率6.9）",
+      "product": "圣诞系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B84"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15747（汇率7.25）",
+      "product": "鲨鱼系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B85"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15747（汇率7.08）",
+      "product": "鲨鱼系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B86"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15747（汇率6.9）",
+      "product": "鲨鱼系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B87"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15746（汇率7.25）",
+      "product": "飞天小女警系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B88"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15746（汇率7.08）",
+      "product": "飞天小女警系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B89"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15746（汇率6.9）",
+      "product": "飞天小女警系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B90"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15752（汇率7.25）",
+      "product": "野猫系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B91"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15752（汇率7.08）",
+      "product": "野猫系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B92"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15752（汇率6.9）",
+      "product": "野猫系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B93"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15749（汇率7.25）",
+      "product": "嘻哈系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B94"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15749（汇率7.08）",
+      "product": "嘻哈系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B95"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15749（汇率6.9）",
+      "product": "嘻哈系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B96"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15751（汇率7.25）",
+      "product": "食物系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B97"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15751（汇率7.08）",
+      "product": "食物系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B98"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15751（汇率6.9）",
+      "product": "食物系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B99"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15755（汇率7.25）",
+      "product": "彩虹熊系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B100"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15755（汇率7.08）",
+      "product": "彩虹熊系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B101"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15755（汇率6.9）",
+      "product": "彩虹熊系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B102"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15760（汇率7.25）",
+      "product": "六代钥匙扣系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B103"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15760（汇率7.08）",
+      "product": "六代钥匙扣系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B104"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15760（汇率6.9）",
+      "product": "六代钥匙扣系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B105"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "125160（汇率7.25）",
+      "product": "狗玩具",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B106"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "125160（汇率7.08）",
+      "product": "狗玩具",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B107"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "125160（汇率6.9）",
+      "product": "狗玩具",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B108"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "157117（汇率7.08）",
+      "product": "Babby系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B109"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "157117（汇率6.9）",
+      "product": "Babby系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B110"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15779（汇率7.25）",
+      "product": "足球系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B111"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15779（汇率7.08）",
+      "product": "足球系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B112"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15779（汇率6.9）",
+      "product": "足球系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B113"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15792（汇率7.08）",
+      "product": "18英寸大鸡块",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B114"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15792（汇率6.9）",
+      "product": "18英寸大鸡块",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B115"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15785（汇率7.08）",
+      "product": "圣诞系列二代",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B116"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15785（汇率6.9）",
+      "product": "圣诞系列二代",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B117"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15783（汇率7.08）",
+      "product": "鸡块系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B118"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "15783（汇率6.9）",
+      "product": "鸡块系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B119"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "125223（汇率6.9）",
+      "product": "圣诞狗玩具系列",
+      "workshop": "兴信A",
+      "source": "ZURU (富格乐)!B120"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "胶囊款CDU-24（SR103-130-181-160-180",
+      "product": "手链贴纸（吸塑装）",
+      "workshop": "华登",
+      "source": "Sky Castle!B4"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "胶囊款CDU-12（SR103-130-181-160-180",
+      "product": "手链贴纸（吸塑装）",
+      "workshop": "华登",
+      "source": "Sky Castle!B5"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR320",
+      "product": "手链贴纸（吸塑装）",
+      "workshop": "华登",
+      "source": "Sky Castle!B6"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR460-无CDU",
+      "product": "手链贴纸（带笔记本）",
+      "workshop": "华登",
+      "source": "Sky Castle!B7"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR460CDU-12",
+      "product": "手链贴纸（飞机盒装）",
+      "workshop": "华登",
+      "source": "Sky Castle!B8"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR460CDU-6",
+      "product": "手链贴纸（塑胶桶装）",
+      "workshop": "华登",
+      "source": "Sky Castle!B9"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR370",
+      "product": "胶袋装手链",
+      "workshop": "华登",
+      "source": "Sky Castle!B10"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "JS100CDU-24",
+      "product": "两条手链装",
+      "workshop": "华登",
+      "source": "Sky Castle!B11"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "JS300",
+      "product": "手链贴纸（吸塑装）",
+      "workshop": "华登",
+      "source": "Sky Castle!B12"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR102-不带CDU",
+      "product": "手链贴纸（吸塑装）",
+      "workshop": "华登",
+      "source": "Sky Castle!B13"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR102CDU-9",
+      "product": "手链贴纸（吸塑装）",
+      "workshop": "华登",
+      "source": "Sky Castle!B14"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR102CDU-16",
+      "product": "手链贴纸（带笔记本）",
+      "workshop": "华登",
+      "source": "Sky Castle!B15"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR102CDU-24",
+      "product": "手链贴纸（飞机盒装）",
+      "workshop": "华登",
+      "source": "Sky Castle!B16"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR201",
+      "product": "手链吊坠",
+      "workshop": "华登",
+      "source": "Sky Castle!B17"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR301",
+      "product": "卷筒大贴纸",
+      "workshop": "华登",
+      "source": "Sky Castle!B18"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR400",
+      "product": "信封大贴纸",
+      "workshop": "华登",
+      "source": "Sky Castle!B19"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR400CDU-6",
+      "product": "手链贴纸（吸塑装）",
+      "workshop": "华登",
+      "source": "Sky Castle!B20"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR400CDU-12",
+      "product": "手链贴纸（带笔记本）",
+      "workshop": "华登",
+      "source": "Sky Castle!B21"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR430",
+      "product": "手链贴纸（飞机盒装）",
+      "workshop": "华登",
+      "source": "Sky Castle!B22"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR430CDU-6",
+      "product": "手链贴纸（带笔记本）",
+      "workshop": "华登",
+      "source": "Sky Castle!B23"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR430CDU-12",
+      "product": "手链贴纸（手提包）",
+      "workshop": "华登",
+      "source": "Sky Castle!B24"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR8003",
+      "product": "书包公仔",
+      "workshop": "华登",
+      "source": "Sky Castle!B25"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SRMC103",
+      "product": "四方盒",
+      "workshop": "华登",
+      "source": "Sky Castle!B26"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "JC140",
+      "product": "小蛋糕",
+      "workshop": "华登",
+      "source": "Sky Castle!B27"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "JC100",
+      "product": "小蛋糕",
+      "workshop": "华登",
+      "source": "Sky Castle!B28"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "JC120",
+      "product": "大蛋糕",
+      "workshop": "华登",
+      "source": "Sky Castle!B29"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1000",
+      "product": "鱼混装",
+      "workshop": "兴信A",
+      "source": "CEPIA!B6"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1001",
+      "product": "球",
+      "workshop": "兴信A",
+      "source": "CEPIA!B8"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1002",
+      "product": "码头",
+      "workshop": "兴信A",
+      "source": "CEPIA!B10"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1010",
+      "product": "潜水艇",
+      "workshop": "兴信A",
+      "source": "CEPIA!B12"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1021",
+      "product": "潜水艇含鱼",
+      "workshop": "兴信A",
+      "source": "CEPIA!B14"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1026",
+      "product": "圆盘包含2条鱼",
+      "workshop": "兴信A",
+      "source": "CEPIA!B16"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1011",
+      "product": "圆盘包含鱼",
+      "workshop": "兴信A",
+      "source": "CEPIA!B18"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1009",
+      "product": "圆盘不包含鱼",
+      "workshop": "兴信A",
+      "source": "CEPIA!B20"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1007",
+      "product": "11寸公仔",
+      "workshop": "兴信A",
+      "source": "CEPIA!B22"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1012",
+      "product": "三岔通道",
+      "workshop": "兴信A",
+      "source": "CEPIA!B24"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1019",
+      "product": "鱼+球",
+      "workshop": "兴信A",
+      "source": "CEPIA!B26"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1005",
+      "product": "11寸公仔",
+      "workshop": "兴信A",
+      "source": "CEPIA!B28"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1006",
+      "product": "11寸公仔",
+      "workshop": "兴信A",
+      "source": "CEPIA!B30"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1008",
+      "product": "11寸公仔",
+      "workshop": "兴信A",
+      "source": "CEPIA!B32"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1013",
+      "product": "三岔通道+鱼",
+      "workshop": "兴信A",
+      "source": "CEPIA!B34"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "S1000",
+      "product": "泡泡贴1PACK",
+      "workshop": "兴信A",
+      "source": "CEPIA!B35"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "S1001",
+      "product": "泡泡贴3PACK",
+      "workshop": "兴信A",
+      "source": "CEPIA!B36"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "S1002",
+      "product": "泡泡贴5PACK",
+      "workshop": "兴信A",
+      "source": "CEPIA!B37"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "S1003",
+      "product": "泡泡贴10PACK",
+      "workshop": "兴信A",
+      "source": "CEPIA!B38"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "A1002",
+      "product": "大生蛋机",
+      "workshop": "兴信A",
+      "source": "CEPIA!B39"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "B1000",
+      "product": "手推车",
+      "workshop": "兴信A",
+      "source": "CEPIA!B40"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "R1000",
+      "product": "陀螺",
+      "workshop": "兴信A",
+      "source": "CEPIA!B41"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "R1001",
+      "product": "擂台",
+      "workshop": "兴信A",
+      "source": "CEPIA!B42"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "K1000",
+      "product": "单装香蕉",
+      "workshop": "兴信A",
+      "source": "CEPIA!B49"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "K1002",
+      "product": "串装香蕉",
+      "workshop": "兴信A",
+      "source": "CEPIA!B50"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1035",
+      "product": "老鼠城市套装",
+      "workshop": "兴信B",
+      "source": "CEPIA!B56"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1032",
+      "product": "老鼠",
+      "workshop": "兴信B",
+      "source": "CEPIA!B57"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1036",
+      "product": "老鼠摩天轮",
+      "workshop": "兴信B",
+      "source": "CEPIA!B58"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1034",
+      "product": "老鼠警车",
+      "workshop": "兴信B",
+      "source": "CEPIA!B59"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1033",
+      "product": "老鼠消防站",
+      "workshop": "兴信B",
+      "source": "CEPIA!B60"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1074",
+      "product": "老鼠+城市套装",
+      "workshop": "兴信B",
+      "source": "CEPIA!B61"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "G1000",
+      "product": "女款许愿机",
+      "workshop": "兴信B",
+      "source": "CEPIA!B62"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "G1002",
+      "product": "男款许愿机",
+      "workshop": "兴信B",
+      "source": "CEPIA!B63"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "G1001",
+      "product": "男女许愿球",
+      "workshop": "兴信B",
+      "source": "CEPIA!B64"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "R1003",
+      "product": "飞轮带电款",
+      "workshop": "兴信B",
+      "source": "CEPIA!B65"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "R1002",
+      "product": "飞轮不带电款",
+      "workshop": "兴信B",
+      "source": "CEPIA!B66"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "B1001",
+      "product": "搅拌机",
+      "workshop": "兴信B",
+      "source": "CEPIA!B67"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1106",
+      "product": "三代农场老鼠",
+      "workshop": "兴信B",
+      "source": "CEPIA!B72"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "W1002",
+      "product": "大恐龙蛋",
+      "workshop": "兴信A",
+      "source": "CEPIA!B79"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "W1003",
+      "product": "小恐龙蛋",
+      "workshop": "兴信A",
+      "source": "CEPIA!B80"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "W1000",
+      "product": "魔法棒",
+      "workshop": "兴信A",
+      "source": "CEPIA!B81"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1026",
+      "product": "3.5\"马仔",
+      "workshop": "河源",
+      "source": "CEPIA!B93"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1039",
+      "product": "11\"二代公仔PIXELZ",
+      "workshop": "河源",
+      "source": "CEPIA!B94"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1042",
+      "product": "11\"二代公仔Decora",
+      "workshop": "河源",
+      "source": "CEPIA!B95"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1043",
+      "product": "11\"二代公仔HEATNER",
+      "workshop": "河源",
+      "source": "CEPIA!B96"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1033",
+      "product": "11\"二代公仔REGNIA",
+      "workshop": "河源",
+      "source": "CEPIA!B97"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "17103",
+      "product": "金属/灰红  比卡超",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B4"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "20110",
+      "product": "四角星",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B5"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "11572",
+      "product": "五角星",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B6"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1121117",
+      "product": "比卡超手表",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B7"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1122125-US",
+      "product": "游戏机",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B8"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "61300",
+      "product": "男仔小精灵",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B9"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "10805",
+      "product": "波兰地图",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B10"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "17103",
+      "product": "红/白 色比卡超",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B11"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1023128",
+      "product": "故事机",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B12"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "11697",
+      "product": "速度头",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B13"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "11411",
+      "product": "魔镜",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B14"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "24138",
+      "product": "转盘游戏机",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B15"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1124135",
+      "product": "复仇者游戏机",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B16"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1125130",
+      "product": "OMTS新款四角星",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B19"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1125155",
+      "product": "PTE 比卡超圆形游戏机",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B20"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1125155",
+      "product": "新款五角星",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B21"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1125087",
+      "product": "平板地图",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B22"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1325107",
+      "product": "足球游戏机",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B23"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "新产品",
+      "product": "新款蓝精灵",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B24"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "新产品",
+      "product": "超级精灵球",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B25"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "新产品",
+      "product": "涡轮四角星游戏机",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B26"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "新产品",
+      "product": "米奇老鼠",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B27"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "新产品",
+      "product": "米奇五角星",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B28"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "新产品",
+      "product": "城市游戏机",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B29"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1325107",
+      "product": "美式足球",
+      "workshop": "兴信B",
+      "source": "ZANZOON（嘉苏）!B30"
+    },
+    {
+      "customer": "嘉苏A",
+      "sku": "6434",
+      "product": "电子笔",
+      "workshop": "兴信A",
+      "source": "ZANZOON（嘉苏）!B46"
+    },
+    {
+      "customer": "嘉苏A",
+      "sku": "130-3554 ",
+      "product": "马达加线",
+      "workshop": "兴信A",
+      "source": "ZANZOON（嘉苏）!B47"
+    },
+    {
+      "customer": "嘉苏A",
+      "sku": "201-2603",
+      "product": "信号发声器",
+      "workshop": "兴信A",
+      "source": "ZANZOON（嘉苏）!B48"
+    }
+  ]
+}

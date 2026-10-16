@@ -1,0 +1,1721 @@
+{
+  "source": "副本2026年7--月份各客核价汇总表",
+  "period": "2026年1–7月",
+  "columns": [
+    {
+      "key": "A",
+      "label": "客名",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "B",
+      "label": "货号",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "C",
+      "label": "货品名称",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "D",
+      "label": "2026年1-7月份实际接单数量",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "E",
+      "label": "货价(HK$)",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "F",
+      "label": "成本(含人工)",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "G",
+      "label": "成本(不含人工)",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "H",
+      "label": "啤工",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "I",
+      "label": "退税后啤工",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "J",
+      "label": "啤工金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "K",
+      "label": "啤工占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "L",
+      "label": "装工",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "M",
+      "label": "退税后装工",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "N",
+      "label": "装工金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "O",
+      "label": "装工占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "P",
+      "label": "喷印工",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "Q",
+      "label": "退税后喷印工",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "R",
+      "label": "喷印工金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "S",
+      "label": "喷印工占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "T",
+      "label": "料价进口料",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "U",
+      "label": "料价国内料",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "V",
+      "label": "退税后原料",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "W",
+      "label": "原料金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "X",
+      "label": "原料占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "Y",
+      "label": "ABS料价成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "Z",
+      "label": "ABS占货价%",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "AA",
+      "label": "总采购价",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AB",
+      "label": "彩盒",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AC",
+      "label": "退税后彩盒",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AD",
+      "label": "彩盒金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AE",
+      "label": "彩盒占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AF",
+      "label": "贴纸",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AG",
+      "label": "退税后贴纸",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AH",
+      "label": "贴纸金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AI",
+      "label": "贴纸占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AJ",
+      "label": "吸塑",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AK",
+      "label": "退税后吸塑",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AL",
+      "label": "吸塑金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AM",
+      "label": "吸塑占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AN",
+      "label": "纸箱",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AO",
+      "label": "退税后纸箱",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AP",
+      "label": "纸箱金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AQ",
+      "label": "纸箱占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AR",
+      "label": "电镀",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AS",
+      "label": "电子",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AT",
+      "label": "退税后电子",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AU",
+      "label": "电子金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AV",
+      "label": "电子占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AW",
+      "label": "电池",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AX",
+      "label": "退税后电池",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AY",
+      "label": "电池金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AZ",
+      "label": "电池占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BA",
+      "label": "五金",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BB",
+      "label": "退税后五金",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BC",
+      "label": "五金金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BD",
+      "label": "五金占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BE",
+      "label": "搪胶",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BF",
+      "label": "退税后搪胶",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BG",
+      "label": "搪胶金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BH",
+      "label": "搪胶占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BI",
+      "label": "车发",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BJ",
+      "label": "退税后车发",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BK",
+      "label": "车发金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BL",
+      "label": "车发占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BM",
+      "label": "车衣",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BN",
+      "label": "退税后车衣",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BO",
+      "label": "车衣金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BP",
+      "label": "车衣占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BQ",
+      "label": "油漆",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BR",
+      "label": "退税后油漆",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BS",
+      "label": "油漆金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BT",
+      "label": "油漆占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BU",
+      "label": "其他外购",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BV",
+      "label": "退税后其他外购",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BW",
+      "label": "其他外购金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BX",
+      "label": "其他外购占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "BY",
+      "label": "杂项",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BZ",
+      "label": "退税后杂项",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CA",
+      "label": "杂项金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CB",
+      "label": "杂项占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CC",
+      "label": "运费",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CD",
+      "label": "吊柜费",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CE",
+      "label": "退税后运费",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CF",
+      "label": "运费金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CG",
+      "label": "运费占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CH",
+      "label": "附加税0.4%",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CI",
+      "label": "人民币采购成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CJ",
+      "label": "人民币采购成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CK",
+      "label": "未退税前毛利",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CL",
+      "label": "未退税前毛利率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CM",
+      "label": "未退税前利润",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CN",
+      "label": "未退税前利润率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CO",
+      "label": "未退税前码点",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CP",
+      "label": "含税1%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CQ",
+      "label": "人工类13%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CR",
+      "label": "运费含税9%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CS",
+      "label": "含税13%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CT",
+      "label": "纸箱(含税13%）成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CU",
+      "label": "搪胶类3%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CV",
+      "label": "车发类13%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CW",
+      "label": "车衣类13%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CX",
+      "label": "吸塑类6%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CY",
+      "label": "总退税可减少成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CZ",
+      "label": "退税及返点后总成本（含人工）",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DA",
+      "label": "退税后码数",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DB",
+      "label": "退税后原料成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DC",
+      "label": "退税后人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DD",
+      "label": "退税后不含人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DE",
+      "label": "退税后毛利",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DF",
+      "label": "退税后毛利率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DG",
+      "label": "退税后利润",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DH",
+      "label": "退税后利润率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DI",
+      "label": "总生产金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DJ",
+      "label": "总生产成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DK",
+      "label": "总未退税前毛利",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DL",
+      "label": "总未退税前毛利率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DM",
+      "label": "总未退税前利润",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DN",
+      "label": "总未退税前利润率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DO",
+      "label": "总未退税前料价",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DP",
+      "label": "总未退税前料价占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DQ",
+      "label": "总未退税人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DR",
+      "label": "总未退税人工成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DS",
+      "label": "总人民币结算外购件成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DT",
+      "label": "总人民币结算外购件成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DU",
+      "label": "总退税及返点减少成本金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DV",
+      "label": "退税后不含人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DW",
+      "label": "退税后不含人工成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DX",
+      "label": "总退税后毛利",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DY",
+      "label": "总退税后毛利率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DZ",
+      "label": "总退税后利润",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "EA",
+      "label": "总退税后利润率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "EB",
+      "label": "总退税后料成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "EC",
+      "label": "总未退税前料成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "ED",
+      "label": "总退税后人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "EE",
+      "label": "总退税后人工成本占比",
+      "hidden": false,
+      "percent": true
+    }
+  ],
+  "quantities": [
+    {
+      "customer": "ZURU",
+      "sku": "9238（汇率7.25）",
+      "product": "魔法仙女",
+      "qty": 0,
+      "source": "不分车间核价明细!D343"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9258（汇率7.25）",
+      "product": "一窝蛋",
+      "qty": 0,
+      "source": "不分车间核价明细!D344"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9258（汇率7.08）",
+      "product": "一窝蛋",
+      "qty": 5106,
+      "source": "不分车间核价明细!D345"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9296（汇率7.25）",
+      "product": "小窝蛋",
+      "qty": 60497,
+      "source": "不分车间核价明细!D346"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9296（汇率7.08）",
+      "product": "小窝蛋",
+      "qty": 85015,
+      "source": "不分车间核价明细!D347"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9296（汇率6.9）",
+      "product": "小窝蛋",
+      "qty": 461260,
+      "source": "不分车间核价明细!D348"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92119（汇率7.25）",
+      "product": "冰雪蛋",
+      "qty": 37308,
+      "source": "不分车间核价明细!D349"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92119（汇率7.08）",
+      "product": "冰雪蛋",
+      "qty": 111787,
+      "source": "不分车间核价明细!D350"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92119（汇率6.9）",
+      "product": "冰雪蛋",
+      "qty": 272141,
+      "source": "不分车间核价明细!D351"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9281（汇率7.25）",
+      "product": "皇冠公仔",
+      "qty": 4086,
+      "source": "不分车间核价明细!D352"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9281（汇率7.08）",
+      "product": "皇冠公仔",
+      "qty": 8232,
+      "source": "不分车间核价明细!D353"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9297（汇率7.25）",
+      "product": "恶魔蛋",
+      "qty": 5922,
+      "source": "不分车间核价明细!D354"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9297（汇率7.08）",
+      "product": "恶魔蛋",
+      "qty": 61842,
+      "source": "不分车间核价明细!D355"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9285（汇率7.25）",
+      "product": "摇头小狗1PK装",
+      "qty": 1920,
+      "source": "不分车间核价明细!D356"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9285（汇率7.08）",
+      "product": "摇头小狗1PK装",
+      "qty": 11937,
+      "source": "不分车间核价明细!D357"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9284（汇率7.25）",
+      "product": "摇头小狗3PK装",
+      "qty": 0,
+      "source": "不分车间核价明细!D358"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92105（汇率7.25）",
+      "product": "尿布蛋",
+      "qty": 48960,
+      "source": "不分车间核价明细!D359"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92105（汇率7.08）",
+      "product": "尿布蛋",
+      "qty": 179336,
+      "source": "不分车间核价明细!D360"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92105（汇率7.08）",
+      "product": "尿布蛋",
+      "qty": 141336,
+      "source": "不分车间核价明细!D361"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25282（汇率7.25）",
+      "product": "鲨鱼",
+      "qty": 7400,
+      "source": "不分车间核价明细!D365"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25282（汇率7.08）",
+      "product": "鲨鱼",
+      "qty": 22200,
+      "source": "不分车间核价明细!D366"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25282（汇率6.9）",
+      "product": "鲨鱼",
+      "qty": 191037,
+      "source": "不分车间核价明细!D367"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92125（汇率7.25）",
+      "product": "一窝猫蛋",
+      "qty": 22228,
+      "source": "不分车间核价明细!D368"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92125（汇率7.08）",
+      "product": "一窝猫蛋",
+      "qty": 145872,
+      "source": "不分车间核价明细!D369"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "92125（（汇率6.9）",
+      "product": "一窝猫蛋",
+      "qty": 392816,
+      "source": "不分车间核价明细!D370"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25251（汇率7.25）",
+      "product": "鸭子",
+      "qty": 33034,
+      "source": "不分车间核价明细!D398"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25251（汇率7.08）",
+      "product": "鸭子",
+      "qty": 55576,
+      "source": "不分车间核价明细!D399"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25251（汇率6.9）",
+      "product": "鸭子",
+      "qty": 145020,
+      "source": "不分车间核价明细!D400"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25252（汇率7.25）",
+      "product": "鳄鱼",
+      "qty": 204,
+      "source": "不分车间核价明细!D401"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25252（汇率7.08）",
+      "product": "鳄鱼",
+      "qty": 1068,
+      "source": "不分车间核价明细!D402"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25252（汇率6.9）",
+      "product": "鳄鱼",
+      "qty": 2008,
+      "source": "不分车间核价明细!D403"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25253（汇率7.25）",
+      "product": "金鱼",
+      "qty": 2304,
+      "source": "不分车间核价明细!D404"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25253（汇率7.08）",
+      "product": "金鱼",
+      "qty": 3216,
+      "source": "不分车间核价明细!D405"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "25253（汇率6.9）",
+      "product": "金鱼",
+      "qty": 4680,
+      "source": "不分车间核价明细!D406"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9543（汇率7.25）",
+      "product": "仓鼠",
+      "qty": 32008,
+      "source": "不分车间核价明细!D427"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9543（汇率7.08）",
+      "product": "仓鼠",
+      "qty": 88807,
+      "source": "不分车间核价明细!D428"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9543（汇率6.9）",
+      "product": "仓鼠",
+      "qty": 239138,
+      "source": "不分车间核价明细!D429"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9283（汇率7.25）",
+      "product": "美人鱼",
+      "qty": 10184,
+      "source": "不分车间核价明细!D430"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9283（汇率7.08）",
+      "product": "美人鱼",
+      "qty": 23156,
+      "source": "不分车间核价明细!D431"
+    },
+    {
+      "customer": "ZURU",
+      "sku": "9283（汇率6.9）",
+      "product": "美人鱼",
+      "qty": 107446,
+      "source": "不分车间核价明细!D432"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "20110",
+      "product": "四角星",
+      "qty": 26838,
+      "source": "不分车间核价明细!D803"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "11572",
+      "product": "五角星",
+      "qty": 13320,
+      "source": "不分车间核价明细!D804"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1121117",
+      "product": "比卡超手表",
+      "qty": 14220,
+      "source": "不分车间核价明细!D805"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1122125-US",
+      "product": "游戏机",
+      "qty": 0,
+      "source": "不分车间核价明细!D806"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "61300",
+      "product": "男仔小精灵",
+      "qty": 2508,
+      "source": "不分车间核价明细!D807"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "10805",
+      "product": "波兰地图",
+      "qty": 2304,
+      "source": "不分车间核价明细!D808"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1023128",
+      "product": "故事机",
+      "qty": 0,
+      "source": "不分车间核价明细!D810"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "11697",
+      "product": "速度头",
+      "qty": 1704,
+      "source": "不分车间核价明细!D811"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "11411",
+      "product": "魔镜",
+      "qty": 4380,
+      "source": "不分车间核价明细!D812"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "24138",
+      "product": "转盘游戏机",
+      "qty": 39894,
+      "source": "不分车间核价明细!D813"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1125130",
+      "product": "OMTS新款四角星",
+      "qty": 17520,
+      "source": "不分车间核价明细!D817"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1125087",
+      "product": "平板地图",
+      "qty": 6800,
+      "source": "不分车间核价明细!D820"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1325107",
+      "product": "足球游戏机",
+      "qty": 66820,
+      "source": "不分车间核价明细!D821"
+    },
+    {
+      "customer": "ZANZOON（嘉苏）",
+      "sku": "1325107",
+      "product": "美式足球",
+      "qty": 0,
+      "source": "不分车间核价明细!D828"
+    },
+    {
+      "customer": "嘉苏A",
+      "sku": "130-3554 ",
+      "product": "马达加线",
+      "qty": 0,
+      "source": "不分车间核价明细!D838"
+    },
+    {
+      "customer": "嘉苏A",
+      "sku": "201-2603",
+      "product": "信号发声器",
+      "qty": 0,
+      "source": "不分车间核价明细!D839"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1000",
+      "product": "鱼混装",
+      "qty": 0,
+      "source": "不分车间核价明细!D980"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "Z1001",
+      "product": "球",
+      "qty": 0,
+      "source": "不分车间核价明细!D981"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1001",
+      "product": "球",
+      "qty": 0,
+      "source": "不分车间核价明细!D982"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "Z1002",
+      "product": "码头",
+      "qty": 0,
+      "source": "不分车间核价明细!D983"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1002",
+      "product": "码头",
+      "qty": 0,
+      "source": "不分车间核价明细!D984"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "Z1010",
+      "product": "潜水艇",
+      "qty": 0,
+      "source": "不分车间核价明细!D985"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1010",
+      "product": "潜水艇",
+      "qty": 0,
+      "source": "不分车间核价明细!D986"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "Z1021",
+      "product": "潜水艇含鱼",
+      "qty": 0,
+      "source": "不分车间核价明细!D987"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1021",
+      "product": "潜水艇含鱼",
+      "qty": 0,
+      "source": "不分车间核价明细!D988"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "Z1026",
+      "product": "圆盘包含2条鱼",
+      "qty": 0,
+      "source": "不分车间核价明细!D989"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1026",
+      "product": "圆盘包含2条鱼",
+      "qty": 0,
+      "source": "不分车间核价明细!D990"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "Z1011",
+      "product": "圆盘包含鱼",
+      "qty": 0,
+      "source": "不分车间核价明细!D991"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1011",
+      "product": "圆盘包含鱼",
+      "qty": 0,
+      "source": "不分车间核价明细!D992"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "Z1009",
+      "product": "圆盘不包含鱼",
+      "qty": 0,
+      "source": "不分车间核价明细!D993"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1009",
+      "product": "圆盘不包含鱼",
+      "qty": 0,
+      "source": "不分车间核价明细!D994"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "D1007",
+      "product": "11寸公仔",
+      "qty": 0,
+      "source": "不分车间核价明细!D995"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1007",
+      "product": "11寸公仔",
+      "qty": 0,
+      "source": "不分车间核价明细!D996"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "Z1012",
+      "product": "三岔通道",
+      "qty": 0,
+      "source": "不分车间核价明细!D997"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1012",
+      "product": "三岔通道",
+      "qty": 0,
+      "source": "不分车间核价明细!D998"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "Z1019",
+      "product": "鱼+球",
+      "qty": 0,
+      "source": "不分车间核价明细!D999"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1019",
+      "product": "鱼+球",
+      "qty": 0,
+      "source": "不分车间核价明细!D1000"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "D1005",
+      "product": "11寸公仔",
+      "qty": 0,
+      "source": "不分车间核价明细!D1001"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1005",
+      "product": "11寸公仔",
+      "qty": 0,
+      "source": "不分车间核价明细!D1002"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "D1006",
+      "product": "11寸公仔",
+      "qty": 0,
+      "source": "不分车间核价明细!D1003"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1006",
+      "product": "11寸公仔",
+      "qty": 0,
+      "source": "不分车间核价明细!D1004"
+    },
+    {
+      "customer": "Cepia旧 ",
+      "sku": "D1008",
+      "product": "11寸公仔",
+      "qty": 0,
+      "source": "不分车间核价明细!D1005"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1008",
+      "product": "11寸公仔",
+      "qty": 0,
+      "source": "不分车间核价明细!D1006"
+    },
+    {
+      "customer": "Cepia旧",
+      "sku": "D1013",
+      "product": "三岔通道+鱼",
+      "qty": 0,
+      "source": "不分车间核价明细!D1007"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "D1013",
+      "product": "三岔通道+鱼",
+      "qty": 0,
+      "source": "不分车间核价明细!D1008"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "S1000",
+      "product": "泡泡贴1PACK",
+      "qty": 0,
+      "source": "不分车间核价明细!D1009"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "S1001",
+      "product": "泡泡贴3PACK",
+      "qty": 0,
+      "source": "不分车间核价明细!D1010"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "S1002",
+      "product": "泡泡贴5PACK",
+      "qty": 0,
+      "source": "不分车间核价明细!D1011"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "S1003",
+      "product": "泡泡贴10PACK",
+      "qty": 0,
+      "source": "不分车间核价明细!D1012"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "B1000",
+      "product": "手推车",
+      "qty": 0,
+      "source": "不分车间核价明细!D1014"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1035",
+      "product": "老鼠城市套装",
+      "qty": 0,
+      "source": "不分车间核价明细!D1029"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1032",
+      "product": "老鼠",
+      "qty": 13560,
+      "source": "不分车间核价明细!D1030"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1036",
+      "product": "老鼠摩天轮",
+      "qty": 3000,
+      "source": "不分车间核价明细!D1031"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1034",
+      "product": "老鼠警车",
+      "qty": 6000,
+      "source": "不分车间核价明细!D1032"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1033",
+      "product": "老鼠消防站",
+      "qty": 0,
+      "source": "不分车间核价明细!D1033"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "Z1074",
+      "product": "老鼠+城市套装",
+      "qty": 0,
+      "source": "不分车间核价明细!D1034"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "G1000",
+      "product": "女款许愿机",
+      "qty": 0,
+      "source": "不分车间核价明细!D1035"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "G1002",
+      "product": "男款许愿机",
+      "qty": 0,
+      "source": "不分车间核价明细!D1036"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "G1001",
+      "product": "男女许愿球",
+      "qty": 0,
+      "source": "不分车间核价明细!D1037"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "R1003",
+      "product": "飞轮带电款",
+      "qty": 0,
+      "source": "不分车间核价明细!D1038"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "R1002",
+      "product": "飞轮不带电款",
+      "qty": 0,
+      "source": "不分车间核价明细!D1039"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "B1001",
+      "product": "搅拌机",
+      "qty": 0,
+      "source": "不分车间核价明细!D1040"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "W1002",
+      "product": "大恐龙蛋",
+      "qty": 0,
+      "source": "不分车间核价明细!D1054"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "W1003",
+      "product": "小恐龙蛋",
+      "qty": 0,
+      "source": "不分车间核价明细!D1055"
+    },
+    {
+      "customer": "Cepia",
+      "sku": "W1000",
+      "product": "魔法棒",
+      "qty": 0,
+      "source": "不分车间核价明细!D1056"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "胶囊款CDU-24（SR103-130-181-160-180",
+      "product": "手链贴纸（吸塑装）",
+      "qty": 2426214,
+      "source": "不分车间核价明细!D1152"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "胶囊款CDU-12（SR103-130-181-160-180",
+      "product": "手链贴纸（吸塑装）",
+      "qty": 557742,
+      "source": "不分车间核价明细!D1153"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR320",
+      "product": "手链贴纸（吸塑装）",
+      "qty": 117312,
+      "source": "不分车间核价明细!D1154"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR460-无CDU",
+      "product": "手链贴纸（带笔记本）",
+      "qty": 16608,
+      "source": "不分车间核价明细!D1155"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR460CDU-12",
+      "product": "手链贴纸（飞机盒装）",
+      "qty": 17568,
+      "source": "不分车间核价明细!D1156"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR460CDU-6",
+      "product": "手链贴纸（塑胶桶装）",
+      "qty": 22050,
+      "source": "不分车间核价明细!D1157"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR370",
+      "product": "胶袋装手链",
+      "qty": 61002,
+      "source": "不分车间核价明细!D1158"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "JS100CDU-24",
+      "product": "两条手链装",
+      "qty": 322542,
+      "source": "不分车间核价明细!D1161"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "JS300",
+      "product": "手链贴纸（吸塑装）",
+      "qty": 12984,
+      "source": "不分车间核价明细!D1162"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR102-不带CDU",
+      "product": "手链贴纸（吸塑装）",
+      "qty": 170400,
+      "source": "不分车间核价明细!D1163"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR102CDU-9",
+      "product": "手链贴纸（吸塑装）",
+      "qty": 126054,
+      "source": "不分车间核价明细!D1164"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR102CDU-16",
+      "product": "手链贴纸（带笔记本）",
+      "qty": 187408,
+      "source": "不分车间核价明细!D1165"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR102CDU-24",
+      "product": "手链贴纸（飞机盒装）",
+      "qty": 315000,
+      "source": "不分车间核价明细!D1166"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR201",
+      "product": "手链吊坠",
+      "qty": 887107,
+      "source": "不分车间核价明细!D1167"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR301",
+      "product": "卷筒大贴纸",
+      "qty": 236002,
+      "source": "不分车间核价明细!D1168"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR400",
+      "product": "信封大贴纸",
+      "qty": 130326,
+      "source": "不分车间核价明细!D1169"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR400CDU-6",
+      "product": "手链贴纸（吸塑装）",
+      "qty": 80118,
+      "source": "不分车间核价明细!D1170"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR400CDU-12",
+      "product": "手链贴纸（带笔记本）",
+      "qty": 66996,
+      "source": "不分车间核价明细!D1171"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR430",
+      "product": "手链贴纸（飞机盒装）",
+      "qty": 41133,
+      "source": "不分车间核价明细!D1172"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR430CDU-6",
+      "product": "手链贴纸（带笔记本）",
+      "qty": 36072,
+      "source": "不分车间核价明细!D1173"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "SR430CDU-12",
+      "product": "手链贴纸（手提包）",
+      "qty": 22260,
+      "source": "不分车间核价明细!D1174"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "JC140",
+      "product": "小蛋糕",
+      "qty": 37591,
+      "source": "不分车间核价明细!D1177"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "JC100",
+      "product": "小蛋糕",
+      "qty": 116398,
+      "source": "不分车间核价明细!D1178"
+    },
+    {
+      "customer": "Sky Castle",
+      "sku": "JC120",
+      "product": "大蛋糕",
+      "qty": 727380,
+      "source": "不分车间核价明细!D1179"
+    }
+  ]
+}

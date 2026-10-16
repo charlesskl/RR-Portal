@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>核价板块</title>
   <link rel="stylesheet" href="./styles.css?v=20261014-audit-fold">
+  <style>
+    #workshop-assignment[hidden]{display:none!important}
+    #workshop-assignment label{display:flex;align-items:center;gap:6px;white-space:nowrap}
+    #workshop-assignment input[type=checkbox],[data-workshop-select]{width:auto}
+    #workshop-assignment select{width:auto;min-width:130px}
+    .verification-list-table{min-width:850px}
+    @media(min-width:761px){#verification-list:not(.hidden):has(#workshop-assignment:not([hidden])){grid-template-rows:auto auto auto minmax(0,1fr)}}
+  </style>
 </head>
 <body>
   <div class="topbar module-topbar">
@@ -24,6 +32,7 @@
           <div><h1>核价任务</h1><p>按部门填写、提交和审核；每次核价形成独立版本</p></div>
         </div>
         <div class="verification-center-actions">
+          <a class="mini" href="./verification-summary.html">核价汇总 / 导出</a>
           <button id="verification-records" class="mini">已完成记录</button>
           <button id="verification-export" class="mini">导出任务清单</button>
         </div>
@@ -37,12 +46,19 @@
           <option value="ready">待锁定</option>
           <option value="completed">已完成</option>
         </select>
+        <select id="workshop-filter" aria-label="按车间筛选"><option value="">全部车间</option><option>兴信A</option><option>兴信B</option><option>华登</option><option>河源</option><option>待分配车间</option></select>
         <select id="verification-customer-filter"><option value="">全部客户</option></select>
       </div>
+        <div id="workshop-assignment" style="padding:12px;display:flex;align-items:center;flex-wrap:wrap;gap:12px" hidden>
+          <label><input id="workshop-select-visible" type="checkbox"> 全选当前筛选结果</label>
+          <select id="workshop-target" aria-label="分配所属车间"><option value="">选择车间</option><option>兴信A</option><option>兴信B</option><option>华登</option><option>河源</option><option>待分配车间</option></select>
+          <button id="workshop-apply" class="mini" type="button">分配选中项</button>
+          <span id="workshop-message" role="status">仅调整车间，不改变核价和完成状态</span>
+        </div>
       <div class="verification-master-detail">
         <div class="verification-list-pane">
           <table class="verification-list-table">
-            <thead><tr><th>货号</th><th>产品</th><th>客户</th><th>当前版本</th><th>部门进度</th><th>状态</th></tr></thead>
+            <thead><tr><th>货号</th><th>产品</th><th>客户</th><th>当前版本</th><th>部门进度</th><th>状态</th><th>所属车间</th></tr></thead>
             <tbody id="verification-list-body"></tbody>
           </table>
         </div>
@@ -59,6 +75,6 @@
   <script src="./formula-input.js?v=20260731-fraction-export"></script>
 <script src="./jazwares-freight.js?v=20261009"></script>
 <script src="./workbench.js?v=20261014-audit-fold"></script>
-  <script type="module" src="./verification.js?v=20261016-save-protection-review"></script>
+  <script type="module" src="./verification.js?v=20261016-summary-workshops"></script>
 </body>
 </html>

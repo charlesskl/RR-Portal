@@ -223,31 +223,59 @@ let comparisonState = { quoteId: null, baseline: 'quote', targets: null, dept: '
 let comparisonRefreshToken = 0;
 const versionCache = new Map();
 
+let canAssignWorkshop = false;
+const workshopSelected = new Set();
+$('workshop-filter').onchange = () => {workshopSelected.clear();renderList();$('workshop-message').textContent='仅调整车间，不改变核价和完成状态';};
+$('workshop-select-visible').onchange = event => {
+  for(const row of filteredList())if(row.current_version_id){if(event.target.checked)workshopSelected.add(row.current_version_id);else workshopSelected.delete(row.current_version_id);}
+  renderList();$('workshop-message').textContent=`已选 ${workshopSelected.size} 款`;
+};
+$('workshop-apply').onclick = async () => {
+  const workshop=$('workshop-target').value;
+  if(!workshop || !workshopSelected.size){$('workshop-message').textContent='请勾选任务并选择车间';return;}
+  if(!confirm(`将选中的 ${workshopSelected.size} 款核价分配至「${workshop}」？核价和完成状态不变。`))return;
+  $('workshop-apply').disabled=true;
+  try {
+    const result=await api('/verifications/workshops',{method:'PUT',body:JSON.stringify({version_ids:[...workshopSelected],workshop})});
+    workshopSelected.clear();await loadList();$('workshop-message').textContent=`已将 ${result.count} 款分配至 ${result.workshop}，刷新汇总页即可查看`;
+  }catch(error){$('workshop-message').textContent=error.message;}
+  finally{$('workshop-apply').disabled=false;}
+};
 function filteredList() {
   const query = ($('verification-search').value || '').trim().toLowerCase();
   const status = $('verification-status-filter').value;
   const customer = $('verification-customer-filter').value;
   return listState.filter(row => (!status || row.verification_status === status)
     && (!customer || row.customer === customer)
+    && (!$('workshop-filter').value || row.workshop === $('workshop-filter').value)
     && [row.quote_no, row.product_name, row.customer, row.version, row.current_version_label, row.current_version_category].join(' ').toLowerCase().includes(query));
 }
 
 function renderList() {
   const rows = filteredList();
   $('verification-list-body').innerHTML = rows.length ? rows.map(row => `<tr class="verification-list-row ${Number(selectedQuoteId) === Number(row.id) ? 'selected' : ''}" data-id="${row.id}">
-    <td><strong>${esc(row.quote_no)}</strong><small>${esc(row.version || 'V1')}</small></td>
+    <td>${canAssignWorkshop && row.current_version_id ? `<input type="checkbox" data-workshop-select="${row.current_version_id}" aria-label="选择 ${esc(row.quote_no)}" ${workshopSelected.has(row.current_version_id)?'checked':''}> ` : ''}<strong>${esc(row.quote_no)}</strong><small>${esc(row.version || 'V1')}</small></td>
     <td>${esc(row.product_name)}</td><td>${esc(row.customer || '—')}</td>
     <td><strong>${esc(versionTitle({ label: row.current_version_label || '待创建', category: row.current_version_category }))}</strong><small>共 ${num(row.version_count)} 个版本</small></td>
     <td>${num(row.approved_count)} / ${num(row.total_depts)}</td>
     <td><span class="verification-status status-${esc(row.verification_status || 'not_started')}">${VERSION_STATUS[row.verification_status] || '待创建'}</span></td>
-  </tr>`).join('') : '<tr><td colspan="6" class="summary-empty">暂无符合条件的核价任务</td></tr>';
+    <td title="${esc(row.workshop_source)}">${esc(row.workshop || '待分配车间')}</td>
+  </tr>`).join('') : '<tr><td colspan="7" class="summary-empty">暂无符合条件的核价任务</td></tr>';
+  document.querySelectorAll('[data-workshop-select]').forEach(input => {
+    input.onclick = event => event.stopPropagation();
+    input.onchange = () => {const id=Number(input.dataset.workshopSelect);if(input.checked)workshopSelected.add(id);else workshopSelected.delete(id);$('workshop-message').textContent=`已选 ${workshopSelected.size} 款`};
+  });
+  $('workshop-select-visible').checked = rows.length > 0 && rows.every(r => workshopSelected.has(r.current_version_id));
   document.querySelectorAll('.verification-list-row').forEach(row => {
     row.onclick = () => selectTask(row.dataset.id);
   });
 }
 
 async function loadList() {
-  [me, { rows: listState }] = await Promise.all([api('/auth/me'), api('/verifications')]);
+  const [user, result] = await Promise.all([api('/auth/me'), api('/verifications')]);
+  me = user; listState = result.rows;
+  canAssignWorkshop = Boolean(result.can_assign_workshop);
+  $('workshop-assignment').hidden = !canAssignWorkshop;
   $('who-chip').textContent = `${me.dept_name} · ${me.display_name || me.username}`;
   const customers = [...new Set(listState.map(row => row.customer).filter(Boolean))].sort();
   $('verification-customer-filter').innerHTML = '<option value="">全部客户</option>'

@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth, quoteAccess } = require('../middleware/auth');
-const { WORKSHOPS, QUOTE_COMPONENTS, SUMMARY_COLUMNS, SHARE_AMOUNTS, SHARE_UNITS, AMOUNT_SHARE_KEYS, calculateSummaryValues, buildQuoteSummary, buildSummaryWorkbook, parseJson } = require('../services/quoteSummary');
+const { summaryHeaderStyle, WORKSHOPS, QUOTE_COMPONENTS, SUMMARY_COLUMNS, SHARE_AMOUNTS, SHARE_UNITS, AMOUNT_SHARE_KEYS, calculateSummaryValues, buildQuoteSummary, buildSummaryWorkbook, parseJson } = require('../services/quoteSummary');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -125,7 +125,7 @@ router.get('/', async (req, res) => {
     can_view_completion: req.user.role === 'admin',
     workshops: await workshopOptions(req.user.active_factory_code),
     components: QUOTE_COMPONENTS.map(([code, name]) => ({ code, name })),
-    summary_columns: SUMMARY_COLUMNS.map(([code, name, format]) => ({ code, name, format, share_amounts: code === 'amount_share_total' ? AMOUNT_SHARE_KEYS.map(key => SHARE_AMOUNTS[key]) : SHARE_AMOUNTS[code] ? [SHARE_AMOUNTS[code]] : null, share_unit: SHARE_UNITS[code] })),
+    summary_columns: SUMMARY_COLUMNS.map(([code, name, format]) => ({ code, name, format, header_style: summaryHeaderStyle(code), share_amounts: code === 'amount_share_total' ? AMOUNT_SHARE_KEYS.map(key => SHARE_AMOUNTS[key]) : SHARE_AMOUNTS[code] ? [SHARE_AMOUNTS[code]] : null, share_unit: SHARE_UNITS[code] })),
     can_edit: req.user.dept === 'sales' || isAdmin(req.user),
   });
 });

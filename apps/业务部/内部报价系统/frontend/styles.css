@@ -1108,3 +1108,5 @@ h3 .upload-mold-sheet button:hover { background: #334155; }
 }
 
 .summary-workshop-actions{display:flex;align-items:center;gap:6px}.summary-workshop-actions .summary-workshop{flex:1;width:0;min-width:0!important}.summary-workshop-actions .save-summary{flex:none;padding:6px 8px;white-space:nowrap}
+
+.summary-table thead th{font-family:"Songti SC",SimSun,serif;color:#000;border-color:#333;font-weight:700}.summary-table .summary-owner-row th{height:26px;min-height:26px;padding:3px;background:#fff}.summary-sheet-title strong,.summary-sheet-title h2{color:#000}

@@ -69,9 +69,14 @@ function renderHead() {
   widths.push(110, 135);
   $('summary-cols').innerHTML = widths.map(width => `<col style="width:${width}px">`).join('');
   $('summary-head').closest('table').style.width = `${widths.reduce((sum, width) => sum + width, 0)}px`;
-  $('summary-head').innerHTML = `<tr>
+  const headerStyle = item => item.header_style || {fill:'FFFFFF',color:'000000',owner:'',owner_fill:'FFFFFF'};
+  $('summary-head').innerHTML = `<tr class="summary-owner-row">
+    ${fixed.map(() => '<th></th>').join('')}
+    ${state.summaryColumns.map(item => `<th style="background:#${headerStyle(item).owner_fill}!important;color:#000">${esc(headerStyle(item).owner)}</th>`).join('')}
+    ${workflow.map(() => '<th></th>').join('')}
+  </tr><tr>
     ${fixed.map(label => `<th>${label}</th>`).join('')}
-    ${state.summaryColumns.map((item, index) => `<th class="${summaryColorClass(item.code)} ${item.code.endsWith('_share') || item.format === 'percent' ? 'component-sub' : 'component-unit'} group-${Math.floor(index / 4) % 2}">${esc(item.name)}</th>`).join('')}
+    ${state.summaryColumns.map((item, index) => `<th style="background:#${headerStyle(item).fill}!important;color:#${headerStyle(item).color}!important" class="${summaryColorClass(item.code)} ${item.code.endsWith('_share') || item.format === 'percent' ? 'component-sub' : 'component-unit'} group-${Math.floor(index / 4) % 2}">${esc(item.name)}</th>`).join('')}
     ${workflow.map(label => `<th class="workflow-head">${label}</th>`).join('')}
   </tr>`;
 }

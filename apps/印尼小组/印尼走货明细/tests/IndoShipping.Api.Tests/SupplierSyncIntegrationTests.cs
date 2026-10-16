@@ -9,6 +9,27 @@ namespace IndoShipping.Api.Tests;
 
 public class SupplierSyncIntegrationTests
 {
+    [Theory]
+    [InlineData("materials")]
+    [InlineData("purchase_orders")]
+    [InlineData("shipment_items")]
+    public async Task Delete_uses_database_case_rules_for_non_ascii_supplier_names(string table)
+    {
+        await using var fixture = await Fixture.Create();
+        if (fixture is null) return;
+        var c = fixture.Connection;
+        await AddUsageColumns(c);
+        await c.ExecuteAsync("INSERT INTO dict_supplier(keyword,full_name) VALUES ('İpek','Unused Company')");
+        await c.ExecuteAsync($"INSERT INTO {table}(supplier) VALUES ('İpek')");
+        var controller = new DictionariesController(fixture.Factory);
+        var conflict = Assert.IsType<ConflictObjectResult>(await controller.DeleteSupplier(1));
+        var report = System.Text.Json.JsonSerializer.SerializeToElement(conflict.Value);
+        Assert.Equal(1, report.GetProperty("total").GetInt64());
+        Assert.Equal(1, report.GetProperty("usages").GetArrayLength());
+        Assert.Equal(1, await c.ExecuteScalarAsync<int>("SELECT count(*) FROM dict_supplier"));
+        Assert.Equal(1, await c.ExecuteScalarAsync<int>($"SELECT count(*) FROM {table}"));
+    }
+
     [Fact]
     public async Task Delete_reports_each_usage_and_keeps_supplier_until_all_references_are_removed()
     {
@@ -62,6 +83,39 @@ public class SupplierSyncIntegrationTests
         Assert.Contains(report.GetProperty("usages").EnumerateArray(), u => u.GetProperty("document").GetString() == "PO002");
         Assert.IsType<OkObjectResult>(await controller.DeleteSupplier(2));
         Assert.Equal(108, await c.ExecuteScalarAsync<int>("SELECT count(*) FROM materials"));
+    }
+
+    [Fact]
+    public async Task Delete_caps_all_categories_independently_with_the_complete_total()
+    {
+        await using var fixture = await Fixture.Create();
+        if (fixture is null) return;
+        var c = fixture.Connection;
+        await AddUsageColumns(c);
+        await c.ExecuteAsync(@"
+            INSERT INTO dict_supplier(keyword,full_name) VALUES ('Alpha','Alpha');
+            INSERT INTO materials(supplier) SELECT 'Alpha' FROM generate_series(1,101);
+            INSERT INTO purchase_orders(supplier) SELECT 'Alpha' FROM generate_series(1,102);
+            INSERT INTO shipment_items(supplier) SELECT 'Alpha' FROM generate_series(1,103);
+            INSERT INTO dict_supplier(keyword,full_name) VALUES ('Other','Other Company');");
+        var controller = new DictionariesController(fixture.Factory);
+        var conflict = Assert.IsType<ConflictObjectResult>(await controller.DeleteSupplier(1));
+        var report = System.Text.Json.JsonSerializer.SerializeToElement(conflict.Value);
+        Assert.Contains("不能删除", report.GetProperty("error").GetString());
+        Assert.Equal(306, report.GetProperty("total").GetInt64());
+        Assert.True(report.GetProperty("truncated").GetBoolean());
+        var usages = report.GetProperty("usages").EnumerateArray().ToArray();
+        Assert.Equal(300, usages.Length);
+        foreach (var type in new[] { "物料", "采购单", "走货明细" })
+        {
+            var group = usages.Where(row => row.GetProperty("type").GetString() == type).ToArray();
+            Assert.Equal(Enumerable.Range(1, 100), group.Select(row => row.GetProperty("id").GetInt32()));
+        }
+        Assert.IsType<OkObjectResult>(await controller.DeleteSupplier(2));
+        Assert.Equal(1, await c.ExecuteScalarAsync<int>("SELECT count(*) FROM dict_supplier"));
+        Assert.Equal(306, await c.ExecuteScalarAsync<int>(@"
+            SELECT (SELECT count(*) FROM materials) + (SELECT count(*) FROM purchase_orders)
+                + (SELECT count(*) FROM shipment_items)"));
     }
 
     private static Task<int> AddUsageColumns(NpgsqlConnection c) => c.ExecuteAsync(@"

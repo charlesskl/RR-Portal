@@ -157,21 +157,23 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
         if (supplier is null) return NotFound();
         var names = new[] { supplier.keyword, supplier.full }
             .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value!.Trim().ToLowerInvariant()).Distinct().ToArray();
+            .Select(value => value!.Trim()).Distinct().ToArray();
         var usages = (await c.QueryAsync<SupplierUsage>(@"
-            WITH usages AS (
+            WITH names AS (
+                SELECT DISTINCT lower(name) AS name FROM unnest(@names::text[]) AS aliases(name)
+            ), usages AS (
                 SELECT '物料' AS type, m.id, '' AS document, m.product_code AS productcode,
                     m.material_code AS materialcode, m.name_zh AS materialname, m.supplier
-                FROM materials m WHERE lower(trim(m.supplier)) = ANY(@names)
+                FROM materials m WHERE lower(trim(m.supplier)) IN (SELECT name FROM names)
                 UNION ALL
                 SELECT '采购单', p.id, p.po_no, '', '', '', p.supplier
-                FROM purchase_orders p WHERE lower(trim(p.supplier)) = ANY(@names)
+                FROM purchase_orders p WHERE lower(trim(p.supplier)) IN (SELECT name FROM names)
                 UNION ALL
                 SELECT '走货明细', i.id, s.container_no, m.product_code, m.material_code, m.name_zh, i.supplier
                 FROM shipment_items i
                 LEFT JOIN shipments s ON s.id = i.shipment_id
                 LEFT JOIN materials m ON m.id = i.material_id
-                WHERE lower(trim(i.supplier)) = ANY(@names)
+                WHERE lower(trim(i.supplier)) IN (SELECT name FROM names)
             ), ranked AS (
                 SELECT *, count(*) OVER () AS total,
                     row_number() OVER (PARTITION BY type ORDER BY id) AS position

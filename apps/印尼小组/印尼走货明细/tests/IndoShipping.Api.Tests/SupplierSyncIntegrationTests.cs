@@ -10,17 +10,26 @@ namespace IndoShipping.Api.Tests;
 public class SupplierSyncIntegrationTests
 {
     [Theory]
-    [InlineData("materials")]
-    [InlineData("purchase_orders")]
-    [InlineData("shipment_items")]
-    public async Task Delete_uses_database_case_rules_for_non_ascii_supplier_names(string table)
+    [InlineData("materials", "İpek")]
+    [InlineData("purchase_orders", "İpek")]
+    [InlineData("shipment_items", "İpek")]
+    [InlineData("materials", "\u00a0Alpha\u00a0")]
+    [InlineData("purchase_orders", "\u00a0Alpha\u00a0")]
+    [InlineData("shipment_items", "\u00a0Alpha\u00a0")]
+    [InlineData("materials", "\u2003Alpha\u2003")]
+    [InlineData("purchase_orders", "\u2003Alpha\u2003")]
+    [InlineData("shipment_items", "\u2003Alpha\u2003")]
+    [InlineData("materials", "\tAlpha\t")]
+    [InlineData("purchase_orders", "\tAlpha\t")]
+    [InlineData("shipment_items", "\tAlpha\t")]
+    public async Task Delete_uses_database_case_and_whitespace_rules_for_supplier_names(string table, string name)
     {
         await using var fixture = await Fixture.Create();
         if (fixture is null) return;
         var c = fixture.Connection;
         await AddUsageColumns(c);
-        await c.ExecuteAsync("INSERT INTO dict_supplier(keyword,full_name) VALUES ('İpek','Unused Company')");
-        await c.ExecuteAsync($"INSERT INTO {table}(supplier) VALUES ('İpek')");
+        await c.ExecuteAsync("INSERT INTO dict_supplier(keyword,full_name) VALUES (@name,'Unused Company')", new { name });
+        await c.ExecuteAsync($"INSERT INTO {table}(supplier) VALUES (@name)", new { name });
         var controller = new DictionariesController(fixture.Factory);
         var conflict = Assert.IsType<ConflictObjectResult>(await controller.DeleteSupplier(1));
         var report = System.Text.Json.JsonSerializer.SerializeToElement(conflict.Value);

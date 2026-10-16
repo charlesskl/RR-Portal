@@ -157,10 +157,10 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
         if (supplier is null) return NotFound();
         var names = new[] { supplier.keyword, supplier.full }
             .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value!.Trim()).Distinct().ToArray();
+            .Select(value => value!).Distinct().ToArray();
         var usages = (await c.QueryAsync<SupplierUsage>(@"
             WITH names AS (
-                SELECT DISTINCT lower(name) AS name FROM unnest(@names::text[]) AS aliases(name)
+                SELECT DISTINCT lower(trim(name)) AS name FROM unnest(@names::text[]) AS aliases(name)
             ), usages AS (
                 SELECT '物料' AS type, m.id, '' AS document, m.product_code AS productcode,
                     m.material_code AS materialcode, m.name_zh AS materialname, m.supplier

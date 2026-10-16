@@ -11,6 +11,10 @@
     #workshop-assignment input[type=checkbox],[data-workshop-select]{width:auto}
     #workshop-assignment select{width:auto;min-width:130px}
     .verification-list-table{min-width:850px}
+    .verification-toolbar{grid-template-columns:minmax(220px,1fr) repeat(3,minmax(120px,170px))}
+    [data-workshop-select],#workshop-select-visible{min-height:20px;min-width:20px;vertical-align:middle}
+    #workshop-message{overflow-wrap:anywhere;min-width:0;flex:1 1 220px}
+    @media(max-width:700px){.verification-toolbar{grid-template-columns:1fr}#workshop-assignment select{font-size:16px;max-width:100%}}
     @media(min-width:761px){#verification-list:not(.hidden):has(#workshop-assignment:not([hidden])){grid-template-rows:auto auto auto minmax(0,1fr)}}
   </style>
 </head>
@@ -75,6 +79,6 @@
   <script src="./formula-input.js?v=20260731-fraction-export"></script>
 <script src="./jazwares-freight.js?v=20261009"></script>
 <script src="./workbench.js?v=20261014-audit-fold"></script>
-  <script type="module" src="./verification.js?v=20261016-summary-workshops"></script>
+  <script type="module" src="./verification.js?v=20261016-summary-review"></script>
 </body>
 </html>

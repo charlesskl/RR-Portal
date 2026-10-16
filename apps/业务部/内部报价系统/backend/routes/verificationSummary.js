@@ -3,29 +3,34 @@ const db=require('../db');
 const {requireAuth,quoteAccess}=require('../middleware/auth');
 const {columns,template,buildVerificationRow,customerTotals,buildVerificationWorkbook}=require('../services/verificationSummary');
 const {sourceQuantity}=require('../services/sourceSummary');
+const {payloadRevision,validRevision,assertRevision,saveMetadataSql}=require('../services/verificationMetadata');
 const router=express.Router();router.use(requireAuth);
 const canEditQuantity=u=>Boolean(u.perms?.['账号管理']?.can_admin)||u.role==='admin'||['sales','engineering'].includes(u.dept);
 router.put('/quantity',async(req,res)=>{
   if(!canEditQuantity(req.user))return res.status(403).json({error:'只有业务、工程或管理员可以填写接单数量'});
-  const {version_id:id,quantity}=req.body||{};
+  const {version_id:id,quantity,expected_revision}=req.body||{};
   if(!Number.isSafeInteger(id)||id<=0||!(quantity===null||(Number.isSafeInteger(quantity)&&quantity>=0)))return res.status(400).json({error:'数量须为非负整数，或留空'});
+  if(!validRevision(expected_revision))return res.status(400).json({error:'缺少有效的核价资料版本，请刷新后重试'});
   try{
-    await db.transaction(async()=>{
+    const revision=await db.transaction(async()=>{
       const v=await db.prepare(`SELECT v.*,q.deleted_at FROM quote_verification_versions v JOIN quotes q ON q.id=v.quote_id WHERE v.id=?`).get(id);
       if(!v||v.deleted_at||v.status==='cancelled')throw Object.assign(new Error('核价版本不可用'),{status:409});
       const access=await quoteAccess(req.user,v.quote_id);
       if(access.status!==200)throw Object.assign(new Error('无权修改此核价数量'),{status:access.status});
       const latest=await db.prepare("SELECT id FROM quote_verification_versions WHERE quote_id=? AND status<>'cancelled' ORDER BY version_no DESC,id DESC LIMIT 1").get(v.quote_id);
-      if(latest.id!==id)throw Object.assign(new Error('核价版本已更新，请刷新后填写'),{status:409});
+      if(!latest||latest.id!==id)throw Object.assign(new Error('核价版本已更新，请刷新后填写'),{status:409});
       const s=await db.prepare("SELECT * FROM quote_verification_sections WHERE version_id=? AND dept='sales'").get(id);
       if(!s)throw Object.assign(new Error('缺少业务核价信息'),{status:409});
+      assertRevision(s,expected_revision);
       const p=JSON.parse(s.payload_json||'{}'),actor=req.user.name||req.user.username;
       p.summary_order_quantity={value:quantity,updated_by:actor,updated_at:new Date().toISOString()};
-      const saved=await db.prepare('UPDATE quote_verification_sections SET payload_json=? WHERE id=? AND payload_json=?').run(JSON.stringify(p),s.id,s.payload_json);
+      const payloadJson=JSON.stringify(p);
+      const saved=await db.prepare(saveMetadataSql).run(payloadJson,s.id,s.payload_json);
       if(!saved.changes)throw Object.assign(new Error('核价资料已更新，请刷新后重试'),{status:409});
       await db.prepare(`INSERT INTO audit_log(quote_id,dept,actor,action,detail) VALUES(?,?,?,'verification_order_quantity',?)`).run(v.quote_id,req.user.dept,actor,`${v.label} 汇总接单数量设为 ${quantity===null?'空白':quantity}；核价单价与完成状态不变`);
+      return payloadRevision({payload_json:payloadJson});
     })();
-    res.json({ok:true});
+    res.json({ok:true,quantity_revision:revision});
   }catch(e){if(e.status)return res.status(e.status).json({error:e.message});throw e;}
 });
 
@@ -47,6 +52,8 @@ async function loadRows(user,filters={}) {
     // Every cost comes from the current verification detail. The original
     // summary supplies order quantity only, never cost overrides or comparisons.
     const report=buildVerificationRow(q,{id:q.verification_version_id,label:q.verification_label,status:q.verification_status,version_no:q.verification_version_no},sections,sourceQuantity(q,sections)??undefined);
+    const sales=sections.find(s=>s.dept==='sales');
+    report.quantity_revision=sales?payloadRevision(sales):null;
     if(filters.workshop&&report.workshop!==filters.workshop)continue;
     result.push(report);
   }

@@ -1,4 +1,5 @@
 const {resolveWorkshop, workshopName} = require('../services/verificationWorkshops');
+const {payloadRevision,validRevision,assertRevision,saveMetadataSql} = require('../services/verificationMetadata');
 const express = require('express');
 const db = require('../db');
 const { requireAuth, quoteAccess } = require('../middleware/auth');
@@ -141,13 +142,13 @@ router.get('/', async (req, res) => {
       COALESCE((SELECT COUNT(*) FROM quote_verification_sections sx WHERE sx.version_id=v.id AND sx.status='approved'), 0) AS approved_count
       FROM quotes q JOIN quote_customer_confirmations c ON c.quote_id=q.id
       LEFT JOIN quote_verification_versions v ON v.id=(
-        SELECT vx.id FROM quote_verification_versions vx WHERE vx.quote_id=q.id ORDER BY vx.version_no DESC LIMIT 1
+        SELECT vx.id FROM quote_verification_versions vx WHERE vx.quote_id=q.id AND vx.status<>'cancelled' ORDER BY vx.version_no DESC,vx.id DESC LIMIT 1
       )
       WHERE q.factory_code=? ${activeQuotePredicate} AND c.status='confirmed'
       ORDER BY c.confirmed_at DESC, q.id DESC`).all(req.user.active_factory_code);
   } else {
     const customers = (await db.prepare('SELECT customer FROM user_customers WHERE user_id=?').all(req.user.id)).map(row => row.customer);
-    if (!customers.length) return res.json({ rows: [], total_depts: totalDepts });
+    if (!customers.length) return res.json({ rows: [], total_depts: totalDepts, can_assign_workshop: canManageVersions(req.user) });
     const marks = customers.map(() => '?').join(',');
     rows = await db.prepare(`SELECT q.id, q.quote_no, q.product_name, q.version, q.customer,
       c.confirmed_price, c.confirmed_qty, c.confirmed_at,
@@ -158,7 +159,7 @@ router.get('/', async (req, res) => {
       COALESCE((SELECT COUNT(*) FROM quote_verification_sections sx WHERE sx.version_id=v.id AND sx.status='approved'), 0) AS approved_count
       FROM quotes q JOIN quote_customer_confirmations c ON c.quote_id=q.id
       LEFT JOIN quote_verification_versions v ON v.id=(
-        SELECT vx.id FROM quote_verification_versions vx WHERE vx.quote_id=q.id ORDER BY vx.version_no DESC LIMIT 1
+        SELECT vx.id FROM quote_verification_versions vx WHERE vx.quote_id=q.id AND vx.status<>'cancelled' ORDER BY vx.version_no DESC,vx.id DESC LIMIT 1
       )
       WHERE q.factory_code=? ${activeQuotePredicate} AND c.status='confirmed' AND q.customer IN (${marks})
       ORDER BY c.confirmed_at DESC, q.id DESC`).all(req.user.active_factory_code, ...customers);
@@ -166,35 +167,43 @@ router.get('/', async (req, res) => {
   for (const row of rows) {
     const sections = row.current_version_id ? await db.prepare('SELECT * FROM quote_verification_sections WHERE version_id=?').all(row.current_version_id) : [];
     Object.assign(row, resolveWorkshop(row, sections));
+    const sales = sections.find(s=>s.dept==='sales');
+    row.workshop_revision = sales ? payloadRevision(sales) : null;
   }
   res.json({ rows: rows.map(row => ({ ...row, total_depts: totalDepts })), can_assign_workshop: canManageVersions(req.user) });
 });
 
 router.put('/workshops', async (req, res) => {
   if (!canManageVersions(req.user)) return res.status(403).json({error:'只有业务、工程或管理员可以分配车间'});
-  const ids = req.body?.version_ids, name = workshopName(req.body?.workshop);
+  const ids = req.body?.version_ids, name = workshopName(req.body?.workshop), expected = req.body?.expected_revisions;
   if (!Array.isArray(ids) || !ids.length || ids.length > 1000 || ids.some(id => !Number.isSafeInteger(id) || id <= 0) || !name)
     return res.status(400).json({error:'请选择核价版本和有效车间'});
+  if (!expected || typeof expected !== 'object' || Array.isArray(expected) || ids.some(id=>!validRevision(expected[id])))
+    return res.status(400).json({error:'缺少有效的核价资料版本，请刷新后重试'});
   try {
-    const count = await db.transaction(async () => {
-      for (const id of new Set(ids)) {
+    const revisions = await db.transaction(async () => {
+      const next = {};
+      for (const id of [...new Set(ids)].sort((a,b)=>a-b)) {
         const version = await db.prepare(`SELECT v.*,q.deleted_at FROM quote_verification_versions v JOIN quotes q ON q.id=v.quote_id WHERE v.id=?`).get(id);
         if (!version || version.deleted_at || version.status === 'cancelled') throw Object.assign(new Error('核价版本不存在或已取消'),{status:409});
         const access = await quoteAccess(req.user, version.quote_id);
         if (access.status !== 200) throw Object.assign(new Error('无权分配该核价任务'),{status:access.status});
-        const latest = await db.prepare('SELECT id FROM quote_verification_versions WHERE quote_id=? ORDER BY version_no DESC,id DESC LIMIT 1').get(version.quote_id);
-        if (latest.id !== id) throw Object.assign(new Error('版本已变化，请刷新后重试'),{status:409});
+        const latest = await db.prepare("SELECT id FROM quote_verification_versions WHERE quote_id=? AND status<>'cancelled' ORDER BY version_no DESC,id DESC LIMIT 1").get(version.quote_id);
+        if (!latest || latest.id !== id) throw Object.assign(new Error('版本已变化，请刷新后重试'),{status:409});
         const sales = await db.prepare("SELECT * FROM quote_verification_sections WHERE version_id=? AND dept='sales'").get(id);
         if (!sales) throw Object.assign(new Error('缺少业务核价信息'),{status:409});
+        assertRevision(sales,expected[id]);
         const payload = JSON.parse(sales.payload_json || '{}');
         payload.workshop_assignment = {name, assigned_by:actorName(req.user), assigned_at:new Date().toISOString()};
-        const saved = await db.prepare('UPDATE quote_verification_sections SET payload_json=? WHERE id=? AND payload_json=?').run(JSON.stringify(payload),sales.id,sales.payload_json);
+        const payloadJson = JSON.stringify(payload);
+        const saved = await db.prepare(saveMetadataSql).run(payloadJson,sales.id,sales.payload_json);
         if (!saved.changes) throw Object.assign(new Error('核价资料已更新，请刷新后重试'),{status:409});
         await db.prepare(`INSERT INTO audit_log(quote_id,dept,actor,action,detail) VALUES(?,?,?,'verification_workshop_assign',?)`).run(version.quote_id,req.user.dept,actorName(req.user),`${version.label} 分配至 ${name}；核价及审核状态不变`);
+        next[id] = payloadRevision({payload_json:payloadJson});
       }
-      return new Set(ids).size;
+      return next;
     })();
-    res.json({ok:true,count,workshop:name});
+    res.json({ok:true,count:Object.keys(revisions).length,workshop:name,revisions});
   } catch(error) {
     if(error.status)return res.status(error.status).json({error:error.message});
     throw error;

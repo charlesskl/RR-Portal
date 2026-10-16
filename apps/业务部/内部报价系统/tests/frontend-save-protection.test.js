@@ -83,7 +83,7 @@ function verificationFixture(testApi) {
     window: { VerificationWorkbench: { renderAssembly(_body, _draft, _editable, onChange) { calls.push(onChange); } }, addEventListener: (event, fn) => { handlers[event] = fn; } },
     alert: message => alerts.push(message), confirm: () => true, testApi, initialTask: task(),
   };
-  const source = read('verification.js').split("$('verification-search').oninput = renderList;")[0];
+  const source = read('verification.js').split("$('verification-search').oninput =")[0];
   vm.runInNewContext(source + `
     api = testApi; me = {dept:'assembly',role:'admin'}; taskState = initialTask; activeDepartment = 'assembly'; sectionDirty = true;
     let rendered = 0; renderDetail = () => { rendered += 1; };

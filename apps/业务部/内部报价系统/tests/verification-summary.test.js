@@ -156,9 +156,9 @@ test('summary and export share latest-version, customer and factory scope',async
     INSERT INTO quote_verification_versions VALUES(1,1,'V1','completed',1),(2,1,'V2','drafting',2),(3,1,'V3','cancelled',3),(4,2,'V1','completed',1),(5,3,'V1','completed',1),(6,4,'V1','completed',1);
     INSERT INTO user_customers VALUES(7,'A');`);
   const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),mod={exports:{}};
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../backend/routes/verificationSummary.js'),'utf8'),{module:mod,require:id=>id==='../db'?db:id==='../middleware/auth'?{requireAuth:()=>{}}:id==='../services/sourceSummary'?require('../backend/services/sourceSummary'):id==='../services/verificationSummary'?{buildVerificationRow:(q,v)=>({id:q.id,version:v.label})}:require(id)});
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../backend/routes/verificationSummary.js'),'utf8'),{module:mod,require:id=>id==='../db'?db:id==='../middleware/auth'?{requireAuth:()=>{}}:id==='../services/verificationMetadata'?require('../backend/services/verificationMetadata'):id==='../services/sourceSummary'?require('../backend/services/sourceSummary'):id==='../services/verificationSummary'?{buildVerificationRow:(q,v)=>({id:q.id,version:v.label})}:require(id)});
   const load=mod.exports.loadRows,user={id:7,active_factory_code:'qingxi',perms:{}};
-  assert.equal(JSON.stringify(await load(user)),JSON.stringify([{id:1,version:'V2'}]));
+  assert.equal(JSON.stringify(await load(user)),JSON.stringify([{id:1,version:'V2',quantity_revision:null}]));
   assert.equal((await load(user,{customer:'B'})).length,0);
   assert.equal((await load({...user,perms:{'账号管理':{can_admin:1}}})).length,2);
   assert.equal((await load(user,{status:'completed'})).length,0);

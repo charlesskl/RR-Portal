@@ -51,7 +51,7 @@ const SECTION_STATUS = {
 };
 const VERSION_STATUS = {
   not_started: '待创建', drafting: '填写中', in_review: '审核中',
-  ready: '待锁定', completed: '已完成',
+  ready: '待锁定', completed: '已完成', cancelled: '已取消',
 };
 const versionTitle = version => [version?.label, String(version?.category || '').trim()].filter(Boolean).join(' · ');
 const currencySymbol = currency => currency === 'USD' ? 'US$' : currency === 'RMB' ? '¥' : currency === 'NUMBER' ? '' : 'HK$';
@@ -224,22 +224,48 @@ let comparisonRefreshToken = 0;
 const versionCache = new Map();
 
 let canAssignWorkshop = false;
+let workshopSavePending = false;
+let listRequestSequence = 0;
 const workshopSelected = new Set();
-$('workshop-filter').onchange = () => {workshopSelected.clear();renderList();$('workshop-message').textContent='仅调整车间，不改变核价和完成状态';};
+const workshopRevisions = new Map();
+function updateWorkshopSelection() {
+  const selectable=filteredList().filter(row=>row.current_version_id&&row.workshop_revision);
+  const all=$('workshop-select-visible');
+  all.checked=selectable.length>0&&selectable.every(row=>workshopSelected.has(row.current_version_id));
+  all.indeterminate=!all.checked&&selectable.some(row=>workshopSelected.has(row.current_version_id));
+  all.disabled=workshopSavePending||!selectable.length;
+  $('workshop-target').disabled=workshopSavePending;
+  $('workshop-apply').disabled=workshopSavePending||!workshopSelected.size;
+}
+function applyListFilter() {
+  workshopSelected.clear();workshopRevisions.clear();renderList();
+  $('workshop-message').textContent='仅调整车间，不改变核价和完成状态';
+}
+$('workshop-filter').onchange = applyListFilter;
 $('workshop-select-visible').onchange = event => {
-  for(const row of filteredList())if(row.current_version_id){if(event.target.checked)workshopSelected.add(row.current_version_id);else workshopSelected.delete(row.current_version_id);}
+  if(workshopSavePending)return;
+  for(const row of filteredList())if(row.current_version_id&&row.workshop_revision){if(event.target.checked){workshopSelected.add(row.current_version_id);workshopRevisions.set(row.current_version_id,row.workshop_revision);}else {workshopSelected.delete(row.current_version_id);workshopRevisions.delete(row.current_version_id);}}
   renderList();$('workshop-message').textContent=`已选 ${workshopSelected.size} 款`;
 };
 $('workshop-apply').onclick = async () => {
+  if(workshopSavePending)return;
   const workshop=$('workshop-target').value;
-  if(!workshop || !workshopSelected.size){$('workshop-message').textContent='请勾选任务并选择车间';return;}
-  if(!confirm(`将选中的 ${workshopSelected.size} 款核价分配至「${workshop}」？核价和完成状态不变。`))return;
-  $('workshop-apply').disabled=true;
+  const selected=filteredList().filter(row=>workshopSelected.has(row.current_version_id)&&row.workshop_revision);
+  if(!workshop || !selected.length){$('workshop-message').textContent='请勾选任务并选择车间';return;}
+  if(!confirm(`将选中的 ${selected.length} 款核价分配至「${workshop}」？核价和完成状态不变。`))return;
+  const ids=selected.map(row=>row.current_version_id);
+  const expected_revisions=Object.fromEntries(selected.map(row=>[row.current_version_id,workshopRevisions.get(row.current_version_id)]));
+  workshopSavePending=true;renderList();$('workshop-message').textContent='正在保存车间分配…';
   try {
-    const result=await api('/verifications/workshops',{method:'PUT',body:JSON.stringify({version_ids:[...workshopSelected],workshop})});
-    workshopSelected.clear();await loadList();$('workshop-message').textContent=`已将 ${result.count} 款分配至 ${result.workshop}，刷新汇总页即可查看`;
-  }catch(error){$('workshop-message').textContent=error.message;}
-  finally{$('workshop-apply').disabled=false;}
+    const result=await api('/verifications/workshops',{method:'PUT',body:JSON.stringify({version_ids:ids,workshop,expected_revisions})});
+    for(const row of selected){row.workshop=workshop;row.workshop_revision=result.revisions?.[row.current_version_id]||null;workshopSelected.delete(row.current_version_id);workshopRevisions.delete(row.current_version_id);}
+    // Refresh the list without selecting a task: an in-flight assignment must
+    // never replace the department form the user has opened or edited meanwhile.
+    try{await loadList({refreshSelection:false});}
+    catch{renderList();$('workshop-message').textContent=`车间已保存；任务清单刷新失败，请刷新页面后核对`;return;}
+    $('workshop-message').textContent=`已将 ${result.count} 款分配至 ${result.workshop}，刷新汇总页即可查看`;
+  }catch(error){$('workshop-message').textContent=`${error.message}；已保留选择，请刷新核对后重试`;}
+  finally{workshopSavePending=false;renderList();}
 };
 function filteredList() {
   const query = ($('verification-search').value || '').trim().toLowerCase();
@@ -253,8 +279,10 @@ function filteredList() {
 
 function renderList() {
   const rows = filteredList();
+  const visible=new Set(rows.map(row=>row.current_version_id));
+  for(const id of workshopSelected)if(!visible.has(id)){workshopSelected.delete(id);workshopRevisions.delete(id);}
   $('verification-list-body').innerHTML = rows.length ? rows.map(row => `<tr class="verification-list-row ${Number(selectedQuoteId) === Number(row.id) ? 'selected' : ''}" data-id="${row.id}">
-    <td>${canAssignWorkshop && row.current_version_id ? `<input type="checkbox" data-workshop-select="${row.current_version_id}" aria-label="选择 ${esc(row.quote_no)}" ${workshopSelected.has(row.current_version_id)?'checked':''}> ` : ''}<strong>${esc(row.quote_no)}</strong><small>${esc(row.version || 'V1')}</small></td>
+    <td>${canAssignWorkshop && row.current_version_id && row.workshop_revision ? `<input type="checkbox" data-workshop-select="${row.current_version_id}" aria-label="选择 ${esc(row.quote_no)}" ${workshopSelected.has(row.current_version_id)?'checked':''} ${workshopSavePending?'disabled':''}> ` : ''}<strong>${esc(row.quote_no)}</strong><small>${esc(row.version || 'V1')}</small></td>
     <td>${esc(row.product_name)}</td><td>${esc(row.customer || '—')}</td>
     <td><strong>${esc(versionTitle({ label: row.current_version_label || '待创建', category: row.current_version_category }))}</strong><small>共 ${num(row.version_count)} 个版本</small></td>
     <td>${num(row.approved_count)} / ${num(row.total_depts)}</td>
@@ -263,25 +291,33 @@ function renderList() {
   </tr>`).join('') : '<tr><td colspan="7" class="summary-empty">暂无符合条件的核价任务</td></tr>';
   document.querySelectorAll('[data-workshop-select]').forEach(input => {
     input.onclick = event => event.stopPropagation();
-    input.onchange = () => {const id=Number(input.dataset.workshopSelect);if(input.checked)workshopSelected.add(id);else workshopSelected.delete(id);$('workshop-message').textContent=`已选 ${workshopSelected.size} 款`};
+    input.onchange = () => {if(workshopSavePending)return;const id=Number(input.dataset.workshopSelect);if(input.checked){workshopSelected.add(id);workshopRevisions.set(id,listState.find(row=>row.current_version_id===id)?.workshop_revision);}else{workshopSelected.delete(id);workshopRevisions.delete(id);}updateWorkshopSelection();$('workshop-message').textContent=`已选 ${workshopSelected.size} 款`};
   });
-  $('workshop-select-visible').checked = rows.length > 0 && rows.every(r => workshopSelected.has(r.current_version_id));
+  updateWorkshopSelection();
   document.querySelectorAll('.verification-list-row').forEach(row => {
     row.onclick = () => selectTask(row.dataset.id);
   });
 }
 
-async function loadList() {
+async function loadList({refreshSelection=true}={}) {
+  const sequence=++listRequestSequence;
   const [user, result] = await Promise.all([api('/auth/me'), api('/verifications')]);
+  if(sequence!==listRequestSequence)return;
   me = user; listState = result.rows;
   canAssignWorkshop = Boolean(result.can_assign_workshop);
   $('workshop-assignment').hidden = !canAssignWorkshop;
   $('who-chip').textContent = `${me.dept_name} · ${me.display_name || me.username}`;
   const customers = [...new Set(listState.map(row => row.customer).filter(Boolean))].sort();
+  const selectedCustomer=$('verification-customer-filter').value;
   $('verification-customer-filter').innerHTML = '<option value="">全部客户</option>'
     + customers.map(customer => `<option value="${esc(customer)}">${esc(customer)}</option>`).join('');
+  $('verification-customer-filter').value=customers.includes(selectedCustomer)?selectedCustomer:'';
+  if(!canAssignWorkshop){workshopSelected.clear();workshopRevisions.clear();}
   renderList();
-  if (listState.length) await selectTask(selectedQuoteId || listState[0].id);
+  if (refreshSelection&&listState.length) {
+    const target=listState.find(row=>Number(row.id)===Number(selectedQuoteId))||listState[0];
+    await selectTask(target.id);
+  }
 }
 
 function cacheVersion(data) {
@@ -319,7 +355,7 @@ async function selectTask(quoteId) {
     $('verification-preview').innerHTML = `<div class="verification-preview-empty"><strong>核价任务暂时无法打开</strong><br>${esc(error.message)}</div>`;
     return;
   }
-  const latest = taskState.versions[taskState.versions.length - 1];
+  const latest = taskState.versions.filter(version=>version.status!=='cancelled').at(-1);
   const row = listState.find(item => Number(item.id) === selectedQuoteId);
   if (row && latest) {
     Object.assign(row, {
@@ -1070,9 +1106,9 @@ function renderTaxComparison(sources, summaries) {
   </section>`;
 }
 
-$('verification-search').oninput = renderList;
-$('verification-status-filter').onchange = renderList;
-$('verification-customer-filter').onchange = renderList;
+$('verification-search').oninput = applyListFilter;
+$('verification-status-filter').onchange = applyListFilter;
+$('verification-customer-filter').onchange = applyListFilter;
 $('verification-preview').addEventListener('click', event => {
   if (event.target.closest('#verification-open-detail')) openDetail('workflow');
   if (event.target.closest('#verification-open-compare')) openDetail('compare');
@@ -1080,7 +1116,7 @@ $('verification-preview').addEventListener('click', event => {
 $('verification-records').onclick = () => {
   $('verification-status-filter').value = $('verification-status-filter').value === 'completed' ? '' : 'completed';
   $('verification-records').classList.toggle('active', $('verification-status-filter').value === 'completed');
-  renderList();
+  applyListFilter();
 };
 $('verification-export').onclick = () => {
   const rows = [['货号', '产品', '版本', '客户', '当前核价版本', '部门进度', '核价状态'], ...filteredList().map(row => [
@@ -1099,8 +1135,10 @@ $('verification-export').onclick = () => {
   URL.revokeObjectURL(url);
 };
 
+const linkedQuoteId=Number(new URLSearchParams(window.location.search).get('quote_id'));
+if(Number.isSafeInteger(linkedQuoteId)&&linkedQuoteId>0)selectedQuoteId=linkedQuoteId;
 loadList().catch(error => {
-  $('verification-list-body').innerHTML = `<tr><td colspan="6" class="summary-empty">${esc(error.message)}</td></tr>`;
+  $('verification-list-body').innerHTML = `<tr><td colspan="7" class="summary-empty">${esc(error.message)}</td></tr>`;
 });
 
 window.addEventListener('beforeunload', event => {

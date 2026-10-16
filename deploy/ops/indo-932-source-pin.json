@@ -1,11 +1,8 @@
 {
-  "reviewedHead": "7db4e250cd33bc51c352128d5e1afec066649a57",
+  "reviewedHead": "67e12df35fd8092c6399e469746967e181ef9224",
   "sourceBlobs": {
-    "apps/印尼小组/印尼走货明细/src/IndoShipping.Api/Controllers/DictionariesController.cs": "b30a07d57a10d998c55110ba0e6d4f2ddc7957f3b0c4df39978a4fbd783ce0b2",
-    "apps/印尼小组/印尼走货明细/tests/IndoShipping.Api.Tests/SupplierSyncIntegrationTests.cs": "b4fe61cdd9f57f35ed9e7b1f043cb8834e3308f64bcd3820207d0d62cc47810b",
-    "apps/印尼小组/印尼走货明细/web/src/pages/SupplierSummaryPage.tsx": "1cc658261d1be32dd2833b2e4d5e0a63cd5f1c7690e2b6dd21b5eba65de82755",
-    "apps/印尼小组/印尼走货明细/web/src/utils/supplierFilters.test.ts": "525acced22a026ef3ebd271cfbff1ba24fc1e7ad26f02364b0fcbb4039f253ba",
-    "apps/印尼小组/印尼走货明细/web/src/utils/supplierFilters.ts": "cb3b96f22da81759375758f3826556287397fe2b110f0423554ddacb64e97eb0"
+    "apps/印尼小组/印尼走货明细/src/IndoShipping.Api/Controllers/DictionariesController.cs": "75cd70f672054233f7290bddf44121be92b5ca37c728d8c91ffdaafd3b6e076c",
+    "apps/印尼小组/印尼走货明细/tests/IndoShipping.Api.Tests/SupplierSyncIntegrationTests.cs": "4b69189471619ac5c7a779b15103e486054b19ccbb04c1ec313593b8fd675029"
   },
   "dist": {
     "assets/CustomersPage-BTw7wDVF.js": "c98c50ae0dde644f954ba3fcebe12946237fb5885540c7d688141b6a1b4d4c42",
@@ -72,7 +69,7 @@
       "src/IndoShipping.Api/Controllers/AuthController.cs": "711aa7e956456ee583051c4c7f9df6a06c9ae371f96a73805964c063203cfc78",
       "src/IndoShipping.Api/Controllers/CustomersController.cs": "5fa3321056ba470a636653b52beb4ab90395b646b754564cd588908fd761f886",
       "src/IndoShipping.Api/Controllers/DbAdminController.cs": "ff3beecd97756caaa44419a33d3e7ad01c3b9927c0bc0bd6d4a95c94915ede97",
-      "src/IndoShipping.Api/Controllers/DictionariesController.cs": "b30a07d57a10d998c55110ba0e6d4f2ddc7957f3b0c4df39978a4fbd783ce0b2",
+      "src/IndoShipping.Api/Controllers/DictionariesController.cs": "75cd70f672054233f7290bddf44121be92b5ca37c728d8c91ffdaafd3b6e076c",
       "src/IndoShipping.Api/Controllers/HealthController.cs": "18aab714f4970407b04bb94cca2af72b8f6c2aea60ea9613f179088cc5f05942",
       "src/IndoShipping.Api/Controllers/ImagesController.cs": "d32d30d7f68cb25b293a0861f03b9e88eddd2a5960eee5eada059bad0423631d",
       "src/IndoShipping.Api/Controllers/MaterialAlertsAdjustments.cs": "7553e5d6ecb5488aadbbed35b7aa757a00ad766e974f613bc798fd9d2fb3b122",

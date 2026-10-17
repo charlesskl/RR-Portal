@@ -1,7 +1,31 @@
-name: Indo Shipping Diag
+name: PR938 Indo Shipping Private Backup and Read-only Verification
+run-name: PR938 Indo shipping ${{ inputs.mode }}
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Private schema/config backup / strict read-only PR938 verification"
+        type: choice
+        options: [backup, verify]
+        default: backup
+      phase:
+        description: "PR being deployed"
+        type: choice
+        options: ['938']
+        required: true
+      before_commit:
+        description: "Exact 40-character pre-deployment main SHA"
+        type: string
+        required: true
+      target_commit:
+        description: "Exact main SHA (same as before_commit for backup; merge SHA for verify)"
+        type: string
+        required: true
+      backup_path:
+        description: "Exact private backup directory returned by backup (required for verify)"
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -20,26 +44,59 @@ jobs:
         shell: bash
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          INDO_OPS_MODE: ${{ inputs.mode }}
+          INDO_OPS_PHASE: ${{ inputs.phase }}
+          INDO_OPS_BEFORE: ${{ inputs.before_commit }}
+          INDO_OPS_TARGET: ${{ inputs.target_commit }}
+          INDO_OPS_BACKUP: ${{ inputs.backup_path }}
         run: |
           set -euo pipefail
           if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
             echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
             exit 1
           fi
+          [[ "$INDO_OPS_MODE" =~ ^(backup|verify)$ && "$INDO_OPS_PHASE" =~ ^938$ ]] || exit 1
+          [[ "$INDO_OPS_BEFORE" =~ ^[a-f0-9]{40}$ && "$INDO_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$INDO_OPS_BEFORE" = 499aa8f3fc5e62fee3c6fad7a6bcb7f243b62de8 ]] || exit 1
+          if [[ "$INDO_OPS_MODE" = backup ]]; then
+            [[ -z "$INDO_OPS_BACKUP" && "$INDO_OPS_BEFORE" = "$INDO_OPS_TARGET" ]] || exit 1
+          else
+            [[ "$INDO_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/indo-pre-938-[0-9]{8}T[0-9]{12}Z$ && "$INDO_OPS_BEFORE" != "$INDO_OPS_TARGET" ]] || exit 1
+          fi
 
-      - name: Fetch indo-shipping container logs via SSH
+      - name: Private Indo backup or read-only deployment verification
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          INDO_OPS_MODE: ${{ inputs.mode }}
+          INDO_OPS_REF: ${{ github.sha }}
+          INDO_OPS_PHASE: ${{ inputs.phase }}
+          INDO_OPS_BEFORE: ${{ inputs.before_commit }}
+          INDO_OPS_TARGET: ${{ inputs.target_commit }}
+          INDO_OPS_BACKUP: ${{ inputs.backup_path }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 5m
+          command_timeout: 8m
+          envs: INDO_OPS_MODE,INDO_OPS_REF,INDO_OPS_PHASE,INDO_OPS_BEFORE,INDO_OPS_TARGET,INDO_OPS_BACKUP
           script: |
             set -euo pipefail
-            echo "== 容器状态 =="
-            docker ps -a --filter name=indo-shipping --format 'table {{.Names}}\t{{.Status}}'
-            echo "== 最近 100 行日志 =="
-            docker logs rr-portal-indo-shipping-1 --tail 100 2>&1 || true
+            [[ "$INDO_OPS_MODE" =~ ^(backup|verify)$ && "$INDO_OPS_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$INDO_OPS_PHASE" =~ ^938$ && "$INDO_OPS_BEFORE" =~ ^[a-f0-9]{40}$ && "$INDO_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$INDO_OPS_BEFORE" = 499aa8f3fc5e62fee3c6fad7a6bcb7f243b62de8 ]] || exit 1
+            if [[ "$INDO_OPS_MODE" = backup ]]; then
+              [[ -z "$INDO_OPS_BACKUP" && "$INDO_OPS_BEFORE" = "$INDO_OPS_TARGET" ]] || exit 1
+            else
+              [[ "$INDO_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/indo-pre-938-[0-9]{8}T[0-9]{12}Z$ && "$INDO_OPS_BEFORE" != "$INDO_OPS_TARGET" ]] || exit 1
+            fi
+            cd /opt/rr-portal
+            git fetch origin main ops/indo-938-20261017 >/dev/null 2>&1 || { echo 'INDO_938_SCRIPT_FETCH_FAILED'; exit 1; }
+            umask 077
+            indo_temporary=$(mktemp -d /tmp/indo-938.XXXXXX)
+            trap 'rm -rf "$indo_temporary"' EXIT
+            git show "$INDO_OPS_REF:deploy/ops/indo-938.py" > "$indo_temporary/ops.py" 2>/dev/null || { echo 'INDO_938_SCRIPT_READ_FAILED'; exit 1; }
+            git show "$INDO_OPS_REF:deploy/ops/indo-938-source-pin.json" > "$indo_temporary/source-pin.json" 2>/dev/null || { echo 'INDO_938_PIN_READ_FAILED'; exit 1; }
+            git show "$INDO_OPS_REF:deploy/ops/indo-938-pdb.py" > "$indo_temporary/pdb-proof.py" 2>/dev/null || { echo 'INDO_938_PDB_TOOL_READ_FAILED'; exit 1; }
+            python3 "$indo_temporary/ops.py" "$INDO_OPS_MODE" "$INDO_OPS_PHASE" "$INDO_OPS_BEFORE" "$INDO_OPS_TARGET" "$INDO_OPS_BACKUP"

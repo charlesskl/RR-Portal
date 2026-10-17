@@ -13,6 +13,7 @@ import { isPaperRope, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWei
 import { bindInvoiceLookupSerial, documentRow, rebindDocumentFormula, type DocumentTableLayout } from './documentTemplateFormula'
 import auxiliaryDocumentLayout from './auxiliaryDocumentLayout.json'
 import { AUXILIARY_TABLES, auxiliaryDetailFormulas } from './auxiliaryDocumentFormula'
+import { invoiceDetailGroups } from './invoiceDetailGroups'
 
 import { CUSTOMS_FIXED, effectiveCustomsCompany, sortShipmentItems, cartonLayout } from './shipmentOrder'
 export { CUSTOMS_FIXED, effectiveCustomsCompany } from './shipmentOrder'
@@ -45,6 +46,10 @@ function purchaseCurrencyFormat(currency?: string) {
 
 export function customsFormulaName(item: CustomsItem, material?: Material, customsCompany = '') {
   const name = item.formula_name || material?.name_zh || material?.item_no || ''
+  // 公式品名使用紧固件通称；完整名称和规格仍分别导出到 F、H 列。
+  // 不把工具或螺丝/螺母组合品误归为单一紧固件。
+  if (/螺丝/.test(name) && !/螺丝(?:刀|批|机)|螺母/.test(name)) return '螺丝'
+  if (/螺母/.test(name) && !/螺母(?:扳手|机)|螺丝/.test(name)) return '螺母'
   if (customsCompany.includes('华胜益')) return name
   return FORMULA_NAME_PREFIXES.find(prefix => name.startsWith(prefix)) || name
 }
@@ -896,7 +901,7 @@ function populateLinkedDocuments(
     const active = index < sorted.length
     setPreservingStyle(genericInvoiceSheet, `B${row}`, active ? index + 1 : '')
     const refs: Record<string, string> = {
-      C: `B${mainRow}`, D: `F${mainRow}`, E: `G${mainRow}`, F: `L${mainRow}`, G: `M${mainRow}`,
+      C: `B${mainRow}`, D: `E${mainRow}`, E: `G${mainRow}`, F: `L${mainRow}`, G: `M${mainRow}`,
       H: `Z${mainRow}`, I: `AA${mainRow}`, J: `P${mainRow}`, K: `Q${mainRow}`, L: `AT${mainRow}`,
     }
     for (const [col, mainCell] of Object.entries(refs)) {
@@ -1028,7 +1033,7 @@ function populateGlobalIndoLinkedDocuments(wb: XLSX.WorkBook, mainName: string, 
     const active = index < sorted.length
     setPreservingStyle(invoiceSheet, `B${row}`, active ? index + 1 : '')
     const refs: Record<string, string> = {
-      C: `B${mainRow}`, D: `F${mainRow}`, E: `G${mainRow}`, F: `L${mainRow}`, G: `M${mainRow}`,
+      C: `B${mainRow}`, D: `E${mainRow}`, E: `G${mainRow}`, F: `L${mainRow}`, G: `M${mainRow}`,
       H: `Z${mainRow}`, I: `AA${mainRow}`, J: `P${mainRow}`, K: `Q${mainRow}`, L: `AT${mainRow}`,
     }
     for (const [col, mainCell] of Object.entries(refs)) {
@@ -1786,7 +1791,8 @@ async function groupGenericInvoice(zip: JSZip, mainName: string, companies: stri
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(index)
   })
-  const refs: Record<string, string> = { C: 'B', D: 'F', E: 'G', F: 'K', G: 'J', H: 'Z', I: 'AA', J: 'P', K: 'Q', L: 'AT' }
+  // 商品名称引用主明细 E 列“套公式名称”，F 列保留完整中文名称供申报内容匹配。
+  const refs: Record<string, string> = { C: 'B', D: 'E', E: 'G', F: 'K', G: 'J', H: 'Z', I: 'AA', J: 'P', K: 'Q', L: 'AT' }
   const normalizeName = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, '').normalize('NFKC')
   const catalogueRows = new Map<string, number[]>()
   if (catalogue) {
@@ -1855,13 +1861,34 @@ async function groupGenericInvoice(zip: JSZip, mainName: string, companies: stri
     .find(cell => cell.getAttribute('r') === 'I23')?.getAttribute('s')
   const subtotalRows: number[] = []
   const newRows = new Map<number, number>()
+  const detailGroups = new Map([...groups].map(([company, indices]) => [company, invoiceDetailGroups(indices.map(index => ({
+    index, name: String(sourceValue('E', index)), hs: String(sourceValue('B', index)), unit: String(sourceValue('J', index)),
+  })))]))
+  // Dense serials retain original first-appearance order, even when company groups reorder rows.
+  const serials = new Map([...detailGroups.values()].flat().map(indices => indices[0]).sort((a, b) => a - b)
+    .map((index, serial) => [index, serial + 1]))
   for (const [company, indices] of groups) {
     const start = next
-    for (const index of indices) {
+    for (const members of detailGroups.get(company)!) {
+      const index = members[0]
       const row = makeRow(detail, next)
-      newRows.set(index, next++)
-      put(row, 'B', index + 1)
+      for (const member of members) newRows.set(member, next)
+      next++
+      put(row, 'B', serials.get(index)!)
       for (const [col, source] of Object.entries(refs)) {
+        if (members.length > 1 && ['F', 'I', 'J', 'K', 'L'].includes(col)) {
+          const value = members.reduce((sum, member) => sum + (Number(sourceValue(source, member)) || 0), 0)
+          const references = members.map(member => formulaRef(mainName, `${source}${member + 4}`).replace(/^=/, ''))
+          put(row, col, value, `SUM(${references.join(',')})`)
+          continue
+        }
+        if (members.length > 1 && col === 'H') {
+          const quantity = members.reduce((sum, member) => sum + (Number(sourceValue('K', member)) || 0), 0)
+          const amount = members.reduce((sum, member) => sum + (Number(sourceValue('AA', member)) || 0), 0)
+          const rowNo = row.getAttribute('r')
+          put(row, col, quantity ? amount / quantity : 0, `IFERROR(I${rowNo}/F${rowNo},0)`)
+          continue
+        }
         if (col === 'G') {
           const unitRef = formulaRef(mainName, `J${index + 4}`).replace(/^=/, '')
           const unit = String(sourceValue('J', index)).trim()
@@ -1883,8 +1910,10 @@ async function groupGenericInvoice(zip: JSZip, mainName: string, companies: stri
           continue
         }
         if (col === 'E') {
-          const match = declaration(index)
-          put(row, col, match?.value || '', match?.formula)
+          const matches = [...new Map(members.map(declaration).filter(match => match != null)
+            .map(match => [match.value, match])).values()]
+          put(row, col, matches.map(match => match.value).join('\n'), matches.length
+            ? matches.map(match => match.formula).join('&CHAR(10)&') : undefined)
           continue
         }
         const address = `${source}${index + 4}`
@@ -2448,7 +2477,7 @@ async function restoreAuxiliaryFormulas(zip: JSZip, items: CustomsItem[], form: 
   }
   const layouts = new Map<string, DocumentTableLayout[]>(AUXILIARY_TABLES.map(table => [table.name, [{
     start: table.start, end: table.total - 1, finalStart: table.start,
-    finalTotal: Math.max(table.total, table.start + items.length),
+    finalTotal: Math.max(table.total, table.start + details.size),
   }]]))
   const workbook = parser.parseFromString(await zip.file('xl/workbook.xml')!.async('string'), 'application/xml')
   for (const table of AUXILIARY_TABLES) {

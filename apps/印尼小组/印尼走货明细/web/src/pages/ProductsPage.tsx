@@ -257,7 +257,7 @@ export default function ProductsPage() {
           originalMaterialsRef.current = existingMats.map(m => ({ ...m }))
           const merged = mergeImportedMaterials(existingMats, r.materials, true)
           setMaterials(merged.rows)
-          message.info(`物料匹配：更新 ${merged.updated} 行，新增 ${merged.added} 行，待核对 ${merged.conflicts.length} 行`)
+          message.info(`物料匹配：更新 ${merged.updated} 行，新增 ${merged.added} 行，待核对 ${merged.conflicts.length} 行；已有物料单位保持不变`)
           if (merged.pending.length) {
             const reviewRows = merged.rows.slice(0, existingMats.length)
             const recommended = recommendMaterialChoices(reviewRows, merged.pending)
@@ -270,7 +270,7 @@ export default function ProductsPage() {
                 try {
                   const resolved = resolveMaterialImport(merged.rows, merged.pending, choices, existingMats.length)
                   setMaterials(resolved)
-                  message.success('选择已应用，请检查物料后点击保存')
+                  message.success('选择已应用，已有物料单位保持不变，请检查物料后点击保存')
                 } catch (error: any) {
                   message.error(error.message)
                   return Promise.reject(error)
@@ -483,7 +483,7 @@ function MoldingsEditor({ value, onChange, dicts }: { value: Molding[]; onChange
       <Space style={{ marginBottom: 12 }}>
         <Button type="primary" onClick={addMold}>＋ 新增模具</Button>
         <Button onClick={autoFillHs}>🔍 HS 自动填充</Button>
-        <Typography.Text type="secondary">每个模具下含若干塑胶件 · 字典 HS {dicts.hs.length} 条</Typography.Text>
+        <Typography.Text type="secondary">每个模具下含若干塑胶件或搪胶件 · 字典 HS {dicts.hs.length} 条</Typography.Text>
       </Space>
       {value.length === 0 && (
         <div style={{ textAlign: 'center', color: '#999', padding: 24, border: '1px dashed #ddd', borderRadius: 6 }}>
@@ -541,8 +541,8 @@ function PartsTable({ parts, materialName, onChange }: { parts: MoldingPart[]; m
   return (
     <div style={{ background: '#fff', border: '1px solid #d6dbe2', borderRadius: 6, padding: 8 }}>
       <Space style={{ marginBottom: 8 }}>
-        <Tag color="blue">🧩 塑胶件清单 ({parts.length})</Tag>
-        <Button size="small" onClick={add}>＋ 加塑胶件</Button>
+        <Tag color="blue">🧩 零件清单 ({parts.length})</Tag>
+        <Button size="small" onClick={add}>＋ 加零件</Button>
       </Space>
       <Table
         rowKey={(_, i) => String(i)}
@@ -745,7 +745,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode, onSuppliersChange
         name_en: material.name_en || translatedMaterialName(material.name_zh || '', dicts),
         category: material.category || inferMaterialCategory(`${material.name_zh || ''} ${material.spec || ''}`),
       })))
-      message.success(`已更新 ${result.updated} 行，新增 ${result.added} 行 — 别忘点 💾 保存`)
+      message.success(`已更新 ${result.updated} 行，新增 ${result.added} 行；已有物料单位保持不变 — 别忘点 💾 保存`)
       if (result.conflicts.length) message.warning(`有 ${result.conflicts.length} 行匹配到多个已有物料，已跳过：${result.conflicts.join('、')}`, 10)
     } catch (e: any) {
       message.error('导入失败: ' + (e?.message ?? e))

@@ -5,8 +5,10 @@ const specKey = (value?: string) => key(value).replace(/\s+/g, '').replace(/[×x
 const nameKey = (value?: string) => key(value).replace(/五金配件|hardware accessories|fsc/gi, '').replace(/[\s\-/#（）()]/g, '')
 
 export function updateImportedMaterial(target: Material, material: Material, engineering = false): Material {
+  // 已有物料的单位由页面手动维护，工程/Excel 更新及核对替换均不得覆盖。
+  // 新增物料不走此更新函数，仍使用导入单位。
   const patch = Object.fromEntries(Object.entries(material).filter(([field, value]) =>
-    !['id', 'active', 'image_id', 'image', 'sort_order'].includes(field)
+    !['id', 'active', 'image_id', 'image', 'sort_order', 'unit_kg'].includes(field)
     && !(engineering && ['gross_per_pc', 'length', 'width', 'height', 'qty_per_carton', 'weight_per_carton'].includes(field))
     && value != null && (typeof value !== 'string' || value.trim() !== '')))
   return { ...target, ...patch, ...(engineering && material.image_id ? { image_id: material.image_id } : {}) }

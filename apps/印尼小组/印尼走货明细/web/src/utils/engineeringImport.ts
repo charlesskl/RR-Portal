@@ -395,6 +395,16 @@ export async function importEngineeringFile(file: File, opts?: { hsDict?: HsDict
     const cSets     = colOf('套数', 'Sets')
     const cEjections= colOf('出模数', 'Ejections', 'NumberofEjections')
     const cPlace    = colOf('生产地', 'PlaceofManufacture', 'Manufacture', '产地')
+    const cMachine = headers.findIndex(h => /啤机机型|MesinModel|MachineModel/i.test(h))
+    const machineAt = (row: number) => {
+      if (cMachine < 0) return ''
+      const cell = { r: rangeStart.r + row, c: rangeStart.c + cMachine }
+      // 只读取该机型单元格自身的合并区域，不能沿用上一模具的机型。
+      const merged = worksheet['!merges']?.find(range => cell.r >= range.s.r && cell.r <= range.e.r
+        && cell.c >= range.s.c && cell.c <= range.e.c)
+      return String(worksheet[XLSX.utils.encode_cell(merged?.s || cell)]?.v ?? '')
+        .normalize('NFKC').replace(/\s+/g, '')
+    }
 
     let curMold: { prefix: string; cat: string; place: string; entry: Molding } | null = null
     for (let r = hdrIdx + 1; r < grid.length; r++) {
@@ -411,7 +421,7 @@ export async function importEngineeringFile(file: File, opts?: { hsDict?: HsDict
       const mat      = cMaterial >= 0 ? String(row[cMaterial] ?? '').trim() : ''
       if (isValidName(moldName)) {
         // start new 工模
-        const prefix = /搪胶/.test(mat) ? '搪胶件' : '塑胶件'
+        const prefix = /搪胶/.test(mat) || /搪胶炉/.test(machineAt(r)) ? '搪胶件' : '塑胶件'
         const cat = prefix === '搪胶件' ? '搪胶' : '塑胶'
         const place = cPlace >= 0 ? String(row[cPlace] ?? '').trim() : ''
         const rawColor = cColor >= 0 ? String(row[cColor] ?? '').trim() : ''

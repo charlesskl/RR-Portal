@@ -18,6 +18,22 @@ const variant = (index: number): Molding => ({
 })
 
 describe('engineering molding variant merge', () => {
+  it('corrects a uniquely matched plastic-to-vinyl import without duplicating or losing manual settings', () => {
+    const old = { ...variant(0), workshop: '人工车间', setsPerShot: 4, notes: '人工备注' }
+    const incoming = { ...variant(0), workshop: '华登', parts: variant(0).parts!.map(part => ({
+      ...part, partName: part.partName!.replace('塑胶件-', '搪胶件-'), category: '搪胶',
+    })) }
+    const snapshot = structuredClone(old)
+    const merged = mergeImportedMoldings([old], [incoming])
+    expect(merged).toHaveLength(1)
+    expect(merged[0]).toMatchObject({ workshop: '人工车间', setsPerShot: 4, notes: '人工备注' })
+    expect(merged[0].parts?.every(part => part.category === '搪胶' && part.partName?.startsWith('搪胶件-'))).toBe(true)
+    expect(old).toEqual(snapshot)
+    expect(mergeImportedMoldings(merged, [incoming])).toEqual(merged)
+    expect(mergeImportedMoldings([{ ...old, colorName: '其他颜色' }], [incoming])).toHaveLength(2)
+    expect(mergeImportedMoldings([old, structuredClone(old)], [incoming])).toHaveLength(3)
+    expect(mergeImportedMoldings([incoming], [old])).toHaveLength(2)
+  })
   it('recovers all seven styles when the existing product only retained the last style', () => {
     const incoming = names.map((_, i) => variant(i))
     const existing = [{ ...variant(6), workshop: '兴信B车间', notes: '保留人工备注', setsPerShot: 4 }]

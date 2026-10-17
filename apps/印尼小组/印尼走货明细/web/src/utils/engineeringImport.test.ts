@@ -109,6 +109,64 @@ describe('engineering fraction usage', () => {
 })
 
 describe('engineering material import', () => {
+  it.runIf(process.env.ENGINEERING_L21106_FILE)('classifies all supplied L21106 furnace molds as vinyl', async () => {
+    const bytes = readFileSync(process.env.ENGINEERING_L21106_FILE!)
+    const result = await importEngineeringFile({ arrayBuffer: async () =>
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) } as File)
+    expect(result.moldings).toHaveLength(21)
+    const vinyl = result.moldings.filter(m => /-S\d+$/.test(m.moldId ?? ''))
+    expect(vinyl).toHaveLength(14)
+    for (const mold of vinyl) {
+      expect(mold.parts?.length).toBeGreaterThan(0)
+      expect(mold.parts?.map(p => p.category), mold.moldId).toEqual(mold.parts?.map(() => '搪胶'))
+    }
+    const plastic = result.moldings.filter(m => /-P\d+$/.test(m.moldId ?? ''))
+    expect(plastic).toHaveLength(7)
+    expect(plastic.every(m =>
+      m.parts?.every(p => p.category === '塑胶'))).toBe(true)
+  })
+  it.each(['xls', 'xlsx'] as const)('classifies PVC parts by molding machine without leaking to the next mold (%s)', async bookType => {
+    for (const machineHeader of ['啤机机型', 'Mesin\nModel\n啤机机型', 'Mesin Model', 'Machine Model']) {
+      const workbook = XLSX.utils.book_new()
+      const sheet = XLSX.utils.aoa_to_sheet([
+        ['产品编号', 'L21106'],
+        ['工模编号', '工模名称', 'Nama Part\n零件名称', 'Material Part\n材料', machineHeader, '生产地', '英文物料'],
+        ['S01', '公仔脸', null, 'PVC85°（本白）', '24 搪胶\n炉', '中国'],
+        [null, null, '狐狸公仔脸A1', null, null, null, 'Fox face'],
+        ['P01', '左右手', null, 'PVC85°（本白）', '12A', '中国'],
+        [null, null, '狐狸左右手A1'],
+        ['P02', '脚', null, 'PVC85°（本白）', null, '中国'],
+        [null, null, '狐狸脚A1'],
+        ['S02', '旧格式搪胶', null, '搪胶PVC', null, '中国'],
+        [null, null, '旧款脸'],
+      ])
+      XLSX.utils.book_append_sheet(workbook, sheet, '排模表')
+      const bytes = XLSX.write(workbook, { type: 'array', bookType }) as ArrayBuffer
+      const result = await importEngineeringFile({ arrayBuffer: async () => bytes } as File)
+      expect(result.moldings.map(m => m.parts?.[0].category)).toEqual(['搪胶', '塑胶', '塑胶', '搪胶'])
+      expect(result.moldings[0].parts?.[0]).toMatchObject({ partName: '搪胶件-狐狸公仔脸A1', partNameEn: expect.stringContaining('Vinyl parts') })
+      expect(result.moldings[0].workshop).toBe('华登')
+      expect(result.moldings[1].parts?.[0].partName).toBe('塑胶件-狐狸左右手A1')
+      expect(result.moldings[1].workshop).toBe('兴信A车间')
+    }
+  })
+  it('reads only explicit machine merged cells with an offset worksheet range', async () => {
+    const workbook = XLSX.utils.book_new()
+    const sheet: XLSX.WorkSheet = {}
+    XLSX.utils.sheet_add_aoa(sheet, [
+      ['产品编号', 'L21106'],
+      ['工模编号', '工模名称', '零件名称', '材料', '啤机机型'],
+      ['S01', '脸', null, 'PVC85', '24搪胶炉'], [null, null, '狐狸脸'],
+      ['S02', '脚', null, 'PVC85'], [null, null, '狐狸脚'],
+      ['P01', '手', null, 'PVC85'], [null, null, '狐狸手'],
+    ], { origin: 'B3' })
+    sheet['!ref'] = 'B3:F10'
+    sheet['!merges'] = [XLSX.utils.decode_range('F5:F8')]
+    XLSX.utils.book_append_sheet(workbook, sheet, '排模表')
+    const bytes = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer
+    const result = await importEngineeringFile({ arrayBuffer: async () => bytes } as File)
+    expect(result.moldings.map(m => m.parts?.[0].category)).toEqual(['搪胶', '搪胶', '塑胶'])
+  })
   it.each(['xls', 'xlsx'] as const)('maps 物料编号 to material_code preserving displayed zeros (%s)', async (bookType) => {
     const workbook = XLSX.utils.book_new()
     const sheet = XLSX.utils.aoa_to_sheet([

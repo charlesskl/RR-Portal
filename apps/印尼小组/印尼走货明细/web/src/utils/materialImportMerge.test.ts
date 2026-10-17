@@ -2,6 +2,30 @@ import { describe, expect, it } from 'vitest'
 import { mergeImportedMaterials, recommendMaterialChoices, resolveMaterialImport } from './materialImportMerge'
 
 describe('material Excel import merge', () => {
+  it.each([true, false])('preserves existing units while updating other fields (engineering=%s)', engineering => {
+    const old = { id: 1, material_code: 'M1', name_zh: '旧名', unit_kg: 'TNE', usage_qty: 1 }
+    const imported = [
+      { material_code: 'M1', name_zh: '新名', unit_kg: 'KGM', usage_qty: 2 },
+      { material_code: 'M2', name_zh: '新增', unit_kg: 'PCE' },
+    ]
+    const result = mergeImportedMaterials([old], imported, engineering)
+    expect(result).toMatchObject({ updated: 1, added: 1 })
+    expect(result.rows[0]).toMatchObject({ id: 1, name_zh: '新名', unit_kg: 'TNE', usage_qty: 2 })
+    expect(result.rows[1].unit_kg).toBe('PCE')
+    expect(old).toMatchObject({ name_zh: '旧名', unit_kg: 'TNE', usage_qty: 1 })
+    expect(imported[0].unit_kg).toBe('KGM')
+  })
+  it('preserves units on explicit replacement but imports units for explicitly added rows', () => {
+    const result = resolveMaterialImport([{ id: 1, name_zh: '旧名', unit_kg: 'PCE' }], [
+      { name_zh: '替换名', unit_kg: 'KGM' }, { name_zh: '新增', unit_kg: 'TNE' },
+    ], [0, 'add'], 1)
+    expect(result[0]).toMatchObject({ id: 1, name_zh: '替换名', unit_kg: 'PCE' })
+    expect(result[1]).toMatchObject({ name_zh: '新增', unit_kg: 'TNE' })
+  })
+  it.each(['KGM', '', undefined])('does not change existing/default unit %s on replacement', unit_kg => {
+    const result = mergeImportedMaterials([{ material_code: 'M1', unit_kg }], [{ material_code: 'M1', unit_kg: 'TNE' }], true)
+    expect(result.rows[0].unit_kg).toBe(unit_kg)
+  })
   it('recommends renamed electrode sheets without confusing reversed polarity', () => {
     const rows = [{ name_zh: '五金配件-正负极电池片（无脚）', spec: '0.4T*22.3W*8.3H' },
       { name_zh: '五金配件-负正极电池片（无脚）', spec: '0.4T*22.3W*8.3H' }]

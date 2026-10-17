@@ -18,26 +18,7 @@
 const http = require('node:http');
 const fs   = require('node:fs');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
-
-/* ── 门户 SSO 票据（HS256 JWT）校验：与门户 SSO_SECRET 一致 ── */
-function verifyPortalTicket(ticket) {
-  const parts = String(ticket || '').split('.');
-  if (parts.length !== 3) throw new Error('票据格式不正确');
-  const secret = process.env.SSO_SECRET || 'dev-sso-secret-change-me';
-  const expected = crypto.createHmac('sha256', secret).update(parts[0] + '.' + parts[1]).digest();
-  const actual = Buffer.from(parts[2].replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) throw new Error('票据校验失败');
-  let payload;
-  try {
-    payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
-  } catch (e) { throw new Error('票据无效'); }
-  if (!payload.exp || Date.now() > payload.exp) throw new Error('票据已过期');
-  if (payload.app !== 'xingxin-qms') throw new Error('票据不属于本系统');
-  if (!payload.sub) throw new Error('票据缺少账号');
-  return payload;
-}
 
 const ROOT      = path.join(__dirname, '..');           // 前端静态根目录
 const DATA_DIR  = process.env.DATA_PATH || path.join(__dirname, 'data');
@@ -112,6 +93,8 @@ let AI = loadAiConfig();
    但它按官方提示词做「全文 OCR」非常准。所以：模型只负责把图变文字，
    字段提取由下面的 parseDeliveryNote() 确定性完成。 */
 const OCR_READ_PROMPT = 'Read all the text in the image, including the company name, title, serial number, date, customer, and all text outside the table, then the table contents.';
+/* 表格密集型单据（如台聚）全文 OCR 易乱行/复读，解析不出明细时改用此提示词重试 */
+const OCR_TABLE_PROMPT = 'Read all the text in the image. Output the table contents as a markdown table with every column kept (including the quantity column and empty cells), one row per line.';
 
 /* ── 送货单 OCR 文本 → 结构化字段（确定性解析，不依赖模型指令遵循）── */
 function parseDeliveryNote(text) {
@@ -170,13 +153,15 @@ function parseDeliveryNote(text) {
     if (hi !== -1) {
       const head = splitRow(tbl[hi]);
       const find = (re, notRe) => head.findIndex(h => re.test(h) && !(notRe && notRe.test(h)));
-      const cOrder = find(/订单|PO/i, /数量/);
-      const cNo    = find(/编号|货号|Item/i, /订单/);
+      let   cOrder = find(/合同/, /数量/);
+      if (cOrder === -1) cOrder = find(/订单|PO/i, /数量/);
+      const cNo    = find(/编号|货号|Item/i, /订单|合同/);
       const cName  = find(/品名|名称|货名|规格|Desc/i, /编号/);
       let   cQty   = head.findIndex(h => /^数\s*量$/.test(h));
       if (cQty === -1) cQty = find(/送货数量|实送数量/);
       if (cQty === -1) cQty = find(/送货|实送/, /欠|总/);
       if (cQty === -1) cQty = find(/数量/, /欠|总/);
+      if (cQty === -1) cQty = find(/备品/);   /* 台聚：模型偶发丢「数量」表头，数量值落在备品数列 */
       const cUnit  = find(/单位/, /数量/);
       let lastNo = '';
       for (const row of tbl.slice(hi + 1)) {
@@ -188,6 +173,11 @@ function parseDeliveryNote(text) {
         if (/[：:]/.test(no) || /[：:]/.test(name)) continue;   /* 表尾标签行（胶箱：/收货人：/Q.C: 等） */
         /* 货号/品名错位互换：货号格是中文、品名格是编号串时对调 */
         if (/[一-鿿]/.test(no) && /^[A-Za-z0-9#+\-.]+$/.test(name)) { const tmp = no; no = name; name = tmp; }
+        /* 品名规格开头带编号（如「77772-8#唱片背面贴纸」）：拆出编号当货号 */
+        if (!no && name) {
+          const pm = name.match(/^([A-Za-z0-9][A-Za-z0-9#\-]{2,})[一-鿿]/);
+          if (pm) { no = pm[1]; name = name.slice(pm[1].length); }
+        }
         if (!no) no = lastNo;   /* 合并单元格：货号向下继承 */
         if (no) lastNo = no;
         const qty  = get(cQty).split('/')[0].replace(/[^\d.]/g, '');
@@ -316,7 +306,31 @@ async function aiVisionExtract(dataUrl) {
   let content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '';
   if (Array.isArray(content)) content = content.map(c => (typeof c === 'string' ? c : (c && c.text) || '')).join('');
   content = String(content).trim();
-  const fields = parseDeliveryNote(content);
+  let fields = parseDeliveryNote(content);
+  /* 表格密集型单据（如台聚）全文 OCR 易乱行/复读导致解析不出明细：
+     换「输出 markdown 表格」提示词再识别一次，解析出明细才采用 */
+  if (!fields.items.length) {
+    console.warn('[AI] 首次 OCR 未解析出明细，换表格提示词重试');
+    payload.messages[0].content[0].text = OCR_TABLE_PROMPT;
+    let r2 = await callModel(payload.model);
+    for (let i = 0; i < 3 && isDenied(r2); i++) { await sleep(1500); r2 = await callModel(payload.model); }
+    if (r2.status < 400) {
+      try {
+        const data2 = JSON.parse(r2.raw);
+        let content2 = data2 && data2.choices && data2.choices[0] && data2.choices[0].message && data2.choices[0].message.content || '';
+        if (Array.isArray(content2)) content2 = content2.map(c => (typeof c === 'string' ? c : (c && c.text) || '')).join('');
+        content2 = String(content2).trim();
+        const fields2 = parseDeliveryNote(content2);
+        if (fields2.items.length) {
+          if (!fields2.date && fields.date) fields2.date = fields.date;
+          if (!fields2.supplier && fields.supplier) fields2.supplier = fields.supplier;
+          if (!fields2.deliveryNo && fields.deliveryNo) fields2.deliveryNo = fields.deliveryNo;
+          if (!fields2.orderNo && fields.orderNo) fields2.orderNo = fields.orderNo;
+          fields = fields2; content = content2; data = data2;
+        }
+      } catch (e) { console.warn('[AI] 表格提示词重试响应异常：', e.message); }
+    }
+  }
   return { fields, usage: data.usage || null, rawText: content };
 }
 
@@ -356,6 +370,9 @@ const SCHEMA_SQL = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT, type TEXT, createdAt TEXT
   );
+  CREATE TABLE IF NOT EXISTS record_tombstones (
+    id INTEGER PRIMARY KEY, deletedAt TEXT
+  );
 `;
 
 const toNum = (v) => (v === '' || v === null || v === undefined || isNaN(Number(v))) ? null : Number(v);
@@ -372,6 +389,7 @@ function recordValues(r) {
     r.updatedAt || new Date().toISOString(),
     r.status ?? null, r.reviewBy ?? null, r.reviewAt ?? null,
     r.rejectReason ?? null, r.rejectBy ?? null, r.rejectAt ?? null,
+    r.aqlLevel ?? null,
   ];
 }
 
@@ -382,13 +400,66 @@ function rowToRecord(row) {
   return r;
 }
 
-/* ── 全量替换（事务）── */
+/* ── 合并写入（事务）：按 id upsert。
+   多人/多标签页同时使用时，任何一端都可能用「旧状态的全量数组」推回服务端，
+   旧的全量替换会把别人新录的记录整批抹掉（曾发生 74 条变 68 条）。
+   规则：
+   1) 同 id 已存在且服务端 updatedAt 更新 → 跳过这条（旧数据不覆盖新数据）；
+   2) 命中墓碑（该 id 已被删除且删除时间 >= 记录 updatedAt）→ 跳过（防止旧推送复活已删记录）；
+   3) 其余 INSERT OR REPLACE。 ── */
+function upsertRecords(db, records) {
+  const cols = RECORD_COLS.join(',');
+  const ph = RECORD_COLS.map(() => '?').join(',');
+  const upd = RECORD_COLS.filter(c => c !== 'id').map(c => c + '=excluded.' + c).join(',');
+  const ins = db.prepare(`INSERT INTO records(${cols}) VALUES(${ph}) ON CONFLICT(id) DO UPDATE SET ${upd}`);
+  const get = db.prepare('SELECT updatedAt FROM records WHERE id = ?');
+  const getTomb = db.prepare('SELECT deletedAt FROM record_tombstones WHERE id = ?');
+  const delTomb = db.prepare('DELETE FROM record_tombstones WHERE id = ?');
+  let accepted = 0, skippedStale = 0, skippedTomb = 0;
+  db.exec('BEGIN');
+  try {
+    for (const r of records) {
+      const id = Number(r.id) || 0;
+      if (!id) continue;
+      const tomb = getTomb.get(id);
+      if (tomb && (!r.updatedAt || String(r.updatedAt) <= String(tomb.deletedAt))) { skippedTomb++; continue; }
+      const cur = get.get(id);
+      if (cur && cur.updatedAt && r.updatedAt && String(cur.updatedAt) > String(r.updatedAt)) { skippedStale++; continue; }
+      ins.run(...recordValues(r));
+      delTomb.run(id);   /* 明确重建同 id 记录时清掉墓碑 */
+      accepted++;
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return { accepted, skippedStale, skippedTomb };
+}
+
+/* ── 按 id 删除（写墓碑，防止旧标签页推送复活）── */
+function deleteRecords(db, ids) {
+  const now = new Date().toISOString();
+  const del = db.prepare('DELETE FROM records WHERE id = ?');
+  const tomb = db.prepare('INSERT OR REPLACE INTO record_tombstones(id, deletedAt) VALUES(?, ?)');
+  let count = 0;
+  db.exec('BEGIN');
+  try {
+    for (const id of ids) {
+      const n = Number(id) || 0;
+      if (!n) continue;
+      del.run(n); tomb.run(n, now); count++;
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return count;
+}
+
+/* ── 全量替换（事务）：仅用于「清空数据 / 恢复示例 / 替换模式导入」等显式整库操作 ── */
 function replaceRecords(db, records) {
   const ph = RECORD_COLS.map(() => '?').join(',');
   const ins = db.prepare(`INSERT INTO records(${RECORD_COLS.join(',')}) VALUES(${ph})`);
   db.exec('BEGIN');
   try {
     db.prepare('DELETE FROM records').run();
+    db.prepare('DELETE FROM record_tombstones').run();
     for (const r of records) ins.run(...recordValues(r));
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
@@ -760,27 +831,6 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { companies: COMPANIES });
     }
 
-    /* ── 门户 SSO 验票（免登，无需鉴权，不分厂区）── */
-    if (p === '/api/sso-verify' && req.method === 'POST') {
-      const body = await readBody(req);
-      try {
-        const claims = verifyPortalTicket(body && body.ticket);
-        return sendJson(res, 200, {
-          ok: true,
-          user: {
-            username: String(claims.sub),
-            name: String(claims.name || claims.sub),
-            dept: String(claims.dept || ''),
-            role: 'admin',
-            perms: claims.perms || null,
-          },
-          companies: Array.isArray(claims.companies) ? claims.companies : null,
-        });
-      } catch (e) {
-        return sendJson(res, 401, { ok: false, error: String(e && e.message || e) });
-      }
-    }
-
     /* ── 数据类路由：解析目标厂区（缺省东莞，兼容旧链接）── */
     const companyId = resolveCompany(url.searchParams);
     if (companyId === null) {
@@ -805,6 +855,19 @@ const server = http.createServer(async (req, res) => {
       return sendDownload(req, res, 'application/vnd.ms-excel; charset=utf-8', `${companyName(companyId)}品质检验明细统计表${span}.xls`, body);
     }
     if (p === '/api/records' && req.method === 'POST') {
+      const body = await readBody(req);
+      const delCount = Array.isArray(body.deletedIds) && body.deletedIds.length
+        ? deleteRecords(db, body.deletedIds) : 0;
+      const r = upsertRecords(db, Array.isArray(body.records) ? body.records : []);
+      return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM records').get().c,
+        accepted: r.accepted, skippedStale: r.skippedStale, skippedTomb: r.skippedTomb, deleted: delCount });
+    }
+    if (p === '/api/records/delete' && req.method === 'POST') {
+      const body = await readBody(req);
+      const n = deleteRecords(db, Array.isArray(body.ids) ? body.ids : []);
+      return sendJson(res, 200, { ok: true, deleted: n });
+    }
+    if (p === '/api/records/replace' && req.method === 'POST') {
       const body = await readBody(req);
       replaceRecords(db, Array.isArray(body.records) ? body.records : []);
       return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM records').get().c });

@@ -47,6 +47,17 @@
   window.__QC_BACKEND_OK = false;
   window.__QC_LAST_SYNC = null;
 
+  /* 待删除记录 id 队列：app.js 删除记录时标记，下次推送时带给服务端按 id 删除。
+     （服务端已改为按 id 合并写入，不再全量替换，删除必须显式告知） */
+  window.__QC_PENDING_DELETES = [];
+  window.__QC_MARK_DELETED = function (ids) {
+    if (!Array.isArray(ids)) return;
+    for (var i = 0; i < ids.length; i++) {
+      var n = Number(ids[i]) || 0;
+      if (n && window.__QC_PENDING_DELETES.indexOf(n) === -1) window.__QC_PENDING_DELETES.push(n);
+    }
+  };
+
   /* ── 开机：同步 XHR 拉全量（必须同步，才能赶在 app.js 的 init 之前写好 localStorage）── */
   function syncBootstrap() {
     try {
@@ -101,7 +112,14 @@
   function pushRecords() {
     try {
       var st = JSON.parse(localStorage.getItem(KEY.records) || '{}');
-      return post(API_BASE + '/api/records?company=' + COMPANY, { records: st.records || [] });
+      /* 整库替换操作（清空数据/恢复示例/替换模式导入）走 replace 通道 */
+      if (window.__QC_FORCE_REPLACE) {
+        return post(API_BASE + '/api/records/replace?company=' + COMPANY, { records: st.records || [] })
+          .then(function (ok) { if (ok) { window.__QC_FORCE_REPLACE = false; window.__QC_PENDING_DELETES = []; } return ok; });
+      }
+      var deleted = window.__QC_PENDING_DELETES.slice();
+      return post(API_BASE + '/api/records?company=' + COMPANY, { records: st.records || [], deletedIds: deleted })
+        .then(function (ok) { if (ok) window.__QC_PENDING_DELETES = []; return ok; });
     } catch (e) { console.warn('[QC后端] 读本地记录失败', e); }
     return Promise.resolve(false);
   }

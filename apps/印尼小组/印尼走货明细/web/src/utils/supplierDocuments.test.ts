@@ -688,7 +688,9 @@ describe('supplier document export', () => {
     expect(invoice[`H${merged}`]).toMatchObject({ v: 6.2, f: `IFERROR(I${merged}/F${merged},0)` })
     for (const [column, source] of Object.entries({ F: 'K', I: 'AA', J: 'P', K: 'Q', L: 'AT' })) {
       expect(invoice[`${column}${merged}`].f).toMatch(/^SUM\(/)
-      const addresses = [...invoice[`${column}${merged}`].f!.matchAll(/'MERGE-TEST'!([A-Z]+\d+)/g)].map(match => match[1])
+      const addresses = [...invoice[`${column}${merged}`].f!.matchAll(/'MERGE-TEST'!([A-Z]+)(\d+)(?::\1(\d+))?/g)]
+        .flatMap(match => Array.from({ length: Number(match[3] || match[2]) - Number(match[2]) + 1 },
+          (_, offset) => `${match[1]}${Number(match[2]) + offset}`))
       expect(addresses).toHaveLength(2)
       expect(addresses.every(address => address.startsWith(source))).toBe(true)
     }
@@ -708,6 +710,34 @@ describe('supplier document export', () => {
     }
     expect(wb.Sheets['销售合同'].I53.v).toBe(84)
     expect(wb.Sheets['销售合同'].A22?.v || '').toBe('')
+  }, 30000)
+  it('exports 256 merged source rows with valid range formulas and linked auxiliary totals', async () => {
+    const items = Array.from({ length: 256 }, (_, index) => ({
+      material_id: index + 1, qty: 10, kg: 1, price: 2, cartons: 1, qty_per_carton: '10',
+      customs_company: '甲报关公司', supplier: seller.keyword, contract_no: 'LARGE-C', invoice_no: 'LARGE-I',
+    }))
+    const file = await buildCustomsWorkbook({
+      templateBuffer: rrmTemplateBuffer, items, seller,
+      materials: new Map(items.map(item => [item.material_id, { id: item.material_id,
+        product_code: `LARGE-${item.material_id}`, name_zh: `PB螺丝${item.material_id}`,
+        hs_cn: '7318159090', unit_kg: 'KGM', net_per_pc: 0.1, weight_per_carton: 1 }])),
+      productHs: new Map(), images: new Map(), form: { customer: 'RRM', containerNo: 'LARGE-MERGE' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    const main = wb.Sheets['LARGE-MERGE'], invoice = wb.Sheets['发票']
+    expect(Object.values(main).filter((cell: any) => /^LARGE-\d+$/.test(String(cell?.v)))).toHaveLength(256)
+    for (const [column, source] of Object.entries({ F: 'K', I: 'AA', J: 'P', K: 'Q', L: 'AT' })) {
+      expect(invoice[`${column}9`].f).toBe(`SUM('LARGE-MERGE'!${source}4:${source}259)`)
+    }
+    expect(invoice.F9.v).toBe(256)
+    expect(invoice.H9).toMatchObject({ f: 'IFERROR(I9/F9,0)', v: 2 })
+    expect(invoice.I9.v).toBe(512)
+    expect(wb.Sheets['销售合同'].I16.v).toBe(512)
+    expect(wb.Sheets['销售合同'].I53.v).toBe(512)
+    expect(wb.Sheets['装箱单 (2)'].B10.v).toBe('螺丝')
+    expect(wb.Sheets['草稿大单-1'].N21.v).toBe(512)
+    expect(Object.entries(wb.Sheets['装箱单'])
+      .filter(([address, cell]) => /^A\d+$/.test(address) && typeof cell.v === 'number')).toHaveLength(256)
   }, 30000)
   it.each(['legacy', 'RRI', 'RRM'])('links generic invoice commodity numbers to Chinese HS codes (%s)', async variant => {
     const items = [1, 2, 3].map(id => ({ material_id: id, qty: 1, supplier: seller.keyword }))

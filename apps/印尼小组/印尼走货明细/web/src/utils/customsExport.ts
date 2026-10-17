@@ -13,7 +13,7 @@ import { isPaperRope, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWei
 import { bindInvoiceLookupSerial, documentRow, rebindDocumentFormula, type DocumentTableLayout } from './documentTemplateFormula'
 import auxiliaryDocumentLayout from './auxiliaryDocumentLayout.json'
 import { AUXILIARY_TABLES, auxiliaryDetailFormulas } from './auxiliaryDocumentFormula'
-import { invoiceDetailGroups } from './invoiceDetailGroups'
+import { invoiceDetailGroups, invoiceDetailSumFormula } from './invoiceDetailGroups'
 
 import { CUSTOMS_FIXED, effectiveCustomsCompany, sortShipmentItems, cartonLayout } from './shipmentOrder'
 export { CUSTOMS_FIXED, effectiveCustomsCompany } from './shipmentOrder'
@@ -1879,7 +1879,7 @@ async function groupGenericInvoice(zip: JSZip, mainName: string, companies: stri
         if (members.length > 1 && ['F', 'I', 'J', 'K', 'L'].includes(col)) {
           const value = members.reduce((sum, member) => sum + (Number(sourceValue(source, member)) || 0), 0)
           const references = members.map(member => formulaRef(mainName, `${source}${member + 4}`).replace(/^=/, ''))
-          put(row, col, value, `SUM(${references.join(',')})`)
+          put(row, col, value, invoiceDetailSumFormula(references))
           continue
         }
         if (members.length > 1 && col === 'H') {

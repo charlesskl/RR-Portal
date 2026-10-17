@@ -38,11 +38,13 @@
     }
     return {groups:[...groups.values()],unmatched:[...unmatched]};
   }
-  function planSupplier(config,items){
+  function planSupplier(config,items,totalCode){
     const normalize=value=>String(value||'').normalize('NFKC').replace(/\s+/g,'').toUpperCase();
-    const groups=new Map(),unmatched=new Set();
+    const groups=new Map(),unmatched=new Set(),sharedItems=[];
+    const total=normalize(totalCode);
     for(const item of items){
       const code=normalize(item.product_code);
+      if(total && code===total){sharedItems.push({...item});continue;}
       // Supplier BeautyMini codes use the SKU list serial, including exclusive SKUs.
       // Prefer an exact official code; only this known alias may fall back to serial.
       const exact=code?config.products.filter(p=>normalize(p.code)===code):[];
@@ -53,7 +55,7 @@
       if(!groups.has(product.id))groups.set(product.id,{product,items:[]});
       groups.get(product.id).items.push({...item});
     }
-    return {groups:[...groups.values()],unmatched:[...unmatched]};
+    return {groups:[...groups.values()],unmatched:[...unmatched],sharedItems};
   }
   function planAssembly(config, rows) {
     const groups = new Map(), unmatched = new Set();

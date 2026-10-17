@@ -2771,11 +2771,13 @@ function renderCartonCalc(host, c, canEdit, onChange) {
   render();
 }
 
-function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty, quoteCustomer, { inputId, previewId, targetKey, label, mixedConfig, mixedRoot, onApplied }) {
+function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty, quoteCustomer, { inputId, previewId, targetKey, label, mixedConfig, mixedRoot, mixedTotalCode, getMixedImportTarget, onApplied }) {
     const fileInput = host.querySelector(inputId);
     if (!fileInput) return;
     fileInput.onchange = async (e) => {
       const file = e.target.files[0]; if (!file) return;
+      const importTarget = getMixedImportTarget?.();
+      const sharedImport = !!mixedConfig && importTarget === '__shared__';
       const preview = host.querySelector(previewId);
       preview.innerHTML = '<i class="muted">正在识别 MOQ 与币种报价…</i>';
       try {
@@ -2825,7 +2827,7 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
         };
         const renderPreview = () => {
           const normalizedItems = result.items.map(selectedItem);
-          const allocation = mixedConfig ? window.MixedSku.planSupplier(mixedConfig, normalizedItems) : null;
+          const allocation = mixedConfig && !sharedImport ? window.MixedSku.planSupplier(mixedConfig, normalizedItems, mixedTotalCode) : null;
           preview.innerHTML = `
             <div class="card" style="background:#f0fdf4;border:1px solid #86efac;">
               <p>从 <b>${escapeHtml(result.sheet_used || '')}</b> 解析到 <b>${normalizedItems.length}</b> 条${escapeHtml(label)}明细；可逐项选择识别到的 MOQ 与币种：</p>
@@ -2850,9 +2852,10 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
                 </tr>`;
               }).join('')}
               </tbody></table>
-              ${allocation ? `<p>${allocation.unmatched.length ? '无法分配：'+allocation.unmatched.map(escapeHtml).join('、') : '已匹配 '+allocation.groups.length+' 款产品，将按货号分配；未涉及的产品保留原明细。'}</p>` : ''}
+              ${sharedImport ? '<p>导入到：每包装共有费用（计一次）。表内货号保留作来源，不匹配小产品。</p>' : ''}
+              ${allocation ? `<p>${allocation.unmatched.length ? '无法分配：'+allocation.unmatched.map(escapeHtml).join('、') : '已匹配 '+allocation.groups.length+' 款小产品；总货号共用项目 '+allocation.sharedItems.length+' 条，每包装计一次。未涉及的资料保留。'}</p>` : ''}
               <div style="margin-top:10px">
-                <button data-action="replace" ${allocation?.unmatched.length ? 'disabled' : ''}>${allocation ? '替换对应产品的'+escapeHtml(label) : '应用（替换全部'+escapeHtml(label)+'）'}</button>
+                <button data-action="replace" ${allocation?.unmatched.length ? 'disabled' : ''}>${sharedImport ? '替换共有费用的'+escapeHtml(label) : allocation ? '替换匹配归属的'+escapeHtml(label) : '应用（替换全部'+escapeHtml(label)+'）'}</button>
                 <button data-action="append" class="mini" ${allocation?.unmatched.length ? 'disabled' : ''}>追加到现有列表</button>
                 <button data-action="cancel" class="mini danger">取消</button>
               </div>
@@ -2868,14 +2871,32 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
           const finish = (mode) => {
             const appliedItems = result.items.map(selectedItem);
             if (mixedConfig) {
-              const plan=window.MixedSku.planSupplier(mixedConfig,appliedItems);
-              if(plan.unmatched.length || !plan.groups.length)return;
-              if(mode==='replace' && plan.groups.some(g=>mixedRoot.mixed_products[g.product.id]?.[targetKey]?.length) && !confirm('将替换匹配产品的'+label+'明细，确认？'))return;
+              if (getMixedImportTarget && getMixedImportTarget() !== importTarget) {
+                preview.innerHTML = '报价对象已切换，请重新选择文件，核对导入归属。';
+                fileInput.value = ''; return;
+              }
+              if (sharedImport) {
+                if (!appliedItems.length) return;
+                const target = mixedRoot.mixed_shared ||= {};
+                if (mode === 'replace' && target[targetKey]?.length && !confirm('将替换共有费用的'+label+'明细，确认？')) return;
+                const rows = appliedItems.map(item => ({ ...item }));
+                target[targetKey] = mode === 'replace' ? rows : (target[targetKey] || []).concat(rows);
+                preview.innerHTML = '已导入每包装共有费用（计一次），请保存工程/业务草稿。';
+                fileInput.value = ''; onChange(); onApplied?.(); return;
+              }
+              const plan=window.MixedSku.planSupplier(mixedConfig,appliedItems,mixedTotalCode);
+              if(plan.unmatched.length || (!plan.groups.length && !plan.sharedItems.length))return;
+              if(mode==='replace' && (plan.groups.some(g=>mixedRoot.mixed_products?.[g.product.id]?.[targetKey]?.length) || (plan.sharedItems.length && mixedRoot.mixed_shared?.[targetKey]?.length)) && !confirm('将替换本次匹配的小产品及共有费用的'+label+'明细，确认？'))return;
+              if(plan.sharedItems.length){
+                const shared=mixedRoot.mixed_shared ||= {};
+                shared[targetKey]=mode==='replace'?plan.sharedItems:(shared[targetKey]||[]).concat(plan.sharedItems);
+              }
+              mixedRoot.mixed_products ||= {};
               for(const group of plan.groups){
                 const target=mixedRoot.mixed_products[group.product.id] ||= {};
                 target[targetKey]=mode==='replace'?group.items:(target[targetKey]||[]).concat(group.items);
               }
-              preview.innerHTML='已分配到 '+plan.groups.length+' 款产品，请保存工程/业务草稿。';
+              preview.innerHTML='已分配到 '+plan.groups.length+' 款小产品；'+plan.sharedItems.length+' 条总货号项目已归入共有费用（计一次），请保存工程/业务草稿。';
               fileInput.value='';onChange();onApplied?.();return;
             }
             payload[targetKey] = mode === 'replace'

@@ -526,11 +526,11 @@
       const detail = host.querySelector('.mixed-detail');
       if (dept === 'engineering' && edit && !fixedProductId) {
         const upload=document.createElement('section');upload.className='mixed-config';
-        upload.innerHTML='<h3>批量导入混装外购报价</h3><p class="muted">使用供应商报价模板，单独增加“货号”列，填写小产品完整货号；每条明细均填写货号（可合并单元格）。整表按货号分配，保留物料名称、MOQ、币种及价格。</p><label>导入类别 <select data-supplier-kind><option value="hardware">五金</option><option value="aux_materials">辅助材料</option><option value="packaging_materials">包装材料</option></select></label> <label>选择报价表 <input data-supplier-file type="file" accept=".xlsx,.xls"></label><div data-supplier-preview></div>';
+        upload.innerHTML='<h3>批量导入混装外购报价</h3><p class="muted">使用供应商报价模板，单独增加“货号”列，填写小产品完整货号；每条明细均填写货号（可合并单元格）。选择“每包装共有费用”时，整表导入共用项目、每包装计一次，无需匹配小产品货号；其他视图中，总货号自动归入共有费用，小产品货号分配到对应产品。保留物料名称、MOQ、币种及价格。</p><label>导入类别 <select data-supplier-kind><option value="hardware">五金</option><option value="aux_materials">辅助材料</option><option value="packaging_materials">包装材料</option></select></label> <label>选择报价表 <input data-supplier-file type="file" accept=".xlsx,.xls"></label><div data-supplier-preview></div>';
         host.insertBefore(upload,detail);
         const attach=()=>window.attachSupplierMaterialImportUI(upload,{},edit,onChange,args[0],args[1],window.__data.quote.qty,window.__data.quote.customer,{
           inputId:'[data-supplier-file]',previewId:'[data-supplier-preview]',targetKey:upload.querySelector('[data-supplier-kind]').value,
-          label:upload.querySelector('[data-supplier-kind]').selectedOptions[0].textContent,mixedConfig:cfg,mixedRoot:root,onApplied:draw
+          label:upload.querySelector('[data-supplier-kind]').selectedOptions[0].textContent,mixedConfig:cfg,mixedRoot:root,mixedTotalCode:window.__data.quote.quote_no,getMixedImportTarget:()=>selected,onApplied:draw
         });
         upload.querySelector('[data-supplier-kind]').onchange=()=>{upload.querySelector('[data-supplier-preview]').textContent='';upload.querySelector('[data-supplier-file]').value='';attach();};
         attach();

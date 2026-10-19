@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 env:
   RELEASE_WORKFLOW_PIN_FROZEN: 'true'
-  RELEASE_HELPER_SHA256: '4fb2177140f1916fa78b5c5181453b554c0f2a87c638e07e4e4193dea6909b65'
+  RELEASE_HELPER_SHA256: 'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5'
 jobs:
   reviewed-data-operation:
     runs-on: ubuntu-latest

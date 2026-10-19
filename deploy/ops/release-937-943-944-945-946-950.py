@@ -3,7 +3,7 @@ import contextlib, hashlib, importlib.util, json, os, pathlib, re, select, shuti
 ROOT=pathlib.Path('/opt/rr-portal')
 BASE='52c090589d6da542fee74ef17c8edd3b0dfe4fe6'
 BRANCH='refs/heads/ops/release-937-943-944-945-946-950-20261019'
-BACKUP=ROOT/'deploy/backups/release-937-943-944-945-946-950-20261019'
+BACKUP=ROOT/'deploy/backups/release-937-943-944-945-946-950-20261019-v2'
 VERIFY=BACKUP.with_name(BACKUP.name+'-verify')
 BACKUP_PIN_FROZEN=True
 VERIFY_PIN_FROZEN=False
@@ -91,7 +91,7 @@ def runtime():
   row={'id':v['Id'],'image':v['Image'],'started':v['State'].get('StartedAt'),'restarts':v['RestartCount'],
    'running':v['State'].get('Running'),'oom':v['State'].get('OOMKilled'),
    'health':v['State'].get('Health',{}).get('Status'),'environmentSHA256':digest(v['Config'].get('Env',[])),
-   'mounts':v.get('Mounts',[]),'memory':v['HostConfig'].get('Memory'),'swap':v['HostConfig'].get('MemorySwap'),
+   'mounts':sorted(v.get('Mounts',[]),key=enc),'memory':v['HostConfig'].get('Memory'),'swap':v['HostConfig'].get('MemorySwap'),
    'healthcheck':v['Config'].get('Healthcheck')}
   if label.get('com.docker.compose.project')=='rr-portal' and service in TARGETS|PROTECTED|{'db','nginx','core','redis'}:
    need(service not in services,'uniqueFixedService');services[service]=row
@@ -104,6 +104,19 @@ def runtime():
  for dest,rel in [('/app/data',PREFIXES['qc-report-data'][0]),('/app/storage',PREFIXES['qc-report-storage'][0])]:
   need(any(m.get('Type')=='bind' and m.get('Destination')==dest and m.get('Source')==str(ROOT/rel) for m in services['qc-report-worker']['mounts']),'workerSharedPersistentRoots')
  return {'services':services,'others':others}
+
+def runtime_difference(before,after):
+ # Only fixed service labels, truncated container IDs and fixed field names.
+ changes={'services':[],'others':[]}
+ allowed={'id','image','started','restarts','running','oom','health','environmentSHA256','mounts','memory','swap','healthcheck'}
+ for scope in changes:
+  for name in sorted(set(before[scope])|set(after[scope])):
+   a,b=before[scope].get(name),after[scope].get(name)
+   if a==b:continue
+   fields=['presence'] if a is None or b is None else sorted(k for k in allowed if a.get(k)!=b.get(k))
+   if a is not None and b is not None and any(a.get(k)!=b.get(k) for k in (set(a)|set(b))-allowed):fields.append('otherFields')
+   changes[scope].append({'service' if scope=='services' else 'idPrefix':name if scope=='services' else name[:12],'fields':fields})
+ return changes
 
 def runtime_checks(before,after):
  a,b=before['services'],after['services'];checks={}
@@ -264,7 +277,8 @@ def original_archive():
  return baseline
 
 def capture(directory,with_dump):
- first=runtime();head=run(['git','rev-parse','HEAD']).decode().strip()
+ first=runtime();L.private_write(directory/'runtime-before.private.json',enc(first))
+ head=run(['git','rev-parse','HEAD']).decode().strip()
  need(head==(BASE if with_dump else TARGET),'exactDeploymentHead')
  env=ROOT/'.env.cloud.production';need(env.is_file() and not env.is_symlink() and env.stat().st_size<=4*1024**2,'privateEnvironmentFile')
  L.private_write(directory/'environment.private',env.read_bytes())
@@ -282,7 +296,12 @@ def capture(directory,with_dump):
  for key,(rel,_,_) in PREFIXES.items():result['trees'][key]=sqlite_capture(key,ROOT/rel,directory/key)
  result['postgres']=pg_capture(first['services']['db']['id'],directory,with_dump)
  need(L.file_hash(env)==result['envSHA256'],'environmentStableDuringCapture')
- need(runtime()==first,'runtimeStableDuringCapture')
+ last=runtime();L.private_write(directory/'runtime-after.private.json',enc(last))
+ if last!=first:
+  changed=runtime_difference(first,last);L.private_write(directory/'runtime-difference.private.json',enc(changed))
+  for scope,rows in changed.items():
+   for start in range(0,len(rows),8):print(json.dumps({'kind':'runtime-field-differences','scope':scope,'changedServiceFields':rows[start:start+8]},sort_keys=True),flush=True)
+ need(last==first,'runtimeStableDuringCapture')
  L.private_write(directory/'baseline.private.json',enc(result))
  return result
 

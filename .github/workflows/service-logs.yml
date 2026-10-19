@@ -1,8 +1,8 @@
-name: Fixed Sealed SQLite Row Classification
+name: Fixed SQLite Partners and Retention Explanation
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [sqlite-rows]}
+      mode: {type: choice, required: true, options: [sqlite-partners-retention]}
 permissions:
   contents: read
 concurrency:
@@ -20,7 +20,7 @@ jobs:
           RELEASE_MODE: ${{ inputs.mode }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
-          [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = sqlite-rows && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+          [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = sqlite-partners-retention && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Read fixed container and deployment summaries
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
@@ -36,7 +36,7 @@ jobs:
           envs: RELEASE_REF,RELEASE_ATTEMPT,RELEASE_MODE
           script: |
             set -euo pipefail
-            [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = sqlite-rows ]] || exit 1
+            [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = sqlite-partners-retention ]] || exit 1
             umask 077
             python3 -B - <<'PY'
             """Fixed sealed SQLite row preservation classification; no live database or business output."""
@@ -84,11 +84,18 @@ jobs:
             def table_audit(db,table,cols):
              names=[c[1]for c in cols];hashes=sorted(digest([cell(x)for x in row])for row in db.execute('SELECT '+','.join(map(quote,names))+' FROM '+quote(table)));need(len(hashes)<=200000)
              return {'rows':len(hashes),'sha256':sha(''.join(hashes).encode()),'columnsSha256':digest(cols)}
-            def stamp(value):
+            def legacy_stamp(value):
              if type(value)is not str:return None
              try:
               v=datetime.datetime.fromisoformat(value.replace('Z','+00:00'));return v.astimezone(datetime.timezone.utc)if v.tzinfo is not None else None
              except ValueError:return None
+            def stamp(value):
+             if type(value)is not str:return None
+             match=re.fullmatch(r'(\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d)(?:\.(\d{1,9}))?(Z|[+-]\d\d:\d\d)',value)
+             if not match:return None
+             normalized=match[1]+('.'+match[2][:6].ljust(6,'0')if match[2]else'')+match[3]
+             return legacy_stamp(normalized)
+            
             def in_window(v):return v is not None and START<=v<=END
             
             def row_compare(old,new,table,policy=None):
@@ -127,32 +134,52 @@ jobs:
              with contextlib.closing(connect(path))as db:
               names={r[1]for r in db.execute('PRAGMA table_info(_params)')}
               if not{'id','value'}<=names:return None
-              row=db.execute("SELECT CASE WHEN json_valid(value) THEN json_extract(value,'$.logs.maxDays') END,CASE WHEN json_valid(value) THEN json_extract(value,'$.logs.minLevel') END FROM _params WHERE id='settings'").fetchone()
+              row=db.execute("SELECT CASE WHEN json_valid(value) THEN json_extract(value,'$.logs.maxDays') END,CASE WHEN json_valid(value) THEN json_extract(value,'$.logs.minLevel') END,CASE WHEN json_valid(value) THEN json_type(value,'$.logs.maxDays') END,CASE WHEN json_valid(value) THEN json_type(value,'$.logs.minLevel') END FROM _params WHERE id='settings'").fetchone()
               start=stamp(started)
-              if row is None or type(row[0])is not int or not 0<=row[0]<=36500 or type(row[1])is not int or not -100<=row[1]<=100 or start is None:return None
+              if row is None or row[2:]!=('integer','integer')or type(row[0])is not int or not 0<=row[0]<=36500 or type(row[1])is not int or not -100<=row[1]<=100 or start is None:return None
               return {'maxDays':row[0],'minLevel':row[1],'cutoff':start-datetime.timedelta(days=row[0])}
             def db_path(archive,manifest,key,relative):
              name=key+'/sqlite/'+relative;need(name in manifest and'..'not in pathlib.PurePosixPath(name).parts and not pathlib.PurePosixPath(name).is_absolute());p=archive/name;need(private_hash(p,512*1024**2)==manifest[name]);return p
             
+            def projected_partners(old,new):
+             expected=['id','name','type','createdAt'];need([c[1]for c in columns(old,'partners')]==expected and columns(new,'partners')==columns(old,'partners'))
+             def count(db,names):return collections.Counter(enc([cell(x)for x in row])for row in db.execute('SELECT '+','.join(map(quote,names))+' FROM partners'))
+             reports=[]
+             for names,excluded in [(['name','type','createdAt'],['id']),(['name','type'],['id','createdAt'])]:
+              a,b=count(old,names),count(new,names);missing=sum((a-b).values());added=sum((b-a).values());reports.append({'comparedFields':names,'excludedFields':excluded,'oldRows':sum(a.values()),'newRows':sum(b.values()),'retainedOldTypedMultisetRows':sum((a&b).values()),'missingOldTypedMultisetRows':missing,'additionalNewTypedMultisetRows':added,'allOldProjectedRowsPreserved':missing==0,'createdAtPreservationVerified':names==['name','type','createdAt']and missing==0,'excludingCreatedAtIsDiagnosticOnlyNotPreservationApproval':names==['name','type']})
+             return reports
+            
+            def settings_shape(path,started):
+             with contextlib.closing(connect(path))as db:
+              names={r[1]for r in db.execute('PRAGMA table_info(_params)')};result={'expectedParamsColumnsPresent':{'id','value'}<=names,'storedSettingsRowCount':None,'storageType':None,'jsonValid':None,'jsonRootType':None,'logsType':None,'maxDaysType':None,'minLevelType':None}
+              if result['expectedParamsColumnsPresent']:
+               row=db.execute("SELECT count(*) FROM _params WHERE id='settings'").fetchone();result['storedSettingsRowCount']=row[0];need(row[0]<=1)
+               if row[0]:
+                values=db.execute("SELECT typeof(value),json_valid(value),CASE WHEN json_valid(value) THEN json_type(value) END,CASE WHEN json_valid(value) THEN json_type(value,'$.logs') END,CASE WHEN json_valid(value) THEN json_type(value,'$.logs.maxDays') END,CASE WHEN json_valid(value) THEN json_type(value,'$.logs.minLevel') END FROM _params WHERE id='settings'").fetchone();storage,valid,root,logs,days,level=values;need(storage in {'text','blob','null','integer','real'}and all(x in {None,'object','array','text','null','integer','real','true','false'}for x in (root,logs,days,level)));result.update(storageType=storage,jsonValid=bool(valid),jsonRootType=root,logsType=logs,maxDaysType=days,minLevelType=level)
+             match=re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.(\d{1,9}))?Z',started or'');result.update(startedTimestampFractionDigits=len(match[1]or'')if match else None,legacyTimestampParserAccepted=legacy_stamp(started)is not None,nanosecondCompatibleParserAccepted=stamp(started)is not None,configuredNumericPolicyAvailable=logs_policy(path,started)is not None)
+             return result
+            
             def main():
              global STAGE
-             need(PIN_FROZEN and os.environ.get('RELEASE_REF')=='refs/heads/ops/release-progress-v4-20261019'and os.environ.get('RELEASE_ATTEMPT')=='1'and os.environ.get('RELEASE_MODE')=='sqlite-rows');signal.alarm(180)
+             need(PIN_FROZEN and os.environ.get('RELEASE_REF')=='refs/heads/ops/release-progress-v4-20261019'and os.environ.get('RELEASE_ATTEMPT')=='1'and os.environ.get('RELEASE_MODE')=='sqlite-partners-retention');signal.alarm(180)
              captures=[capture(*a)for a in ARCHIVES];before,after=[a[0]for a in captures];need(before['head']==BASE and after['head']==TARGET)
-             for key,relative,tables in [('qc','sy-huadeng/qc.db',('records','partners')),('factory-review','auxiliary.db',('_logs',)),('factory-review-test','auxiliary.db',('_logs',))]:
+             for key,relative,tables in [('qc','sy-huadeng/qc.db',('partners',)),('factory-review','auxiliary.db',('_logs',)),('factory-review-test','auxiliary.db',('_logs',))]:
               STAGE=key;paths=[db_path(a[0],c[1],key,relative)for a,c in zip(ARCHIVES,captures)];policy=None;settings_paths=[]
               if key.startswith('factory-review'):
-               settings_paths=[db_path(a[0],c[1],key,'data.db')for a,c in zip(ARCHIVES,captures)];policies=[logs_policy(p,after['runtime']['services'][key]['started'])for p in settings_paths];need(policies[0]==policies[1]);policy=policies[1]
+               settings_paths=[db_path(a[0],c[1],key,'data.db')for a,c in zip(ARCHIVES,captures)];started=after['runtime']['services'][key]['started'];policies=[logs_policy(p,started)for p in settings_paths];need(policies[0]==policies[1]);policy=policies[1]
+               print(enc({'kind':'sealed-logs-settings-shape','system':key,'before':settings_shape(settings_paths[0],started),'after':settings_shape(settings_paths[1],started),'numericPolicyUnchanged':policies[0]==policies[1]if policy else None,'rawSettingsValuesPrinted':False}).decode(),flush=True)
               with contextlib.ExitStack()as stack:
                old,new=[stack.enter_context(contextlib.closing(connect(p)))for p in paths];old.execute('ATTACH DATABASE ? AS afterdb',(paths[1].as_uri()+'?mode=ro&immutable=1',))
                for table in tables:
-                need(all(0<=snap['trees'][key]['sqlite'][relative]['tables'][table]['rows']<=200000 for snap in (before,after)));cols=columns(old,table);need(table_audit(old,table,cols)==before['trees'][key]['sqlite'][relative]['tables'][table]and table_audit(new,table,cols)==after['trees'][key]['sqlite'][relative]['tables'][table]);result=row_compare(old,new,table,policy);print(enc(dict(kind='sealed-sqlite-table',system=key,company='sy-huadeng'if key=='qc'else None,table=table,fullOldAndNewTypedAuditMatchesSealedManifest=True,**result)).decode(),flush=True)
-               if key=='qc':
-                seqold=dict(old.execute('SELECT name,seq FROM main.sqlite_sequence'));seqnew=dict(old.execute('SELECT name,seq FROM afterdb.sqlite_sequence'));print(enc({'kind':'sqlite-sequence','system':'qc','company':'sy-huadeng','tables':[{'table':t,'oldPresent':t in seqold,'newPresent':t in seqnew,'same':seqold.get(t)==seqnew.get(t),'neverRegressed':type(seqold.get(t))is int and type(seqnew.get(t))is int and seqnew[t]>=seqold[t]}for t in ('records','partners')]}).decode(),flush=True)
+                need(all(0<=snap['trees'][key]['sqlite'][relative]['tables'][table]['rows']<=200000 for snap in (before,after)));cols=columns(old,table);need(table_audit(old,table,cols)==before['trees'][key]['sqlite'][relative]['tables'][table]and table_audit(new,table,cols)==after['trees'][key]['sqlite'][relative]['tables'][table])
+                if key=='qc':result={'projectedMultisetComparisons':projected_partners(old,new),'idRegeneratedByKnownAPIIsMechanismNotActorProof':True}
+                else:result=row_compare(old,new,table,policy)
+                print(enc(dict(kind='sealed-sqlite-explanation',system=key,table=table,fullOldAndNewTypedAuditMatchesSealedManifest=True,**result)).decode(),flush=True)
               for rel,pp in [(relative,paths)]+([('data.db',settings_paths)]if settings_paths else[]):
                for p,a,c in zip(pp,ARCHIVES,captures):need(private_hash(p,512*1024**2)==c[1][key+'/sqlite/'+rel])
              for a in ARCHIVES:need(private_hash(a[0]/'manifest.json',4*1024**2)==a[1]and private_hash(a[0]/'first-result.json',1024**2)==a[2])
-             print(enc({'kind':'summary','completed':True,'sealedSnapshotsOnly':True,'liveDatabaseAccessed':False,'businessValuesPrinted':False,'businessOrConfigurationWritesPerformed':False,'retentionIsCompatibilityNotActorAttribution':True,'originalStrictAuditRemainsFailed':True}).decode(),flush=True)
+             print(enc({'kind':'summary','completed':True,'sealedSnapshotsOnly':True,'liveDatabaseAccessed':False,'businessValuesPrinted':False,'businessOrConfigurationWritesPerformed':False,'retentionIsCompatibilityNotActorAttribution':True,'originalStrictAuditRemainsFailed':True,'createdAtNotAutomaticallyExempted':True}).decode(),flush=True)
             if __name__=='__main__':
              try:main()
-             except BaseException as error:print(enc({'safeFailure':'SEALED_SQLITE_CLASSIFICATION_FAILED','stage':STAGE,'exceptionType':type(error).__name__ if type(error).__name__ in {'RuntimeError','KeyError','TypeError','ValueError','OperationalError','OSError','FileNotFoundError','PermissionError'}else'OtherError'}).decode(),flush=True);sys.exit(1)
+             except BaseException as error:print(enc({'safeFailure':'SEALED_SQLITE_EXPLANATION_FAILED','stage':STAGE,'exceptionType':type(error).__name__ if type(error).__name__ in {'RuntimeError','KeyError','TypeError','ValueError','OperationalError','OSError','FileNotFoundError','PermissionError'}else'OtherError'}).decode(),flush=True);sys.exit(1)
             PY

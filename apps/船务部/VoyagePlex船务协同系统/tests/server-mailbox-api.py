@@ -27,6 +27,7 @@ def run():
             calls = []
             tested_mailboxes = []
             pause_test = False
+            fail_poll = False
 
             def log_message(self, *args):
                 pass
@@ -54,6 +55,9 @@ def run():
                         assert test_release.wait(15)
                     self.respond({"connected": payload["auth_code"] == "fixture-auth", "message": "本地测试"})
                     return
+                if self.fail_poll:
+                    self.respond({"error": "synthetic-private-parser-detail"}, status=503)
+                    return
                 folder = payload["folder"]
                 self.calls.append((folder, payload["after_uid"]))
                 uids = [11] if folder == "INBOX" else [5, 11]
@@ -64,8 +68,8 @@ def run():
                 self.respond({"configured": True, "address": payload["address"], "uid_validity": 7,
                               "items": items})
 
-            def respond(self, payload):
-                self.send_response(200)
+            def respond(self, payload, status=200):
+                self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps(payload).encode())
@@ -197,6 +201,18 @@ def run():
             with sqlite3.connect(db_path) as db:
                 assert db.execute("SELECT COUNT(*) FROM ImportEmailItems WHERE Company='Huadeng'").fetchone()[0] == 3
 
+            ParserStub.fail_poll = True
+            with sqlite3.connect(db_path) as db:
+                before_cursor = db.execute("SELECT LastUid FROM MailSyncStates WHERE Id=?", (1000 + owner_id,)).fetchone()[0]
+            failure = request("/api/imports/email/mailbox/sync", {}, expected=502)
+            assert failure == {"error": "邮箱同步失败，已保留同步断点，请稍后重试或联系管理员"}
+            assert "synthetic-private-parser-detail" not in json.dumps(failure)
+            request("/api/health")
+            with sqlite3.connect(db_path) as db:
+                assert db.execute("SELECT LastUid FROM MailSyncStates WHERE Id=?", (1000 + owner_id,)).fetchone()[0] == before_cursor
+                assert db.execute("SELECT COUNT(*) FROM ImportEmailItems WHERE Company='Huadeng'").fetchone()[0] == 3
+            ParserStub.fail_poll = False
+
             bind("reset@example.com")
             bind("owner@example.com")
             ParserStub.pause_test = True
@@ -212,7 +228,7 @@ def run():
                 stored = db.execute("SELECT MailboxTestStatus FROM Users WHERE Id=?", (owner_id,)).fetchone()[0]
             check(stored == "Unknown", "Concurrent rebind stored stale mailbox test status: " + stored)
             assert not failures, "\n".join(failures)
-            print("Server mailbox API: legacy schema/key migration, restart idempotence, credential rotation without duplicates, folder identity and concurrent binding tests passed.")
+            print("Server mailbox API: legacy migration, idempotence, rotation, folder identity, sanitized poll failures and concurrent binding tests passed.")
         finally:
             test_release.set()
             stop()

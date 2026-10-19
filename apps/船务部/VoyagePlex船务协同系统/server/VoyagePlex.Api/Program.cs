@@ -1001,8 +1001,10 @@ app.MapPatch("/api/imports/email/mailbox/items/{itemId:long}", async (long itemI
 app.MapPost("/api/imports/email/mailbox/sync", async (HttpContext context, MailboxSyncService sync, CancellationToken cancellationToken) =>
 {
     try { return Results.Ok(await sync.SyncAsync(cancellationToken, context.RequestServices.GetRequiredService<AppDbContext>().Company, context.RequestServices.GetRequiredService<AppDbContext>().MailOwnerId)); }
-    catch (Exception error) when (error is not OperationCanceledException)
-    { return Results.Json(new { error = error.GetBaseException().Message }, statusCode: 502); }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    { return Results.Json(new { error = "邮箱解析请求超时，已保留同步断点，请稍后重试" }, statusCode: 504); }
+    catch (Exception) when (!cancellationToken.IsCancellationRequested)
+    { return Results.Json(new { error = "邮箱同步失败，已保留同步断点，请稍后重试或联系管理员" }, statusCode: 502); }
 });
 
 app.MapPost("/api/imports/email/split-preview", (JsonObject payload) =>

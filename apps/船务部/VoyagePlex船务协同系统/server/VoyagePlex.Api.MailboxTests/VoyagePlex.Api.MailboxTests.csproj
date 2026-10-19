@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <NoWarn Condition="'$(MailboxSyncSource)' != ''">$(NoWarn);CS0436</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Microsoft.Extensions.Hosting" />
+    <Using Include="Microsoft.Extensions.Logging" />
+    <ProjectReference Include="../VoyagePlex.Api/VoyagePlex.Api.csproj" />
+    <!-- Optional baseline source lets the same behavioral tests demonstrate the
+         pre-fix service failure without changing the application checkout. -->
+    <Compile Include="$(MailboxSyncSource)" Link="MailboxSyncService.cs" Condition="'$(MailboxSyncSource)' != ''" />
+  </ItemGroup>
+</Project>

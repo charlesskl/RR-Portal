@@ -1,13 +1,65 @@
 import imaplib
 import os
 import re
+import socket
+import threading
+import time
 from datetime import date, datetime, timedelta, timezone
 
 
-MAX_MESSAGES = 50
+MAX_MESSAGES = 5
 MAX_MESSAGE_BYTES = 25 * 1024 * 1024
+MAX_BATCH_BYTES = 32 * 1024 * 1024
+FETCH_BUDGET_SECONDS = 45
 LOOKBACK_DAYS = 7
 INTERNAL_DATE = re.compile(rb'INTERNALDATE "([^"]+)"')
+
+
+class OversizedLiteral(ValueError):
+    pass
+
+
+class BoundedImap(imaplib.IMAP4_SSL):
+    literal_limit = MAX_MESSAGE_BYTES
+
+    def read(self, size):
+        # Reject the server's literal length before imaplib allocates the body.
+        if size > self.literal_limit:
+            raise OversizedLiteral()
+        return super().read(size)
+
+
+class MailboxControl:
+    def __init__(self):
+        self.cancelled = threading.Event()
+        self.fetch_expired = threading.Event()
+        self.client = None
+        self.tasks = []
+
+    def cancel(self):
+        self.cancelled.set()
+        self.close_socket()
+
+    def expire_fetch(self):
+        self.fetch_expired.set()
+        self.close_socket()
+
+    def close_socket(self):
+        client = self.client
+        if client is not None:
+            try:
+                client.sock.shutdown(socket.SHUT_RDWR)
+            except (AttributeError, OSError):
+                pass
+
+    def check(self, deadline):
+        if self.cancelled.is_set():
+            raise InterruptedError("邮箱读取已取消")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or self.fetch_expired.is_set():
+            raise TimeoutError("本轮邮箱读取已达到时间预算")
+        if self.client is not None:
+            self.client.sock.settimeout(min(20, remaining))
 
 
 def identify_client(client) -> None:
@@ -30,7 +82,8 @@ def folder_failure(parts) -> str:
 
 
 def received_at_from_fetch(parts: list) -> str:
-    header = next((part[0] for part in parts if isinstance(part, tuple)), b"")
+    header = b" ".join(part[0] if isinstance(part, tuple) else part
+                       for part in parts if isinstance(part, (bytes, tuple)))
     match = INTERNAL_DATE.search(header)
     if not match:
         raise RuntimeError("邮箱未返回邮件收件时间")
@@ -38,7 +91,34 @@ def received_at_from_fetch(parts: list) -> str:
     return received.astimezone(timezone.utc).isoformat()
 
 
-def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: str = "Xingxin", credentials: dict | None = None) -> dict:
+def response_for_uid(parts, uid, body=False):
+    # imaplib splits a literal from its trailing response fields. UID is legal
+    # on either side of BODY[], and unsolicited FETCH records can be interleaved.
+    groups, current = [], []
+    for part in parts:
+        header = part[0] if isinstance(part, tuple) else part
+        if not isinstance(header, bytes):
+            continue
+        if re.match(rb'^\d+ \(', header) and current:
+            groups.append(current)
+            current = []
+        current.append(part)
+    if current:
+        groups.append(current)
+    for group in groups:
+        header = b" ".join(part[0] if isinstance(part, tuple) else part for part in group)
+        matches = {int(value) for value in re.findall(rb'\bUID ([0-9]+)\b', header)}
+        if matches == {uid}:
+            if body:
+                if not any(isinstance(part, tuple) for part in group) or b"BODY[]" not in header:
+                    continue
+            elif not INTERNAL_DATE.search(header) or not re.search(rb'\bRFC822\.SIZE [0-9]+\b', header):
+                continue
+            return group
+    return []
+
+
+def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: str = "Xingxin", credentials: dict | None = None, control: MailboxControl | None = None) -> dict:
     if company not in {"Xingxin", "Huadeng"}:
         raise ValueError("公司板块无效")
     prefix = "VOYAGEPLEX_HUADENG_MAIL_" if company == "Huadeng" else "VOYAGEPLEX_MAIL_"
@@ -50,10 +130,21 @@ def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: s
 
     host = credentials.get("host", "imap.exmail.qq.com") if credentials is not None else os.environ.get(prefix + "IMAP_HOST", "imaphz.qiye.163.com")
     folder = credentials.get("folder", "INBOX") if credentials is not None else os.environ.get(prefix + "FOLDER", "INBOX")
-    client = imaplib.IMAP4_SSL(host, 993, timeout=30)
+    control = control or MailboxControl()
+    deadline = time.monotonic() + FETCH_BUDGET_SECONDS
+    control.check(deadline)
+    timer = threading.Timer(FETCH_BUDGET_SECONDS, control.expire_fetch)
+    timer.daemon = True
+    timer.start()
+    client = None
     try:
+        client = BoundedImap(host, 993, timeout=20)
+        control.client = client
+        control.check(deadline)
         client.login(address, secret)
+        control.check(deadline)
         identify_client(client)
+        control.check(deadline)
         status, _ = client.select(folder, readonly=True)
         if status != "OK":
             raise RuntimeError(folder_failure(_))
@@ -62,34 +153,79 @@ def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: s
         # IMAP SINCE uses server internal dates; search one day earlier and let
         # the API apply the exact China-time boundary to each fetched message.
         since = (first_day - timedelta(days=1)).strftime("%d-%b-%Y")
+        control.check(deadline)
         status, found = client.uid("SEARCH", None, "SINCE", since)
         if status != "OK":
             raise RuntimeError("邮箱搜索失败")
         uids = [int(uid) for uid in (found[0] or b"").split() if int(uid) > after_uid]
         messages = []
+        total_bytes = 0
+        blocked_uid = None
         for uid in sorted(uids)[:MAX_MESSAGES]:
-            # 单封邮件读取失败必须隔离：若整批中断，调用方断点会永远停在同一 UID，
-            # 每轮同步都重复拉取同一批邮件。
+            # Fetch immutable metadata first. Never skip an unknown-date UID.
+            received_at = ""
             try:
-                status, parts = client.uid("FETCH", str(uid), "(INTERNALDATE BODY.PEEK[])")
+                control.check(deadline)
+                status, parts = client.uid("FETCH", str(uid), "(INTERNALDATE RFC822.SIZE)")
                 if status != "OK" or not parts:
-                    raise RuntimeError(f"读取邮件 {uid} 失败")
-                raw = next((part[1] for part in parts if isinstance(part, tuple)), None)
-                if not raw:
-                    raise RuntimeError(f"邮件 {uid} 内容为空")
-                messages.append({"uid": uid, "received_at": received_at_from_fetch(parts),
-                                 "raw": raw if len(raw) <= MAX_MESSAGE_BYTES else None,
-                                 "error": "邮件超过 25MB" if len(raw) > MAX_MESSAGE_BYTES else ""})
-            except Exception as exc:
-                messages.append({"uid": uid, "received_at": "", "raw": None,
-                                 "error": f"邮件读取失败：{exc}"})
+                    raise RuntimeError()
+                metadata = response_for_uid(parts, uid)
+                received_at = received_at_from_fetch(metadata)
+                header = b" ".join(part[0] if isinstance(part, tuple) else part for part in metadata)
+                match = re.search(rb'\bRFC822\.SIZE ([0-9]+)\b', header)
+                if not match:
+                    raise RuntimeError()
+                size = int(match[1])
+            except Exception:
+                if control.cancelled.is_set():
+                    raise InterruptedError("邮箱读取已取消")
+                # A known date permits a durable failed item. Without it the API
+                # must commit earlier items only and leave this UID for retry.
+                messages.append({"uid": uid, "received_at": received_at, "raw": None,
+                                 "error": "无法读取有效的邮件元数据", "failure_kind": "metadata",
+                                 "retryable": not bool(received_at)})
+                if not received_at:
+                    blocked_uid = uid
+                break
+            if size > MAX_MESSAGE_BYTES:
+                messages.append({"uid": uid, "received_at": received_at, "raw": None,
+                                 "error": "邮件超过 25MB", "failure_kind": "message_size", "retryable": False})
+                continue
+            if total_bytes + size > MAX_BATCH_BYTES or time.monotonic() >= deadline:
+                break  # Not attempted: no result and no cursor advance for this UID.
+            try:
+                control.check(deadline)
+                client.literal_limit = min(MAX_MESSAGE_BYTES, MAX_BATCH_BYTES - total_bytes)
+                status, parts = client.uid("FETCH", str(uid), "(BODY.PEEK[])")
+                if status != "OK" or not parts:
+                    raise RuntimeError()
+                raw = next((part[1] for part in response_for_uid(parts, uid, body=True) if isinstance(part, tuple)), None)
+                if not raw or len(raw) != size:
+                    raise RuntimeError()
+                if len(raw) > MAX_MESSAGE_BYTES or total_bytes + len(raw) > MAX_BATCH_BYTES:
+                    raise OversizedLiteral()
+                total_bytes += len(raw)
+                messages.append({"uid": uid, "received_at": received_at,
+                                 "raw": raw, "error": "", "retryable": False})
+            except Exception as error:
+                if control.cancelled.is_set():
+                    raise InterruptedError("邮箱读取已取消")
+                messages.append({"uid": uid, "received_at": received_at, "raw": None,
+                                 "error": "邮件正文读取失败，已保留收件时间供人工处理",
+                                 "failure_kind": "message_size" if isinstance(error, OversizedLiteral) else "body_read",
+                                 "retryable": False})
+                if not isinstance(error, RuntimeError):
+                    break  # A failed literal/socket can leave the stream unsynchronized.
         return {"configured": True, "address": address, "uid_validity": validity,
-                "messages": messages}
+                "messages": messages, "blocked_uid": blocked_uid}
     finally:
-        try:
-            client.logout()
-        except (imaplib.IMAP4.error, OSError):
-            pass
+        timer.cancel()
+        control.client = None
+        if client is not None:
+            try:
+                client.shutdown()
+            except (imaplib.IMAP4.error, OSError):
+                pass
 
 
 def test_mailbox_connection(credentials: dict) -> dict:

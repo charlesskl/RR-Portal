@@ -18,7 +18,7 @@ VALID_EML = b"Subject: shipment notice\r\nFrom: factory@example.com\r\n\r\nhello
 BASE_URL = "http://127.0.0.1:18099"
 
 
-def slow_fetch_mailbox(after_uid=0, start_date="2026-08-01", company="Xingxin", credentials=None):
+def slow_fetch_mailbox(after_uid=0, start_date="2026-08-01", company="Xingxin", credentials=None, control=None):
     time.sleep(SLOW_SECONDS)
     return {"configured": True, "address": "shipping@example.com", "uid_validity": 123,
             "messages": [{"uid": 11, "received_at": "2026-09-17T16:30:00+00:00",
@@ -36,8 +36,7 @@ class PollMailboxHealthTests(unittest.TestCase):
         """真实 uvicorn 服务下模拟慢 IMAP + 慢附件解析，/health 必须毫秒级响应。
 
         与生产拓扑一致（单 worker 单事件循环，docker 从进程外探测 /health）。
-        修复前 fetch/parse 在事件循环里执行，此测试 /health 会被阻塞约
-        2 * SLOW_SECONDS，复现生产健康检查超时。
+        本测试只验证慢收信不会阻塞事件循环；内存、CPU和取消隔离另有进程测试。
         """
         with patch("app.main.fetch_mailbox", slow_fetch_mailbox), \
                 patch("app.main.parse_email_entries", slow_parse_email_entries):

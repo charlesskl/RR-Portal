@@ -4,6 +4,8 @@ import uuid
 import re
 import os
 import json
+import time
+import threading
 from io import BytesIO
 from datetime import datetime
 from urllib.parse import quote
@@ -24,10 +26,12 @@ from .shipment_export import build_completed_shipment_summary_workbook, build_in
 from .product_workbook import parse_product_workbook
 from .inventory_writeback import build_inventory_writeback
 from .destination_country import infer_destination_country
-from .mailbox import fetch_mailbox, test_mailbox_connection
+from .mailbox import MailboxControl, fetch_mailbox, test_mailbox_connection
+from .mail_worker import parse_isolated
 
 PARSER_VERSION = "voyageplex-rules-0.1.3+cargo-notification"
 app = FastAPI(title="VoyagePlex Email Parser", version=PARSER_VERSION)
+_mail_poll_gate = threading.Lock()
 
 
 class PersonalMailboxRequest(BaseModel):
@@ -57,27 +61,81 @@ async def poll_personal_mailbox(payload: PersonalMailboxRequest):
                               {"address": payload.address, "auth_code": payload.auth_code, "host": payload.host, "folder": payload.folder})
 
 
+async def _mail_thread(function, args, control):
+    task = asyncio.create_task(asyncio.to_thread(function, *args))
+    control.tasks.append(task)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        control.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=3)
+        except (Exception, asyncio.CancelledError):
+            # Network connect itself has a 20s socket deadline; a disposable
+            # parser supervisor is signalled/reaped within the worker deadline.
+            task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+        raise
+
+
 async def poll_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: str = "Xingxin", credentials: dict | None = None):
     if after_uid < 0:
         return Response(content='{"error":"after_uid 无效"}', status_code=400, media_type="application/json")
+    if not _mail_poll_gate.acquire(blocking=False):
+        return Response(content='{"error":"邮箱读取正在进行，请稍后重试"}', status_code=429, media_type="application/json")
+    control = MailboxControl()
     try:
-        mailbox = await asyncio.to_thread(fetch_mailbox, after_uid, start_date, company, credentials)
+        return await asyncio.wait_for(_poll_mailbox(after_uid, start_date, company, credentials, control), timeout=150)
+    except asyncio.TimeoutError:
+        return Response(content='{"error":"本轮邮箱读取超时，请稍后重试"}', status_code=504, media_type="application/json")
+    finally:
+        control.cancel()
+        pending = {task for task in control.tasks if not task.done()}
+        if not pending:
+            _mail_poll_gate.release()
+        else:
+            # Keep the gate until every actual fetch/worker thread has exited,
+            # even if the requesting client has already stopped waiting.
+            def completed(task):
+                pending.discard(task)
+                if not pending:
+                    _mail_poll_gate.release()
+            for task in list(pending):
+                task.add_done_callback(completed)
+
+
+async def _poll_mailbox(after_uid, start_date, company, credentials, control):
+    deadline = time.monotonic() + 150
+    try:
+        mailbox = await _mail_thread(fetch_mailbox, (after_uid, start_date, company, credentials, control), control)
         if not mailbox["configured"]:
             return {"configured": False, "items": []}
-        entries = [{"filename": f'mail-{entry["uid"]}.eml', "raw": entry["raw"]}
-                   for entry in mailbox["messages"] if entry["raw"]]
-        parsed = await asyncio.to_thread(parse_email_entries, entries, *([] if company == "Xingxin" else [company])) if entries else {"items": []}
-        parsed_by_uid = {int(item["filename"][5:-4]): item for item in parsed["items"]}
         items = []
+        blocked_uid = None
         for entry in mailbox["messages"]:
-            item = parsed_by_uid.get(entry["uid"], {"status": "failed", "error": entry["error"]})
+            if time.monotonic() >= deadline:
+                break  # Unprocessed UIDs remain below the next API cursor.
+            if entry["raw"]:
+                item = await _mail_thread(parse_isolated,
+                    (entry["raw"], f'mail-{entry["uid"]}.eml', company, control.cancelled, deadline), control)
+                if item.get("status") == "failed":
+                    from .mail_worker import failure_headers
+                    item.update(failure_headers(entry["raw"]))
+                entry["raw"] = None  # Release each body as soon as its worker exits.
+            else:
+                item = {"filename": f'mail-{entry["uid"]}.eml', "status": "failed", "error": entry["error"],
+                        "failure_kind": entry.get("failure_kind", "body_read")}
             items.append({**item, "mailbox_uid": entry["uid"],
-                          "mailbox_received_at": entry["received_at"]})
+                          "mailbox_received_at": entry["received_at"], "retryable": entry.get("retryable", False)})
+            if entry.get("retryable") and not entry["received_at"]:
+                blocked_uid = entry["uid"]
+                break
         return {"configured": True, "address": mailbox["address"],
-                "uid_validity": mailbox["uid_validity"], "items": items}
+                "uid_validity": mailbox["uid_validity"], "items": items, "blocked_uid": blocked_uid}
     except Exception:
         return Response(content='{"error":"邮箱连接或读取失败，请检查账号、授权码和网络"}',
                         status_code=502, media_type="application/json")
+    finally:
+        control.cancel()
 
 
 @app.post("/v1/product-workbooks/parse")

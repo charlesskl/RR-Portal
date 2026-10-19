@@ -15,8 +15,9 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
         var nextSync = new Dictionary<string, DateTime>();
         while (!stoppingToken.IsCancellationRequested)
         {
-            using (var inventoryScope = scopeFactory.CreateScope())
+            try
             {
+                using var inventoryScope = scopeFactory.CreateScope();
                 var inventoryDb = inventoryScope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var owners = await inventoryDb.Users.AsNoTracking().Where(value => value.IsActive && value.MailboxAddress != "" && (value.CompanyAccess == "Huadeng" || value.CompanyAccess == "Both" || value.Role == "admin"))
                     .ToListAsync(stoppingToken);
@@ -24,24 +25,33 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                 mailboxes.AddRange(owners.Where(ServerMailboxConfiguration.IsConfigured).Select(user => ("Huadeng", (long?)user.Id)));
                 foreach (var mailbox in mailboxes)
                 {
-                    using var scope = scopeFactory.CreateScope();
-                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    db.Company = mailbox.Company; db.MailOwnerId = mailbox.Owner;
-                    var setting = await db.MailSystemSettings.FirstOrDefaultAsync(stoppingToken);
-                    if (setting is null)
+                    try
                     {
-                        setting = new MailSystemSetting { Id = db.CompanySettingId, DailyWorkflowVersion = DailyMailRules.WorkflowVersion };
-                        db.MailSystemSettings.Add(setting); await db.SaveChangesAsync(stoppingToken);
+                        using var scope = scopeFactory.CreateScope();
+                        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                        db.Company = mailbox.Company; db.MailOwnerId = mailbox.Owner;
+                        var setting = await db.MailSystemSettings.FirstOrDefaultAsync(stoppingToken);
+                        if (setting is null)
+                        {
+                            setting = new MailSystemSetting { Id = db.CompanySettingId, DailyWorkflowVersion = DailyMailRules.WorkflowVersion };
+                            db.MailSystemSettings.Add(setting); await db.SaveChangesAsync(stoppingToken);
+                        }
+                        var key = $"{mailbox.Company}:{mailbox.Owner}";
+                        if (nextSync.GetValueOrDefault(key) > DateTime.UtcNow) continue;
+                        nextSync[key] = DateTime.UtcNow.AddMinutes(Math.Clamp(setting.SyncIntervalMinutes, 1, 1440));
+                        if (setting.SyncEnabled) await SyncAsync(stoppingToken, mailbox.Company, mailbox.Owner);
                     }
-                    var key = $"{mailbox.Company}:{mailbox.Owner}";
-                    if (nextSync.GetValueOrDefault(key) > DateTime.UtcNow) continue;
-                    nextSync[key] = DateTime.UtcNow.AddMinutes(Math.Clamp(setting.SyncIntervalMinutes, 1, 1440));
-                    try { if (setting.SyncEnabled) await SyncAsync(stoppingToken, mailbox.Company, mailbox.Owner); }
-                    catch (Exception error) when (error is not OperationCanceledException)
-                    { logger.LogWarning("邮箱 {Mailbox} 同步失败：{ErrorType}", key, error.GetType().Name); }
+                    // HttpClient timeouts also derive from OperationCanceledException.
+                    // Only cancellation of the service's own token stops the worker.
+                    catch (Exception error) when (!stoppingToken.IsCancellationRequested)
+                    { logger.LogWarning("邮箱 {Mailbox} 同步失败：{ErrorType}", $"{mailbox.Company}:{mailbox.Owner}", error.GetType().Name); }
                 }
             }
-            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception error) when (!stoppingToken.IsCancellationRequested)
+            { logger.LogWarning("邮箱自动同步轮询失败：{ErrorType}", error.GetType().Name); }
+            try { await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
         }
     }
 
@@ -102,10 +112,7 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             try
             {
                 var response = await parser.PollMailboxAsync(state.LastUid, startDate, cancellationToken, company, credentials);
-                if (response.StatusCode is < 200 or >= 300)
-                    throw new InvalidOperationException("邮箱连接或读取失败");
-                var payload = JsonNode.Parse(response.Body)?.AsObject()
-                    ?? throw new InvalidOperationException("邮箱服务返回了无效数据");
+                var payload = ReadMailboxPayload(response, credentials?.Address);
                 if (payload["configured"]?.GetValue<bool>() != true)
                     return new { configured = false, imported = 0 };
 
@@ -120,9 +127,11 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                     if (hadCursor)
                     {
                         response = await parser.PollMailboxAsync(0, startDate, cancellationToken, company, credentials);
-                        if (response.StatusCode is < 200 or >= 300) throw new InvalidOperationException("邮箱读取失败");
-                        payload = JsonNode.Parse(response.Body)?.AsObject()
-                            ?? throw new InvalidOperationException("邮箱服务返回了无效数据");
+                        payload = ReadMailboxPayload(response, credentials?.Address);
+                        if (payload["configured"]?.GetValue<bool>() != true ||
+                            payload["address"]?.GetValue<string>() != address ||
+                            payload["uid_validity"]?.GetValue<long>() != validity)
+                            throw new InvalidOperationException("邮箱身份在读取期间变化，请重试");
                     }
                 }
 
@@ -130,11 +139,16 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                 var batchesByDate = new Dictionary<string, ImportBatch>();
                 var contactsByEmail = new Dictionary<string, MailContact>(StringComparer.OrdinalIgnoreCase);
                 var imported = 0;
+                long previousUid = 0;
+                long? blockedUid = null;
+                var blockedError = "";
                 foreach (var node in incoming)
                 {
-                    if (node is not JsonObject item) continue;
+                    if (node is not JsonObject item) throw new InvalidOperationException("邮箱服务返回了无效邮件记录");
                     var uid = item["mailbox_uid"]?.GetValue<long>() ?? 0;
-                    if (uid <= 0) continue;
+                    if (uid <= previousUid || uid > uint.MaxValue)
+                        throw new InvalidOperationException("邮箱服务返回了无效邮件顺序");
+                    previousUid = uid;
                     var key = company == "Huadeng" ? $"Huadeng:{ownerId}:{state.MailboxIdentity}:{address}:{validity}:{uid}" : $"{address}:{validity}:{uid}";
                     if (await db.ImportEmailItems.AnyAsync(value => value.MailboxKey == key, cancellationToken))
                     {
@@ -149,7 +163,15 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                     var receivedAt = item["mailbox_received_at"]?.ToString() ?? "";
                     string receivedDate;
                     try { receivedDate = MailboxDateRules.ReceivedDate(receivedAt); }
-                    catch (FormatException error) { throw new InvalidOperationException($"邮件 {uid} 缺少有效收件时间", error); }
+                    catch (FormatException error)
+                    {
+                        if (!failed) throw new InvalidOperationException($"邮件 {uid} 缺少有效收件时间", error);
+                        // Commit the known prefix, but never invent a date or advance
+                        // across a UID whose server metadata could not be read.
+                        blockedUid = uid;
+                        blockedError = $"邮件 {uid} 的收件时间读取失败，已保留断点等待重试";
+                        break;
+                    }
                     if (string.CompareOrdinal(receivedDate, startDate) < 0)
                     {
                         state.LastUid = Math.Max(state.LastUid, uid);
@@ -203,13 +225,13 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                     if (failed) batch.FailedCount++; else batch.ParsedCount++;
                 }
                 db.ImportBatches.AddRange(batchesByDate.Values);
-                state.LastSuccessAt = DateTime.UtcNow;
-                state.LastError = "";
+                if (blockedUid is null) state.LastSuccessAt = DateTime.UtcNow;
+                state.LastError = blockedError;
                 await db.SaveChangesAsync(cancellationToken);
-                return new { configured = true, imported,
+                return new { configured = true, imported, blockedUid, error = blockedError,
                     batch_ids = batchesByDate.Values.Select(value => value.Id).ToArray() };
             }
-            catch (Exception error) when (error is not OperationCanceledException)
+            catch (Exception error) when (!cancellationToken.IsCancellationRequested)
             {
                 logger.LogError("邮箱同步写入失败：{ErrorType}", error.GetType().Name);
                 db.ChangeTracker.Clear();
@@ -222,5 +244,21 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             }
         }
         finally { SyncLock.Release(); }
+    }
+
+    private static JsonObject ReadMailboxPayload(ParserResponse response, string? expectedAddress)
+    {
+        if (response.StatusCode is < 200 or >= 300)
+            throw new InvalidOperationException("邮箱连接或读取失败");
+        var payload = JsonNode.Parse(response.Body)?.AsObject()
+            ?? throw new InvalidOperationException("邮箱服务返回了无效数据");
+        if (payload["configured"]?.GetValue<bool>() != true) return payload;
+        var address = payload["address"]?.GetValue<string>();
+        var validity = payload["uid_validity"]?.GetValue<long>() ?? 0;
+        if (string.IsNullOrWhiteSpace(address) || validity is <= 0 or > uint.MaxValue ||
+            payload["items"] is not JsonArray ||
+            (expectedAddress is not null && !string.Equals(address, expectedAddress, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("邮箱服务返回了无效邮箱身份或邮件数据");
+        return payload;
     }
 }

@@ -1,0 +1,54 @@
+name: VoyagePlex mailbox resource and cursor regression
+
+on:
+  pull_request:
+    paths:
+      - 'apps/船务部/VoyagePlex船务协同系统/**'
+      - '.github/workflows/voyageplex-mailbox-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mailbox-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/船务部/VoyagePlex船务协同系统
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build API and regress actual SQLite cursor, cancellation and ownership behavior
+        run: |
+          dotnet build server/VoyagePlex.Api/VoyagePlex.Api.csproj
+          dotnet run --project server/VoyagePlex.Api.MailboxTests/VoyagePlex.Api.MailboxTests.csproj
+          dotnet run --project server/VoyagePlex.Api.WorkflowTests/VoyagePlex.Api.WorkflowTests.csproj
+          python3 tests/daily-mail-api.py
+          python3 tests/server-mailbox-api.py
+      - name: Build the actual parser image
+        working-directory: apps/船务部/VoyagePlex船务协同系统/services/email-parser
+        run: |
+          docker build --tag voyageplex-mailbox-production .
+          docker build --tag voyageplex-mailbox-regression --file - . <<'FIXTURE_DOCKERFILE'
+          FROM voyageplex-mailbox-production
+          RUN python -m pip install --no-cache-dir pytest==9.1.1
+          FIXTURE_DOCKERFILE
+      - name: All parser regressions with a hard 512MiB memory limit and no extra swap
+        working-directory: apps/船务部/VoyagePlex船务协同系统/services/email-parser
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup_mailbox_fixture() {
+            docker inspect --format 'Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}} ExitCode={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}}' voyageplex-mailbox-fixture 2>/dev/null || true
+            docker rm -f voyageplex-mailbox-fixture >/dev/null 2>&1 || true
+          }
+          trap cleanup_mailbox_fixture EXIT
+          docker run --name voyageplex-mailbox-fixture --network none \
+            --memory=512m --memory-swap=512m --cpus=2 --pids-limit=128 \
+            --mount "type=bind,source=$PWD/tests,target=/app/tests,readonly" \
+            --entrypoint python voyageplex-mailbox-regression \
+            -m pytest tests -v

@@ -11,7 +11,7 @@ import subprocess
 import time
 
 ROOT = pathlib.Path('/opt/rr-portal')
-EXPECTED_HEAD = '53f482f4b71fc0fd4c6696e9ec4b2058e6a342bc'
+EXPECTED_HEAD = '4ec24b7b6d25836ee4ee702b57324764a856b83f'
 UPDATE_SCRIPT_SHA256 = '65691c767b5228287ff905d0a273ddd8cf6acdca8aacf7ff023a734f3de4ed21'
 DEADLINE = time.monotonic() + 38
 TOOLS = {'docker', 'docker-compose', 'buildkitd', 'buildkit-runc', 'buildctl',
@@ -68,7 +68,7 @@ def state():
         raw = read(path, 128).decode('ascii', 'replace').strip()
         value['phase'] = raw if raw in {'pulling', 'analyze', 'cleanup', 'directories', 'backup', 'deploy'} else 'unknown'
     head = command(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], seconds=5, cap=128)
-    value['headMatchesExpected53f482f'] = bool(head and head.decode('ascii', 'replace').strip() == EXPECTED_HEAD)
+    value['headMatchesExpectedDeployment'] = bool(head and head.decode('ascii', 'replace').strip() == EXPECTED_HEAD)
     emit('deployment', value)
 
 

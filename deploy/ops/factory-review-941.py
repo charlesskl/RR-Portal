@@ -131,7 +131,8 @@ def quote(value):
 def audit(connection):
     require(connection.execute('PRAGMA integrity_check').fetchall() == [('ok',)], 'SQLiteIntegrity')
     require(not connection.execute('PRAGMA foreign_key_check').fetchall(), 'SQLiteForeignKeys')
-    schema = connection.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').fetchall()
+    # Keep the in-memory audit identical to its sealed JSON representation.
+    schema = [list(row) for row in connection.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name')]
     tables = {}
     for kind, name, _, _ in schema:
         if kind != 'table':

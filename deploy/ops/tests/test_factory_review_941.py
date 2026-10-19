@@ -215,6 +215,64 @@ class Contracts(unittest.TestCase):
             import shutil
             shutil.rmtree(output, ignore_errors=True)
 
+    def sealed_backup_fixture(self):
+        ops.BACKUPS = self.root / 'backups'
+        ops.BACKUPS.mkdir(mode=0o700)
+        directory = ops.BACKUPS / 'factory-review-pre-941-20261019T123456000000Z'
+        directory.mkdir(mode=0o700)
+        baseline = {'sourceCommit': ops.BASE, 'backupComplete': True, 'services': {}}
+        for service in ops.SERVICES:
+            source = self.root / (service + '-original')
+            source.mkdir(mode=0o700)
+            for name in ['data.db', 'auxiliary.db']:
+                with contextlib.closing(sqlite3.connect(source / name)) as connection:
+                    connection.executescript('CREATE TABLE sample(id INTEGER PRIMARY KEY,value); INSERT INTO sample VALUES(1,1);')
+                    connection.commit()
+            (source / 'settings').write_bytes(b'original private settings')
+            target = directory / service
+            target.mkdir(mode=0o700)
+            databases = ops.snapshots(source, target / 'sqlite')
+            files = ops.non_database_inventory(source, databases, target / 'non-database.tar')
+            baseline['services'][service] = {'sqlite': databases, 'files': files}
+        ops.private_write(directory / 'baseline.json', ops.encoded(baseline))
+        ops.seal(directory)
+        return directory, baseline
+
+    def test_real_sqlite_sealed_backup_json_roundtrip_passes_without_rewriting_original_bytes(self):
+        directory, baseline = self.sealed_backup_fixture()
+        before = {str(p): ops.file_hash(p) for p in directory.rglob('*') if p.is_file()}
+        self.assertEqual(baseline, json.loads(ops.encoded(baseline)))
+        path, loaded = ops.selected_backup(str(directory))
+        self.assertEqual(path, directory)
+        self.assertEqual(loaded, baseline)
+        self.assertEqual(before, {str(p): ops.file_hash(p) for p in directory.rglob('*') if p.is_file()})
+
+    def test_sealed_roundtrip_rejects_real_schema_and_same_count_typed_row_changes(self):
+        directory, _ = self.sealed_backup_fixture()
+        database = directory / 'factory-review/sqlite/data.db'
+        for mutation in ['UPDATE sample SET value=1.0', 'ALTER TABLE sample ADD COLUMN unexpected TEXT']:
+            with self.subTest(mutation=mutation):
+                with contextlib.closing(sqlite3.connect(database)) as connection:
+                    connection.execute('UPDATE sample SET value=1')
+                    connection.execute(mutation)
+                    connection.commit()
+                # Even a newly sealed physical file cannot replace the original
+                # full logical schema/table audit retained in baseline.json.
+                (directory / 'manifest.json').unlink()
+                ops.seal(directory)
+                with self.assertRaises(RuntimeError):
+                    ops.selected_backup(str(directory))
+                self.assertEqual(ops.FAILED, 'retainedAllTableSnapshotsMatchBaseline')
+
+    def test_sealed_roundtrip_rejects_any_original_file_bytes_changed(self):
+        directory, _ = self.sealed_backup_fixture()
+        archive = directory / 'factory-review/non-database.tar'
+        with archive.open('ab') as stream:
+            stream.write(b'unexpected trailing bytes')
+        with self.assertRaises(RuntimeError):
+            ops.selected_backup(str(directory))
+        self.assertEqual(ops.FAILED, 'originalBackupSealIntact')
+
     def test_archive_includes_unknown_settings_and_photos_but_not_exact_db_companions(self):
         self.database()
         (self.root / 'data.db-wal').write_bytes(b'evidence only')

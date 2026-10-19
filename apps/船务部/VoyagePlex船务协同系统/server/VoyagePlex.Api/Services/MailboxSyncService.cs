@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -410,6 +411,7 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             await db.ShipmentTasks.IgnoreQueryFilters().AnyAsync(task => task.SourceImportItemId != null &&
                 ids.Contains(task.SourceImportItemId.Value), cancellationToken))
             throw new MailboxRetryRejectedException("邮件不存在、不属于所选邮箱或已处理，已保留原数据");
+        await RejectSecondaryTaskSources(db, ids, cancellationToken);
         foreach (var item in rows)
         {
             if (JsonNode.Parse(item.TaskIdsJson) is not JsonArray { Count: 0 })
@@ -417,6 +419,46 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             RetryUid(item, db.MailOwnerId!.Value, state, credentials);
         }
         return rows;
+    }
+
+    private static async Task RejectSecondaryTaskSources(AppDbContext db, IReadOnlyList<long> ids, CancellationToken cancellationToken)
+    {
+        const int maxSourceJsonChars = 64 * 1024, maxTotalChars = 4 * 1024 * 1024, maxTasks = 10_000;
+        var taskCount = 0; var totalChars = 0;
+        // SourceEmailsJson is shared by all owners within the company. Bound the SQL
+        // projection as well as parsing so malformed large rows cannot exhaust the API.
+        var sources = db.ShipmentTasks.IgnoreQueryFilters().AsNoTracking().Where(task => task.Company == db.Company)
+            .Select(task => task.SourceEmailsJson.Substring(0, maxSourceJsonChars + 1)).Take(maxTasks + 1);
+        await foreach (var json in sources.AsAsyncEnumerable().WithCancellation(cancellationToken))
+        {
+            if (++taskCount > maxTasks || json is null || json.Length > maxSourceJsonChars ||
+                (totalChars += json.Length) > maxTotalChars)
+                throw new MailboxRetryRejectedException("任务来源资料超出安全核对范围，已保留原数据");
+            try
+            {
+                using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 8 });
+                if (document.RootElement.ValueKind != JsonValueKind.Array)
+                    throw new JsonException();
+                foreach (var source in document.RootElement.EnumerateArray())
+                {
+                    if (source.ValueKind != JsonValueKind.Object) throw new JsonException();
+                    long sourceId = 0;
+                    var hasId = false;
+                    foreach (var property in source.EnumerateObject())
+                    {
+                        if (property.Name != "id") continue;
+                        if (hasId || property.Value.ValueKind != JsonValueKind.Number ||
+                            !property.Value.TryGetInt64(out sourceId) || sourceId <= 0) throw new JsonException();
+                        hasId = true;
+                    }
+                    if (!hasId) throw new JsonException();
+                    if (ids.Contains(sourceId))
+                        throw new MailboxRetryRejectedException("邮件已有任务来源关联，已保留原数据");
+                }
+            }
+            catch (Exception error) when (error is JsonException or InvalidOperationException)
+            { throw new MailboxRetryRejectedException("任务来源资料无法安全核对，已保留原数据"); }
+        }
     }
 
     private static bool SameReceivedInstant(string before, string after) =>

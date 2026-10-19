@@ -444,6 +444,131 @@ await Test("retry rejects notes, review or manual changes made while parser awai
     }
 });
 
+await Test("retry rejects exact secondary task sources across owners before parser without changing data", async () =>
+{
+    var retryCalls = 0;
+    await using var f = await Fixture.Create((p, _) =>
+    {
+        if (p.ContainsKey("selected_uids")) retryCalls++;
+        return Task.FromResult(Reply(p, Item(11, failed: !p.ContainsKey("selected_uids"))));
+    });
+    await f.Sync(2); var ids = await f.ItemIds();
+    await f.Read(async db =>
+    {
+        db.Company = "Huadeng";
+        db.ShipmentTasks.Add(new() { ResponsibleUserId = 3, SourceImportItemId = null,
+            SourceEmailsJson = JsonSerializer.Serialize(new[] { new { id = ids[0], isMailbox = true,
+                mailSubject = "source", mailSender = "fixture@example.com", mailReceivedAt = "2026-10-16T00:00:00Z",
+                workCategory = "Change", relation = "确认补充或变更" } }) });
+        await db.SaveChangesAsync();
+    });
+    var before = await f.Snapshot();
+    try { await f.Retry(2, ids); throw new InvalidOperationException("Secondary task source accepted"); }
+    catch (MailboxRetryRejectedException error) when (error.StatusCode == 409) { }
+    Require(retryCalls == 0 && await f.Snapshot() == before, "Secondary link reached parser or changed data");
+});
+
+await Test("retry rechecks secondary task source added while parser awaits and preserves new link", async () =>
+{
+    Fixture? fixture = null; long itemId = 0; var changedSnapshot = "";
+    await using var f = await Fixture.Create(async (p, _) =>
+    {
+        if (p.ContainsKey("selected_uids"))
+        {
+            await fixture!.Read(async db =>
+            {
+                db.Company = "Huadeng";
+                db.ShipmentTasks.Add(new() { ResponsibleUserId = 3,
+                    SourceEmailsJson = JsonSerializer.Serialize(new[] { new { id = itemId } }) });
+                await db.SaveChangesAsync();
+            });
+            changedSnapshot = await fixture.Snapshot();
+        }
+        return Reply(p, Item(11, failed: !p.ContainsKey("selected_uids")));
+    });
+    fixture = f; await f.Sync(2); var ids = await f.ItemIds(); itemId = ids[0];
+    try { await f.Retry(2, ids); throw new InvalidOperationException("Concurrent secondary task source accepted"); }
+    catch (MailboxRetryRejectedException error) when (error.StatusCode == 409) { }
+    Require(changedSnapshot != "" && await f.Snapshot() == changedSnapshot, "Concurrent secondary link or failed row modified");
+});
+
+await Test("retry matches secondary integer IDs exactly and ignores other-company task JSON", async () =>
+{
+    await using var f = await Fixture.Create((p, _) => Task.FromResult(Reply(p,
+        Item(11, failed: !p.ContainsKey("selected_uids")))));
+    await f.Sync(2); var ids = await f.ItemIds();
+    await f.Read(async db =>
+    {
+        db.ShipmentTasks.Add(new() { SourceEmailsJson = "not valid JSON" }); // Xingxin is outside this retry's company.
+        await db.SaveChangesAsync();
+        db.Company = "Huadeng";
+        db.ShipmentTasks.Add(new() { ResponsibleUserId = 3,
+            SourceEmailsJson = JsonSerializer.Serialize(new[] { new { id = ids[0] * 10 + 1,
+                mailSubject = $"Unrelated text mentioning {ids[0]} and {ids[0]}00",
+                futureExtra = new { id = ids[0], arbitrary = true } } }) });
+        await db.SaveChangesAsync();
+    });
+    var result = JsonSerializer.SerializeToNode(await f.Retry(2, ids))!;
+    Require(result["recovered"]!.GetValue<int>() == 1, "Unrelated numeric text or other-company JSON blocked recovery");
+});
+
+await Test("retry fails closed on malformed, unknown or oversized secondary source JSON", async () =>
+{
+    foreach (var json in new[] { "not JSON", "null", "{}", "[1]", "[{}]", "[{\"id\":\"1\"}]",
+        "[{\"id\":1.0}]", "[{\"id\":0}]", "[{\"id\":7,\"id\":8}]", "[" + new string(' ', 64 * 1024) + "]" })
+    {
+        var retryCalls = 0;
+        await using var f = await Fixture.Create((p, _) =>
+        {
+            if (p.ContainsKey("selected_uids")) retryCalls++;
+            return Task.FromResult(Reply(p, Item(11, failed: !p.ContainsKey("selected_uids"))));
+        });
+        await f.Sync(2); var ids = await f.ItemIds();
+        await f.Read(async db =>
+        {
+            db.Company = "Huadeng"; db.ShipmentTasks.Add(new() { SourceEmailsJson = json });
+            await db.SaveChangesAsync();
+        });
+        var before = await f.Snapshot();
+        try { await f.Retry(2, ids); throw new InvalidOperationException("Unsafe task JSON accepted"); }
+        catch (MailboxRetryRejectedException error) when (error.StatusCode == 409) { }
+        Require(retryCalls == 0 && await f.Snapshot() == before, "Unsafe task JSON reached parser or changed data");
+    }
+});
+
+await Test("retry bounds aggregate secondary source JSON and task row scanning", async () =>
+{
+    foreach (var kind in new[] { "characters", "tasks" })
+    {
+        var retryCalls = 0;
+        await using var f = await Fixture.Create((p, _) =>
+        {
+            if (p.ContainsKey("selected_uids")) retryCalls++;
+            return Task.FromResult(Reply(p, Item(11, failed: !p.ContainsKey("selected_uids"))));
+        });
+        await f.Sync(2); var ids = await f.ItemIds();
+        await f.Read(async db =>
+        {
+            var json = kind == "characters" ? "[" + new string(' ', 64 * 1024 - 2) + "]" : "[]";
+            var emptyObject = "{}";
+            var count = kind == "characters" ? 65 : 10_001;
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                WITH RECURSIVE numbers(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM numbers WHERE value < {count})
+                INSERT INTO ShipmentTasks (Company, ResponsibleUserId, ResponsibleUserName, SourceMailboxAddress,
+                    BatchRootId, BatchSequence, Customer, EmailSubject, ContainerType, CutoffDate, SiDeadline,
+                    Port, DestinationCountry, TransportReference, SpecialRequirements, WarehouseGroupsJson,
+                    ExportDetailsJson, ItemsJson, SourceEmailsJson, SourceGroupKey, Status, UpdatedAt, CreatedAt)
+                SELECT 'Huadeng', 3, '', '', 0, 0, '', '', '', '', '', '', '', '', '', '[]', {emptyObject}, '[]',
+                    {json}, '', 'PendingReview', '2026-10-19 00:00:00', '2026-10-19 00:00:00' FROM numbers;
+                """);
+        });
+        var before = await f.Snapshot();
+        try { await f.Retry(2, ids); throw new InvalidOperationException("Secondary task scan budget exceeded without rejection"); }
+        catch (MailboxRetryRejectedException error) when (error.StatusCode == 409) { }
+        Require(retryCalls == 0 && await f.Snapshot() == before, "Task scan budget exceeded with side effects");
+    }
+});
+
 await Test("retry cancellation propagates without writes and releases shared synchronization lock", async () =>
 {
     using var cancellation = new CancellationTokenSource(); var cancel = true;
@@ -524,6 +649,7 @@ sealed class Fixture : IAsyncDisposable
             batches = await db.ImportBatches.IgnoreQueryFilters().AsNoTracking().OrderBy(x => x.Id).ToListAsync(),
             contacts = await db.MailContacts.IgnoreQueryFilters().AsNoTracking().OrderBy(x => x.Id).ToListAsync(),
             states = await db.MailSyncStates.IgnoreQueryFilters().AsNoTracking().OrderBy(x => x.Id).ToListAsync(),
+            tasks = await db.ShipmentTasks.IgnoreQueryFilters().AsNoTracking().OrderBy(x => x.Id).ToListAsync(),
         }));
         return result;
     }

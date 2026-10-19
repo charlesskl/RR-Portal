@@ -31,7 +31,10 @@ ROOT = pathlib.Path('/opt/rr-portal')
 APP = pathlib.Path('apps/船务部/VoyagePlex船务协同系统')
 DATA = ROOT / APP / 'data-runtime'
 DB = DATA / 'voyageplex.db'
-BACKUP = ROOT / 'deploy/backups/voyageplex-mail-recovery-20261019'
+FIRST_BACKUP = ROOT / 'deploy/backups/voyageplex-mail-recovery-20261019'
+FIRST_RESULT_SHA256 = '5c90d5251fbb212364dee9b1059fb6d76feafd617cce576bb0254bc389b442a5'
+FIRST_SEAL_SHA256 = 'c9af2383c41e4bf0652a02c13c39480f4d35d65bedb18b7ffa1ee35e1baa639c'
+BACKUP = ROOT / 'deploy/backups/voyageplex-mail-recovery-20261019-complete-v2'
 RUNS = BACKUP.with_name(BACKUP.name + '-runs')
 BRANCH = 'refs/heads/ops/voyageplex-mail-recovery-20261019'
 BASE = '4932408a0375058b781b9a9c050d4eef65f8728b'
@@ -233,6 +236,17 @@ def verify_seal(directory):
     require(actual == expected, 'SEALED_RESULT_OR_BACKUP_CHANGED')
 
 
+def prior_failure():
+    verify_seal(FIRST_BACKUP)
+    require(file_sha(FIRST_BACKUP / 'first-result.json') == FIRST_RESULT_SHA256 and
+            file_sha(FIRST_BACKUP / 'seal.json') == FIRST_SEAL_SHA256, 'EXACT_ORIGINAL_FAILURE_RECEIPT_REQUIRED')
+    result = read_json(FIRST_BACKUP / 'first-result.json')
+    require(result.get('mode') == 'backup' and result.get('failed') is True and
+            result.get('failedCheck') == 'UNEXPECTED_ADDITIONAL_SQLITE_DATABASE', 'EXPECTED_ORIGINAL_BACKUP_FAILURE_REQUIRED')
+    return {'resultPath': str(FIRST_BACKUP / 'first-result.json'), 'resultSHA256': FIRST_RESULT_SHA256,
+            'sealSHA256': FIRST_SEAL_SHA256, 'failedCheck': 'UNEXPECTED_ADDITIONAL_SQLITE_DATABASE', 'preserved': True}
+
+
 def backup_files(destination):
     """SQLite logical snapshot replaces its live DB/WAL/SHM originals; all other files copied."""
     require(DATA.resolve() == DATA and DATA.is_dir(), 'FIXED_DATA_DIRECTORY_REQUIRED')
@@ -256,8 +270,19 @@ def backup_files(destination):
         count += 1
         total += before.st_size
         require(count <= 100000 and total <= 20 * 1024**3, 'DATA_BACKUP_BOUND')
+        historical = re.fullmatch(r'voyageplex\.db\.before-(company|daily-mail|personal-mail)-([0-9]{14})-[a-f0-9]{32}\.db', rel.as_posix())
+        if historical:
+            # Only the three exact application-generated top-level name shapes.
+            require(dt.datetime.strptime(historical[2], '%Y%m%d%H%M%S').strftime('%Y%m%d%H%M%S') == historical[2],
+                    'VALID_HISTORICAL_SQLITE_TIMESTAMP_REQUIRED')
+            for suffix in ['-wal', '-shm', '-journal']:
+                companion = path.with_name(path.name + suffix)
+                require(not companion.is_symlink() and (not companion.exists() or
+                        companion.is_file() and companion.stat().st_size == 0), 'HISTORICAL_SQLITE_LIVE_COMPANION_FORBIDDEN')
         with path.open('rb') as source:
-            require(source.read(16) != b'SQLite format 3\x00', 'UNEXPECTED_ADDITIONAL_SQLITE_DATABASE')
+            is_sqlite = source.read(16) == b'SQLite format 3\x00'
+            require(not is_sqlite or historical is not None, 'UNEXPECTED_ADDITIONAL_SQLITE_DATABASE')
+            require(not historical or is_sqlite, 'HISTORICAL_SQLITE_HEADER_REQUIRED')
         (destination / rel).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         shutil.copyfile(path, destination / rel)
         (destination / rel).chmod(0o600)
@@ -266,6 +291,20 @@ def backup_files(destination):
                 (after.st_ino, after.st_size, after.st_mtime_ns), 'FILE_CHANGED_DURING_COPY')
         metadata[rel.as_posix()]['sha256'] = file_sha(destination / rel)
         require(metadata[rel.as_posix()]['sha256'] == file_sha(path), 'FILE_COPY_HASH_MISMATCH')
+        final = path.stat()
+        require((before.st_ino, before.st_size, before.st_mtime_ns) ==
+                (final.st_ino, final.st_size, final.st_mtime_ns), 'FILE_CHANGED_DURING_COPY')
+        if historical:
+            end = time.monotonic() + 30
+            with connect(destination / rel) as copied:
+                copied.set_progress_handler(lambda: 1 if time.monotonic() > end else 0, 1000)
+                require(copied.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'HISTORICAL_SQLITE_INTEGRITY_CHECK')
+            for suffix in ['-wal', '-shm', '-journal']:
+                companion = path.with_name(path.name + suffix)
+                require(not companion.is_symlink() and (not companion.exists() or
+                        companion.is_file() and companion.stat().st_size == 0), 'HISTORICAL_SQLITE_LIVE_COMPANION_FORBIDDEN')
+            # Keep kind=file: subsequent byte-preservation comparison includes it.
+            metadata[rel.as_posix()]['historicalSQLiteIndividuallyVerified'] = True
     return metadata
 
 
@@ -697,7 +736,8 @@ def backup(directory, result):
     bindings = settings_and_bindings(directory / 'baseline.sqlite3')
     entries, flags = configuration(private['voyageplex-api'], bindings)
     write_new(directory / 'typed-tables.private.json', table_snapshot(directory / 'baseline.sqlite3'))
-    write_new(directory / 'data-files.private.json', backup_files(directory / 'data-files'))
+    files = backup_files(directory / 'data-files')
+    write_new(directory / 'data-files.private.json', files)
     write_new(directory / 'bindings.private.json', bindings)
     old_dll = command(['docker', 'exec', private['voyageplex-api']['Id'], 'sha256sum', '/app/VoyagePlex.Api.dll']).decode().split()[0]
     require(re.fullmatch('[a-f0-9]{64}', old_dll) is not None, 'OLD_DLL_HASH_SHAPE')
@@ -706,6 +746,8 @@ def backup(directory, result):
     write_new(directory / 'candidates.private.json', candidate)
     result.update({'source': BASE, 'backupComplete': True, 'sqliteOnlineBackup': True,
                    'allNonSQLiteFilesPrivatelyCopied': True, 'databaseAndFilesAreNotOneAtomicSnapshot': True,
+                   'historicalSQLiteFilesIndividuallyVerified': True, 'independentDatabasesAreNotOneAtomicSnapshot': True,
+                   'historicalSQLiteFileCount': sum(item.get('historicalSQLiteIndividuallyVerified') is True for item in files.values()),
                    'candidateMetadataExecutionLocation': 'server-host-independent-standard-library-child',
                    'candidateSearchDoesNotRepeatParserNetworkConnectivityProof': True,
                    'bindings': flags, 'candidates': candidate_summary(candidate), 'services': safe})
@@ -825,6 +867,7 @@ def main():
     original = None
     prior_receipts = []
     if mode == 'backup':
+        retained_failure = prior_failure()
         directory = BACKUP
     else:
         original = selected_backup()
@@ -843,6 +886,8 @@ def main():
               'containersOrConfigurationChangedByOps': False, 'secretsOrMailContentPrinted': False,
               'success': False, 'allMailboxRecoveryVerified': False,
               'priorContinuationReceipts': sorted(prior_receipts, key=lambda v: v['run'])}
+    if mode == 'backup':
+        result['priorFailure'] = retained_failure
     def terminate(*_):
         require(False, 'WORKFLOW_TERMINATION_REQUESTED')
     old_handler = signal.signal(signal.SIGTERM, terminate)
@@ -863,6 +908,8 @@ def main():
     finally:
         write_new(directory / 'first-result.json', result)
         seal(directory)
+        if mode == 'backup':
+            prior_failure()  # Original files, receipt and full seal must remain unchanged.
         if mode != 'backup':
             verify_seal(BACKUP)
         emit(result)

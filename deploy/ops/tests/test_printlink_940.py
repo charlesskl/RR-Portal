@@ -10,10 +10,13 @@ import os
 import pathlib
 import re
 import sqlite3
+import shutil
+import tarfile
 import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+from unittest import mock
 
 HELPER = pathlib.Path(__file__).parents[1]/'printlink-940.py'
 spec = importlib.util.spec_from_file_location('printlink940',HELPER)
@@ -762,6 +765,234 @@ class ContextTests(unittest.TestCase):
         previous,current=functions(old),functions(HELPER.read_text())
         for name in ['selected_backup','backup','verify','diagnose','diagnostic_private_backup','diagnostic_snapshot_proof']:
             self.assertEqual(previous[name],current[name],name)
+
+
+ACTIVE_TEST_PAYLOAD=json.dumps({'state':'RUNNING','progress':60,'connected':True,'sourceMachine':'1'})
+ACTIVE_TEST_NEW_PAYLOAD=json.dumps({'state':'IDLE','progress':0,'connected':False,'sourceMachine':'1'})
+
+
+class ActiveTests(unittest.TestCase):
+    def setUp(self):
+        self.old_umask=os.umask(0o077)
+        self.tmp=tempfile.TemporaryDirectory(prefix='printlink-940-active-synthetic-')
+        self.root=pathlib.Path(self.tmp.name)
+        self.baseline=self.root/'original';self.live=self.root/'live'
+        self.baseline.mkdir(mode=0o700);self.live.mkdir(mode=0o700)
+        names=['orders/printlink.sqlite','production.sqlite']
+        self.audit={}
+        for name in names:
+            file=self.baseline/'sqlite-snapshots'/name
+            file.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+            with contextlib.closing(sqlite3.connect(file)) as db:
+                db.execute('CREATE TABLE business(id TEXT PRIMARY KEY,payload TEXT)')
+                db.execute("INSERT INTO business VALUES ('preserve','original')")
+                db.execute('CREATE TABLE '+('users' if name.startswith('orders/') else 'snapshot')+'(id TEXT PRIMARY KEY,value TEXT)')
+                db.execute('INSERT INTO '+('users' if name.startswith('orders/') else 'snapshot')+" VALUES ('identity','original')")
+                if name.startswith('orders/'):
+                    db.executescript('CREATE TABLE collector_events(id TEXT PRIMARY KEY,station TEXT NOT NULL,received TEXT NOT NULL);'
+                      'CREATE TABLE collector_devices(station TEXT,machine TEXT,payload TEXT NOT NULL,observed TEXT NOT NULL,PRIMARY KEY(station,machine));'
+                      'CREATE TABLE collector_stations(id TEXT PRIMARY KEY,last_seen TEXT,sequence INTEGER DEFAULT 0);')
+                    db.execute("INSERT INTO collector_stations VALUES ('station','2026-10-19T01:00:00.000Z',1)")
+                    db.execute("INSERT INTO collector_events VALUES ('original','station','2026-10-19T01:00:00.000Z')")
+                    db.execute("INSERT INTO collector_devices VALUES ('station','1',?,'2026-10-18T01:00:00.000Z')",(ACTIVE_TEST_PAYLOAD,))
+                db.commit();self.audit[name]=ops.sqlite_audit(db)
+            target=self.live/name;target.parent.mkdir(mode=0o700,parents=True,exist_ok=True);shutil.copy2(file,target)
+        self.before={'deployment':'PR940','sourceCommit':ops.PRE_DEPLOY_COMMIT,'strictVerificationPassed':False,
+                     'checks':{'allLogicalSQLiteDataStable':False,'allOtherChecks':True},'sqlite':self.audit,'rawInventory':[]}
+        for name,data in {'baseline.json':ops.encoded(self.before),'runtime.private.json':b'{}','env.before':b'synthetic',
+                          'nginx.configuration':b'synthetic'}.items():
+            ops.private_write(self.baseline/name,data)
+        with tarfile.open(self.baseline/'runtime-raw.tar','w'):pass
+        ops.seal(self.baseline)
+        self.seal=(self.baseline/'manifest.json').read_bytes()
+        self.saved=(ops.BACKUPS,ops.DIAGNOSTIC_BACKUP_PATH)
+        ops.BACKUPS=self.root;ops.DIAGNOSTIC_BACKUP_PATH=str(self.baseline)
+
+    def tearDown(self):
+        ops.BACKUPS,ops.DIAGNOSTIC_BACKUP_PATH=self.saved
+        self.tmp.cleanup();os.umask(self.old_umask)
+
+    def sql(self,statement,parameters=(),database='orders/printlink.sqlite'):
+        with contextlib.closing(sqlite3.connect(self.live/database)) as db:
+            db.execute(statement,parameters);db.commit()
+
+    def telemetry(self):
+        self.sql("INSERT INTO collector_events VALUES ('new','station','2026-10-19T02:00:00.000Z')")
+        # MAX allows an unchanged sequence; offline observations may predate backup.
+        self.sql("UPDATE collector_stations SET last_seen='2026-10-19T02:00:00.001Z'")
+        self.sql("UPDATE collector_devices SET payload=?,observed='2026-10-18T02:00:00.000Z'",(ACTIVE_TEST_NEW_PAYLOAD,))
+
+    def snapshot(self,name='current',probe=None,audit=None):
+        return ops.active_read_snapshot(self.live,self.baseline,self.audit,self.root/name,probe,audit)
+
+    def test_only_three_telemetry_tables_pass_and_original_seal_unchanged(self):
+        self.telemetry();current,delta,gates,_=self.snapshot()
+        self.assertNotEqual(current,self.audit)
+        self.assertTrue(all(v['passed'] for v in gates.values()))
+        self.assertEqual(delta['orders/printlink.sqlite']['tables']['collector_events']['added'],1)
+        final,_,_,pairwise=self.snapshot('final',self.root/'current',current)
+        self.assertEqual(final,current);self.assertTrue(all(v['passed'] for v in pairwise.values()))
+        self.assertEqual((self.baseline/'manifest.json').read_bytes(),self.seal)
+        self.assertEqual(ops.diagnostic_private_backup(str(self.baseline))[1],self.before)
+        self.assertFalse((self.baseline/'verify-first-result.json').exists())
+
+    def test_forbidden_deltas(self):
+        cases=[
+          ('cloud-business',"UPDATE business SET payload='changed'",(), 'orders/printlink.sqlite'),
+          ('production-snapshot',"UPDATE business SET payload='changed'",(), 'production.sqlite'),
+          ('cloud-permission',"UPDATE users SET value='administrator'",(), 'orders/printlink.sqlite'),
+          ('actual-snapshot',"UPDATE snapshot SET value='changed stock/product/conflict'",(), 'production.sqlite'),
+          ('schema',"ALTER TABLE business ADD COLUMN hidden TEXT",(), 'orders/printlink.sqlite'),
+          ('delete-old-event',"DELETE FROM collector_events WHERE id='original'",(), 'orders/printlink.sqlite'),
+          ('modify-old-event',"UPDATE collector_events SET received='2026-10-19T01:00:00.001Z' WHERE id='original'",(), 'orders/printlink.sqlite'),
+          ('event-pk',"UPDATE collector_events SET id='changed' WHERE id='original'",(), 'orders/printlink.sqlite'),
+          ('station-pk',"UPDATE collector_stations SET id='changed'",(), 'orders/printlink.sqlite'),
+          ('device-pk',"UPDATE collector_devices SET machine='2'",(), 'orders/printlink.sqlite'),
+          ('null-device-pk',"UPDATE collector_devices SET machine=NULL",(), 'orders/printlink.sqlite'),
+          ('sequence-backward',"UPDATE collector_stations SET sequence=0",(), 'orders/printlink.sqlite'),
+          ('station-time-backward',"UPDATE collector_stations SET last_seen='2026-10-18T01:00:00.000Z'",(), 'orders/printlink.sqlite'),
+          ('device-time-backward',"UPDATE collector_devices SET observed='2026-10-17T01:00:00.000Z'",(), 'orders/printlink.sqlite'),
+          ('offset-time',"UPDATE collector_devices SET observed='2026-10-18T02:00:00+02:00'",(), 'orders/printlink.sqlite'),
+          ('same-time-payload-change',"UPDATE collector_devices SET observed='2026-10-18T01:00:00.000Z'",(), 'orders/printlink.sqlite'),
+          ('unknown-station',"UPDATE collector_events SET station='unknown' WHERE id='new'",(), 'orders/printlink.sqlite'),
+          ('no-new-event',"DELETE FROM collector_events WHERE id='new'",(), 'orders/printlink.sqlite'),
+          ('future-observation',"UPDATE collector_devices SET observed='2026-10-19T03:00:00.000Z'",(), 'orders/printlink.sqlite'),
+        ]
+        original_live=self.root/'original-live';shutil.copytree(self.live,original_live)
+        for label,sql,args,database in cases:
+            with self.subTest(label=label):
+                shutil.rmtree(self.live);shutil.copytree(original_live,self.live)
+                self.telemetry();self.sql(sql,args,database)
+                with self.assertRaises(Exception):self.snapshot(label)
+                evidence=self.root/label/'sqlite-snapshots'/database
+                self.assertTrue(evidence.is_file())
+                report=json.loads(evidence.with_name(evidence.name+'.audit-delta.json').read_bytes())
+                with contextlib.closing(sqlite3.connect(evidence.as_uri()+'?mode=ro&immutable=1',uri=True)) as copy:
+                    self.assertEqual(ops.sqlite_audit(copy),report['audit'])
+
+    def test_invalid_payloads(self):
+        invalid=[
+          'null','[]','{}',
+          '{"state":"IDLE","progress":0,"progress":1,"connected":true}',
+          '{"state":"IDLE","progress":NaN,"connected":true}',
+          '{"state":"IDLE","progress":Infinity,"connected":true}',
+          json.dumps({'state':'IDLE','progress':True,'connected':True}),
+          json.dumps({'state':'IDLE','progress':101,'connected':True}),
+          json.dumps({'state':'BAD','progress':0,'connected':True}),
+          json.dumps({'state':'IDLE','progress':0,'connected':1}),
+          json.dumps({'state':'IDLE','progress':0,'connected':True,'inventory':0}),
+          json.dumps({'state':'IDLE','progress':0,'connected':True,'name':{'nested':1}}),
+          json.dumps({'state':'IDLE','progress':0,'connected':True,'name':'😀'*129}),
+          json.dumps({'state':'IDLE','progress':0,'connected':True,'nozzleTemp':10000001}),
+          json.dumps({'state':'IDLE','progress':0,'connected':True,'remainingTime':False}),
+        ]
+        for value in invalid:
+            with self.subTest(value=value):
+                with self.assertRaises(Exception):ops.active_payload(value)
+
+    def test_current_new_event_cannot_disappear_by_final(self):
+        self.telemetry();audit,_,_,_=self.snapshot()
+        self.sql("DELETE FROM collector_events WHERE id='new'")
+        # Still legal vs original alone, but forbidden vs current pinned evidence.
+        self.sql("UPDATE collector_stations SET last_seen='2026-10-19T01:00:00.000Z'")
+        self.sql("UPDATE collector_devices SET payload=?,observed='2026-10-18T01:00:00.000Z'",(ACTIVE_TEST_PAYLOAD,))
+        with self.assertRaises(Exception):self.snapshot('final',self.root/'current',audit)
+
+    def test_failure_retained_exclusively_and_original_first_result_untouched(self):
+        # Corrupt original seal content, then show the failed first attempt survives.
+        (self.baseline/'env.before').write_bytes(b'changed')
+        with self.assertRaises(Exception):ops.verify_active('f'*40,str(self.baseline))
+        result_dir=self.root/ops.ACTIVE_RESULT_NAME;result=(result_dir/'first-result.json').read_bytes()
+        self.assertFalse(json.loads(result)['activeVerificationPassed'])
+        self.assertFalse(json.loads(result)['strictVerificationPassed'])
+        with self.assertRaises(FileExistsError):ops.verify_active('f'*40,str(self.baseline))
+        self.assertEqual((result_dir/'first-result.json').read_bytes(),result)
+        self.assertEqual((self.baseline/'manifest.json').read_bytes(),self.seal)
+        self.assertFalse((self.baseline/'verify-first-result.json').exists())
+
+    def test_other_container_change_keeps_overall_false_but_reports_data_protection(self):
+        lifecycle={'containerId':'old','imageId':'old-image','running':True,'status':'running','oomKilled':False,'health':'healthy'}
+        old_runtime={'configEnvironmentSha256':'same','processEnvironmentSha256':{},'mounts':[],
+                     'platformLock':{},'lifecycle':lifecycle}
+        new_runtime={**old_runtime,'lifecycle':{**lifecycle,'containerId':'new','imageId':'new-image'}}
+        old_others={name:{**lifecycle,'restartCount':0} for name in ops.PROTECTED_SERVICES+['voyageplex']}
+        new_others={**old_others,'voyageplex':{**old_others['voyageplex'],'restartCount':1}}
+        self.before.update({'runtime':old_runtime,'otherContainers':old_others,'durableInventory':[],
+                            'nginx':{'configuration':ops.raw_hash(b'synthetic')},'configuration':{'same':'same'}})
+        (self.baseline/'baseline.json').write_bytes(ops.encoded(self.before))
+        (self.baseline/'manifest.json').unlink();ops.seal(self.baseline)
+        original_manifest=(self.baseline/'manifest.json').read_bytes()
+        (self.root/'.env.cloud.production').write_bytes(b'synthetic')
+        self.telemetry();target='f'*40
+        replacements={'ROOT':self.root,'git_commit':lambda *args:target,'tested_source_guard':lambda *args:{},
+          'runtime_context':lambda:('synthetic',self.live,new_runtime,{}),'tree_inventory':lambda *args:[],
+          'durable_inventory':lambda rows,*args:rows,'other_containers':lambda:new_others,
+          'nginx_material':lambda:{'configuration':b'synthetic'},'actual_runtime_files':lambda *args:0,
+          'read_only_probes':lambda:{'passed':True},'production_readiness':lambda *args:{'passed':True},
+          'configuration':lambda:{'same':'same'}}
+        with mock.patch.multiple(ops,**replacements):result=ops.verify_active(target,str(self.baseline))
+        self.assertTrue(result['targetDataPreservationPassed'])
+        self.assertFalse(result['activeVerificationPassed'])
+        self.assertFalse(result['strictVerificationPassed'])
+        self.assertFalse(result['checks']['allOtherContainersUnchanged'])
+        self.assertEqual(set(result['otherContainerLifecycleDelta']),{'voyageplex'})
+        self.assertEqual((self.baseline/'manifest.json').read_bytes(),original_manifest)
+        self.assertFalse((self.baseline/'verify-first-result.json').exists())
+
+
+class ActiveRoutingTests(unittest.TestCase):
+    def test_main_active_exit_uses_overall_active_result_and_retains_strict_false(self):
+        pin=str(HELPER.with_name('printlink-940-source.json'));target='1c295d6418a64a1610b9075acd4da2a38d875328'
+        with contextlib.ExitStack() as stack:
+            for name in ['backup','verify','diagnose','context']:
+                stack.enter_context(patch.object(ops,name,side_effect=AssertionError('wrong mode route: '+name)))
+            active=stack.enter_context(patch.object(ops,'verify_active'))
+            for passed in [False,True]:
+                active.return_value={'mode':'verify-active','activeVerificationPassed':passed,
+                  'targetDataPreservationPassed':True,'strictVerificationPassed':False,'originalStrictVerificationPassed':False}
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    status=ops.main(['verify-active',ops.PRE_DEPLOY_COMMIT,target,ops.DIAGNOSTIC_BACKUP_PATH,pin])
+                self.assertEqual(status,0 if passed else 1)
+                result=json.loads(output.getvalue());self.assertFalse(result['strictVerificationPassed'])
+                self.assertFalse(result['originalStrictVerificationPassed']);self.assertTrue(result['targetDataPreservationPassed'])
+                active.assert_called_with(target,ops.DIAGNOSTIC_BACKUP_PATH)
+
+    def test_main_active_rejects_nonfixed_arguments_and_changed_pin_bytes(self):
+        pin=str(HELPER.with_name('printlink-940-source.json'));target='1c295d6418a64a1610b9075acd4da2a38d875328'
+        with patch.object(ops,'verify_active') as active:
+            for mode,before,commit,path in [('unknown',ops.PRE_DEPLOY_COMMIT,target,ops.DIAGNOSTIC_BACKUP_PATH),
+              ('verify-active','d'*40,target,ops.DIAGNOSTIC_BACKUP_PATH),
+              ('verify-active',ops.PRE_DEPLOY_COMMIT,ops.PRE_DEPLOY_COMMIT,ops.DIAGNOSTIC_BACKUP_PATH),
+              ('verify-active',ops.PRE_DEPLOY_COMMIT,'not-a-sha',ops.DIAGNOSTIC_BACKUP_PATH),
+              ('verify-active',ops.PRE_DEPLOY_COMMIT,'f'*40,ops.DIAGNOSTIC_BACKUP_PATH),
+              ('verify-active',ops.PRE_DEPLOY_COMMIT,target,ops.DIAGNOSTIC_BACKUP_PATH+'x'),
+              ('verify-active',ops.PRE_DEPLOY_COMMIT,target,'')]:
+                with self.assertRaises(RuntimeError):ops.main([mode,before,commit,path,pin])
+            with tempfile.TemporaryDirectory() as folder:
+                altered=pathlib.Path(folder)/'pin.json';altered.write_bytes(pathlib.Path(pin).read_bytes()+b'\n')
+                with self.assertRaises(RuntimeError):ops.main(['verify-active',ops.PRE_DEPLOY_COMMIT,target,ops.DIAGNOSTIC_BACKUP_PATH,str(altered)])
+            active.assert_not_called()
+
+    def test_both_workflow_gates_require_active_fixed_backup_and_deployed_target(self):
+        workflow=(HELPER.parents[2]/'.github/workflows/indo-diag.yml').read_text()
+        self.assertIn('options: [backup, verify, diagnose, context, verify-active]',workflow)
+        env={**os.environ,'CLOUD_HOST_FINGERPRINT':'SHA256:'+'A'*43,
+          'PRINTLINK_OPS_BRANCH':'refs/heads/ops/printlink-940-20261019','PRINTLINK_OPS_REF':'a'*40,
+          'PRINTLINK_OPS_MODE':'verify-active','PRINTLINK_OPS_BEFORE':ops.PRE_DEPLOY_COMMIT,
+          'PRINTLINK_OPS_TARGET':'1c295d6418a64a1610b9075acd4da2a38d875328','PRINTLINK_OPS_BACKUP':ops.DIAGNOSTIC_BACKUP_PATH}
+        for label,indent in [('run',10),('script',12)]:
+            match=re.search(r'^\s*'+label+r': \|\n((?:^ {'+str(indent)+r'}.*\n|^\n)+)',workflow,re.M)
+            self.assertIsNotNone(match)
+            script='\n'.join(line[indent:] for line in match[1].splitlines()).split('cd /opt/rr-portal',1)[0]
+            result=subprocess.run(['bash','-c',script],env=env,capture_output=True)
+            self.assertEqual(result.returncode,0)
+            for changed in [{'PRINTLINK_OPS_TARGET':ops.PRE_DEPLOY_COMMIT},{'PRINTLINK_OPS_TARGET':'not-a-sha'},
+              {'PRINTLINK_OPS_TARGET':'f'*40},
+              {'PRINTLINK_OPS_BEFORE':'d'*40},{'PRINTLINK_OPS_BACKUP':ops.DIAGNOSTIC_BACKUP_PATH+'x'},
+              {'PRINTLINK_OPS_BACKUP':''},{'PRINTLINK_OPS_MODE':'verify_active'},
+              {'PRINTLINK_OPS_BRANCH':'refs/heads/main'}]:
+                rejected=subprocess.run(['bash','-c',script],env={**env,**changed},capture_output=True)
+                self.assertNotEqual(rejected.returncode,0)
 
 
 if __name__=='__main__':unittest.main()

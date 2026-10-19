@@ -956,21 +956,250 @@ def context(target,path):
       'automaticRestoreOrRecreatePerformed':False,'deploymentAuthorizedByThisResult':False}
 
 
+# DRAFT ONLY: insert before main() in the reviewed PR940 ops helper.
+# This adds no business writes and does not alter backup/selected_backup/verify.
+ACTIVE_RESULT_NAME = 'printlink-verify-active-940-first-20261019T011955726437Z'
+ACTIVE_TABLES = {'collector_events', 'collector_stations', 'collector_devices'}
+ACTIVE_STATES = {'RUNNING', 'FINISH', 'FAILED', 'PAUSE', 'IDLE', 'UNKNOWN'}
+ACTIVE_STRINGS = {'sourceMachine':32, 'name':256, 'gcodeFile':256, 'jobName':256, 'error':256}
+ACTIVE_NUMBERS = {'remainingTime', 'nozzleTemp', 'nozzleTarget', 'bedTemp', 'bedTarget',
+                  'layerNum', 'totalLayers', 'currentHeight', 'laserPowerMw'}
+
+
+def active_timestamp(value):
+    # Conservative acceptance contract: collector-generated canonical UTC ms.
+    # The HTTP route accepts more date formats; those require separate review.
+    require(isinstance(value,str) and bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z',value)),
+            'activeCanonicalUTCMillisecondTimestamp')
+    parsed=parse_timestamp(value)
+    require(parsed.isoformat(timespec='milliseconds').replace('+00:00','Z')==value, 'activeValidCalendarTimestamp')
+    return parsed
+
+
+def active_payload(value):
+    require(isinstance(value,str), 'activeDevicePayloadIsText')
+    def pairs(items):
+        result={}
+        for key,item in items:
+            require(key not in result, 'activeNoDuplicateJSONKeys')
+            result[key]=item
+        return result
+    def bad_constant(_):
+        require(False, 'activeNoNonfiniteJSONConstants')
+    payload=json.loads(value,object_pairs_hook=pairs,parse_constant=bad_constant)
+    required={'state','progress','connected'}
+    require(type(payload) is dict and required<=set(payload)<=required|set(ACTIVE_STRINGS)|ACTIVE_NUMBERS,
+            'activeExactDeviceDisplayPayloadFields')
+    require(payload['state'] in ACTIVE_STATES and type(payload['connected']) is bool,
+            'activeDeviceStateAndConnectedTypes')
+    for key,number in payload.items():
+        if key in ACTIVE_STRINGS:
+            require(isinstance(number,str) and len(number.encode('utf-16-le','surrogatepass'))//2<=ACTIVE_STRINGS[key],
+                    'activeDeviceStringWithinJavaScriptUTF16Limit')
+        elif key in ACTIVE_NUMBERS or key=='progress':
+            require(type(number) in {int,float} and math.isfinite(number) and 0<=number<=(100 if key=='progress' else 10000000),
+                    'activeFiniteBoundedDeviceNumber')
+    return True
+
+
+def active_telemetry(connection,reference):
+    require(reference in {'baseline','probe'}, 'activeFixedReferenceAlias')
+    contract={'collector_stations':['id','last_seen','sequence'], 'collector_devices':['station','machine','payload','observed'],
+              'collector_events':['id','station','received']}
+    for table,columns in contract.items():
+        for schema in [reference,'main']:
+            metadata=connection.execute('PRAGMA '+schema+'.table_xinfo('+quote_identifier(table)+')').fetchall()
+            require([row[1] for row in metadata]==columns, 'activeExactTelemetryColumnContract')
+    def rows(schema,table,columns):
+        return connection.execute('SELECT '+','.join(quote_identifier(c) for c in columns)+' FROM '+schema+'.'+quote_identifier(table))
+    def text(value,limit=None):
+        return isinstance(value,str) and bool(value) and (limit is None or len(value.encode('utf-16-le','surrogatepass'))//2<=limit)
+    stations={}
+    for schema in [reference,'main']:
+        values={}
+        for identifier,last_seen,sequence in rows(schema,'collector_stations',['id','last_seen','sequence']):
+            require(text(identifier) and type(sequence) is int and 0<=sequence<=9007199254740991, 'activeStationKeyAndSafeSequence')
+            require(identifier not in values, 'activeUniqueStationKey')
+            values[identifier]=(last_seen,active_timestamp(last_seen),sequence)
+        stations[schema]=values
+    require(set(stations[reference])==set(stations['main']), 'activeStationPrimaryKeySetUnchanged')
+    changed_stations=set()
+    for identifier,(stamp,parsed,sequence) in stations['main'].items():
+        old_stamp,old_parsed,old_sequence=stations[reference][identifier]
+        require(stamp>=old_stamp and parsed>=old_parsed and sequence>=old_sequence, 'activeStationTimeAndSequenceNondecreasing')
+        if (stamp,sequence)!=(old_stamp,old_sequence):changed_stations.add(identifier)
+    devices={}
+    for schema in [reference,'main']:
+        values={}
+        for station,machine,payload,observed in rows(schema,'collector_devices',['station','machine','payload','observed']):
+            require(text(station) and station in stations[schema] and text(machine) and bool(re.fullmatch(r'[0-9]+',machine)),
+                    'activeExistingStationAndNumericMachineKey')
+            require((station,machine) not in values, 'activeUniqueDeviceKey')
+            active_payload(payload)
+            values[(station,machine)]=(payload,observed,active_timestamp(observed))
+        devices[schema]=values
+    require(set(devices[reference])==set(devices['main']), 'activeDevicePrimaryKeySetUnchanged')
+    changed_devices={}
+    for key,(payload,observed,parsed) in devices['main'].items():
+        old_payload,old_observed,old_parsed=devices[reference][key]
+        require(observed>=old_observed and parsed>=old_parsed, 'activeDeviceObservedNondecreasing')
+        if payload!=old_payload or observed!=old_observed:
+            require(observed>old_observed and parsed>old_parsed, 'activeChangedDeviceRequiresStrictlyNewerObservation')
+            changed_devices[key]=parsed
+    # Index lookup by native PK, then exact typed equality on every original cell.
+    missing=connection.execute('SELECT COUNT(*) FROM '+reference+'.collector_events b WHERE NOT EXISTS '
+        '(SELECT 1 FROM main.collector_events c WHERE c.id=b.id AND _ops_cell_equal(c.id,b.id)=1 '
+        'AND _ops_cell_equal(c.station,b.station)=1 AND _ops_cell_equal(c.received,b.received)=1)').fetchone()[0]
+    require(missing==0, 'activeEveryOldCollectorEventExactlyPreserved')
+    added=0;newest_event={}
+    query='SELECT c.id,c.station,c.received FROM main.collector_events c WHERE NOT EXISTS '
+    query+='(SELECT 1 FROM '+reference+'.collector_events b WHERE b.id=c.id AND _ops_cell_equal(b.id,c.id)=1)'
+    for identifier,station,received in connection.execute(query):
+        require(text(identifier,80) and text(station) and station in stations['main'], 'activeNewEventHasExistingStationAndBoundedID')
+        stamp=active_timestamp(received)
+        require(stations[reference][station][1]<=stamp<=stations['main'][station][1], 'activeNewEventWithinStationHeartbeatWindow')
+        newest_event[station]=max(newest_event.get(station,stamp),stamp)
+        added+=1
+    require(changed_stations<=set(newest_event), 'activeChangedStationHasNewEvent')
+    require(all(station in newest_event and observed<=newest_event[station]+datetime.timedelta(seconds=60)
+                for (station,_),observed in changed_devices.items()), 'activeChangedDeviceHasNewStationEventWithinFutureLimit')
+    return {'passed':True,'appendedEvents':added,'everyOldEventExactlyPreserved':True,
+            'stationAndDevicePrimaryKeySetsUnchanged':True,'timestampsAndSequencesNondecreasing':True,
+            'devicePayloadsMatchExactDisplayContract':True}
+
+
+def active_read_snapshot(tree,directory,original,output,probe=None,probe_audit=None):
+    names=discover_databases(tree)
+    require(set(names)==set(original), 'activeExactDatabaseInventory')
+    audits={};deltas={};gates={};pairwise={}
+    with contextlib.ExitStack() as stack:
+        connections=diagnostic_connections(tree,directory,names,stack)
+        for name,connection in connections.items():
+            # Audit, exact original delta, telemetry validation and copied evidence
+            # all observe this same pinned main transaction, including valid WAL.
+            audit=sqlite_audit(connection);delta=diagnostic_database_delta(connection,name,original[name])
+            audits[name]=audit;deltas[name]=delta
+            # Preserve the first read and its exact safe diff before any semantic
+            # gate can reject it. A rejected attempt must not need a fresh sample.
+            destination=output/'sqlite-snapshots'/name
+            destination.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+            require(not destination.exists(), 'activeNewEvidenceSnapshotOnly')
+            with contextlib.closing(sqlite3.connect(destination)) as copy:
+                connection.backup(copy)
+                require(sqlite_audit(copy)==audit, 'activeEvidenceCopyMatchesSamePinnedFullTypedAudit')
+            destination.chmod(0o600)
+            private_write(destination.with_name(destination.name+'.audit-delta.json'),encoded({'audit':audit,'typedDelta':delta}))
+            cloud=name=='orders/printlink.sqlite'
+            allowed=ACTIVE_TABLES if cloud else set()
+            require(audit['schemaSha256']==original[name]['schemaSha256'] and set(audit['tables'])==set(original[name]['tables'])
+                    and all(value['columnsSha256']==original[name]['tables'][table]['columnsSha256'] for table,value in audit['tables'].items()),
+                    'activeAllSchemasAndColumnsExactlyUnchanged')
+            require(not cloud or ACTIVE_TABLES<=set(audit['tables']), 'activeAllThreeTelemetryTablesPresent')
+            require(all(value==original[name]['tables'][table] for table,value in audit['tables'].items() if table not in allowed),
+                    'activeEveryNonTelemetryTableAndTypedFullRowExactlyUnchanged')
+            gates[name]=active_telemetry(connection,'baseline') if cloud else {'passed':True,'allTablesExactlyUnchanged':True}
+            if probe:
+                if cloud:
+                    current=probe/'sqlite-snapshots'/name
+                    connection.execute('ATTACH DATABASE ? AS probe',(current.as_uri()+'?mode=ro&immutable=1',))
+                    pairwise[name]=active_telemetry(connection,'probe')
+                else:
+                    require(audit==probe_audit[name], 'activeProductionStableDuringProbe')
+                    pairwise[name]={'passed':True,'allTablesExactlyUnchanged':True}
+    diagnostic_snapshot_proof(output,audits)
+    return audits,deltas,gates,pairwise
+
+
+def verify_active(target,path):
+    require(path==DIAGNOSTIC_BACKUP_PATH, 'activeExactRetainedOriginalBackupOnly')
+    directory=pathlib.Path(path)
+    os.umask(0o077)
+    require(BACKUPS.is_dir() and not BACKUPS.is_symlink(), 'activePrivateResultRootIsRealDirectory')
+    result_directory=BACKUPS/ACTIVE_RESULT_NAME
+    # Deterministic, exclusive first attempt. Errors and partial artifacts block a
+    # second invocation; never replace the original seal or a failed first result.
+    result_directory.mkdir(mode=0o700)
+    private_write(result_directory/'attempt.json',encoded({'mode':'verify-active','target':target,'originalBackup':str(directory)}))
+    print(json.dumps({'activeVerificationStarted':str(result_directory),'businessWritesPerformed':False}),flush=True)
+    try:
+        directory,before,original_seal=diagnostic_private_backup(path)
+        original_proof=diagnostic_snapshot_proof(directory,before['sqlite'])
+        require(git_commit()==git_commit('origin/main')==target and target!=PRE_DEPLOY_COMMIT, 'verifyActiveAtExactDeployedMain')
+        expected=tested_source_guard(target,True)
+        app,tree,runtime,private=runtime_context()
+        private_write(result_directory/'runtime.private.json',encoded(private))
+        current_sqlite,current_delta,current_gate,_=active_read_snapshot(tree,directory,before['sqlite'],result_directory/'current')
+        current_raw=tree_inventory(tree);others=other_containers()
+        nginx={k:raw_hash(v) for k,v in nginx_material().items()}
+        runtime_count=actual_runtime_files(app,expected)
+        probes=read_only_probes();production_ready=production_readiness(app)
+        final_sqlite,final_delta,final_gate,pairwise=active_read_snapshot(tree,directory,before['sqlite'],result_directory/'final',result_directory/'current',current_sqlite)
+        final_raw=tree_inventory(tree)
+        checks={'everyTableAndFullRowUnchanged':current_sqlite==before['sqlite'],
+          'everyDurableFileByteUnchanged':durable_inventory(current_raw,current_sqlite,runtime['platformLock'])==before['durableInventory'],
+          'logicalSQLiteStableDuringProbe':current_sqlite==final_sqlite,
+          'durableFilesStableDuringProbe':durable_inventory(current_raw,current_sqlite,runtime['platformLock'])==durable_inventory(final_raw,final_sqlite,runtime['platformLock']),
+          'completeConfigEnvironmentUnchanged':runtime['configEnvironmentSha256']==before['runtime']['configEnvironmentSha256'],
+          'allThreeProcessEnvironmentsUnchanged':runtime['processEnvironmentSha256']==before['runtime']['processEnvironmentSha256'],
+          'persistentMountsUnchanged':runtime['mounts']==before['runtime']['mounts'],
+          'privateEnvironmentFileUnchanged':file_hash(ROOT/'.env.cloud.production')==file_hash(directory/'env.before'),
+          'allOtherContainersUnchanged':others==before['otherContainers'],
+          'fiveProtectedServicesHealthy':all(healthy_lifecycle(others[name]) for name in PROTECTED_SERVICES),
+          'actualNginxAndAuthorizationUnchanged':nginx==before['nginx'],
+          'applicationStartupAndDeploymentConfigurationUnchanged':configuration()==before['configuration'],
+          'targetPrintlinkRecreated':runtime['lifecycle']['containerId']!=before['runtime']['lifecycle']['containerId'],
+          'targetPrintlinkImageChanged':runtime['lifecycle']['imageId']!=before['runtime']['lifecycle']['imageId'],
+          'targetPrintlinkRuntimeStableDuringProbe':runtime_context()[2]==runtime,
+          'otherContainerLifecycleStableDuringProbe':other_containers()==others,
+          'productionReadOnlyStatusReady':production_ready['passed'],'readOnlyHealthAndAssetsPassed':probes['passed'],
+          'sourceStable':git_commit()==git_commit('origin/main')==target}
+        _,original_again,seal_after=diagnostic_private_backup(path)
+        active_checks={key:value for key,value in checks.items() if key not in {'everyTableAndFullRowUnchanged','logicalSQLiteStableDuringProbe'}}
+        active_checks.update({'originalSealAndStrictFalseUnchanged':seal_after==original_seal and original_again==before,
+          'currentOnlyPermittedTelemetryChanges':all(v['passed'] for v in current_gate.values()),
+          'finalOnlyPermittedTelemetryChanges':all(v['passed'] for v in final_gate.values()),
+          'probeOnlyPermittedTelemetryChanges':all(v['passed'] for v in pairwise.values())})
+        data_keys={'everyDurableFileByteUnchanged','durableFilesStableDuringProbe','originalSealAndStrictFalseUnchanged',
+                   'currentOnlyPermittedTelemetryChanges','finalOnlyPermittedTelemetryChanges','probeOnlyPermittedTelemetryChanges'}
+        lifecycle_delta={name:{'before':before['otherContainers'].get(name),'after':others.get(name)}
+            for name in sorted(set(before['otherContainers'])|set(others)) if before['otherContainers'].get(name)!=others.get(name)}
+        result={'mode':'verify-active','deployment':'PR940','sourceCommit':target,'backup':str(directory),'resultDirectory':str(result_directory),
+          'baselineNonQuiescent':True,'originalStrictVerificationPassed':False,'strictVerificationPassed':False,
+          'observedStrictChecksPassed':all(checks.values()),'checks':checks,'activeChecks':active_checks,
+          'activeVerificationPassed':all(active_checks.values()),'beforeSQLite':before['sqlite'],'currentSQLite':current_sqlite,'finalSQLite':final_sqlite,
+          'targetDataPreservationPassed':all(active_checks[key] for key in data_keys),'otherContainerLifecycleDelta':lifecycle_delta,
+          'currentTypedDelta':current_delta,'finalTypedDelta':final_delta,'currentTelemetry':current_gate,'finalTelemetry':final_gate,'probeTelemetry':pairwise,
+          'originalSQLiteSnapshotProof':original_proof,'printlinkBefore':before['runtime']['lifecycle'],'printlinkAfter':runtime['lifecycle'],
+          'otherContainersBefore':before['otherContainers'],'otherContainersAfter':others,'runtimeFilesVerified':runtime_count,
+          'probes':probes,'productionReadiness':production_ready,'crossDatabaseAtomicSnapshotClaimed':False,
+          'originalBackupFilesWritten':False,'originalFailureAttributed':False,'businessWritesPerformed':False,
+          'conflictChoicesSubmitted':False,'stockOrProductIdsChangedByOperator':False,'automaticRestoreOrRecreatePerformed':False}
+        private_write(result_directory/'first-result.json',encoded(result))
+        return result
+    except Exception as error:
+        private_write(result_directory/'first-result.json',encoded({'mode':'verify-active','failed':True,'failedCheck':FAILED_CHECK,
+          'errorType':type(error).__name__,'strictVerificationPassed':False,'activeVerificationPassed':False,
+          'targetDataPreservationPassed':False,
+          'baselineNonQuiescent':True,'originalBackupFilesWritten':False,'businessWritesPerformed':False}))
+        raise
+
+
 def main(argv):
     global TESTED_SOURCE
     require(len(argv)==5, 'exactFiveArguments')
     mode,before,target,path,pin = argv
-    require(mode in {'backup','verify','diagnose','context'} and before==PRE_DEPLOY_COMMIT and bool(re.fullmatch('[a-f0-9]{40}',target)), 'exactModeAndCommitArguments')
+    require(mode in {'backup','verify','diagnose','context','verify-active'} and before==PRE_DEPLOY_COMMIT and bool(re.fullmatch('[a-f0-9]{40}',target)), 'exactModeAndCommitArguments')
     TESTED_SOURCE = json.loads(pathlib.Path(pin).read_bytes())
     require(TESTED_SOURCE.get('finalPinFrozen') is True, 'finalSourcePinEmptyFailClosed')
     require((mode=='backup' and target==before and not path) or
             (mode=='verify' and target!=before and bool(re.fullmatch('/opt/rr-portal/deploy/backups/printlink-pre-940-[0-9]{8}T[0-9]{12}Z',path))) or
-            (mode in {'diagnose','context'} and target==before and path==DIAGNOSTIC_BACKUP_PATH), 'exactModeSpecificArguments')
-    if mode in {'diagnose','context'}:require(file_hash(pathlib.Path(pin))==DIAGNOSTIC_PIN_SHA256, 'diagnosticExactReviewedFrozenPinBytes')
+            (mode in {'diagnose','context'} and target==before and path==DIAGNOSTIC_BACKUP_PATH) or
+            (mode=='verify-active' and target=='1c295d6418a64a1610b9075acd4da2a38d875328' and target!=before and path==DIAGNOSTIC_BACKUP_PATH), 'exactModeSpecificArguments')
+    if mode in {'diagnose','context','verify-active'}:require(file_hash(pathlib.Path(pin))==DIAGNOSTIC_PIN_SHA256, 'diagnosticExactReviewedFrozenPinBytes')
     os.umask(0o077)
-    result = backup(target) if mode=='backup' else diagnose(target,path) if mode=='diagnose' else context(target,path) if mode=='context' else verify(target,path)
+    result = backup(target) if mode=='backup' else diagnose(target,path) if mode=='diagnose' else context(target,path) if mode=='context' else verify_active(target,path) if mode=='verify-active' else verify(target,path)
     print(json.dumps(result,ensure_ascii=True))
-    return 0 if (result['diagnosticComplete'] if mode=='diagnose' else result['contextComplete'] if mode=='context' else result['strictVerificationPassed']) else 1
+    return 0 if (result['diagnosticComplete'] if mode=='diagnose' else result['contextComplete'] if mode=='context' else result['activeVerificationPassed'] if mode=='verify-active' else result['strictVerificationPassed']) else 1
 
 
 if __name__=='__main__':

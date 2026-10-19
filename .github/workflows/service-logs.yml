@@ -1,82 +1,80 @@
-name: Release Read Only Permission Progress
+name: Service Logs - Fixed Reviewed Seven-Service Recovery V3
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [progress]}
+      mode:
+        type: choice
+        required: true
+        options: [deploy]
 permissions:
   contents: read
+  actions: read
 concurrency:
-  group: release-read-only-progress
+  group: deploy-cloud
+  queue: max
   cancel-in-progress: false
+env:
+  RELEASE_DEPLOY_WORKFLOW_FROZEN: 'true'
+  RELEASE_DEPLOY_HELPER_SHA256: '40f501d28bcc0fdbbca630be41440b1d2a7f9b89eec2fd0b7a0ee7f81a0ecc01'
 jobs:
-  progress:
+  deploy-reviewed-scope:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 120
     steps:
-      - shell: bash
+      - name: Validate frozen source and disabled regular deployment
+        shell: bash
         env:
-          RELEASE_REF: ${{ github.ref }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_BRANCH: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
           RELEASE_MODE: ${{ inputs.mode }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
-          [[ "$RELEASE_REF" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = progress && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Read fixed container and deployment summaries
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+          set -euo pipefail
+          [[ "$RELEASE_DEPLOY_WORKFLOW_FROZEN" = true && "$RELEASE_DEPLOY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy ]] || exit 1
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+          gh api "repos/$GH_REPO/actions/workflows/deploy.yml" > "$RUNNER_TEMP/regular-deploy-state.json"
+          python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["state"]=="disabled_manually"' "$RUNNER_TEMP/regular-deploy-state.json"
+          for state in queued in_progress waiting requested pending; do
+            gh api --method GET "repos/$GH_REPO/actions/workflows/deploy.yml/runs" -f status="$state" -f per_page=1 > "$RUNNER_TEMP/regular-deploy-runs.json"
+            python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["total_count"]==0' "$RUNNER_TEMP/regular-deploy-runs.json"
+          done
+      - name: Deploy only the fixed seven services
         env:
-          RELEASE_REF: ${{ github.ref }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          RELEASE_BRANCH: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
-          RELEASE_MODE: ${{ inputs.mode }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
-          fingerprint: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 90s
-          envs: RELEASE_REF,RELEASE_ATTEMPT,RELEASE_MODE
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 110m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_DEPLOY_WORKFLOW_FROZEN,RELEASE_DEPLOY_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$RELEASE_REF" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = progress ]] || exit 1
+            [[ "$RELEASE_DEPLOY_WORKFLOW_FROZEN" = true && "$RELEASE_DEPLOY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            cd /opt/rr-portal
+            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch origin ops/release-937-943-944-945-946-950-20261019 >/dev/null 2>&1 || exit 1
+            [[ "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            python3 -B - <<'PY'
-            import hashlib,io,json,os,pathlib,re,stat,subprocess,sys,tarfile,tempfile
-            sys.excepthook=lambda *_:print('{"safeFailure":"RELEASE_PROGRESS_READ_FAILED"}')
-            services=('qc','indo-shipping','internal-quote','factory-review','factory-review-test','qc-report','qc-report-worker')
-            stages={'preflight','validate-backup','source-current-branch','source-current-head','source-fetch-main','source-root-tree','source-fixed-inputs','source-dirty-snapshot','fast-forward-main','before-build','build','switch','wait-healthy','final-guards'}
-            root=pathlib.Path('/opt/rr-portal/deploy/backups');directory=root/'release-937-943-944-945-946-950-deploy-20261019-v2'
-            assert root.is_dir() and not root.is_symlink() and directory.is_dir() and not directory.is_symlink()
-            diag=pathlib.Path(tempfile.mkdtemp(prefix='release-progress-',dir=root));os.chmod(diag,0o700)
-            def call(args,cap=65536):
-             p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=8);assert p.returncode==0 and len(p.stdout)<=cap;return p.stdout
-            fmt='{"id":{{json .Id}},"image":{{json .Image}},"running":{{json .State.Running}},"oom":{{json .State.OOMKilled}},"restarts":{{json .RestartCount}},"status":{{json .State.Status}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}}}'
-            rows={}
-            for service in services:
-             ids=call(['docker','ps','-aq','--no-trunc','--filter','label=com.docker.compose.project=rr-portal','--filter','label=com.docker.compose.service='+service]).decode().split();assert len(ids)<=1 and all(re.fullmatch('[a-f0-9]{64}',v)for v in ids)
-             rows[service]=json.loads(call(['docker','inspect','--format',fmt,ids[0]]))if ids else{'missing':True}
-            files=list(directory.iterdir());assert len(files)<=1000
-            pattern=r'([0-9]{3})-('+ '|'.join((*services,'release')) +r')-([a-z-]+)\.(log|stdout\.private)'
-            logs=sorted((int(m[1]),p.name)for p in files if (m:=re.fullmatch(pattern,p.name)) and m[3]in stages and p.is_file() and not p.is_symlink())
-            result={'containers':rows,'latestDeployLog':logs[-1][1]if logs else None,'safeReceipt':None}
-            result['failedDeployFileSHA256']={}
-            for name in ['manifest.json','first-result.json']:
-             p=directory/name;assert p.is_file() and not p.is_symlink() and p.stat().st_size<=1048576;result['failedDeployFileSHA256'][name]=hashlib.sha256(p.read_bytes()).hexdigest()
-            receipt=directory/'first-result.json'
-            if receipt.is_file() and not receipt.is_symlink() and receipt.stat().st_size<=65536:
-             r=json.loads(receipt.read_bytes());result['safeReceipt']={k:r[k]for k in ['success','globalHooksRun','globalMaintenanceChanged','envFileModified','automaticRollback','businessCrudPerformed']if type(r.get(k))is bool};result['safeReceipt'].update({'failedStage':r.get('failedStage')if r.get('failedStage')in stages else None,'failedService':r.get('failedService')if r.get('failedService')in services else None})
-            result['hostSourcePermissions']={}
-            for path in ['/opt/rr-portal/apps/生产部/品质管理系统/server/server.js','/opt/rr-portal/apps/生产部/品质管理系统/app.js','/opt/rr-portal/apps/生产部/品质管理系统/qc-backend.js','/opt/rr-portal/apps/QA部/QC成品报告系统/assets']:
-             p=pathlib.Path(path);v=p.lstat();result['hostSourcePermissions'][path]={'mode':oct(stat.S_IMODE(v.st_mode)),'uid':v.st_uid,'gid':v.st_gid,'isRegular':stat.S_ISREG(v.st_mode),'isDirectory':stat.S_ISDIR(v.st_mode)}
-            cid=rows['qc'].get('id');raw=b''
-            if cid:
-             result['qcContainerUser']=json.loads(call(['docker','inspect','--format','{{json .Config.User}}',cid]));data=call(['docker','cp',cid+':/app/server/server.js','-'],1048576)
-             with tarfile.open(fileobj=io.BytesIO(data))as archive:
-              members=archive.getmembers();assert len(members)==1 and members[0].isreg() and members[0].size<=131072;v=members[0];body=archive.extractfile(v).read(131073);assert len(body)==v.size
-              result['qcContainerServerSource']={'mode':oct(v.mode),'uid':v.uid,'gid':v.gid,'isRegular':True,'bytes':len(body),'sha256':hashlib.sha256(body).hexdigest()}
-            if cid:
-             p=subprocess.Popen(['timeout','--signal=TERM','--kill-after=2s','10s','docker','logs','--since','10m','--tail','200',cid],stdout=subprocess.PIPE,stderr=subprocess.STDOUT);raw=p.stdout.read(2097152);p.stdout.close();p.wait(timeout=15)
-            with (diag/'qc-recent.private.log').open('xb')as f:f.write(raw)
-            tokens=['SyntaxError','TypeError','ReferenceError','RangeError','ERR_SQLITE_ERROR','SQLITE_ERROR','SQLITE_BUSY','SQLITE_CORRUPT','MODULE_NOT_FOUND','ERR_MODULE_NOT_FOUND','EADDRINUSE','EACCES','ENOENT','no such column','no such table','duplicate column name','NOT NULL constraint failed','UNIQUE constraint failed','database is locked','attempt to write a readonly database']
-            text=raw.decode('utf-8','replace');result['qcErrorCategories']={t:text.count(t)for t in tokens if t in text};result['qcNodeSourceLocations']=sorted(set(re.findall(r'(?m)^\s*(?:at (?:[A-Za-z0-9_.$<>]+\s+)?\(?)?(/app/(?:server/server|app|qc-backend)\.js:[0-9]+(?::[0-9]+)?)\)?\s*$',text)))[:30]
-            result['permissionDeniedServerSource']=any('EACCES'in line and '/app/server/server.js'in line for line in text.splitlines())
-            print(json.dumps(result,sort_keys=True))
-            PY
+            scoped_release_tmp=$(mktemp -d /tmp/scoped-release.XXXXXX)
+            trap 'rm -rf "$scoped_release_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/release-batch-scoped-deploy-v3.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-937-943-944-945-946-950.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = "$RELEASE_DEPLOY_HELPER_SHA256" ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            timeout --signal=TERM --kill-after=30s 105m python3 -B "$scoped_release_tmp/run.py"
+      - name: Report explicit regular-workflow restoration requirement
+        if: always()
+        shell: bash
+        run: |
+          echo 'MANUAL_ATTENTION: After inspecting this result, the release owner must re-enable deploy.yml and verify its state. This read-only-token workflow cannot enable it.'

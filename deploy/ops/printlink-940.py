@@ -668,18 +668,242 @@ def verify(target,path):
     return result
 
 
+# This mode reads the retained first failure; it never changes verification gates.
+DIAGNOSTIC_BACKUP_PATH = '/opt/rr-portal/deploy/backups/printlink-pre-940-20261019T011955726437Z'
+DIAGNOSTIC_PIN_SHA256 = '51532c38e04af1565dde7f7d00d6457043338b00c5a16acc872c8940246af610'
+DIAGNOSTIC_TIME_COLUMNS = {
+ 'orders/printlink.sqlite':{
+  'collector_events':{'received':'iso'},'collector_devices':{'observed':'iso'},
+  'collector_stations':{'last_seen':'iso'},'account_events':{'created':'iso'},
+  'events':{'created':'iso'},'orders':{'created':'iso','updated':'iso'},
+  'files':{'created':'iso'},'feedback':{'created':'iso','updated':'iso'},
+  'production_jobs':{'created':'iso'}},
+ 'production.sqlite':{'business_sync_backups':{'created':'iso'},'import_backups':{'created':'iso'},
+  'source_inventory_ledger':{'chargedAt':'iso'},'source_inventory_config':{'since':'epoch_ms'}}}
+
+
+def diagnostic_private_backup(path):
+    """Validate the original seal, without relaxing selected_backup()."""
+    directory = pathlib.Path(path)
+    require(str(directory)==DIAGNOSTIC_BACKUP_PATH and directory.parent==BACKUPS,
+            'diagnosticReadsOnlyExactRetainedFirstBackup')
+    require(directory.is_dir() and not directory.is_symlink() and directory.stat().st_mode & 0o077==0,
+            'diagnosticPrivateOriginalDirectory')
+    entries = list(directory.rglob('*'))
+    require(all(not entry.is_symlink() and (entry.is_file() or entry.is_dir()) and entry.stat().st_mode & 0o077==0
+                for entry in entries), 'diagnosticPrivateOriginalEntries')
+    manifest_file = directory/'manifest.json'
+    manifest = json.loads(manifest_file.read_bytes())
+    files = {str(entry.relative_to(directory)) for entry in entries if entry.is_file() and entry!=manifest_file}
+    require(set(manifest)==files and {'baseline.json','runtime-raw.tar','runtime.private.json','env.before','nginx.configuration'}<=files,
+            'diagnosticCompleteOriginalSealedInventory')
+    for name,expected in manifest.items():
+        require(safe_relative(name) and isinstance(expected,str) and bool(re.fullmatch('[a-f0-9]{64}',expected)), 'diagnosticSafeSealedEntry')
+        require(file_hash(directory/name)==expected, 'diagnosticOriginalSealedBytesIntact')
+    before = json.loads((directory/'baseline.json').read_bytes())
+    require(before.get('deployment')=='PR940' and before.get('sourceCommit')==PRE_DEPLOY_COMMIT
+            and before.get('strictVerificationPassed') is False,
+            'diagnosticOriginalStrictFalsePreserved')
+    require(before['checks'].get('allLogicalSQLiteDataStable') is False
+            and all(value is True for key,value in before['checks'].items() if key!='allLogicalSQLiteDataStable'),
+            'diagnosticOriginalFailureScopeUnchanged')
+    require(set(before['sqlite'])=={'orders/printlink.sqlite','production.sqlite'}, 'diagnosticBothOriginalSQLiteSnapshots')
+    require({name for name in files if name.startswith('sqlite-snapshots/')}=={'sqlite-snapshots/'+name for name in before['sqlite']},
+            'diagnosticExactOriginalSQLiteSnapshotFiles')
+    verify_archive(directory/'runtime-raw.tar',before['rawInventory'])
+    return directory,before,{'manifestSha256':file_hash(manifest_file),'files':manifest}
+
+
+def diagnostic_cell_equal(left,right):
+    # Same Python SQLite scalar representation as sqlite_audit: integer vs real,
+    # BLOB vs text, Unicode bytes, full IEEE float precision and signed zero.
+    return int(sqlite_value(left)==sqlite_value(right))
+
+
+def diagnostic_time(value,kind):
+    try:
+        if kind=='iso': stamp=parse_timestamp(value)
+        elif kind=='epoch_ms' and type(value) in {int,float} and math.isfinite(value):
+            stamp=datetime.datetime.fromtimestamp(value/1000,datetime.timezone.utc)
+        else:return None
+        if not 2000<=stamp.year<=2100:return None
+        return stamp.isoformat(timespec='microseconds').replace('+00:00','Z')
+    except (RuntimeError,ValueError,OverflowError,OSError):return None
+
+
+def diagnostic_metadata_label(name):
+    require(isinstance(name,str) and 0<len(name)<=128 and not any(ord(char)<32 for char in name), 'diagnosticSafeSchemaLabel')
+    return name
+
+
+def diagnostic_schema(connection,schema):
+    require(schema in {'main','baseline'}, 'diagnosticFixedSchemaAlias')
+    rows=connection.execute('SELECT type,name,tbl_name,sql FROM '+schema+'.sqlite_master ORDER BY type,name').fetchall()
+    require(connection.execute('PRAGMA '+schema+'.integrity_check').fetchall()==[('ok',)], 'diagnosticSQLiteIntegrity')
+    require(not connection.execute('PRAGMA '+schema+'.foreign_key_check').fetchall(), 'diagnosticSQLiteForeignKeys')
+    tables={}
+    for kind,name,table,sql in rows:
+        diagnostic_metadata_label(name);diagnostic_metadata_label(table)
+        if kind!='table':continue
+        columns=connection.execute('PRAGMA '+schema+'.table_xinfo('+quote_identifier(name)+')').fetchall()
+        require(columns and all(len(column)==7 for column in columns), 'diagnosticAllExtendedColumnsPresent')
+        for column in columns:diagnostic_metadata_label(column[1])
+        require(all(column[6]!=1 for column in columns), 'diagnosticNonPersistentVirtualHiddenColumnsNotComparable')
+        count=connection.execute('SELECT COUNT(*) FROM '+schema+'.'+quote_identifier(name)).fetchone()[0]
+        tables[name]={'columns':columns,'rows':count}
+    return rows,tables
+
+
+def diagnostic_schema_delta(before,current):
+    old={(row[0],row[1]):row for row in before};new={(row[0],row[1]):row for row in current}
+    labels=lambda keys:[{'type':kind,'name':name} for kind,name in sorted(keys)]
+    return {'matches':before==current,'beforeSha256':digest(before),'currentSha256':digest(current),
+       'addedObjects':labels(set(new)-set(old)),'deletedObjects':labels(set(old)-set(new)),
+       'modifiedObjects':labels(key for key in set(old)&set(new) if old[key]!=new[key])}
+
+
+def diagnostic_time_ranges(connection,database,table,columns,from_sql,condition,alias):
+    result={}
+    for name,kind in DIAGNOSTIC_TIME_COLUMNS.get(database,{}).get(table,{}).items():
+        if name not in columns:continue
+        value='_ops_safe_time('+alias+'.'+quote_identifier(name)+',?)'
+        sql='SELECT COUNT(*),COUNT('+value+'),MIN('+value+'),MAX('+value+') '+from_sql+' WHERE '+condition
+        total,valid,minimum,maximum=connection.execute(sql,(kind,kind,kind)).fetchone()
+        result[name]={'rowsInScope':total,'validTimeValues':valid,'minimumUtc':minimum,'maximumUtc':maximum}
+    return result
+
+
+def diagnostic_table_delta(connection,database,table,before,current):
+    columns=before['columns'];names=[column[1] for column in columns]
+    require(columns==current['columns'], 'diagnosticSameExtendedColumnSchemaForRowPairing')
+    pk=[column[1] for column in sorted(columns,key=lambda column:column[5]) if column[5]>0]
+    old_table='baseline.'+quote_identifier(table);new_table='main.'+quote_identifier(table)
+    nulls=' OR '.join(quote_identifier(name)+' IS NULL' for name in pk)
+    keyed=bool(pk) and all(connection.execute('SELECT COUNT(*) FROM '+source+' WHERE '+nulls).fetchone()[0]==0
+                          for source in [old_table,new_table])
+    if not keyed:
+        fields=','.join(quote_identifier(name) for name in names)
+        fingerprint='_ops_row_fingerprint('+fields+')'
+        old='SELECT '+fingerprint+' AS h,COUNT(*) AS n FROM '+old_table+' GROUP BY '+fingerprint+' COLLATE BINARY'
+        new='SELECT '+fingerprint+' AS h,COUNT(*) AS n FROM '+new_table+' GROUP BY '+fingerprint+' COLLATE BINARY'
+        sql='WITH old_rows AS ('+old+'),new_rows AS ('+new+'),deltas AS (SELECT h,SUM(n) AS d FROM (SELECT h,-n AS n FROM old_rows UNION ALL SELECT h,n FROM new_rows) GROUP BY h COLLATE BINARY) SELECT COALESCE(SUM(CASE WHEN d>0 THEN d ELSE 0 END),0),COALESCE(SUM(CASE WHEN d<0 THEN -d ELSE 0 END),0) FROM deltas'
+        added,deleted=connection.execute(sql).fetchone()
+        return {'beforeRows':before['rows'],'currentRows':current['rows'],'pairing':'typed-full-row-multiset-no-nonnull-primary-key',
+           'added':added,'deleted':deleted,'modified':None,'changedColumnCounts':{name:None for name in names},
+           'rowsUnchanged':added==deleted==0,'completeFullRowMultisetCompared':True,
+           'modifiedCountIndeterminateWithoutStableKey':True,'timeRanges':{}}
+    # Native PK predicates retain the real PK index and its collation. The UDF
+    # then enforces exact typed values without SQLite coercion or NOCASE folding.
+    native=' AND '.join('c.'+quote_identifier(name)+' IS b.'+quote_identifier(name) for name in pk)
+    exact=' AND '.join('_ops_cell_equal(c.'+quote_identifier(name)+',b.'+quote_identifier(name)+')=1' for name in pk)
+    join=native+' AND '+exact
+    equal=['_ops_cell_equal(c.'+quote_identifier(name)+',b.'+quote_identifier(name)+')' for name in names]
+    different='NOT ('+' AND '.join(equal)+')'
+    from_sql='FROM '+new_table+' AS c JOIN '+old_table+' AS b ON '+join
+    projections=['COUNT(*)','COALESCE(SUM('+different+'),0)']+['COALESCE(SUM(1-'+item+'),0)' for item in equal]
+    row=connection.execute('SELECT '+','.join(projections)+' '+from_sql).fetchone()
+    matched,modified,*changes=row;added=current['rows']-matched;deleted=before['rows']-matched
+    require(all(type(value) is int and value>=0 for value in [matched,modified,added,deleted,*changes])
+            and modified<=matched and all(value<=modified for value in changes), 'diagnosticKeyedCounterInvariants')
+    ranges={}
+    if added:
+        ranges['addedCurrent']=diagnostic_time_ranges(connection,database,table,names,'FROM '+new_table+' AS c',
+            'NOT EXISTS (SELECT 1 FROM '+old_table+' AS b WHERE '+join+')','c')
+    if deleted:
+        ranges['deletedBefore']=diagnostic_time_ranges(connection,database,table,names,'FROM '+old_table+' AS b',
+            'NOT EXISTS (SELECT 1 FROM '+new_table+' AS c WHERE '+join+')','b')
+    if modified:
+        ranges['modifiedBefore']=diagnostic_time_ranges(connection,database,table,names,from_sql,different,'b')
+        ranges['modifiedCurrent']=diagnostic_time_ranges(connection,database,table,names,from_sql,different,'c')
+    return {'beforeRows':before['rows'],'currentRows':current['rows'],'pairing':'declared-nonnull-primary-key-plus-exact-typed-equality',
+       'added':added,'deleted':deleted,'modified':modified,'changedColumnCounts':dict(zip(names,changes)),
+       'rowsUnchanged':added==deleted==modified==0,'completeFullRowMultisetCompared':True,
+       'modifiedCountIndeterminateWithoutStableKey':False,'timeRanges':ranges}
+
+
+def diagnostic_database_delta(connection,database,original):
+    old_schema,old_tables=diagnostic_schema(connection,'baseline');new_schema,new_tables=diagnostic_schema(connection,'main')
+    require(digest(old_schema)==original['schemaSha256'] and set(old_tables)==set(original['tables']), 'diagnosticSealedPrivateSchemaMatchesOriginalAudit')
+    require(all(metadata['rows']==original['tables'][name]['rows'] and digest(metadata['columns'])==original['tables'][name]['columnsSha256']
+                for name,metadata in old_tables.items()), 'diagnosticSealedPrivateCountsAndColumnsMatchOriginalAudit')
+    schema=diagnostic_schema_delta(old_schema,new_schema)
+    if not schema['matches'] or any(old_tables.get(name,{}).get('columns')!=new_tables.get(name,{}).get('columns') for name in set(old_tables)|set(new_tables)):
+        return {'schema':schema,'comparisonComplete':False,'tableRowMatchingSkippedBecauseSchemaChanged':True,
+          'beforeTableCounts':{name:value['rows'] for name,value in old_tables.items()},
+          'currentTableCounts':{name:value['rows'] for name,value in new_tables.items()},'tables':{}}
+    tables={name:diagnostic_table_delta(connection,database,name,old_tables[name],new_tables[name]) for name in old_tables}
+    return {'schema':schema,'comparisonComplete':True,'tables':tables,
+            'changedTables':[name for name,value in tables.items() if not value['rowsUnchanged']]}
+
+
+def diagnostic_connections(tree,directory,names,stack):
+    result={}
+    for name in names:
+        live=tree/name;private=directory/'sqlite-snapshots'/name
+        connection=stack.enter_context(contextlib.closing(sqlite3.connect(live.as_uri()+'?mode=ro',uri=True,timeout=15)))
+        connection.execute('PRAGMA query_only=ON');connection.execute('PRAGMA temp_store=MEMORY')
+        connection.execute('ATTACH DATABASE ? AS baseline',(private.as_uri()+'?mode=ro&immutable=1',))
+        require(connection.execute('PRAGMA query_only').fetchone()==(1,), 'diagnosticConnectionReadOnly')
+        connection.create_function('_ops_cell_equal',2,diagnostic_cell_equal,deterministic=True)
+        connection.create_function('_ops_row_fingerprint',-1,lambda *values:digest([sqlite_value(value) for value in values]),deterministic=True)
+        connection.create_function('_ops_safe_time',2,diagnostic_time,deterministic=True)
+        connection.execute('BEGIN');connection.execute('SELECT COUNT(*) FROM main.sqlite_master').fetchone()
+        connection.execute('SELECT COUNT(*) FROM baseline.sqlite_master').fetchone()
+        result[name]=connection
+    return result
+
+
+def diagnose(target,path):
+    require(git_commit()==git_commit('origin/main')==PRE_DEPLOY_COMMIT==target, 'diagnosticExactPreDeployMain')
+    expected=tested_source_guard(target)
+    directory,before,seal_before=diagnostic_private_backup(path)
+    app,tree,runtime,private=runtime_context();others=other_containers()
+    names=discover_databases(tree);require(set(names)==set(before['sqlite']), 'diagnosticLiveDatabaseInventoryUnchanged')
+    snapshot_started=datetime.datetime.now(datetime.timezone.utc).isoformat()
+    with contextlib.ExitStack() as stack:
+        connections=diagnostic_connections(tree,directory,names,stack)
+        databases={name:diagnostic_database_delta(connections[name],name,before['sqlite'][name]) for name in names}
+    runtime_files=actual_runtime_files(app,expected)
+    _,original_again,seal_after=diagnostic_private_backup(path)
+    checks={'originalPrivateSealAndFilesUnchanged':seal_after==seal_before,
+      'originalStrictFalseUnchanged':original_again['strictVerificationPassed'] is False,
+      'sourceStillExactPreDeployMain':git_commit()==git_commit('origin/main')==target,
+      'runtimeUnchangedFromFirstBackup':runtime==before['runtime'],
+      'runtimeStableDuringDiagnosis':runtime_context()[2]==runtime,
+      'allOtherContainersUnchangedFromFirstBackup':others==before['otherContainers'],
+      'allOtherContainersStableDuringDiagnosis':other_containers()==others,
+      'actualNginxAuthUnchanged':{key:raw_hash(value) for key,value in nginx_material().items()}==before['nginx'],
+      'privateEnvironmentUnchanged':file_hash(ROOT/'.env.cloud.production')==file_hash(directory/'env.before'),
+      'applicationStartupAndDeploymentConfigurationUnchanged':configuration()==before['configuration']}
+    return {'mode':'diagnose','diagnosticComplete':all(checks.values()) and all(value['comparisonComplete'] for value in databases.values()),
+      'originalBackup':str(directory),'originalStrictVerificationPassed':False,'originalStrictResultPreserved':True,
+      'comparisonWindow':'retained first backup snapshots to this diagnostic read snapshot',
+      'originalBackupWindowAfterSnapshotNotRetained':True,'originalWindowChangedTablesNotReconstructed':True,
+      'originalFailureAttributed':False,'individuallyConsistentCurrentSQLiteSnapshots':True,'crossDatabaseAtomicSnapshotClaimed':False,
+      'snapshotReadStartedAtUtc':snapshot_started,'diagnosticFinishedAtUtc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+      'privateSealVerified':True,'originalPrivateSnapshotsByteSealAndIntegrityVerified':True,
+      'exactTypedCellSemanticsMatchOriginalSQLiteAudit':True,'runtimeFilesVerified':runtime_files,
+      'sourceCommit':target,'checks':checks,'databases':databases,'businessWritesPerformed':False,
+      'businessHttpRequestsPerformed':False,'originalBackupFilesWritten':False,'conflictChoicesSubmitted':False,
+      'stockOrProductIdsChangedByOperator':False,'automaticRestoreOrRecreatePerformed':False,
+      'deploymentAuthorizedByThisResult':False}
+
+
 def main(argv):
     global TESTED_SOURCE
     require(len(argv)==5, 'exactFiveArguments')
     mode,before,target,path,pin = argv
-    require(mode in {'backup','verify'} and before==PRE_DEPLOY_COMMIT and bool(re.fullmatch('[a-f0-9]{40}',target)), 'exactModeAndCommitArguments')
+    require(mode in {'backup','verify','diagnose'} and before==PRE_DEPLOY_COMMIT and bool(re.fullmatch('[a-f0-9]{40}',target)), 'exactModeAndCommitArguments')
     TESTED_SOURCE = json.loads(pathlib.Path(pin).read_bytes())
     require(TESTED_SOURCE.get('finalPinFrozen') is True, 'finalSourcePinEmptyFailClosed')
-    require((mode=='backup' and target==before and not path) or (mode=='verify' and target!=before and bool(re.fullmatch('/opt/rr-portal/deploy/backups/printlink-pre-940-[0-9]{8}T[0-9]{12}Z',path))), 'exactModeSpecificArguments')
+    require((mode=='backup' and target==before and not path) or
+            (mode=='verify' and target!=before and bool(re.fullmatch('/opt/rr-portal/deploy/backups/printlink-pre-940-[0-9]{8}T[0-9]{12}Z',path))) or
+            (mode=='diagnose' and target==before and path==DIAGNOSTIC_BACKUP_PATH), 'exactModeSpecificArguments')
+    if mode=='diagnose':require(file_hash(pathlib.Path(pin))==DIAGNOSTIC_PIN_SHA256, 'diagnosticExactReviewedFrozenPinBytes')
     os.umask(0o077)
-    result = backup(target) if mode=='backup' else verify(target,path)
+    result = backup(target) if mode=='backup' else diagnose(target,path) if mode=='diagnose' else verify(target,path)
     print(json.dumps(result,ensure_ascii=True))
-    return 0 if result['strictVerificationPassed'] else 1
+    return 0 if (result['diagnosticComplete'] if mode=='diagnose' else result['strictVerificationPassed']) else 1
 
 
 if __name__=='__main__':

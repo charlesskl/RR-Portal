@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'printlink only: private backup or read-only verification'
+        description: 'printlink only: private backup, verification or diagnosis'
         type: choice
         required: true
-        options: [backup, verify]
+        options: [backup, verify, diagnose]
         default: backup
       before_commit:
         description: 'Exact pre-deployment main SHA'
@@ -15,11 +15,11 @@ on:
         required: true
         default: '1510ca5f5f7e8a6132075400e50a36710f1447c0'
       target_commit:
-        description: 'Exact main SHA; same as before_commit for preflight/backup'
+        description: 'Exact main SHA; same as before_commit for backup/diagnose'
         type: string
         required: true
       backup_path:
-        description: 'Exact private backup path returned by backup; verify only'
+        description: 'Exact private backup path returned by backup; verify or fixed first-backup diagnosis'
         type: string
         required: false
 
@@ -50,15 +50,17 @@ jobs:
           set -euo pipefail
           [[ "$PRINTLINK_OPS_BRANCH" = refs/heads/ops/printlink-940-20261019 ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-          [[ "$PRINTLINK_OPS_REF" =~ ^[a-f0-9]{40}$ && "$PRINTLINK_OPS_MODE" =~ ^(backup|verify)$ ]] || exit 1
+          [[ "$PRINTLINK_OPS_REF" =~ ^[a-f0-9]{40}$ && "$PRINTLINK_OPS_MODE" =~ ^(backup|verify|diagnose)$ ]] || exit 1
           [[ "$PRINTLINK_OPS_BEFORE" = 1510ca5f5f7e8a6132075400e50a36710f1447c0 && "$PRINTLINK_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
-          if [[ "$PRINTLINK_OPS_MODE" != backup ]]; then
+          if [[ "$PRINTLINK_OPS_MODE" = diagnose ]]; then
+            [[ "$PRINTLINK_OPS_TARGET" = "$PRINTLINK_OPS_BEFORE" && "$PRINTLINK_OPS_BACKUP" = /opt/rr-portal/deploy/backups/printlink-pre-940-20261019T011955726437Z ]] || exit 1
+          elif [[ "$PRINTLINK_OPS_MODE" = verify ]]; then
             [[ "$PRINTLINK_OPS_TARGET" != "$PRINTLINK_OPS_BEFORE" && "$PRINTLINK_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/printlink-pre-940-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
           else
             [[ "$PRINTLINK_OPS_TARGET" = "$PRINTLINK_OPS_BEFORE" && -z "$PRINTLINK_OPS_BACKUP" ]] || exit 1
           fi
 
-      - name: Fixed printlink private backup or read-only verification
+      - name: Fixed printlink private backup, verification or diagnosis
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           PRINTLINK_OPS_BRANCH: ${{ github.ref }}
@@ -78,9 +80,11 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$PRINTLINK_OPS_BRANCH" = refs/heads/ops/printlink-940-20261019 ]] || exit 1
-            [[ "$PRINTLINK_OPS_REF" =~ ^[a-f0-9]{40}$ && "$PRINTLINK_OPS_MODE" =~ ^(backup|verify)$ ]] || exit 1
+            [[ "$PRINTLINK_OPS_REF" =~ ^[a-f0-9]{40}$ && "$PRINTLINK_OPS_MODE" =~ ^(backup|verify|diagnose)$ ]] || exit 1
             [[ "$PRINTLINK_OPS_BEFORE" = 1510ca5f5f7e8a6132075400e50a36710f1447c0 && "$PRINTLINK_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
-            if [[ "$PRINTLINK_OPS_MODE" != backup ]]; then
+            if [[ "$PRINTLINK_OPS_MODE" = diagnose ]]; then
+              [[ "$PRINTLINK_OPS_TARGET" = "$PRINTLINK_OPS_BEFORE" && "$PRINTLINK_OPS_BACKUP" = /opt/rr-portal/deploy/backups/printlink-pre-940-20261019T011955726437Z ]] || exit 1
+            elif [[ "$PRINTLINK_OPS_MODE" = verify ]]; then
               [[ "$PRINTLINK_OPS_TARGET" != "$PRINTLINK_OPS_BEFORE" && "$PRINTLINK_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/printlink-pre-940-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
             else
               [[ "$PRINTLINK_OPS_TARGET" = "$PRINTLINK_OPS_BEFORE" && -z "$PRINTLINK_OPS_BACKUP" ]] || exit 1

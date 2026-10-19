@@ -8,6 +8,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import sqlite3
 import subprocess
 import tempfile
@@ -436,6 +437,210 @@ process.stdout.write(JSON.stringify({mutations,reads,loads,writes}));'''
             (fake/'production/server.js').write_text((app/'production/server.js').read_text()+'\nrepairCorruptedData(loadData());\n')
             with patch.object(ops,'APP',fake):
                 with self.assertRaises(RuntimeError):ops.startup_source_facts()
+
+
+class DiagnosticTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=pathlib.Path(self.temp.name);self.live=self.root/'live';self.private=self.root/'private'
+        (self.live/'orders').mkdir(parents=True);(self.private/'sqlite-snapshots/orders').mkdir(parents=True)
+        self.database='orders/printlink.sqlite';self.live_file=self.live/self.database
+        self.private_file=self.private/'sqlite-snapshots'/self.database
+
+    def build(self,ddl,rows,insert):
+        with contextlib.closing(sqlite3.connect(self.private_file)) as db:
+            db.executescript(ddl);db.executemany(insert,rows);db.commit()
+            self.original=ops.sqlite_audit(db)
+            with contextlib.closing(sqlite3.connect(self.live_file)) as live:db.backup(live)
+        self.writer=sqlite3.connect(self.live_file);self.writer.execute('PRAGMA journal_mode=WAL')
+        self.writer.execute('PRAGMA user_version=0');self.writer.commit()
+        self.addCleanup(self.writer.close)
+
+    def read(self):
+        with contextlib.ExitStack() as stack:
+            connection=ops.diagnostic_connections(self.live,self.private,[self.database],stack)[self.database]
+            return ops.diagnostic_database_delta(connection,self.database,self.original)
+
+    def test_added_deleted_modified_and_all_column_counts(self):
+        self.build('CREATE TABLE t(id INTEGER PRIMARY KEY,value TEXT,number)',[(1,'old',1),(2,'remove',2)],'INSERT INTO t VALUES(?,?,?)')
+        self.writer.execute("UPDATE t SET value='new',number=1.0 WHERE id=1")
+        self.writer.execute('DELETE FROM t WHERE id=2');self.writer.execute("INSERT INTO t VALUES(3,'added',3)");self.writer.commit()
+        value=self.read()['tables']['t']
+        self.assertEqual((value['added'],value['deleted'],value['modified']),(1,1,1))
+        self.assertEqual(value['changedColumnCounts'],{'id':0,'value':1,'number':1})
+
+    def test_nocase_rtrim_and_ieee_values_do_not_hide_differences(self):
+        self.build('CREATE TABLE t(id INTEGER PRIMARY KEY,nocase TEXT COLLATE NOCASE,trimmed TEXT COLLATE RTRIM,value)',
+          [(1,'alpha','text ',1.0)],'INSERT INTO t VALUES(?,?,?,?)')
+        self.writer.execute('UPDATE t SET nocase=?,trimmed=?,value=?',('ALPHA','text',1.0+2**-52));self.writer.commit()
+        value=self.read()['tables']['t'];self.assertEqual(value['modified'],1)
+        self.assertEqual(value['changedColumnCounts'],{'id':0,'nocase':1,'trimmed':1,'value':1})
+        self.assertEqual(ops.diagnostic_cell_equal(0.0,-0.0),0)
+        self.assertEqual(ops.diagnostic_cell_equal(1,1.0),0)
+        self.assertEqual(ops.diagnostic_cell_equal(b'1','1'),0)
+        self.assertEqual(ops.diagnostic_cell_equal(None,''),0)
+
+    def test_primary_key_type_or_case_change_is_added_and_deleted(self):
+        self.build('CREATE TABLE typed(pk PRIMARY KEY,value);CREATE TABLE folded(pk TEXT COLLATE NOCASE PRIMARY KEY,value);',
+          [(1,'same')],'INSERT INTO typed VALUES(?,?)')
+        self.writer.execute("INSERT INTO folded VALUES('alpha','same')");self.writer.commit()
+        # Add the same baseline row before the private image is used immutably.
+        with contextlib.closing(sqlite3.connect(self.private_file)) as db:
+            db.execute("INSERT INTO folded VALUES('alpha','same')");db.commit();self.original=ops.sqlite_audit(db)
+        self.writer.execute('UPDATE typed SET pk=1.0');self.writer.execute("UPDATE folded SET pk='ALPHA'");self.writer.commit()
+        result=self.read()
+        for name in ['typed','folded']:
+            self.assertEqual((result['tables'][name]['added'],result['tables'][name]['deleted'],result['tables'][name]['modified']),(1,1,0))
+
+    def test_composite_primary_key_without_rowid_and_generated_columns(self):
+        self.build('CREATE TABLE t(a TEXT,b INTEGER,v INTEGER,doubled INTEGER GENERATED ALWAYS AS(v*2) STORED,PRIMARY KEY(a,b)) WITHOUT ROWID',
+          [('x',1,2)],'INSERT INTO t(a,b,v) VALUES(?,?,?)')
+        self.writer.execute('UPDATE t SET v=3');self.writer.execute("INSERT INTO t(a,b,v) VALUES('y',2,4)");self.writer.commit()
+        value=self.read()['tables']['t'];self.assertEqual((value['added'],value['deleted'],value['modified']),(1,0,1))
+        self.assertEqual(value['changedColumnCounts'],{'a':0,'b':0,'v':1,'doubled':1})
+
+    def test_null_primary_keys_preserve_duplicate_multiset_without_false_modified_count(self):
+        self.build('CREATE TABLE t(pk TEXT PRIMARY KEY,value)',[(None,'duplicate'),(None,'duplicate')],'INSERT INTO t VALUES(?,?)')
+        self.writer.execute("UPDATE t SET value='new' WHERE rowid=1");self.writer.commit()
+        value=self.read()['tables']['t']
+        self.assertEqual((value['added'],value['deleted']),(1,1));self.assertIsNone(value['modified'])
+        self.assertTrue(value['modifiedCountIndeterminateWithoutStableKey'])
+        self.assertEqual(value['changedColumnCounts'],{'pk':None,'value':None})
+
+    def test_real_h_column_cannot_capture_fingerprint_grouping_alias(self):
+        self.build('CREATE TABLE t(h TEXT,value)',[('shared','first'),('shared','second'),('shared','second')],'INSERT INTO t VALUES(?,?)')
+        self.writer.execute("UPDATE t SET value='third' WHERE rowid=1");self.writer.execute("DELETE FROM t WHERE rowid=3");self.writer.commit()
+        value=self.read()['tables']['t'];self.assertEqual((value['added'],value['deleted']),(1,2))
+        self.assertIsNone(value['modified']);self.assertFalse(value['rowsUnchanged'])
+
+    def test_empty_and_identical_nokey_tables_are_compared_as_multisets(self):
+        self.build('CREATE TABLE empty(value);CREATE TABLE t(value)',[(b'\x00\xff',),(b'\x00\xff',)],'INSERT INTO t VALUES(?)')
+        tables=self.read()['tables'];self.assertTrue(tables['empty']['rowsUnchanged']);self.assertTrue(tables['t']['rowsUnchanged'])
+        self.assertEqual((tables['t']['added'],tables['t']['deleted']),(0,0))
+
+    def test_schema_index_or_trigger_change_stops_row_pairing_without_leaking_sql(self):
+        self.build('CREATE TABLE t(id INTEGER PRIMARY KEY,value TEXT)',[(1,'sentinel-private-content')],'INSERT INTO t VALUES(?,?)')
+        self.writer.execute('CREATE INDEX changed_index ON t(value)');self.writer.commit()
+        value=self.read();self.assertFalse(value['comparisonComplete']);self.assertTrue(value['tableRowMatchingSkippedBecauseSchemaChanged'])
+        self.assertEqual(value['schema']['addedObjects'],[{'type':'index','name':'changed_index'}])
+        self.assertNotIn('sentinel-private-content',json.dumps(value));self.assertNotIn('CREATE INDEX',json.dumps(value))
+
+    def test_system_sequence_is_compared_and_not_filtered(self):
+        self.build('CREATE TABLE t(id INTEGER PRIMARY KEY AUTOINCREMENT,value)',[('one',)],'INSERT INTO t(value) VALUES(?)')
+        self.writer.execute("UPDATE sqlite_sequence SET seq=77 WHERE name='t'");self.writer.commit()
+        value=self.read()['tables']['sqlite_sequence'];self.assertFalse(value['rowsUnchanged'])
+        self.assertEqual((value['added'],value['deleted']),(1,1));self.assertIsNone(value['modified'])
+
+    def test_nonpersistent_fts_hidden_columns_fail_closed(self):
+        connection=sqlite3.connect(':memory:');self.addCleanup(connection.close)
+        connection.execute('CREATE VIRTUAL TABLE searching USING fts5(value)')
+        with self.assertRaises(RuntimeError):ops.diagnostic_schema(connection,'main')
+        self.assertEqual(ops.FAILED_CHECK,'diagnosticNonPersistentVirtualHiddenColumnsNotComparable')
+
+    def test_live_snapshot_is_pinned_across_external_wal_commit_and_private_files_never_change(self):
+        self.build('CREATE TABLE t(id INTEGER PRIMARY KEY,value)',[(1,'before')],'INSERT INTO t VALUES(?,?)')
+        private_bytes=self.private_file.read_bytes();before_entries=sorted(str(p.relative_to(self.private)) for p in self.private.rglob('*'))
+        with contextlib.ExitStack() as stack:
+            connection=ops.diagnostic_connections(self.live,self.private,[self.database],stack)[self.database]
+            self.writer.execute("UPDATE t SET value='after'");self.writer.commit()
+            first=ops.diagnostic_database_delta(connection,self.database,self.original)
+            self.assertTrue(first['tables']['t']['rowsUnchanged'])
+            for schema in ['main','baseline']:
+                with self.assertRaises(sqlite3.OperationalError):connection.execute('INSERT INTO '+schema+".t VALUES(2,'forbidden')")
+        self.assertEqual(self.read()['tables']['t']['modified'],1)
+        self.assertEqual(self.private_file.read_bytes(),private_bytes)
+        self.assertEqual(sorted(str(p.relative_to(self.private)) for p in self.private.rglob('*')),before_entries)
+
+    def test_only_whitelisted_valid_timestamps_are_emitted_without_ids_or_contents(self):
+        secret='private-token-and-record-id'
+        self.build('CREATE TABLE collector_events(id TEXT PRIMARY KEY,station TEXT,received TEXT)',
+          [(secret,'private-station','2026-10-19T01:00:00.000Z')],'INSERT INTO collector_events VALUES(?,?,?)')
+        self.writer.execute('INSERT INTO collector_events VALUES(?,?,?)',('new-private-id','private-station','2026-10-19T02:00:00.000Z'));self.writer.commit()
+        value=self.read();text=json.dumps(value);self.assertNotIn(secret,text);self.assertNotIn('new-private-id',text);self.assertNotIn('private-station',text)
+        ranges=value['tables']['collector_events']['timeRanges']['addedCurrent']['received']
+        self.assertEqual(ranges,{'rowsInScope':1,'validTimeValues':1,'minimumUtc':'2026-10-19T02:00:00.000000Z','maximumUtc':'2026-10-19T02:00:00.000000Z'})
+        self.assertIsNone(ops.diagnostic_time('private-token','iso'))
+        self.assertIsNone(ops.diagnostic_time('1800-01-01T00:00:00Z','iso'))
+
+    def test_original_strict_false_seal_is_read_only_and_tampering_is_rejected(self):
+        import shutil
+        self.build('CREATE TABLE t(id INTEGER PRIMARY KEY,value)',[(1,'private-value')],'INSERT INTO t VALUES(?,?)')
+        second=self.private/'sqlite-snapshots/production.sqlite'
+        with contextlib.closing(sqlite3.connect(second)) as db:
+            db.execute('CREATE TABLE snapshot(id INTEGER PRIMARY KEY,value)');db.execute("INSERT INTO snapshot VALUES(1,'private-state')");db.commit()
+            second_audit=ops.sqlite_audit(db)
+        backups=self.root/'backups';backups.mkdir(mode=0o700)
+        directory=backups/'printlink-pre-940-20261019T011955726437Z';directory.mkdir(mode=0o700)
+        shutil.copytree(self.private/'sqlite-snapshots',directory/'sqlite-snapshots')
+        raw=ops.tree_inventory(self.live,directory/'runtime-raw.tar')
+        before={'deployment':'PR940','sourceCommit':ops.PRE_DEPLOY_COMMIT,'strictVerificationPassed':False,
+          'checks':{'allLogicalSQLiteDataStable':False,'sourceStable':True},'rawInventory':raw,
+          'sqlite':{self.database:self.original,'production.sqlite':second_audit}}
+        (directory/'baseline.json').write_text(json.dumps(before))
+        for name in ['env.before','runtime.private.json','nginx.configuration']:(directory/name).write_text('private-token-never-output')
+        for entry in directory.rglob('*'):entry.chmod(0o700 if entry.is_dir() else 0o600)
+        ops.seal(directory)
+        original={str(file.relative_to(directory)):file.read_bytes() for file in directory.rglob('*') if file.is_file()}
+        with patch.object(ops,'BACKUPS',backups),patch.object(ops,'DIAGNOSTIC_BACKUP_PATH',str(directory)):
+            _,retained,seal=ops.diagnostic_private_backup(str(directory))
+            self.assertIs(retained['strictVerificationPassed'],False)
+            self.assertNotIn('private-token-never-output',json.dumps(seal))
+            self.assertEqual({str(file.relative_to(directory)):file.read_bytes() for file in directory.rglob('*') if file.is_file()},original)
+            (directory/'env.before').write_bytes(b'tampered')
+            with self.assertRaises(RuntimeError):ops.diagnostic_private_backup(str(directory))
+            self.assertEqual((directory/'manifest.json').read_bytes(),original['manifest.json'])
+
+    def test_modified_and_deleted_timestamp_ranges_use_only_changed_rows(self):
+        self.build('CREATE TABLE collector_events(id TEXT PRIMARY KEY,station TEXT,received TEXT)',
+          [('modified-private','station','2026-10-19T01:00:00Z'),('deleted-private','station','2026-10-19T02:00:00Z')],
+          'INSERT INTO collector_events VALUES(?,?,?)')
+        self.writer.execute("UPDATE collector_events SET received='2026-10-19T03:00:00Z' WHERE id='modified-private'")
+        self.writer.execute("DELETE FROM collector_events WHERE id='deleted-private'");self.writer.commit()
+        value=self.read()['tables']['collector_events'];self.assertEqual((value['added'],value['deleted'],value['modified']),(0,1,1))
+        ranges=value['timeRanges'];self.assertEqual(ranges['deletedBefore']['received']['minimumUtc'],'2026-10-19T02:00:00.000000Z')
+        self.assertEqual(ranges['modifiedBefore']['received']['maximumUtc'],'2026-10-19T01:00:00.000000Z')
+        self.assertEqual(ranges['modifiedCurrent']['received']['maximumUtc'],'2026-10-19T03:00:00.000000Z')
+        self.assertNotIn('modified-private',json.dumps(value));self.assertNotIn('deleted-private',json.dumps(value))
+
+    def test_fixed_diagnostic_mode_rejects_wrong_backup_and_keeps_verify_gate(self):
+        with patch.object(ops,'diagnose') as diagnose:
+            with self.assertRaises(RuntimeError):ops.main(['diagnose',ops.PRE_DEPLOY_COMMIT,ops.PRE_DEPLOY_COMMIT,'/opt/rr-portal/deploy/backups/another',str(HELPER.with_name('printlink-940-source.json'))])
+            diagnose.assert_not_called()
+        import ast
+        original=subprocess.check_output(['git','show','HEAD:deploy/ops/printlink-940.py'],cwd=HELPER.parents[2],text=True)
+        current=HELPER.read_text()
+        def functions(source):return {node.name:ast.get_source_segment(source,node) for node in ast.parse(source).body if isinstance(node,ast.FunctionDef)}
+        old,new=functions(original),functions(current)
+        for name in ['selected_backup','backup','verify']:self.assertEqual(old[name],new[name],name)
+
+    def test_both_workflow_gates_accept_only_fixed_first_failure_diagnosis(self):
+        workflow=(HELPER.parents[2]/'.github/workflows/indo-diag.yml').read_text()
+        scripts=[]
+        for label,indent in [('run',10),('script',12)]:
+            match=re.search(r'^\s*'+label+r': \|\n((?:^ {'+str(indent)+r'}.*\n|^\n)+)',workflow,re.M)
+            self.assertIsNotNone(match)
+            script='\n'.join(line[indent:] for line in match[1].splitlines())
+            scripts.append(script.split('cd /opt/rr-portal',1)[0])
+        env={**os.environ,'CLOUD_HOST_FINGERPRINT':'SHA256:'+'A'*43,
+          'PRINTLINK_OPS_BRANCH':'refs/heads/ops/printlink-940-20261019','PRINTLINK_OPS_REF':'a'*40,
+          'PRINTLINK_OPS_MODE':'diagnose','PRINTLINK_OPS_BEFORE':ops.PRE_DEPLOY_COMMIT,
+          'PRINTLINK_OPS_TARGET':ops.PRE_DEPLOY_COMMIT,'PRINTLINK_OPS_BACKUP':ops.DIAGNOSTIC_BACKUP_PATH}
+        for script in scripts:
+            result=subprocess.run(['bash','-c',script],env=env,capture_output=True)
+            self.assertEqual(result.returncode,0)
+            for changed in [{'PRINTLINK_OPS_BACKUP':ops.DIAGNOSTIC_BACKUP_PATH+'x'},
+              {'PRINTLINK_OPS_TARGET':'b'*40},{'PRINTLINK_OPS_BRANCH':'refs/heads/main'},
+              {'PRINTLINK_OPS_MODE':'restore'}]:
+                rejected=subprocess.run(['bash','-c',script],env={**env,**changed},capture_output=True)
+                self.assertNotEqual(rejected.returncode,0)
+
+    def test_diagnostic_json_does_not_relabel_original_false_as_passed(self):
+        source=HELPER.read_text();import ast
+        tree=ast.parse(source);function=next(node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name=='diagnose')
+        text=ast.get_source_segment(source,function)
+        self.assertIn("'originalStrictVerificationPassed':False",text)
+        self.assertIn("'deploymentAuthorizedByThisResult':False",text)
+        self.assertNotIn('private_write(',text);self.assertNotIn('production_readiness(',text);self.assertNotIn('read_only_probes(',text)
 
 
 if __name__=='__main__':unittest.main()

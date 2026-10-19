@@ -22,6 +22,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -34,7 +35,10 @@ DB = DATA / 'voyageplex.db'
 FIRST_BACKUP = ROOT / 'deploy/backups/voyageplex-mail-recovery-20261019'
 FIRST_RESULT_SHA256 = '5c90d5251fbb212364dee9b1059fb6d76feafd617cce576bb0254bc389b442a5'
 FIRST_SEAL_SHA256 = 'c9af2383c41e4bf0652a02c13c39480f4d35d65bedb18b7ffa1ee35e1baa639c'
-BACKUP = ROOT / 'deploy/backups/voyageplex-mail-recovery-20261019-complete-v2'
+SECOND_BACKUP = ROOT / 'deploy/backups/voyageplex-mail-recovery-20261019-complete-v2'
+SECOND_RESULT_SHA256 = '53b23b3ee4a877d944a790495626e2856dca54156c6e6b88a1998e8f99f7b8c9'
+SECOND_SEAL_SHA256 = 'eb4e551634673c28a1ea3a351ff4cc2205ea58e342b6f6e05f838aaf5bb5e6fa'
+BACKUP = ROOT / 'deploy/backups/voyageplex-mail-recovery-20261019-complete-v3'
 RUNS = BACKUP.with_name(BACKUP.name + '-runs')
 BRANCH = 'refs/heads/ops/voyageplex-mail-recovery-20261019'
 BASE = '4932408a0375058b781b9a9c050d4eef65f8728b'
@@ -243,8 +247,82 @@ def prior_failure():
     result = read_json(FIRST_BACKUP / 'first-result.json')
     require(result.get('mode') == 'backup' and result.get('failed') is True and
             result.get('failedCheck') == 'UNEXPECTED_ADDITIONAL_SQLITE_DATABASE', 'EXPECTED_ORIGINAL_BACKUP_FAILURE_REQUIRED')
-    return {'resultPath': str(FIRST_BACKUP / 'first-result.json'), 'resultSHA256': FIRST_RESULT_SHA256,
-            'sealSHA256': FIRST_SEAL_SHA256, 'failedCheck': 'UNEXPECTED_ADDITIONAL_SQLITE_DATABASE', 'preserved': True}
+    verify_seal(SECOND_BACKUP)
+    require(file_sha(SECOND_BACKUP / 'first-result.json') == SECOND_RESULT_SHA256 and
+            file_sha(SECOND_BACKUP / 'seal.json') == SECOND_SEAL_SHA256, 'EXACT_SECOND_FAILURE_RECEIPT_REQUIRED')
+    second = read_json(SECOND_BACKUP / 'first-result.json')
+    require(second.get('mode') == 'backup' and second.get('failed') is True and
+            second.get('failedCheck') == 'HISTORICAL_SQLITE_LIVE_COMPANION_FORBIDDEN', 'EXPECTED_SECOND_BACKUP_FAILURE_REQUIRED')
+    return [{'resultPath': str(FIRST_BACKUP / 'first-result.json'), 'resultSHA256': FIRST_RESULT_SHA256,
+             'sealSHA256': FIRST_SEAL_SHA256, 'failedCheck': 'UNEXPECTED_ADDITIONAL_SQLITE_DATABASE', 'preserved': True},
+            {'resultPath': str(SECOND_BACKUP / 'first-result.json'), 'resultSHA256': SECOND_RESULT_SHA256,
+             'sealSHA256': SECOND_SEAL_SHA256, 'failedCheck': 'HISTORICAL_SQLITE_LIVE_COMPANION_FORBIDDEN', 'preserved': True}]
+
+
+HISTORICAL_NAME = r'voyageplex\.db\.before-(company|daily-mail|personal-mail)-([0-9]{14})-[a-f0-9]{32}\.db'
+
+
+def historical_set(path):
+    """Hash/stat the entire exact DB + optional WAL/SHM/journal set, without opening SQLite."""
+    result = {}
+    for suffix in ['', '-wal', '-shm', '-journal']:
+        member = path.with_name(path.name + suffix)
+        require(not member.is_symlink(), 'HISTORICAL_SQLITE_SYMLINK_FORBIDDEN')
+        if not member.exists():
+            require(bool(suffix), 'HISTORICAL_DATABASE_REQUIRED')
+            continue
+        before = member.stat()
+        require(stat.S_ISREG(before.st_mode), 'HISTORICAL_SQLITE_REGULAR_FILES_REQUIRED')
+        require(before.st_size <= 10 * 1024**3, 'HISTORICAL_SQLITE_MEMBER_BOUND')
+        digest = file_sha(member)
+        after = member.stat()
+        stamp = lambda value: (value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns,
+                               stat.S_IMODE(value.st_mode), value.st_uid, value.st_gid)
+        require(stamp(before) == stamp(after), 'HISTORICAL_SQLITE_SET_CHANGED')
+        result[member.name] = {'stamp': list(stamp(before)), 'sha256': digest}
+    require(sum(value['stamp'][1] for value in result.values()) <= 20 * 1024**3,
+            'HISTORICAL_SQLITE_SET_BOUND')
+    # Detect companions appearing/disappearing while individual members were read.
+    actual = {path.with_name(path.name + suffix).name for suffix in ['', '-wal', '-shm', '-journal']
+              if path.with_name(path.name + suffix).exists() or path.with_name(path.name + suffix).is_symlink()}
+    require(set(result) == actual, 'HISTORICAL_SQLITE_SET_CHANGED')
+    return result
+
+
+def copy_historical_set(path, destination):
+    before = historical_set(path)
+    for name in before:
+        shutil.copyfile(path.with_name(name), destination / name)
+        (destination / name).chmod(0o600)
+        require(file_sha(destination / name) == before[name]['sha256'], 'HISTORICAL_SQLITE_COPY_HASH_MISMATCH')
+    require(historical_set(path) == before, 'HISTORICAL_SQLITE_SET_CHANGED')
+    # SQLite may alter SHM locks/reader marks even in normal read-only mode.
+    # Open only an expendable duplicate, never the retained raw backup.
+    with tempfile.TemporaryDirectory(prefix='history-wal-validation-', dir=destination.parent) as temp:
+        validation = pathlib.Path(temp)
+        for name in before:
+            shutil.copyfile(destination / name, validation / name)
+        until = time.monotonic() + 30
+        with contextlib.closing(sqlite3.connect((validation / path.name).as_uri() + '?mode=ro', uri=True, timeout=5)) as copied:
+            copied.execute('PRAGMA query_only=ON')
+            copied.set_progress_handler(lambda: 1 if time.monotonic() > until else 0, 1000)
+            require(copied.execute('PRAGMA integrity_check').fetchall() == [('ok',)], 'HISTORICAL_SQLITE_WAL_INTEGRITY_CHECK')
+            counts = {name: copied.execute('SELECT COUNT(*) FROM ' + q(name)).fetchone()[0]
+                      for (name,) in copied.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    require(historical_set(path) == before, 'HISTORICAL_SQLITE_SET_CHANGED')
+    require(all(file_sha(destination / name) == value['sha256'] for name, value in before.items()),
+            'RETAINED_HISTORICAL_RAW_SET_UNCHANGED')
+    result = {}
+    for name, value in before.items():
+        stamp = value['stamp']
+        result[name] = {'mode': stamp[4], 'uid': stamp[5], 'gid': stamp[6], 'size': stamp[1],
+                        'mtimeNs': stamp[2], 'kind': 'file', 'sha256': value['sha256'],
+                        'historicalSQLiteRawSetMember': True}
+    result[path.name].update({'historicalSQLiteIndividuallyVerified': True,
+                             'historicalSQLiteValidationMode': 'separate-duplicate-normal-ro-with-WAL',
+                             'historicalSQLiteLogicalTableCounts': counts,
+                             'historicalSQLiteCompanionCount': len(before) - 1})
+    return result
 
 
 def backup_files(destination):
@@ -257,6 +335,8 @@ def backup_files(destination):
     for path in sorted(DATA.rglob('*')):
         require(not path.is_symlink(), 'DATA_SYMLINK_FORBIDDEN')
         rel = path.relative_to(DATA)
+        if rel.as_posix() in metadata:
+            continue  # A historical group already copied this exact companion.
         before = path.stat()
         require(stat.S_ISREG(before.st_mode) or stat.S_ISDIR(before.st_mode), 'DATA_SPECIAL_FILE_FORBIDDEN')
         metadata[rel.as_posix()] = {'mode': stat.S_IMODE(before.st_mode), 'uid': before.st_uid,
@@ -270,19 +350,24 @@ def backup_files(destination):
         count += 1
         total += before.st_size
         require(count <= 100000 and total <= 20 * 1024**3, 'DATA_BACKUP_BOUND')
-        historical = re.fullmatch(r'voyageplex\.db\.before-(company|daily-mail|personal-mail)-([0-9]{14})-[a-f0-9]{32}\.db', rel.as_posix())
+        historical = re.fullmatch(HISTORICAL_NAME, rel.as_posix())
+        require(re.fullmatch(HISTORICAL_NAME + r'-(wal|shm|journal)', rel.as_posix()) is None,
+                'ORPHAN_HISTORICAL_SQLITE_COMPANION_FORBIDDEN')
         if historical:
             # Only the three exact application-generated top-level name shapes.
             require(dt.datetime.strptime(historical[2], '%Y%m%d%H%M%S').strftime('%Y%m%d%H%M%S') == historical[2],
                     'VALID_HISTORICAL_SQLITE_TIMESTAMP_REQUIRED')
-            for suffix in ['-wal', '-shm', '-journal']:
-                companion = path.with_name(path.name + suffix)
-                require(not companion.is_symlink() and (not companion.exists() or
-                        companion.is_file() and companion.stat().st_size == 0), 'HISTORICAL_SQLITE_LIVE_COMPANION_FORBIDDEN')
         with path.open('rb') as source:
             is_sqlite = source.read(16) == b'SQLite format 3\x00'
             require(not is_sqlite or historical is not None, 'UNEXPECTED_ADDITIONAL_SQLITE_DATABASE')
             require(not historical or is_sqlite, 'HISTORICAL_SQLITE_HEADER_REQUIRED')
+        if historical:
+            group = copy_historical_set(path, destination)
+            count += len(group) - 1
+            total += sum(item['size'] for item in group.values()) - before.st_size
+            require(count <= 100000 and total <= 20 * 1024**3, 'DATA_BACKUP_BOUND')
+            metadata.update(group)
+            continue
         (destination / rel).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         shutil.copyfile(path, destination / rel)
         (destination / rel).chmod(0o600)
@@ -294,17 +379,6 @@ def backup_files(destination):
         final = path.stat()
         require((before.st_ino, before.st_size, before.st_mtime_ns) ==
                 (final.st_ino, final.st_size, final.st_mtime_ns), 'FILE_CHANGED_DURING_COPY')
-        if historical:
-            end = time.monotonic() + 30
-            with connect(destination / rel) as copied:
-                copied.set_progress_handler(lambda: 1 if time.monotonic() > end else 0, 1000)
-                require(copied.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'HISTORICAL_SQLITE_INTEGRITY_CHECK')
-            for suffix in ['-wal', '-shm', '-journal']:
-                companion = path.with_name(path.name + suffix)
-                require(not companion.is_symlink() and (not companion.exists() or
-                        companion.is_file() and companion.stat().st_size == 0), 'HISTORICAL_SQLITE_LIVE_COMPANION_FORBIDDEN')
-            # Keep kind=file: subsequent byte-preservation comparison includes it.
-            metadata[rel.as_posix()]['historicalSQLiteIndividuallyVerified'] = True
     return metadata
 
 
@@ -887,7 +961,7 @@ def main():
               'success': False, 'allMailboxRecoveryVerified': False,
               'priorContinuationReceipts': sorted(prior_receipts, key=lambda v: v['run'])}
     if mode == 'backup':
-        result['priorFailure'] = retained_failure
+        result['priorFailures'] = retained_failure
     def terminate(*_):
         require(False, 'WORKFLOW_TERMINATION_REQUESTED')
     old_handler = signal.signal(signal.SIGTERM, terminate)

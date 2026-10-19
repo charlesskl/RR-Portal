@@ -35,8 +35,8 @@ class FakeImap:
         if _args[1] == "(INTERNALDATE RFC822.SIZE)":
             return "OK", [b'1 (INTERNALDATE "18-Sep-2026 00:30:00 +0800" RFC822.SIZE ' + str(len(b"Subject: shipment\r\n\r\nDetails")).encode() + b' UID ' + str(_args[0]).encode() + b')']
         self.requested.append(int(_args[0]))
-        return "OK", [(b'UID ' + str(_args[0]).encode() + b' INTERNALDATE "18-Sep-2026 00:30:00 +0800" BODY[]',
-                       b"Subject: shipment\r\n\r\nDetails")]
+        raw = b"Subject: shipment\r\n\r\nDetails"
+        return "OK", [(b'1 (UID ' + str(_args[0]).encode() + b' BODY[] {' + str(len(raw)).encode() + b'}', raw), b')']
 
     def logout(self):
         pass

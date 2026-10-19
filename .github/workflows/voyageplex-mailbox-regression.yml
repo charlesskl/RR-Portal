@@ -35,7 +35,7 @@ jobs:
           docker build --tag voyageplex-mailbox-production .
           docker build --tag voyageplex-mailbox-regression --file - . <<'FIXTURE_DOCKERFILE'
           FROM voyageplex-mailbox-production
-          RUN python -m pip install --no-cache-dir pytest==9.1.1
+          RUN python -m pip install --no-cache-dir pytest==9.1.1 httpx==0.28.1
           FIXTURE_DOCKERFILE
       - name: All parser regressions with a hard 512MiB memory limit and no extra swap
         working-directory: apps/船务部/VoyagePlex船务协同系统/services/email-parser

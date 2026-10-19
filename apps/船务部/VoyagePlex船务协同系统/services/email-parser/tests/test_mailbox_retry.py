@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app, poll_mailbox
 from app.mailbox import (BatchLiteralBudget, BoundedImap, MailboxUidValidityChanged,
-                         MAX_MESSAGE_BYTES, OversizedLiteral, fetch_mailbox)
+                         MAX_MESSAGE_BYTES, OversizedLiteral, complete_body_literal, fetch_mailbox)
 
 
 CREDENTIALS = {"address": "fixture@example.invalid", "auth_code": "synthetic-private-code",
@@ -124,7 +124,7 @@ class MailboxRetryTests(unittest.TestCase):
                 self.assertEqual(result["blocked_uid"], None if terminal else 11)
                 self.assertEqual([entry["uid"] for entry in result["messages"]], [11])
 
-    def test_size_mismatch_is_pending_evidence_not_accepted_as_complete_raw(self):
+    def test_other_size_mismatch_is_not_accepted_as_complete_raw(self):
         fake = RetryImap()
         original = fake.uid
 
@@ -140,6 +140,15 @@ class MailboxRetryTests(unittest.TestCase):
         self.assertEqual(result["blocked_uid"], 11)
         self.assertTrue(result["messages"][0]["retryable"])
         self.assertIsNone(result["messages"][0]["raw"])
+
+    def test_exact_literal_framing_is_required_even_for_metadata_plus_two(self):
+        for prefix, suffix in ((b'1 (UID 11 BODY[] {1}', b')'),
+                               (b'1 (UID 11 BODY[] {' + str(len(RAW)).encode() + b'}', b'')):
+            with self.subTest(prefix=prefix, suffix=suffix):
+                with self.assertRaises(RuntimeError):
+                    complete_body_literal([(prefix, RAW), suffix], 11, len(RAW) + 2)
+        parts = [(b'1 (UID 11 BODY[] {' + str(len(RAW)).encode() + b'}', RAW), b')']
+        self.assertEqual(complete_body_literal(parts, 11, len(RAW) + 2), RAW)
 
     def test_retry_validation_is_strict_and_does_not_echo_credentials(self):
         invalid = ([], [1] * 2, list(range(1, 7)), [0], [-1], [4294967296],

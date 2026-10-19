@@ -242,6 +242,7 @@ def response_for_uid(parts, uid, body=False):
         current.append(part)
     if current:
         groups.append(current)
+    matched = []
     for group in groups:
         header = b" ".join(part[0] if isinstance(part, tuple) else part for part in group)
         matches = {int(value) for value in re.findall(rb'\bUID ([0-9]+)\b', header)}
@@ -251,8 +252,27 @@ def response_for_uid(parts, uid, body=False):
                     continue
             elif not INTERNAL_DATE.search(header) or not re.search(rb'\bRFC822\.SIZE [0-9]+\b', header):
                 continue
-            return group
-    return []
+            matched.append(group)
+    return matched[0] if len(matched) == 1 else []
+
+
+def complete_body_literal(parts, uid, size):
+    group = response_for_uid(parts, uid, body=True)
+    literals = [part for part in group if isinstance(part, tuple)]
+    if len(literals) != 1:
+        raise RuntimeError()
+    header, raw = literals[0]
+    declared = re.search(rb'\bBODY\[\] \{([0-9]+)\}$', header)
+    closing = b" ".join(part[0] if isinstance(part, tuple) else part for part in group)
+    if (not declared or not isinstance(raw, bytes) or not raw
+            or len(raw) != int(declared[1]) or not closing.rstrip().endswith(b")")):
+        raise RuntimeError()
+    # Verified 163 responses can report RFC822.SIZE two bytes larger than the
+    # complete BODY[] literal. Its own framing must still match exactly; other
+    # size differences remain transient failures, never partially parsed mail.
+    if size not in (len(raw), len(raw) + 2):
+        raise RuntimeError()
+    return raw
 
 
 def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: str = "Xingxin", credentials: dict | None = None, control: MailboxControl | None = None, selected_uids: list[int] | None = None, expected_uid_validity: int | None = None) -> dict:
@@ -346,9 +366,7 @@ def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: s
                 status, parts = client.uid("FETCH", str(uid), "(BODY.PEEK[])")
                 if status != "OK" or not parts:
                     raise RuntimeError()
-                raw = next((part[1] for part in response_for_uid(parts, uid, body=True) if isinstance(part, tuple)), None)
-                if not raw or len(raw) != size:
-                    raise RuntimeError()
+                raw = complete_body_literal(parts, uid, size)
                 if len(raw) > MAX_MESSAGE_BYTES or total_bytes + len(raw) > MAX_BATCH_BYTES:
                     raise OversizedLiteral()
                 total_bytes += len(raw)

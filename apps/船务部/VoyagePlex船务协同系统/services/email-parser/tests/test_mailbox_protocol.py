@@ -80,7 +80,9 @@ class MailboxProtocolTests(unittest.TestCase):
 
     def test_real_wire_trailing_uid_unsolicited_fetch_and_continuous_drip_deadline(self):
         raw = b"Subject: synthetic wire\r\nFrom: fixture@example.invalid\r\n\r\n" + b"x" * 100
-        for scenario in ("uid-before", "uid-after", "drip"):
+        for scenario in ("uid-before", "uid-after", "size-plus-two", "size-plus-one",
+                         "size-plus-three", "size-minus-two", "truncated",
+                         "ambiguous", "multiple-literals", "drip"):
             with self.subTest(scenario=scenario):
                 class Handler(socketserver.StreamRequestHandler):
                     def handle(self):
@@ -100,21 +102,31 @@ class MailboxProtocolTests(unittest.TestCase):
                                     elif "RFC822.SIZE" in args[0]:
                                         uid = args[0].split()[1].encode()
                                         self.wfile.write(b'* 1 FETCH (UID ' + uid + b' FLAGS (\\Seen))\r\n')
-                                        self.wfile.write(b'* 1 FETCH (INTERNALDATE "19-Oct-2026 09:30:00 +0800" RFC822.SIZE ' + str(len(raw)).encode() + b' UID ' + uid + b')\r\n')
+                                        delta = {"size-plus-two": 2, "size-plus-one": 1,
+                                                 "size-plus-three": 3, "size-minus-two": -2}.get(scenario, 0)
+                                        self.wfile.write(b'* 1 FETCH (INTERNALDATE "19-Oct-2026 09:30:00 +0800" RFC822.SIZE ' + str(len(raw) + delta).encode() + b' UID ' + uid + b')\r\n')
                                     else:
                                         uid = args[0].split()[1].encode()
                                         # A different unsolicited FETCH must not donate its UID/body.
                                         self.wfile.write(b"* 7 FETCH (UID 777 FLAGS (\\Seen))\r\n")
                                         self.wfile.write(b'* 1 FETCH (UID ' + uid + b' FLAGS (\\Seen))\r\n')
+                                        if scenario == "ambiguous":
+                                            self.wfile.write(b'* 1 FETCH (UID ' + uid + b' BODY[] {' + str(len(raw)).encode() + b'}\r\n' + raw + b')\r\n')
                                         prefix = b'UID ' + uid + b' ' if scenario == "uid-before" else b''
                                         self.wfile.write(b'* 1 FETCH (' + prefix + b'BODY[] {' + str(len(raw)).encode() + b'}\r\n')
-                                        if scenario == "drip":
+                                        if scenario == "truncated":
+                                            self.wfile.write(raw[:len(raw) // 2])
+                                            self.wfile.flush()
+                                            return  # EOF before the promised literal is complete.
+                                        elif scenario == "drip":
                                             for byte in raw:
                                                 self.wfile.write(bytes([byte]))
                                                 self.wfile.flush()
                                                 time.sleep(.02)  # Never idle for the socket timeout.
                                         else:
                                             self.wfile.write(raw)
+                                        if scenario == "multiple-literals":
+                                            self.wfile.write(b' BODY[] {' + str(len(raw)).encode() + b'}\r\n' + raw)
                                         suffix = b' UID ' + uid if scenario != "uid-before" else b''
                                         self.wfile.write(suffix + b')\r\n')
                                 self.wfile.write(f"{tag} OK complete\r\n".encode())
@@ -133,11 +145,14 @@ class MailboxProtocolTests(unittest.TestCase):
                         start = time.monotonic()
                         result = fetch_mailbox(10, credentials={"address": "fixture@example.invalid", "auth_code": "synthetic", "host": "imap.163.com", "folder": "INBOX"})
                         elapsed = time.monotonic() - start
-                    if scenario == "drip":
-                        self.assertLess(elapsed, 2)
+                    if scenario not in ("uid-before", "uid-after", "size-plus-two"):
+                        if scenario == "drip":
+                            self.assertLess(elapsed, 2)
                         self.assertEqual(len(result["messages"]), 1)
                         self.assertIsNone(result["messages"][0]["raw"])
                         self.assertEqual(result["messages"][0]["received_at"], "2026-10-19T01:30:00+00:00")
+                        self.assertTrue(result["messages"][0]["retryable"])
+                        self.assertEqual(result["blocked_uid"], 11)
                     else:
                         self.assertEqual([entry["raw"] for entry in result["messages"]], [raw, raw])
                         self.assertEqual([entry["uid"] for entry in result["messages"]], [11, 12])

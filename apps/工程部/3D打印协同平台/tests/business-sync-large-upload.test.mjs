@@ -207,6 +207,22 @@ async function request(base, route, {data, body, headers = {}, timeoutMs = 12000
   return {status: response.status, data: JSON.parse(text), bytes: Buffer.byteLength(text), headers: response.headers};
 }
 
+async function waitForCloud(app) {
+  // Docker can publish its port before the cloud listener starts, resetting
+  // connections in that interval. Only the startup health check retries them.
+  const deadline = Date.now() + 15000;
+  let ready = false;
+  do {
+    try {
+      ready = (await fetch(app.base + '/api/health', {signal: AbortSignal.timeout(
+        Math.max(1, Math.min(1000, deadline - Date.now())))})).status === 200;
+    } catch {}
+    if (ready || Date.now() >= deadline || app.child?.exitCode !== null && app.child?.exitCode !== undefined) break;
+    await delay(Math.min(100, deadline - Date.now()));
+  } while (Date.now() < deadline);
+  assert.ok(ready, app.logs());
+}
+
 test('real three-process app preserves images through 21/42 MiB sync, conflicts, success and receipt retry', {timeout: 180000}, async t => {
   const dir = mkdtempSync(path.join(tmpdir(), 'printlink-large-http-'));
   const {source, remote, baseline} = fixture();
@@ -224,13 +240,7 @@ test('real three-process app preserves images through 21/42 MiB sync, conflicts,
   assert.ok(Buffer.byteLength(exchangeBody) > 21 * MiB && Buffer.byteLength(exchangeBody) < 21.1 * MiB);
   try {
     app = await launch(dir);
-    let ready = false;
-    for (let i = 0; i < 150; i++) {
-      try {if ((await fetch(app.base + '/api/health', {signal: AbortSignal.timeout(1000)})).status === 200) {ready = true; break;}} catch {}
-      if (app.child?.exitCode !== null && app.child?.exitCode !== undefined) break;
-      await delay(100);
-    }
-    assert.ok(ready, app.logs());
+    await waitForCloud(app);
     // Cloud health is independent of production startup. Wait for the real,
     // non-mutating sync probe before inspecting production-owned tables.
     const auth = {Authorization: 'Bearer ' + token};
@@ -400,15 +410,15 @@ test('real large keep-both sync survives lost response, collector restart and Wi
   sampleClient();
   try {
     app = await launch(dir);
+    await waitForCloud(app);
     const auth = {Authorization: 'Bearer ' + token};
     let probe;
     const deadline = Date.now() + 15000;
     do {
-      try {probe = await request(app.base, '/api/collector/business-sync', {headers: auth,
-        data: {clientId, probe: true, baseHash: 'not-equal', remoteHash: 'not-equal'}, timeoutMs: Math.max(1, deadline - Date.now())});}
-      catch (error) {if (error.cause?.code !== 'ECONNREFUSED') throw error;}
-      if (probe && probe.status !== 502) break;
-      await delay(100);
+      probe = await request(app.base, '/api/collector/business-sync', {headers: auth,
+        data: {clientId, probe: true, baseHash: 'not-equal', remoteHash: 'not-equal'}, timeoutMs: Math.max(1, deadline - Date.now())});
+      if (probe.status !== 502 || Date.now() >= deadline) break;
+      await delay(Math.min(100, deadline - Date.now()));
     } while (Date.now() < deadline);
     assert.equal(probe?.status, 200, app.logs()); assert.equal(probe.data.unchanged, false);
     const before = readState(dir), initialContainer = app.id ? app.state() : null;

@@ -1,4 +1,4 @@
-name: PR941 One-time Read-only Live Deployment Diagnosis
+name: PR941 Read-only Lifecycle Evidence for Three Fixed Containers
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ permissions:
 # This exact diagnostic only reads state/process metrics; it does not share the
 # deployment lock because the purpose is to inspect an active deployment.
 concurrency:
-  group: pr941-live-readonly-diagnostic
+  group: pr941-readonly-lifecycle-diagnostic
   queue: max
   cancel-in-progress: false
 
@@ -30,7 +30,7 @@ jobs:
           [[ "$FR941_ATTEMPT" = 1 ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
 
-      - name: Read fixed deployment phase and bounded safe process metrics
+      - name: Read bounded lifecycle events and classified error counts
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           FR941_BRANCH: ${{ github.ref }}
@@ -41,83 +41,142 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 2m
+          command_timeout: 3m
           envs: FR941_BRANCH,FR941_ATTEMPT
           script: |
             set -euo pipefail
             [[ "$FR941_BRANCH" = refs/heads/ops/factory-review-941-20261019 ]] || exit 1
             [[ "$FR941_ATTEMPT" = 1 ]] || exit 1
             python3 - <<'PY_DIAG'
-            import json, math, pathlib, re, stat, subprocess
-            ROOT = pathlib.Path('/opt/rr-portal')
-            TARGET = '4932408a0375058b781b9a9c050d4eef65f8728b'
-            def command(args):
-                result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
-                return result.stdout if result.returncode == 0 else None
-            def emit(section, value):
-                line = json.dumps({'section': section, 'data': value}, sort_keys=True, separators=(',', ':'), allow_nan=False)
-                if len(line.encode()) > 6000:
+            import datetime, json, os, re, select, subprocess, time
+            TARGETS = {'printlink': '7fda512cf6166d2304a0293fc73ac5de5400442604d9f50c320dee81f8a8dd9e', 'voyageplex-api': '38de2d1cea0c42468082fb7840af7f1e62ccf8f0816e283fc195e4b61f03e295', 'voyageplex-parser': 'c6c8c7b8a69fcbddb9cd07dc9c814e3812069ac9800220035befa87b2c486a75'}
+            SINCE = '2026-10-19T02:30:00Z'
+            UNTIL = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace('+00:00','Z')
+            BUDGET, DEADLINE = 1048576, time.monotonic() + 100
+            ACTIONS = {'oom','die','kill','restart','start','stop','destroy','create','pause','unpause','health_status: healthy','health_status: unhealthy','health_status: starting'}
+            MARKERS = {
+                'oom':r'\bout of memory\b|\boom[- ]kill(?:ed)?\b|\boomkilled\b',
+                'nodeHeapOom':r'JavaScript heap out of memory|Reached heap limit|Ineffective mark-compacts',
+                'healthRestart':r'unhealthy.*restart|restart.*unhealthy',
+                'healthFailure':r'health.?check.*(?:fail|error)|\bunhealthy\b',
+                'permissionFailure':r'\bEACCES\b|\bEPERM\b|PermissionError|permission denied|operation not permitted',
+                'uncaughtFailure':r'uncaught(?:Exception)?|unhandled(?:Rejection)?|Traceback \(most recent call last\)|FATAL ERROR',
+                'connectionFailure':r'\bECONNREFUSED\b|\bETIMEDOUT\b|connection refused|ConnectionError',
+                'databaseLock':r'\bSQLITE_BUSY\b|database is locked|too many connections',
+                'terminationMarker':r'\bSIGTERM\b|\bSIGKILL\b|\bKilled\b'
+            }
+            MARKERS = {name:re.compile(pattern,re.I) for name,pattern in MARKERS.items()}
+            def emit(section,value):
+                raw = json.dumps({'section':section,'data':value},sort_keys=True,separators=(',',':'),allow_nan=False)
+                if len(raw.encode()) > 6000:
                     raise ValueError('bounded_output')
-                print(line, flush=True)
+                print(raw,flush=True)
+            def bounded(args,limit):
+                global BUDGET
+                limit = min(limit,BUDGET)
+                if limit <= 0 or time.monotonic() >= DEADLINE:
+                    return b'',{'querySucceeded':False,'budgetExhausted':True,'bytes':0,'truncated':True,'timedOut':False}
+                process = subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+                output, truncated, timed_out = bytearray(), False, False
+                deadline = min(DEADLINE,time.monotonic()+20)
+                try:
+                    while True:
+                        remaining = deadline-time.monotonic()
+                        if remaining <= 0:
+                            timed_out=True
+                            break
+                        if not select.select([process.stdout],[],[],remaining)[0]:
+                            timed_out=True
+                            break
+                        block = os.read(process.stdout.fileno(),min(65536,limit-len(output)))
+                        if not block:
+                            try:
+                                process.wait(timeout=max(.1,deadline-time.monotonic()))
+                            except subprocess.TimeoutExpired:
+                                timed_out=True
+                            break
+                        output.extend(block)
+                        if len(output)>=limit:
+                            truncated=True
+                            break
+                finally:
+                    # Stop only this diagnostic CLI client on a read cap/timeout. No Docker
+                    # kill/restart API or signal to any application container is issued.
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=3)
+                    process.stdout.close()
+                BUDGET -= min(len(output),limit)
+                return bytes(output[:limit]),{'querySucceeded':process.returncode==0 and not truncated and not timed_out,'bytes':min(len(output),limit),'truncated':truncated,'timedOut':timed_out}
+            def numeric(value):
+                return int(value) if isinstance(value,(str,int)) and re.fullmatch(r'-?[0-9]{1,10}',str(value)) else None
+            def timestamp(line):
+                match = re.match(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d{1,9})?Z(?:\s|$)',line)
+                return match[1]+'Z' if match else None
+            def counts(lines):
+                result = {'linesExamined':len(lines),'markerCounts':{},'markerTimesUtc':{},'overlappingCategories':True}
+                for key,pattern in MARKERS.items():
+                    selected = [line for line in lines if pattern.search(line)]
+                    stamps = [timestamp(line) for line in selected if timestamp(line)]
+                    result['markerCounts'][key] = len(selected)
+                    result['markerTimesUtc'][key] = {'first':min(stamps) if stamps else None,'last':max(stamps) if stamps else None}
+                return result
             def diagnostic():
-                state = ROOT / 'deploy/.deploy-state'
-                exists = state.exists()
-                phase = None
-                # update-server.sh save_state writes exactly one phase string.
-                if exists and not state.is_symlink() and stat.S_ISREG(state.stat().st_mode) and state.stat().st_size <= 64:
-                    value = state.read_text().strip()
-                    phase = value if value in {'pulling','analyze','cleanup','directories','backup','deploy'} else 'unrecognized'
-                head = command(['git','--no-optional-locks','-C',str(ROOT),'rev-parse','HEAD'])
-                head = head.decode().strip() if head else ''
-                head = head if re.fullmatch('[a-f0-9]{40}', head) else None
-                emit('deployment', {'stateExists':exists,'phase':phase,'checkoutCommit':head,'expectedTarget':TARGET,'checkoutMatchesExpectedTarget':head == TARGET})
-                memory = {}
-                allowed_memory = {'MemTotal','MemAvailable','MemFree','SwapTotal','SwapFree'}
-                for line in pathlib.Path('/proc/meminfo').read_text().splitlines():
-                    match = re.fullmatch(r'([A-Za-z_()]+):\s+([0-9]+) kB', line)
-                    if match and match[1] in allowed_memory:
-                        memory[match[1] + 'Bytes'] = int(match[2]) * 1024
-                emit('memory', memory)
-                raw = command(['ps','-eo','pid=,ppid=,comm=,etime=,pcpu=,pmem='])
-                allowed = {'node','npm','npm ci','npm run build','wget','apk','docker','dockerd','docker-compose','buildkitd','buildkit-runc','buildx','containerd','git','vue-tsc','tsc','vite','rollup','esbuild','unzip'}
-                processes = []
-                for line in (raw.decode().splitlines() if raw else []):
-                    match = re.fullmatch(r'\s*([0-9]+)\s+([0-9]+)\s+(.+?)\s+([0-9:-]+)\s+([0-9.]+)\s+([0-9.]+)\s*', line)
-                    if not match or match[3] not in allowed:
+                datetime.datetime.strptime(SINCE,'%Y-%m-%dT%H:%M:%SZ')
+                if UNTIL < SINCE:
+                    raise ValueError('clock_before_fixed_window')
+                emit('window',{'sinceUtc':SINCE,'untilUtc':UNTIL,'totalReadByteLimit':1048576,'totalSecondsLimit':100,'historicalRetentionCompletenessProven':False})
+                template = '{"id":{{json .Id}},"imageId":{{json .Image}},"status":{{json .State.Status}},"running":{{json .State.Running}},"oomKilled":{{json .State.OOMKilled}},"exitCode":{{json .State.ExitCode}},"startedAt":{{json .State.StartedAt}},"finishedAt":{{json .State.FinishedAt}},"restartCount":{{json .RestartCount}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}},"healthFailingStreak":{{if .State.Health}}{{.State.Health.FailingStreak}}{{else}}0{{end}},"retainedHealthCheckCount":{{if .State.Health}}{{len .State.Health.Log}}{{else}}0{{end}}}'
+                for service,identifier in TARGETS.items():
+                    raw,receipt = bounded(['docker','inspect','--format',template,'rr-portal-'+service+'-1'],8192)
+                    value = json.loads(raw) if receipt['querySucceeded'] else None
+                    valid = bool(value) and re.fullmatch('[a-f0-9]{64}',str(value.get('id'))) and re.fullmatch('sha256:[a-f0-9]{64}',str(value.get('imageId'))) and value.get('status') in {'created','running','paused','restarting','removing','exited','dead'} and value.get('health') in {'none','starting','healthy','unhealthy'}
+                    emit('containerState',{'service':service,'query':receipt,'expectedIdMatches':bool(valid and value['id']==identifier),'state':value if valid else None})
+                    if not valid or value['id']!=identifier:
                         continue
-                    cpu, mem = float(match[5]), float(match[6])
-                    if math.isfinite(cpu) and math.isfinite(mem):
-                        processes.append({'pid':int(match[1]),'ppid':int(match[2]),'command':match[3],'elapsed':match[4],'cpuPercent':cpu,'memoryPercent':mem})
-                for index in range(0, min(len(processes),100),20):
-                    emit('processes', {'offset':index,'totalMatching':len(processes),'items':processes[index:index+20]})
-                emit('processSummary', {'querySucceeded':raw is not None,'totalMatching':len(processes),'maxEmitted':100})
-                template = '{"id":{{json .Id}},"imageId":{{json .Image}},"status":{{json .State.Status}},"running":{{json .State.Running}},"oomKilled":{{json .State.OOMKilled}},"startedAt":{{json .State.StartedAt}},"restartCount":{{json .RestartCount}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}}}'
-                for service in ['factory-review','factory-review-test']:
-                    raw = command(['docker','inspect','--format',template,'rr-portal-' + service + '-1'])
-                    value = json.loads(raw) if raw else None
-                    if value and (not re.fullmatch('[a-f0-9]{64}',value['id']) or not re.fullmatch('sha256:[a-f0-9]{64}',value['imageId']) or value['status'] not in {'created','running','paused','restarting','removing','exited','dead'} or value['health'] not in {'none','starting','healthy','unhealthy'}):
-                        value = None
-                    emit('targetContainer', {'service':service,'present':raw is not None,'safeState':value})
-                # Exact Node20 ancestry + /build + exact npm command identifies a
-                # build process category. It does not prove which app owns it.
-                candidates = command(['docker','ps','--filter','ancestor=node:20-alpine','--no-trunc','-q'])
-                command_classes = {('/bin/sh','-c','npm ci'):'npm-ci',('/bin/sh','-c','npm run build'):'npm-build'}
-                temporary = []
-                for identifier in (candidates.decode().split() if candidates else [])[:20]:
-                    if not re.fullmatch('[a-f0-9]{64}',identifier):
-                        continue
-                    raw = command(['docker','inspect','--format','{"workdir":{{json .Config.WorkingDir}},"command":{{json .Config.Cmd}},"service":{{json (index .Config.Labels "com.docker.compose.service")}},"state":{{json .State.Status}}}',identifier])
-                    if not raw:
-                        continue
-                    value = json.loads(raw)
-                    category = command_classes.get(tuple(value['command'])) if isinstance(value.get('command'),list) else None
-                    if value.get('workdir') == '/build' and not value.get('service') and category and value.get('state') == 'running':
-                        temporary.append({'containerId':identifier,'commandCategory':category,'applicationAttribution':'unproven'})
-                emit('temporaryNode20BuildCategories', temporary)
-                emit('facts', {'readOnly':True,'businessApiCalls':False,'containerChanges':False,'rawLogsOrArgumentsPrinted':False})
+                    raw,receipt = bounded(['docker','events','--since',SINCE,'--until',UNTIL,'--filter','type=container','--filter','container='+identifier,'--format','{{json .}}'],61440)
+                    events,unknown,invalid = [],0,0
+                    for line in raw.decode('utf-8','replace').splitlines():
+                        try:
+                            item=json.loads(line)
+                            actor=item.get('Actor') or {}
+                            action=item.get('Action') or item.get('status')
+                            if actor.get('ID')!=identifier or action not in ACTIONS:
+                                unknown+=1
+                                continue
+                            seconds=numeric(item.get('time'))
+                            if seconds is None:
+                                invalid+=1
+                                continue
+                            utc=datetime.datetime.fromtimestamp(seconds,datetime.timezone.utc).isoformat().replace('+00:00','Z')
+                            if not SINCE<=utc<=UNTIL:
+                                invalid+=1
+                                continue
+                            attributes=actor.get('Attributes') or {}
+                            events.append({'utc':utc,'event':action,'exitCode':numeric(attributes.get('exitCode')),'signal':numeric(attributes.get('signal')),'oomEvent':action=='oom'})
+                        except (ValueError,TypeError,AttributeError,OverflowError,OSError):
+                            invalid+=1
+                    for offset in range(0,min(len(events),100),20):
+                        emit('containerEvents',{'service':service,'offset':offset,'events':events[offset:offset+20]})
+                    emit('eventSummary',{'service':service,'query':receipt,'acceptedEvents':len(events),'unclassifiedOrOtherIdEvents':unknown,'invalidEvents':invalid,'outputEventsLimited':len(events)>100,'retentionCompletenessProven':False})
+                    raw,receipt=bounded(['docker','logs','--timestamps','--since',SINCE,'--until',UNTIL,identifier],196608)
+                    lines=raw.decode('utf-8','replace').splitlines() if receipt['querySucceeded'] or receipt['truncated'] else []
+                    emit('classifiedContainerLogCounts',{'service':service,'query':receipt,'classification':counts(lines),'rawLinesPrinted':False,'retentionCompletenessProven':False})
+                raw,receipt=bounded(['docker','logs','--timestamps','--since',SINCE,'--until',UNTIL,'rr-portal-autoheal-1'],196608)
+                lines=raw.decode('utf-8','replace').splitlines() if receipt['querySucceeded'] or receipt['truncated'] else []
+                for service,identifier in TARGETS.items():
+                    selected=[line for line in lines if identifier in line or identifier[:12] in line or 'rr-portal-'+service+'-1' in line]
+                    emit('classifiedAutohealTargetCounts',{'service':service,'query':receipt,'classification':counts(selected),'rawLinesPrinted':False,'retentionCompletenessProven':False})
+                memory={}
+                with open('/proc/meminfo','r') as stream:
+                    for line in stream:
+                        match=re.fullmatch(r'(MemTotal|MemAvailable|MemFree|SwapTotal|SwapFree):\s+([0-9]+) kB\n?',line)
+                        if match:memory[match[1]+'Bytes']=int(match[2])*1024
+                emit('memoryNow',memory)
+                emit('facts',{'readOnly':True,'remainingReadBytes':BUDGET,'rawLogsAttributesUrlsAndCredentialsPrinted':False,'applicationSignalsOrChanges':False,'restartCauseProvenByMarkerPresenceAlone':False})
             try:
                 diagnostic()
             except Exception as error:
-                emit('failure', {'safeError':'PR941_READ_ONLY_DIAG_FAILED','errorType':type(error).__name__ if type(error).__name__ in {'ValueError','KeyError','TypeError','FileNotFoundError','TimeoutExpired','PermissionError'} else 'Other'})
+                emit('failure',{'safeError':'PR941_LIFECYCLE_DIAG_FAILED','errorType':type(error).__name__ if type(error).__name__ in {'ValueError','TypeError','KeyError','TimeoutExpired','FileNotFoundError','PermissionError'} else 'Other'})
                 raise SystemExit(1)
             PY_DIAG

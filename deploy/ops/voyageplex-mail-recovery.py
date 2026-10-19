@@ -48,25 +48,43 @@ OWNERS = {2: ('tan123', 'lisa666tan@163.com'), 3: ('秦湘柳', 'hyt9833@163.com
 ADMIN = 2
 # Root freezes these only after the final independent application review/build.
 FINAL_PIN_FROZEN = True
-DEPLOYED_HEAD = '4ec24b7b6d25836ee4ee702b57324764a856b83f'
+SECONDARY_TASK_API_GUARD_PIN_FROZEN = True
+SECONDARY_GUARD_PREVIOUS_RUN = RUNS/'recover-39201444781'
+PARTIAL_RECONCILIATION = ROOT/'deploy/backups/voyageplex-partial-run-39201444781-reconciliation-20261019'
+PARTIAL_RECONCILIATION_RESULT_SHA256 = '4425c4fcd1521c1dc2cf0acfbf485289c50448cec9d90a2f9a1b260b27179fe4'  # Freeze only the separately reviewed failed-partial reconciliation.
+PARTIAL_RECONCILIATION_SEAL_SHA256 = '8d8971d9f4f2167b904d2d88408f8301ada44eec983ca6b6c8c5e277e9ec052d'
+_PARTIAL_VERIFICATION = None
+DEPLOYED_HEAD = 'f853c7a2ec47f3cff11e456f874218d2324ad217'
 SOURCE_FILES = {
     "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/Program.cs": "7c0f70a9be50529362ae1922e685d535be9279e6d54d706b27a890fd18f2d76e",
-    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/Services/MailboxSyncService.cs": "6061f6ad8e274529386fb36c1203d444cc4c99ca215fdfc05553f0ed4254eb44",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/Services/MailboxSyncService.cs": "1bc773ea8ffccfad8b000c9e0997d7e57e88528f4060d8a5bbfe0c67bc0ec432",
     "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/Services/EmailParserClient.cs": "b226f830b65d061c29da996b7384a7597d89f0cf36a1eb8f3d9d970dbfdd8824",
     "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/Services/ServerMailboxConfiguration.cs": "24985cac1ea3e80b3f23e51f0926f0c3372123a1590ba93087d30265870b55a4",
     "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/Data/AppDbContext.cs": "d1ecb504b20d431a4a229b32757a47f99e6efd859011d5c714fdec0100547f00",
     "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/VoyagePlex.Api.csproj": "faf8094592160f6a187a9eef395031ff70c68ac2a13ad4b0c6f5f9b6c5ccb313",
     "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/Dockerfile.api": "6dea36116bdffd3ae8fdb6d39050786b4ac89b2c2620738c264df7035fc017a9",
-    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/main.py": "b1e51021e95fab8931a6b3a4929def4ade59f5eb85c1fbe41ad5832d6a5731ac",
-    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/mailbox.py": "4cf88d687f198b9cc50e57779279abc087c2dc3cbfdec5350046f79463142d28",
-    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/mail_worker.py": "7acff1655025aab34fd904edb67b0e83008fad34a7ea3f09c2c63d676e6ad2d5",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/main.py": "a77bada52192c5d66a9709bb4363bb96dbce869e922f70b8a59d3ff67da7d7f5",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/mailbox.py": "4707664cb2a158c76f5df639972b3d7c475cead0f1297d0b8c52b125dbed267e",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/mail_worker.py": "ad1f81f485198261b5625e1f96b7017644624dd80ba65d4011f65ac558b21d7e",
     "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/requirements.txt": "a4c21a5b044539deec682a8a98c37ae97b953a344ea8a5bb659ba32454966daa",
-    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/Dockerfile": "098b11980f4589e84d25d9691a97ba2676c0bc27c337e3cd74d97cefb74918b9"
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/Dockerfile": "098b11980f4589e84d25d9691a97ba2676c0bc27c337e3cd74d97cefb74918b9",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/eml.py": "72a1d04812db00f8ba78a8ce5deb9ac49e60b89cadd81a8f8f44cf8eb94aca28",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/attachments.py": "6a89728651cc4bb94d91ff44d92aef5a8fa0df32e034139584db7ee6a1e40bfb",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/factory_workbook.py": "5abfac2c34798bb7184a41efb1387bbe26be275bea4e2d8ceec853737a473723",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/product_workbook.py": "059b21360bca7fbabd9e48602ff22a6ee73bfd854d5f7e534c9d571d82190b5a",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/readonly_workbook.py": "76a8da4c34a6a8f04fa95e6e86cb38cbe1a618c9ef82f9bcadf4a726e7006602",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/spreadsheets.py": "173eb4fc2fa82519834f5f74958e1df900933ecccde4b21f4879284341dd5d89"
 }
 PARSER_FILES = {
-    "/app/app/main.py": "b1e51021e95fab8931a6b3a4929def4ade59f5eb85c1fbe41ad5832d6a5731ac",
-    "/app/app/mailbox.py": "4cf88d687f198b9cc50e57779279abc087c2dc3cbfdec5350046f79463142d28",
-    "/app/app/mail_worker.py": "7acff1655025aab34fd904edb67b0e83008fad34a7ea3f09c2c63d676e6ad2d5"
+    "/app/app/main.py": "a77bada52192c5d66a9709bb4363bb96dbce869e922f70b8a59d3ff67da7d7f5",
+    "/app/app/mailbox.py": "4707664cb2a158c76f5df639972b3d7c475cead0f1297d0b8c52b125dbed267e",
+    "/app/app/mail_worker.py": "ad1f81f485198261b5625e1f96b7017644624dd80ba65d4011f65ac558b21d7e",
+    "/app/app/eml.py": "72a1d04812db00f8ba78a8ce5deb9ac49e60b89cadd81a8f8f44cf8eb94aca28",
+    "/app/app/attachments.py": "6a89728651cc4bb94d91ff44d92aef5a8fa0df32e034139584db7ee6a1e40bfb",
+    "/app/app/factory_workbook.py": "5abfac2c34798bb7184a41efb1387bbe26be275bea4e2d8ceec853737a473723",
+    "/app/app/product_workbook.py": "059b21360bca7fbabd9e48602ff22a6ee73bfd854d5f7e534c9d571d82190b5a",
+    "/app/app/readonly_workbook.py": "76a8da4c34a6a8f04fa95e6e86cb38cbe1a618c9ef82f9bcadf4a726e7006602",
+    "/app/app/spreadsheets.py": "173eb4fc2fa82519834f5f74958e1df900933ecccde4b21f4879284341dd5d89"
 }
 API_DLL_SHA256 = ''  # optional independent reviewed artifact; absent is explicitly not byte-source proof
 EXPECTED_LIMITS = {'voyageplex-api': 768 * 1024**2, 'voyageplex-parser': 512 * 1024**2,
@@ -527,7 +545,7 @@ def http(base, route, token=None, owner=None, post=False, timeout=10, status_onl
 
 
 def source_and_health(private, safe):
-    require(FINAL_PIN_FROZEN and re.fullmatch('[a-f0-9]{40}', DEPLOYED_HEAD) is not None
+    require(FINAL_PIN_FROZEN and SECONDARY_TASK_API_GUARD_PIN_FROZEN and re.fullmatch('[a-f0-9]{40}', DEPLOYED_HEAD) is not None
             and bool(SOURCE_FILES) and bool(PARSER_FILES)
             and (not API_DLL_SHA256 or re.fullmatch('[a-f0-9]{64}', API_DLL_SHA256) is not None),
             'FINAL_REVIEWED_PIN_NOT_FROZEN')
@@ -552,6 +570,7 @@ def source_and_health(private, safe):
             'BASELINE_AND_RUNNING_API_ARTIFACT_HASH_SHAPES')
     require(running_image != original_image and actual != original_dll, 'API_IMAGE_AND_DLL_MUST_CHANGE_SINCE_BACKUP')
     require_new_api_since_first(running_image,actual,first_recovery()['runtimeBefore'])
+    require_new_api_since_secondary_guard(running_image,actual,secondary_guard_previous_runtime())
     if API_DLL_SHA256:
         require(actual == API_DLL_SHA256, 'RUNNING_REVIEWED_API_ARTIFACT_MATCH')
     for service, port, path in [('voyageplex-api', 5088, '/api/health'), ('voyageplex-parser', 8091, '/health')]:
@@ -573,7 +592,7 @@ def source_and_health(private, safe):
     require(revision is None or revision == DEPLOYED_HEAD, 'PRESENT_API_OCI_REVISION_MUST_MATCH_DEPLOYED_HEAD')
     return {'deployedHead': DEPLOYED_HEAD, 'sourceFilesMatch': True, 'parserImageSourceMatches': True,
             'apiPublishedDLLSHA256': actual, 'apiIndependentReviewedArtifactMatches': True if API_DLL_SHA256 else None,
-            'apiImageChangedSinceBackup': True, 'apiImageAndDLLChangedSinceFirstFailedRecovery':True, 'apiPublishedDLLChangedSinceBackup': True,
+            'apiImageChangedSinceBackup': True, 'apiImageAndDLLChangedSinceFirstFailedRecovery':True, 'apiImageAndDLLChangedSincePreSecondaryGuardV2':True, 'apiPublishedDLLChangedSinceBackup': True,
             'apiBinarySourceByteProofAvailable': bool(API_DLL_SHA256),
             'apiSourceProvenanceUsesDeployWorkflowAndBehaviorWhenArtifactPinAbsent': not bool(API_DLL_SHA256),
             'apiOCIRevisionPresent': revision is not None, 'apiOCIRevisionMatchesExpected': revision == DEPLOYED_HEAD if revision else None,
@@ -886,6 +905,9 @@ def successful_prior_mailbox_tests():
     for path in sorted(RUNS.iterdir()):
         if not (path / 'seal.json').is_file():
             continue  # The current exclusive run is not sealed yet.
+        if path==SECONDARY_GUARD_PREVIOUS_RUN:
+            partial_previous_archive()
+            continue  # Failed historical partial run is not a new-version connection receipt.
         verify_seal(path)
         result = read_json(path / 'first-result.json')
         test = result.get('mailboxTestsBeforeRecovery')
@@ -985,8 +1007,172 @@ def require_new_api_since_first(image,dll,runtime_before):
         image!=oldimage and dll!=olddll,'API_IMAGE_AND_DLL_MUST_CHANGE_SINCE_FIRST_FAILED_RECOVERY')
 
 
-def rows_by_id(db, table):
-    return {r['Id']: dict(r) for r in db.execute('SELECT * FROM '+q(table))}
+def partial_previous_archive(force_full=False):
+    # The interrupted run is never sealed or repaired by this helper. Its exact
+    # retained bytes are bound by a separate failed-partial reconciliation.
+    # Hash all those bytes at invocation start and end; between those passes,
+    # validate the same inode/size/mtime/ctime/mode/owner set. This cache covers
+    # archive byte validation only, never any retry's typed transition proof.
+    global _PARTIAL_VERIFICATION
+    require(SECONDARY_TASK_API_GUARD_PIN_FROZEN and
+        re.fullmatch('[a-f0-9]{64}',PARTIAL_RECONCILIATION_RESULT_SHA256) is not None and
+        re.fullmatch('[a-f0-9]{64}',PARTIAL_RECONCILIATION_SEAL_SHA256) is not None,
+        'FAILED_PARTIAL_RECONCILIATION_PINS_REQUIRED')
+    require(file_sha(PARTIAL_RECONCILIATION/'first-result.json')==PARTIAL_RECONCILIATION_RESULT_SHA256 and
+        file_sha(PARTIAL_RECONCILIATION/'seal.json')==PARTIAL_RECONCILIATION_SEAL_SHA256,
+        'EXACT_EXTERNAL_FAILED_PARTIAL_RECEIPT_REQUIRED')
+    def stamps():
+        require(not SECONDARY_GUARD_PREVIOUS_RUN.is_symlink() and SECONDARY_GUARD_PREVIOUS_RUN.is_dir(),
+            'REGULAR_FIXED_PARTIAL_RUN_REQUIRED')
+        values={}
+        for path in sorted(SECONDARY_GUARD_PREVIOUS_RUN.rglob('*')):
+            require(not path.is_symlink(),'PARTIAL_RUN_SYMLINK_FORBIDDEN')
+            if path.is_dir():continue
+            value=path.stat()
+            require(stat.S_ISREG(value.st_mode),'PARTIAL_RUN_REGULAR_FILES_ONLY')
+            values[path.relative_to(SECONDARY_GUARD_PREVIOUS_RUN).as_posix()]=[
+                value.st_ino,value.st_size,value.st_mtime_ns,value.st_ctime_ns,
+                stat.S_IMODE(value.st_mode),value.st_uid,value.st_gid]
+        require(len(values)<=10000,'PARTIAL_RUN_FILE_COUNT_BOUND')
+        return values
+    before=stamps()
+    if _PARTIAL_VERIFICATION is not None:
+        require(before==_PARTIAL_VERIFICATION['stamps'],'PARTIAL_RUN_METADATA_CHANGED_DURING_INVOCATION')
+        if not force_full:
+            return _PARTIAL_VERIFICATION
+    verify_seal(PARTIAL_RECONCILIATION)
+    value=read_json(PARTIAL_RECONCILIATION/'first-result.json')
+    require(value.get('reconciliationComplete') is True and value.get('failedPartial') is True and
+        value.get('success') is False and value.get('allMailboxRecoveryVerified') is False and
+        value.get('oldRunReclassifiedAsSuccess') is False and value.get('businessWrites') is False and
+        value.get('oldEvidenceWrites') is False and value.get('apiOrIMAPCalls') is False and
+        value.get('process',{}).get('helperAbsent') is True and
+        value.get('immutableOriginalFullAndFirstSealsVerified') is True and
+        value.get('oldTreesMetadataStableAfterSingleStreamingHash') is True and
+        value.get('fullOldByteHashPasses')==1 and value.get('sealedSuccessfulSteps')==6 and
+        value.get('runtimeStableDuringCapture') is True and
+        value.get('canSupportSeparatelyReviewedNarrowPartialRunException') is True,
+        'EXPLICIT_FAILED_PARTIAL_RECONCILIATION_REQUIRED')
+    observed=value.get('runtimeBefore',{})
+    require(observed==value.get('runtimeAfter') and observed.get('head')=='4ec24b7b6d25836ee4ee702b57324764a856b83f' and
+        observed.get('headMatches4ec') is True and observed.get('sourcePinsMatch4ec') is True and
+        observed.get('apiRunning') is True and observed.get('apiHealth')=='healthy' and
+        re.fullmatch('sha256:[a-f0-9]{64}',observed.get('apiImage','')) is not None and
+        re.fullmatch('[a-f0-9]{64}',observed.get('apiDLLSHA256','')) is not None,
+        'EXTERNAL_OBSERVED_PRE_GUARD_4EC_RUNTIME_REQUIRED')
+    manifest_path=PARTIAL_RECONCILIATION/'partial-file-manifest.private.json'
+    require(file_sha(manifest_path)==value.get('oldPartialManifestSHA256'),'EXACT_PARTIAL_MANIFEST_REQUIRED')
+    manifest=read_json(manifest_path)
+    require(isinstance(manifest,dict) and set(manifest)==set(before),'EXACT_PARTIAL_RUN_FILE_SET_REQUIRED')
+    for name,item in manifest.items():
+        require(isinstance(item,dict) and set(item)=={'size','sha256'} and
+            type(item['size']) is int and item['size']==before[name][1] and
+            re.fullmatch('[a-f0-9]{64}',item['sha256']) is not None and
+            file_sha(SECONDARY_GUARD_PREVIOUS_RUN/name)==item['sha256'],
+            'EXACT_PARTIAL_RUN_BYTE_MANIFEST_REQUIRED')
+    require(stamps()==before,'PARTIAL_RUN_CHANGED_DURING_BYTE_VERIFICATION')
+    attempts=value.get('attempts',[])
+    require(isinstance(attempts,list) and len(attempts)==7 and
+        [entry.get('step') for entry in attempts]==list(range(1,8)) and
+        all(entry.get('sealed') is True and entry.get('passed') is True and
+            entry.get('responseRecoveredExactlyOne') is True for entry in attempts[:6]) and
+        attempts[6].get('passed') is not True,
+        'SIX_SEALED_SUCCESSES_AND_UNSUCCESSFUL_SEVENTH_REQUIRED')
+    facts=value.get('step7TypedFacts',{})
+    require(facts.get('targetBeforeAndAfterTypedEqual') is True and
+        facts.get('targetAfterAndCurrentTypedEqual') is True and
+        facts.get('allCursorsBeforeAndAfterTypedEqual') is True,
+        'PARTIAL_SEVENTH_NO_TARGET_OR_CURSOR_TRANSITION_REQUIRED')
+    _PARTIAL_VERIFICATION={'result':value,'manifest':manifest,'stamps':before}
+    return _PARTIAL_VERIFICATION
+
+
+def partial_attempt_receipt(path):
+    proof=partial_previous_archive();prefix=path.relative_to(SECONDARY_GUARD_PREVIOUS_RUN).as_posix()+'/'
+    members={name[len(prefix):]:item['sha256'] for name,item in proof['manifest'].items() if name.startswith(prefix)}
+    require(path.name in {'attempt-%04d'%i for i in range(1,8)} and 'attempt.private.json' in members,
+        'FIXED_PARTIAL_RETRY_RESERVATION_REQUIRED')
+    if 'seal.json' in members:
+        expected=read_json(path/'seal.json');actual=dict(members);actual.pop('seal.json')
+        require(expected==actual,'PARTIAL_SEALED_STEP_MUST_MATCH_FULL_BYTE_MANIFEST')
+    else:
+        require(path.name=='attempt-0007','ONLY_SEVENTH_PARTIAL_STEP_MAY_LACK_SEAL')
+    if 'result.json' in members:
+        receipt=read_json(path/'result.json')
+        require(isinstance(receipt,dict),'PARTIAL_RESULT_OBJECT_REQUIRED')
+    else:
+        require(path.name=='attempt-0007','ONLY_SEVENTH_PARTIAL_STEP_MAY_LACK_RESULT')
+        receipt={'passed':False,'attempted':None,'transportOrResponseOutcomeUncertain':True,
+                 'reconciledPartialReservationOnly':True}
+    require(path.name!='attempt-0007' or receipt.get('passed') is not True,
+        'PARTIAL_SEVENTH_MUST_NEVER_BE_INFERRED_SUCCESSFUL')
+    return receipt
+
+
+def secondary_guard_previous_runtime():
+    observed=partial_previous_archive()['result']['runtimeBefore']
+    # This is a sealed observation taken after the failed run, before deploying
+    # the secondary-source guard; it is not reconstructed historical memory.
+    return {'deployedHead':observed['head'],'apiPublishedDLLSHA256':observed['apiDLLSHA256'],
+            'services':{'voyageplex-api':{'image':observed['apiImage']}},
+            'provenance':'external-observation-after-interrupted-run-before-guard-deployment'}
+
+
+def require_new_api_since_secondary_guard(image,dll,previous):
+    oldimage=previous.get('services',{}).get('voyageplex-api',{}).get('image')
+    olddll=previous.get('apiPublishedDLLSHA256')
+    require(isinstance(oldimage,str) and re.fullmatch('sha256:[a-f0-9]{64}',oldimage) is not None and
+        isinstance(olddll,str) and re.fullmatch('[a-f0-9]{64}',olddll) is not None and
+        image!=oldimage and dll!=olddll,'NEW_API_IMAGE_AND_DLL_WITH_SECONDARY_TASK_TRANSACTION_GUARD_REQUIRED')
+
+
+def rows_by_id(db, table, columns=None):
+    projection='*' if columns is None else ','.join(q(column) for column in columns)
+    return {r['Id']: dict(r) for r in db.execute('SELECT '+projection+' FROM '+q(table))}
+
+
+def full_row_by_id(db,table,item_id):
+    row=db.execute('SELECT * FROM '+q(table)+' WHERE Id=?',(item_id,)).fetchone()
+    return dict(row) if row is not None else None
+
+
+def row_hash_index(db,table):
+    # Exactly one full typed-row scan. Only IDs/digests survive each iteration;
+    # ResultJson, BLOBs and every other source field remain covered by the hash.
+    result={}
+    for row in db.execute('SELECT * FROM '+q(table)):
+        require(row['Id'] not in result,'UNIQUE_HASH_INDEX_IDS_REQUIRED')
+        result[row['Id']]=row_sha(dict(row))
+    return result
+
+
+def preserved_mail_hashes(before,after,allowed):
+    old=row_hash_index(before,'ImportEmailItems');new=row_hash_index(after,'ImportEmailItems')
+    passed=all(key in new and (key in allowed or digest==new[key]) for key,digest in old.items())
+    for key in set(old)&set(allowed):
+        row=full_row_by_id(before,'ImportEmailItems',key);now=full_row_by_id(after,'ImportEmailItems',key)
+        passed=bool(passed and now is not None and set(row)==set(now) and
+            all(typed(row[k])==typed(now[k]) for k in row if k not in RETRY_FIELDS))
+    return passed,old,new
+
+
+def preserved_batch_counters(before,after,changes):
+    expected=row_hash_index(before,'ImportBatches');actual=row_hash_index(after,'ImportBatches')
+    for key,count in changes.items():
+        row=full_row_by_id(before,'ImportBatches',key)
+        if row is None:return False
+        row['FailedCount']-=count;row['ParsedCount']+=count
+        expected[key]=row_sha(row)
+    return all(key in actual and digest==actual[key] for key,digest in expected.items())
+
+
+def failed_request_rows_unchanged(before,after):
+    passed=True
+    for table in ['ImportEmailItems','ImportBatches','MailSyncStates']:
+        old=row_hash_index(before,table);new=row_hash_index(after,table)
+        matched=old==new if table=='MailSyncStates' else all(key in new and digest==new[key] for key,digest in old.items())
+        passed=bool(passed and matched)
+    return passed
 
 
 def row_sha(row):
@@ -1009,6 +1195,12 @@ def retry_candidate(db, item, bindings):
     try:
         if json.loads(item['TaskIdsJson'])!=[]:return False
         if db.execute('SELECT COUNT(*) FROM ShipmentTasks WHERE SourceImportItemId=?',(item['Id'],)).fetchone()[0]:return False
+        for task in db.execute("SELECT SourceEmailsJson FROM ShipmentTasks WHERE Company='Huadeng'"):
+            raw=task['SourceEmailsJson']
+            if not isinstance(raw,str) or len(raw.encode())>2097152:return False
+            refs=json.loads(raw)
+            if not isinstance(refs,list) or any(not isinstance(r,dict) or type(r.get('id')) is not int or r['id']<=0 for r in refs):return False
+            if any(r['id']==item['Id'] for r in refs):return False
         batch=db.execute('SELECT * FROM ImportBatches WHERE Id=?',(item['ImportBatchId'],)).fetchone()
         if batch is None or (batch['Kind'],batch['Status'],batch['Company'],batch['MailOwnerId'])!=('Email','PendingConfirmation','Huadeng',owner):return False
         state=bindings[owner]['state'];address=OWNERS[owner][1]
@@ -1043,6 +1235,17 @@ def freeze_retry_plan(directory):
             if retry_candidate(db,item,bindings):
                 selected.append({'id':item['Id'],'owner':item['MailOwnerId'],'rowSHA256':row_sha(item),'firstFive':item['Id'] in first})
             else:excluded[item['MailOwnerId']]+=1
+    proof,originals,approved,_,_=original_retry_proof(plan/'current.sqlite3')
+    require(proof['passed'],'EXACT_ORIGINAL_BASELINE_OR_SEALED_AFTER_STATE_REQUIRED')
+    with connect(plan/'current.sqlite3') as db:
+        for item_id,item in originals.items():
+            if item_id in approved:continue
+            row=db.execute('SELECT * FROM ImportEmailItems WHERE Id=?',(item_id,)).fetchone()
+            if row is not None and row_sha(dict(row))==item['beforeSHA256'] and retry_candidate(db,dict(row),bindings):
+                selected.append({'id':item_id,'owner':item['owner'],'rowSHA256':item['beforeSHA256'],
+                    'firstFive':False,'authorizedOriginal':True})
+            else:excluded[item['owner']]+=1
+    selected.sort(key=lambda item:(item['owner'],not item.get('authorizedOriginal',False),item['id']))
     require(len(selected)<=5000,'BOUNDED_FROZEN_RETRY_LIST_REQUIRED')
     write_new(plan/'items.private.json',selected);write_new(plan/'excluded.private.json',dict(excluded));seal(plan)
     return selected,excluded
@@ -1057,8 +1260,11 @@ def retry_attempt_history():
         require(not attempts.is_symlink(),'REGULAR_RETRY_ATTEMPT_DIRECTORY_REQUIRED')
         for path in sorted(attempts.iterdir()):
             require(path.is_dir() and not path.is_symlink(),'REGULAR_RETRY_RECEIPT_REQUIRED')
-            verify_seal(path)
-            reserved=read_json(path/'attempt.private.json');receipt=read_json(path/'result.json')
+            if parent==SECONDARY_GUARD_PREVIOUS_RUN:
+                receipt=partial_attempt_receipt(path)
+            else:
+                verify_seal(path);receipt=read_json(path/'result.json')
+            reserved=read_json(path/'attempt.private.json')
             require(type(reserved.get('id')) is int and reserved.get('owner') in OWNERS and
                     re.fullmatch('[a-f0-9]{40}',reserved.get('head','')) is not None,'FIXED_RETRY_RECEIPT_SHAPE')
             reserved['_afterSnapshot']=path/'after.sqlite3'
@@ -1069,8 +1275,8 @@ def retry_attempt_history():
 
 def retry_transition(before_path,after_path,item_id):
     with connect(before_path) as before,connect(after_path) as after:
-        old=rows_by_id(before,'ImportEmailItems');new=rows_by_id(after,'ImportEmailItems')
-        row=old.get(item_id);now=new.get(item_id)
+        old=row_hash_index(before,'ImportEmailItems');new=row_hash_index(after,'ImportEmailItems')
+        row=full_row_by_id(before,'ImportEmailItems',item_id);now=full_row_by_id(after,'ImportEmailItems',item_id)
         stable=row is not None and now is not None and set(row)==set(now) and all(
             typed(row[k])==typed(now[k]) for k in row if k not in RETRY_FIELDS)
         parsed=False
@@ -1081,19 +1287,13 @@ def retry_transition(before_path,after_path,item_id):
                     value.get('status')=='parsed' and type(value.get('mailbox_uid')) is int and
                     str(value['mailbox_uid'])==row['MailboxKey'].rsplit(':',1)[1] and
                     received_date(value.get('mailbox_received_at'))==row['MailReceivedDate'] and
+                    utc_date(value.get('mailbox_received_at'))==utc_date(row['MailReceivedAt']) and
                     value.get('fingerprint')==now['Fingerprint'] and bool(now['Fingerprint']) and
                     (not row['Fingerprint'] or row['Fingerprint']==now['Fingerprint']))
             except (ValueError,TypeError,AttributeError,CheckError):pass
-        other_items=all(key in new and row_sha(value)==row_sha(new[key]) for key,value in old.items() if key!=item_id)
-        oldb=rows_by_id(before,'ImportBatches');newb=rows_by_id(after,'ImportBatches');batch_ok=stable
-        for key,value in oldb.items():
-            current=newb.get(key)
-            if current is None:batch_ok=False;continue
-            expected=dict(value)
-            if row is not None and key==row['ImportBatchId']:
-                expected['FailedCount']-=1;expected['ParsedCount']+=1
-            batch_ok=bool(batch_ok and row_sha(expected)==row_sha(current))
-        cursor_same=rows_by_id(before,'MailSyncStates')==rows_by_id(after,'MailSyncStates')
+        other_items=all(key in new and digest==new[key] for key,digest in old.items() if key!=item_id)
+        batch_ok=bool(stable and preserved_batch_counters(before,after,{row['ImportBatchId']:1})) if row is not None else False
+        cursor_same=row_hash_index(before,'MailSyncStates')==row_hash_index(after,'MailSyncStates')
     return {'onlyAllowedTargetTypedFieldsChanged':bool(stable),'parsedMetadataAndFingerprintPassed':bool(parsed),
             'otherExistingMailRowsIdentical':other_items,'batchCountersAndAllOtherBatchFieldsPassed':bool(batch_ok),
             'allCursorFieldsUnchangedDuringRetry':cursor_same,
@@ -1126,7 +1326,7 @@ def retry_new_failures(directory,result,base,token,deadline,plan,excluded):
             # Re-read immediately before the POST; C# additionally rechecks under its transaction.
             with connect() as db:
                 live=db.execute('SELECT * FROM ImportEmailItems WHERE Id=?',(item['id'],)).fetchone()
-                require(live is not None and row_sha(dict(live))==item['rowSHA256'],'LIVE_RETRY_ROW_HASH_MATCH')
+                require(live is not None and row_sha(dict(live))==item['rowSHA256'] and retry_candidate(db,dict(live),bindings),'LIVE_RETRY_ROW_HASH_AND_TASK_SCOPE_MATCH')
             receipt['attempted']=True
             code,value=http(base,'/api/imports/email/mailbox/retry-failed',token,owner,post=True,timeout=330,body={'itemIds':[item['id']]})
             require(isinstance(value,dict),'RETRY_RESPONSE_OBJECT_REQUIRED')
@@ -1147,10 +1347,7 @@ def retry_new_failures(directory,result,base,token,deadline,plan,excluded):
                     receipt['passed']=receipt['transition']['passed']
                 elif (step/'before.sqlite3').is_file():
                     with connect(step/'before.sqlite3') as before,connect(step/'after.sqlite3') as after:
-                        receipt['failedRequestOriginalRowsAndAllCursorsUnchanged']=all(
-                            all(key in rows_by_id(after,table) and row_sha(row)==row_sha(rows_by_id(after,table)[key])
-                                for key,row in rows_by_id(before,table).items())
-                            for table in ['ImportEmailItems','ImportBatches','MailSyncStates'])
+                        receipt['failedRequestOriginalRowsAndAllCursorsUnchanged']=failed_request_rows_unchanged(before,after)
             finally:
                 write_new(step/'result.json',receipt);seal(step)
         result['retryRuns'].append(receipt)
@@ -1160,7 +1357,7 @@ def retry_new_failures(directory,result,base,token,deadline,plan,excluded):
     completed_count=sum(r['passed'] for r in result['retryRuns'])
     result['retryPlan']={'eligible':len(plan),'excludedUnsafeOrHandled':sum(excluded.values()),
                         'excludedByOwner':dict(excluded),'firstCheckpointNewFailures':5,
-                        'candidateListFrozenBeforeAnyRetry':True,'originalBaselineFailedNeverRetried':True,
+                        'candidateListFrozenBeforeAnyRetry':True,'originalBaselineRetryScope':'exact-six-sealed-original-probe-only',
                         'deferredOrUnsuccessfulFrozenItems':len(plan)-completed_count}
     result['allRetryResponsesSucceeded']=not excluded and completed_count==len(plan) and all(r['passed'] for r in result['retryRuns'])
     verify_seal(directory/'frozen-retry-plan')
@@ -1171,24 +1368,21 @@ def checkpoint_preservation(path):
     first=first_failed_ids();history=retry_attempt_history()
     approved={r['id'] for r,v in history if v.get('passed') is True}
     with connect(FIRST_RECOVERY/'current.sqlite3') as before,connect(path) as after:
-        old=rows_by_id(before,'ImportEmailItems');new=rows_by_id(after,'ImportEmailItems')
-        allowed=first&approved
-        stable=all(key in new and all(typed(value)==typed(new[key][field]) for field,value in row.items()
-            if key not in allowed or field not in RETRY_FIELDS) for key,row in old.items())
+        allowed=(first|set(original_retry_targets()))&approved
+        stable,old,new=preserved_mail_hashes(before,after,allowed)
         exact_after=True
         for reserved,receipt in history:
             if not receipt.get('passed'):continue
             with connect(reserved['_afterSnapshot']) as saved:
-                saved_row=saved.execute('SELECT * FROM ImportEmailItems WHERE Id=?',(reserved['id'],)).fetchone()
+                saved_row=full_row_by_id(saved,'ImportEmailItems',reserved['id'])
                 exact_after=bool(exact_after and saved_row is not None and reserved['id'] in new and
-                    row_sha(dict(saved_row))==row_sha(new[reserved['id']]))
-        tracked={str(owner):{'originalFirstFailed':sum(old[i]['MailOwnerId']==owner for i in first),
-            'nowParsedOrDuplicate':sum(i in new and new[i]['Status'] in {'pending','duplicate'} and i in approved and old[i]['MailOwnerId']==owner for i in first)} for owner in OWNERS}
-        oldb=rows_by_id(before,'ImportBatches');newb=rows_by_id(after,'ImportBatches');batch_ok=True
-        counts=collections.Counter(old[i]['ImportBatchId'] for i in allowed)
-        for key,row in oldb.items():
-            expected=dict(row);expected['FailedCount']-=counts[key];expected['ParsedCount']+=counts[key]
-            batch_ok=bool(batch_ok and key in newb and row_sha(expected)==row_sha(newb[key]))
+                    row_sha(saved_row)==new[reserved['id']])
+        first_rows={key:full_row_by_id(before,'ImportEmailItems',key) for key in first}
+        current_first={key:full_row_by_id(after,'ImportEmailItems',key) for key in first}
+        tracked={str(owner):{'originalFirstFailed':sum(first_rows[i]['MailOwnerId']==owner for i in first),
+            'nowParsedOrDuplicate':sum(current_first[i] is not None and current_first[i]['Status'] in {'pending','duplicate'} and i in approved and first_rows[i]['MailOwnerId']==owner for i in first)} for owner in OWNERS}
+        counts=collections.Counter(full_row_by_id(before,'ImportEmailItems',i)['ImportBatchId'] for i in allowed if i in old)
+        batch_ok=preserved_batch_counters(before,after,counts)
     return {'firstFiveTrackedByOwner':tracked,'allFirstCheckpointMailRowsRetainedWithOnlySealedRetryChanges':stable,
             'firstCheckpointBatchChangesExactlySealedRetryCounts':batch_ok,
             'sealedSuccessfulRetryRowsStillMatchExactAfterSnapshots':exact_after,
@@ -1213,8 +1407,10 @@ def utc_date(value):
 
 def classified_mail_changes(path):
     """Classify measured differences, retaining strict-scope booleans elsewhere."""
+    original_proof,_,_,original_sender_delta,required_original_senders=original_retry_proof(path)
     with connect(BACKUP/'baseline.sqlite3') as before,connect(path) as after:
-        old=rows_by_id(before,'ImportEmailItems');new=rows_by_id(after,'ImportEmailItems')
+        columns=['Id','Company','MailOwnerId','ImportBatchId','MailboxKey','MailReceivedDate','MailReceivedAt','MailSender','Status']
+        old=rows_by_id(before,'ImportEmailItems',columns);new=rows_by_id(after,'ImportEmailItems',columns)
         oldb=rows_by_id(before,'ImportBatches');newb=rows_by_id(after,'ImportBatches')
         oldc=rows_by_id(before,'MailContacts');newc=rows_by_id(after,'MailContacts')
         states=rows_by_id(after,'MailSyncStates');start=after.execute('SELECT StartDate FROM MailSystemSettings WHERE Id=1').fetchone()[0]
@@ -1249,7 +1445,8 @@ def classified_mail_changes(path):
         # Xingxin sender groups. Ambiguous old counters are not waived.
         xold=sender_counts(old.values(),'Xingxin',0,start);xnew=sender_counts(new.values(),'Xingxin',0,start)
         exact_contacts=collections.Counter((r['Company'],r['MailOwnerId'],r['Email']) for r in newc.values())
-        missing_huadeng=sum(exact_contacts[('Huadeng',owner,email)]!=1 for owner,counts in huadeng.items() for email in counts)
+        required_huadeng={(owner,email) for owner,counts in huadeng.items() for email in counts}|required_original_senders
+        missing_huadeng=sum(exact_contacts[('Huadeng',owner,email)]!=1 for owner,email in required_huadeng)
         xcontacts=[r['Email'] for r in newc.values() if (r['Company'],r['MailOwnerId'])==('Xingxin',0)]
         # ASCII addresses have the same case equality here as OrdinalIgnoreCase.
         # Do not silently merge case-colliding or unproven Unicode groups.
@@ -1271,8 +1468,8 @@ def classified_mail_changes(path):
             if prior is not None:
                 stable=bool(stable and all(typed(prior[k])==typed(row[k]) for k in row if k not in {'MessageCount','UpdatedAt'}))
             if scope[0]=='Huadeng' and scope[1] in OWNERS:
-                expected=(prior['MessageCount'] if prior else 0)+huadeng[scope[1]][email]
-                if prior is None and email not in huadeng[scope[1]]:unattributed+=1
+                expected=(prior['MessageCount'] if prior else 0)+huadeng[scope[1]][email]+original_sender_delta[(scope[1],email)]
+                if prior is None and email not in huadeng[scope[1]] and (scope[1],email) not in required_original_senders:unattributed+=1
             elif scope==('Xingxin',0) and email.lower() in xold:
                 expected=xnew[email.lower()]
             elif scope==('Xingxin',0) and prior is None and email.lower() in xnew:
@@ -1285,12 +1482,85 @@ def classified_mail_changes(path):
             equations=bool(equations and expected is not None and row['MessageCount']==expected)
         return {'newMailCategories':dict(scoped),'unclassifiedNewMailCount':unclassified,
                 'newBatchCountersMatchActualChildren':batch_ok,'originalContactsRetained':retained,
-                'contactStableTypedFieldsIdentical':stable,'contactCounterEquationPassed':equations,
+                'contactStableTypedFieldsIdentical':stable,'contactCounterEquationPassed':equations,'exactOriginalSixSenderDeltasIncluded':True,
                 'unattributedContactChanges':unattributed,'requiredSenderGroupsHaveUniqueContacts':group_coverage,
                 'missingOrNonuniqueHuadengContactGroups':missing_huadeng,'missingOrNonuniqueXingxinContactGroups':missing_xingxin,
                 'xingxinCaseAmbiguityOrUnprovenGroups':xcase_ambiguities,'contactTimestampWindowPassed':time_bounds,'actorProven':False,
                 'classificationDescribesCompatibleBehaviorNotConfirmedActor':True,
                 'passed':unclassified==0 and batch_ok and retained and stable and equations and time_bounds and group_coverage and unattributed==0}
+
+
+# This exact read-only receipt independently established eligibility of six
+# original rows. It never replaces or mutates the complete-v3 baseline.
+ORIGINAL_AUDIT = ROOT/'deploy/backups/voyageplex-original-failed-audit-20261019'
+ORIGINAL_AUDIT_RESULT = '795823c64977b4e5a2f1982b9fca786bcccb44a4650a0b027edf7efadebef1bf'
+ORIGINAL_AUDIT_SEAL = '934987cac44e39834a80ff54c1555ffeb9b87d9a89e91354f60c544f11998025'
+
+
+def original_retry_targets():
+    verify_seal(ORIGINAL_AUDIT)
+    require(file_sha(ORIGINAL_AUDIT/'first-result.json')==ORIGINAL_AUDIT_RESULT and
+        file_sha(ORIGINAL_AUDIT/'seal.json')==ORIGINAL_AUDIT_SEAL,'EXACT_ORIGINAL_SIX_READONLY_PROBE_REQUIRED')
+    evidence=read_json(ORIGINAL_AUDIT/'first-result.json');observations=evidence.get('observations',[])
+    gates={'apiHandlingEligible','identityMatching','noSecondaryTaskReference','originalBatchTypedRowUnchanged',
+        'originalTypedRowUnchanged','original_start_unchanged','received_on_or_after_oct08',
+        'stored_received_date_consistent','uidInOriginalEligibleCandidates'}
+    require(evidence.get('completed') is True and evidence.get('priorResultsPreserved') is True and
+        evidence.get('databaseSchemaMatchesBaseline') is True and evidence.get('originalFailedCount')==6 and
+        len(observations)==6 and dict(collections.Counter(r.get('owner') for r in observations))=={2:2,3:2,5:2} and
+        all(all(type(r.get(g)) is int and r[g]==1 for g in gates) and r.get('current_status')=='failed' and
+            r.get('uidInCurrentEligibleCandidates') is None for r in observations),'SIX_PROBE_GATES_REQUIRED')
+    items=read_json(ORIGINAL_AUDIT/'original-six.private.json')
+    require(isinstance(items,list) and len(items)==6 and len({r.get('id') for r in items})==6 and
+        dict(collections.Counter(r.get('owner') for r in items))=={2:2,3:2,5:2},'EXACT_SIX_PRIVATE_IDENTITIES_REQUIRED')
+    with connect(BACKUP/'baseline.sqlite3') as db:
+        for item in items:
+            require(type(item.get('id')) is int and item['id']>0 and type(item.get('uid')) is int and
+                0<item['uid']<=4294967295,'PRIVATE_ORIGINAL_ID_AND_UID_REQUIRED')
+            row=db.execute('SELECT * FROM ImportEmailItems WHERE Id=?',(item['id'],)).fetchone()
+            batch=db.execute('SELECT * FROM ImportBatches WHERE Id=?',(item.get('batchId'),)).fetchone()
+            require(row is not None and batch is not None and row['Status']=='failed' and row['Company']=='Huadeng' and
+                row['MailOwnerId']==item['owner'] and row['ImportBatchId']==item['batchId'] and
+                row['MailboxKey'].rsplit(':',1)[-1]==str(item['uid']) and
+                row_sha(dict(row))==item.get('beforeSHA256')==item.get('currentSHA256') and
+                row_sha(dict(batch))==item.get('beforeBatchSHA256')==item.get('currentBatchSHA256'),
+                'PROBE_PRIVATE_MAP_MUST_MATCH_COMPLETE_BASELINE_ROWS')
+    return {item['id']:item for item in items}
+
+
+def original_retry_proof(path):
+    targets=original_retry_targets();history=retry_attempt_history();approved={};deltas=collections.Counter();required=set()
+    for reserved,receipt in history:
+        if reserved['id'] not in targets or receipt.get('passed') is not True:continue
+        item_id=reserved['id'];require(item_id not in approved,'ORIGINAL_ID_MAY_HAVE_ONLY_ONE_SEALED_SUCCESS')
+        require(reserved.get('authorizedOriginal') is True and reserved['owner']==targets[item_id]['owner'],
+                'ONLY_EXPLICITLY_AUTHORIZED_ORIGINAL_PLAN_MAY_PROVE_SUCCESS')
+        before_path=reserved['_afterSnapshot'].with_name('before.sqlite3')
+        require(retry_transition(before_path,reserved['_afterSnapshot'],item_id)['passed'],
+                'ORIGINAL_SUCCESS_REQUIRES_INDEPENDENT_FULL_TRANSITION_PROOF')
+        with connect(before_path) as before,connect(reserved['_afterSnapshot']) as after:
+            old=dict(before.execute('SELECT * FROM ImportEmailItems WHERE Id=?',(item_id,)).fetchone())
+            new=dict(after.execute('SELECT * FROM ImportEmailItems WHERE Id=?',(item_id,)).fetchone())
+        require(row_sha(old)==targets[item_id]['beforeSHA256'],'ORIGINAL_RETRY_MUST_START_FROM_EXACT_BASELINE_ROW')
+        approved[item_id]=new
+        old_sender,new_sender=normalize_email(old['MailSender']),normalize_email(new['MailSender']);owner=old['MailOwnerId']
+        if old_sender!=new_sender:
+            if old_sender:deltas[(owner,old_sender)]-=1
+            if new_sender:deltas[(owner,new_sender)]+=1
+        if new_sender:required.add((owner,new_sender))
+    with connect(BACKUP/'baseline.sqlite3') as before,connect(path) as after:
+        stable,old,new=preserved_mail_hashes(before,after,set(approved))
+        all_success_rows_match=all(item_id in new and new[item_id]==row_sha(row) for item_id,row in approved.items())
+        changes=collections.Counter(targets[item_id]['batchId'] for item_id in approved)
+        batch_ok=preserved_batch_counters(before,after,changes)
+    public={'exactAuthorizedOriginalCount':6,'recoveredOriginalCount':len(approved),
+        'recoveredOriginalCountsByOwner':dict(collections.Counter(targets[i]['owner'] for i in approved)),
+        'remainingOriginalCount':6-len(approved),'allOtherOriginalTypedMailFieldsIdentical':stable,
+        'originalBatchChangesExactlyAuthorizedRetryCounts':batch_ok,
+        'successfulOriginalRowsMatchSealedAfterSnapshots':all_success_rows_match,
+        'originalFullRowIdentityIntentionallyNotClaimed':True,
+        'passed':stable and batch_ok and all_success_rows_match}
+    return public,targets,approved,deltas,required
 
 
 def selected_backup():
@@ -1397,6 +1667,7 @@ def recover(directory, result, original_bindings, original_candidates, original_
         # Retain actual committed state even after timeout, blocked UID or cleanup failure.
         snapshot = retain_snapshot(directory)
         result['databaseComparison'] = compare_tables(original_tables, snapshot)
+        result['authorizedOriginalFailedRetries']=original_retry_proof(directory/'current.sqlite3')[0]
         result['firstRecoveryCheckpointPreservation']=checkpoint_preservation(directory/'current.sqlite3')
         result['classifiedMailChanges']=classified_mail_changes(directory/'current.sqlite3')
         mark_user_test_category(result['databaseComparison'])
@@ -1445,6 +1716,7 @@ def audit(directory, result, original_bindings, original_candidates, original_ta
     result['newDatabaseMailRecordsSinceBackup'] = new_mail_counts(original_tables, snapshot, directory / 'current.sqlite3')
     result['allNewMessagesParsedOrRecognizedDuplicate'] = all_new_parsed_or_duplicate(result['newDatabaseMailRecordsSinceBackup'])
     result['files'] = compare_files(directory)
+    result['authorizedOriginalFailedRetries']=original_retry_proof(directory/'current.sqlite3')[0]
     result['firstRecoveryCheckpointPreservation']=checkpoint_preservation(directory/'current.sqlite3')
     result['classifiedMailChanges']=classified_mail_changes(directory/'current.sqlite3')
     result['settingsAndConfiguredIdentityFieldsUnchanged'] = all(
@@ -1476,14 +1748,16 @@ def audit(directory, result, original_bindings, original_candidates, original_ta
     result['strictTargetOnlyScopeChecksPassed']=result['mailAndContactAdditionsOnlyTargetOwners'] and result['contactUpdatesOnlyTargetOwners']
     result['classifiedMailChangesPassed']=result['classifiedMailChanges']['passed']
     result['firstRecoveryCheckpointPassed']=result['firstRecoveryCheckpointPreservation']['passed']
+    result['authorizedOriginalFailedRetriesVerified']=result['authorizedOriginalFailedRetries']['passed']
+    result['allSixAuthorizedOriginalFailuresRecovered']=result['authorizedOriginalFailedRetries']['recoveredOriginalCount']==6
     result['auditPassed'] = all(result[k] for k in ['settingsAndConfiguredIdentityFieldsUnchanged', 'allOriginalEligibleUIDsCovered',
         'allCurrentEligibleUIDsCoveredAtSearch', 'fourIndependentCursors', 'noCursorErrors', 'unchangedOtherBusinessTables',
-        'existingMailRowsRetained', 'existingContactsOnlyCounterAndTimestampChanged',
+        'authorizedOriginalFailedRetriesVerified', 'existingContactsOnlyCounterAndTimestampChanged',
         'classifiedMailChangesPassed', 'firstRecoveryCheckpointPassed',
         'allConfiguredFourRoleChecksCompleted', 'fourParserConnectionsPassedBeforeAndAfterRecovery',
         'allOriginalUserFieldsPreservedExceptAuthorizedTests']) and result['files']['allOriginalFileBytesPreserved']
     result['auditPassedScope'] = 'UID archival coverage, original data preservation, live connection and existing access controls'
-    result['recoveryFullyVerified'] = result['auditPassed'] and result['allNewMessagesParsedOrRecognizedDuplicate']
+    result['recoveryFullyVerified'] = result['auditPassed'] and result['allNewMessagesParsedOrRecognizedDuplicate'] and result['allSixAuthorizedOriginalFailuresRecovered']
 
 
 
@@ -1494,7 +1768,7 @@ def main():
     require(os.environ.get('MAIL_RECOVERY_BRANCH') == BRANCH and os.environ.get('MAIL_RECOVERY_ATTEMPT') == '1'
             and re.fullmatch('[1-9][0-9]{5,19}', run_id) is not None, 'FIXED_WORKFLOW_FIRST_ATTEMPT_REQUIRED')
     if mode != 'backup':
-        require(FINAL_PIN_FROZEN, 'FINAL_REVIEWED_PIN_NOT_FROZEN')
+        require(FINAL_PIN_FROZEN and SECONDARY_TASK_API_GUARD_PIN_FROZEN, 'FINAL_REVIEWED_PIN_NOT_FROZEN')
     original = None
     prior_receipts = []
     if mode == 'backup':
@@ -1503,13 +1777,20 @@ def main():
     else:
         original = selected_backup()
         first_recovery()
+        original_retry_targets()
         RUNS.mkdir(mode=0o700, exist_ok=True)
         require(not RUNS.is_symlink() and len(list(RUNS.iterdir())) < MAX_RUNS, 'BOUNDED_CONTINUATIONS_REQUIRED')
         for prior in RUNS.iterdir():
             require(prior.is_dir() and not prior.is_symlink(), 'PRIOR_RUN_DIRECTORY_REQUIRED')
-            verify_seal(prior)
-            prior_receipts.append({'run': prior.name, 'sealSHA256': file_sha(prior / 'seal.json'),
-                                   'resultSHA256': file_sha(prior / 'first-result.json')})
+            if prior==SECONDARY_GUARD_PREVIOUS_RUN:
+                partial_previous_archive(force_full=True)
+                prior_receipts.append({'run':prior.name,'failedPartial':True,
+                    'externalReconciliationResultSHA256':PARTIAL_RECONCILIATION_RESULT_SHA256,
+                    'externalReconciliationSealSHA256':PARTIAL_RECONCILIATION_SEAL_SHA256})
+            else:
+                verify_seal(prior)
+                prior_receipts.append({'run': prior.name, 'sealSHA256': file_sha(prior / 'seal.json'),
+                                       'resultSHA256': file_sha(prior / 'first-result.json')})
         directory = RUNS / (mode + '-' + run_id)
     directory.mkdir(mode=0o700)  # O_EXCL equivalent: never repeat or overwrite this run.
     result = {'mode': mode, 'runId': run_id, 'privateBackupId': BACKUP.name,
@@ -1539,13 +1820,26 @@ def main():
         result['exceptionType'] = type(error).__name__ if type(error).__name__ in {
             'CheckError', 'TimeoutError', 'OperationalError', 'IntegrityError', 'URLError', 'HTTPError', 'ValueError', 'OSError'} else 'Other'
     finally:
+        try:
+            if mode == 'backup':
+                prior_failure()
+            else:
+                verify_seal(BACKUP)
+                first_recovery()
+                original_retry_targets()
+                partial_previous_archive(force_full=True)
+                result['partialArchiveBytesVerifiedAtStartAndFinish'] = True
+            result['finalRetainedEvidenceVerified'] = True
+        except BaseException:
+            result['finalRetainedEvidenceVerified'] = False
+            result['partialArchiveBytesVerifiedAtStartAndFinish'] = False
+            result['success'] = False
+            result['allMailboxRecoveryVerified'] = False
+            result['recoveryFullyVerified'] = False
+            result['failed'] = True
+            result['failedCheck'] = 'FINAL_RETAINED_EVIDENCE_VERIFICATION_FAILED'
         write_new(directory / 'first-result.json', result)
         seal(directory)
-        if mode == 'backup':
-            prior_failure()  # Original files, receipt and full seal must remain unchanged.
-        if mode != 'backup':
-            verify_seal(BACKUP)
-            first_recovery()
         emit(result)
         emit({'kind': 'receipt', 'mode': mode, 'runId': run_id, 'resultPath': result['resultPath'],
               'resultSHA256': file_sha(directory / 'first-result.json'), 'sealSHA256': file_sha(directory / 'seal.json'),

@@ -1,5 +1,6 @@
 """Synthetic process/HTTP tests; Linux execution adds real address-space limits."""
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -77,6 +78,40 @@ print(json.dumps(worker.supervise(raw,filename,company)))
 
 
 class MailWorkerTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "linux", "Linux actual AS/cgroup large MIME coverage")
+    def test_large_mime_attachment_keeps_bytes_under_actual_worker_limits(self):
+        from app.mailbox import MAX_BATCH_BYTES
+
+        prefix = (b"From: fixture@example.invalid\r\nSubject: SYNTHETIC LARGE MIME\r\n"
+                  b"MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=LARGE\r\n\r\n"
+                  b"--LARGE\r\nContent-Type: text/plain\r\n\r\nSynthetic fixture only.\r\n"
+                  b"--LARGE\r\nContent-Type: application/octet-stream\r\n"
+                  b"Content-Disposition: attachment; filename=synthetic.bin\r\n"
+                  b"Content-Transfer-Encoding: base64\r\n\r\n")
+        line = b"QUFB" * 19 + b"\r\n"  # 57 decoded A bytes per SMTP line.
+        count = (35712788 - len(prefix) - 13) // len(line)
+        raw = prefix + line * count + b"\r\n--LARGE--\r\n"
+        self.assertGreater(len(raw), 34 * 1024**2)
+        held = b"y" * (MAX_BATCH_BYTES - len(raw) - 1024)
+        self.assertEqual(len(raw) + len(held), MAX_BATCH_BYTES - 1024)
+        expected = hashlib.sha256()
+        remaining = count * 57
+        while remaining:
+            size = min(remaining, 65536)
+            expected.update(b"A" * size)
+            remaining -= size
+        result = self.run_entry(raw, seconds=25)
+        self.assertEqual(result["status"], "parsed", result.get("failure_kind"))
+        self.assertEqual(result["fingerprint"], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(len(result["attachments"]), 1)
+        self.assertEqual(result["attachments"][0]["size"], count * 57)
+        self.assertEqual(result["attachments"][0]["sha256"], expected.hexdigest())
+        self.assertEqual(self.run_entry(VALID)["status"], "parsed")
+        self.assertEqual(mail_worker.WORKER_ADDRESS_SPACE, 256 * 1024**2)
+        self.assertEqual(mail_worker.WORKER_SECONDS, 18)
+        self.assertEqual(mail_worker.MAX_RESULT_BYTES, 1024**2)
+        del result, raw, held
+
     def test_email_and_attachment_memory_errors_reach_worker_instead_of_business_failure(self):
         from app.main import parse_email_entries
         with patch("app.main.parse_eml", side_effect=MemoryError()):
@@ -92,9 +127,9 @@ class MailWorkerTests(unittest.TestCase):
                 parse_email_entries([{"filename": "synthetic.eml", "raw": message.as_bytes()}], "Huadeng")
 
     @unittest.skipUnless(sys.platform == "linux", "Linux actual AS/cgroup memory pressure coverage")
-    def test_full_parent_and_near_32m_batch_survive_256m_worker_limit(self):
+    def test_full_parent_and_near_48m_batch_survive_256m_worker_limit(self):
         # app.main is already loaded in this parent, including all production
-        # parser libraries. Retain an actual 25MiB + almost 7MiB batch while its
+        # parser libraries. Retain an actual 40MiB + almost 8MiB batch while its
         # first raw body also enters the disposable supervisor/worker pipeline.
         from app.mailbox import MAX_BATCH_BYTES, MAX_MESSAGE_BYTES
         import resource

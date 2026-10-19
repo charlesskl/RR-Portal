@@ -14,8 +14,8 @@ from datetime import date, datetime, timedelta, timezone
 
 
 MAX_MESSAGES = 5
-MAX_MESSAGE_BYTES = 25 * 1024 * 1024
-MAX_BATCH_BYTES = 32 * 1024 * 1024
+MAX_MESSAGE_BYTES = 40 * 1024 * 1024
+MAX_BATCH_BYTES = 48 * 1024 * 1024
 FETCH_BUDGET_SECONDS = 45
 LOOKBACK_DAYS = 7
 INTERNAL_DATE = re.compile(rb'INTERNALDATE "([^"]+)"')
@@ -356,7 +356,7 @@ def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: s
                 break
             if size > MAX_MESSAGE_BYTES:
                 messages.append({"uid": uid, "received_at": received_at, "raw": None,
-                                 "error": "邮件超过 25MB", "failure_kind": "message_size", "retryable": False})
+                                 "error": "邮件超过 40MiB", "failure_kind": "message_size", "retryable": False})
                 continue
             if total_bytes + size > MAX_BATCH_BYTES or time.monotonic() >= deadline:
                 break  # Not attempted: no result and no cursor advance for this UID.

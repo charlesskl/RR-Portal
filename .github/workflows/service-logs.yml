@@ -1,4 +1,4 @@
-name: Release Read Only Progress
+name: Release Read Only Permission Progress
 on:
   workflow_dispatch:
     inputs:
@@ -39,15 +39,15 @@ jobs:
             [[ "$RELEASE_REF" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = progress ]] || exit 1
             umask 077
             python3 -B - <<'PY'
-            import json,os,pathlib,re,subprocess,sys,tempfile
+            import hashlib,io,json,os,pathlib,re,stat,subprocess,sys,tarfile,tempfile
             sys.excepthook=lambda *_:print('{"safeFailure":"RELEASE_PROGRESS_READ_FAILED"}')
             services=('qc','indo-shipping','internal-quote','factory-review','factory-review-test','qc-report','qc-report-worker')
             stages={'preflight','validate-backup','source-current-branch','source-current-head','source-fetch-main','source-root-tree','source-fixed-inputs','source-dirty-snapshot','fast-forward-main','before-build','build','switch','wait-healthy','final-guards'}
             root=pathlib.Path('/opt/rr-portal/deploy/backups');directory=root/'release-937-943-944-945-946-950-deploy-20261019-v2'
             assert root.is_dir() and not root.is_symlink() and directory.is_dir() and not directory.is_symlink()
             diag=pathlib.Path(tempfile.mkdtemp(prefix='release-progress-',dir=root));os.chmod(diag,0o700)
-            def call(args):
-             p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=8);assert p.returncode==0 and len(p.stdout)<=65536;return p.stdout
+            def call(args,cap=65536):
+             p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=8);assert p.returncode==0 and len(p.stdout)<=cap;return p.stdout
             fmt='{"id":{{json .Id}},"image":{{json .Image}},"running":{{json .State.Running}},"oom":{{json .State.OOMKilled}},"restarts":{{json .RestartCount}},"status":{{json .State.Status}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}}}'
             rows={}
             for service in services:
@@ -57,14 +57,26 @@ jobs:
             pattern=r'([0-9]{3})-('+ '|'.join((*services,'release')) +r')-([a-z-]+)\.(log|stdout\.private)'
             logs=sorted((int(m[1]),p.name)for p in files if (m:=re.fullmatch(pattern,p.name)) and m[3]in stages and p.is_file() and not p.is_symlink())
             result={'containers':rows,'latestDeployLog':logs[-1][1]if logs else None,'safeReceipt':None}
+            result['failedDeployFileSHA256']={}
+            for name in ['manifest.json','first-result.json']:
+             p=directory/name;assert p.is_file() and not p.is_symlink() and p.stat().st_size<=1048576;result['failedDeployFileSHA256'][name]=hashlib.sha256(p.read_bytes()).hexdigest()
             receipt=directory/'first-result.json'
             if receipt.is_file() and not receipt.is_symlink() and receipt.stat().st_size<=65536:
              r=json.loads(receipt.read_bytes());result['safeReceipt']={k:r[k]for k in ['success','globalHooksRun','globalMaintenanceChanged','envFileModified','automaticRollback','businessCrudPerformed']if type(r.get(k))is bool};result['safeReceipt'].update({'failedStage':r.get('failedStage')if r.get('failedStage')in stages else None,'failedService':r.get('failedService')if r.get('failedService')in services else None})
+            result['hostSourcePermissions']={}
+            for path in ['/opt/rr-portal/apps/生产部/品质管理系统/server/server.js','/opt/rr-portal/apps/生产部/品质管理系统/app.js','/opt/rr-portal/apps/生产部/品质管理系统/qc-backend.js','/opt/rr-portal/apps/QA部/QC成品报告系统/assets']:
+             p=pathlib.Path(path);v=p.lstat();result['hostSourcePermissions'][path]={'mode':oct(stat.S_IMODE(v.st_mode)),'uid':v.st_uid,'gid':v.st_gid,'isRegular':stat.S_ISREG(v.st_mode),'isDirectory':stat.S_ISDIR(v.st_mode)}
             cid=rows['qc'].get('id');raw=b''
+            if cid:
+             result['qcContainerUser']=json.loads(call(['docker','inspect','--format','{{json .Config.User}}',cid]));data=call(['docker','cp',cid+':/app/server/server.js','-'],1048576)
+             with tarfile.open(fileobj=io.BytesIO(data))as archive:
+              members=archive.getmembers();assert len(members)==1 and members[0].isreg() and members[0].size<=131072;v=members[0];body=archive.extractfile(v).read(131073);assert len(body)==v.size
+              result['qcContainerServerSource']={'mode':oct(v.mode),'uid':v.uid,'gid':v.gid,'isRegular':True,'bytes':len(body),'sha256':hashlib.sha256(body).hexdigest()}
             if cid:
              p=subprocess.Popen(['timeout','--signal=TERM','--kill-after=2s','10s','docker','logs','--since','10m','--tail','200',cid],stdout=subprocess.PIPE,stderr=subprocess.STDOUT);raw=p.stdout.read(2097152);p.stdout.close();p.wait(timeout=15)
             with (diag/'qc-recent.private.log').open('xb')as f:f.write(raw)
             tokens=['SyntaxError','TypeError','ReferenceError','RangeError','ERR_SQLITE_ERROR','SQLITE_ERROR','SQLITE_BUSY','SQLITE_CORRUPT','MODULE_NOT_FOUND','ERR_MODULE_NOT_FOUND','EADDRINUSE','EACCES','ENOENT','no such column','no such table','duplicate column name','NOT NULL constraint failed','UNIQUE constraint failed','database is locked','attempt to write a readonly database']
             text=raw.decode('utf-8','replace');result['qcErrorCategories']={t:text.count(t)for t in tokens if t in text};result['qcNodeSourceLocations']=sorted(set(re.findall(r'(?m)^\s*(?:at (?:[A-Za-z0-9_.$<>]+\s+)?\(?)?(/app/(?:server/server|app|qc-backend)\.js:[0-9]+(?::[0-9]+)?)\)?\s*$',text)))[:30]
+            result['permissionDeniedServerSource']=any('EACCES'in line and '/app/server/server.js'in line for line in text.splitlines())
             print(json.dumps(result,sort_keys=True))
             PY

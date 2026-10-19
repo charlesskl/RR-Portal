@@ -19,6 +19,7 @@ from typing import Annotated
 from fastapi.responses import Response
 
 from .factory_workbook import parse_factory_workbook
+from .readonly_workbook import load_values_workbook
 from .multi_container import multi_container_plan, order_cargo
 from .eml import parse_eml
 from .carrier_schedule import apply_carrier_schedule
@@ -757,85 +758,87 @@ def _mapping_row(group, source, customer, code, name="", owner="", place="", not
 
 
 def parse_inspection_mapping(path: Path) -> list[dict]:
-    import openpyxl
-    workbook = openpyxl.load_workbook(path, data_only=True, read_only=True)
-    result = []
-    for sheet in workbook.worksheets:
-        title = sheet.title.strip()
-        rows = list(sheet.iter_rows(max_col=min(sheet.max_column, 20), values_only=True))
-        if title.startswith("兴信B车间"):
-            for start in (0, 4, 8, 12, 16):
-                customer = _mapping_text(rows[0][start]) if rows and start < len(rows[0]) else ""
-                for values in rows[2:]:
-                    row = _mapping_row("兴信B车间", "兴信验货总结表", customer,
-                                       values[start] if start < len(values) else None,
-                                       values[start + 1] if start + 1 < len(values) else None,
-                                       "龙丽娟", "兴信B车间")
+    workbook = load_values_workbook(path)
+    try:
+        result = []
+        for sheet in workbook.worksheets:
+            title = sheet.title.strip()
+            rows = list(sheet.iter_rows(max_col=min(sheet.max_column, 20), values_only=True))
+            if title.startswith("兴信B车间"):
+                for start in (0, 4, 8, 12, 16):
+                    customer = _mapping_text(rows[0][start]) if rows and start < len(rows[0]) else ""
+                    for values in rows[2:]:
+                        row = _mapping_row("兴信B车间", "兴信验货总结表", customer,
+                                           values[start] if start < len(values) else None,
+                                           values[start + 1] if start + 1 < len(values) else None,
+                                           "龙丽娟", "兴信B车间")
+                        if row: result.append(row)
+            elif title.startswith("兴信A车间石玉珍"):
+                customer = ""
+                for values in rows[1:]:
+                    customer = _mapping_text(values[0]) or customer
+                    raw = _mapping_text(values[1])
+                    code, _, name = raw.partition("/")
+                    row = _mapping_row("兴信A车间 · 石玉珍", "兴信验货总结表", customer, code, name,
+                                       "石玉珍", "兴信A车间")
                     if row: result.append(row)
-        elif title.startswith("兴信A车间石玉珍"):
-            customer = ""
-            for values in rows[1:]:
-                customer = _mapping_text(values[0]) or customer
-                raw = _mapping_text(values[1])
-                code, _, name = raw.partition("/")
-                row = _mapping_row("兴信A车间 · 石玉珍", "兴信验货总结表", customer, code, name,
-                                   "石玉珍", "兴信A车间")
-                if row: result.append(row)
-        elif title.startswith("兴信A车间李诗妍"):
-            customer = ""
-            for values in rows[2:]:
-                customer = _mapping_text(values[1]) or customer
-                place = _mapping_text(values[3]) or "兴信A车间"
-                row = _mapping_row("兴信A车间 · 李诗妍", "兴信验货总结表", customer, values[2], "",
-                                   "李诗妍", place)
-                if row: result.append(row)
-        elif "华嘉负责货号" in title:
-            customer = ""
-            for values in rows[2:]:
-                customer = _mapping_text(values[1]) or customer
-                row = _mapping_row("华嘉", "兴信验货总结表", customer, values[2], "", "华嘉",
-                                   values[3], "兴信表")
-                if row: result.append(row)
-        elif title.startswith("湖南钟雅娴"):
-            customer = ""
-            place = ""
-            for values in rows[1:]:
-                place = _mapping_text(values[1]) or place or "湖南"
-                customer = _mapping_text(values[2]) or customer
-                owner = _mapping_text(values[7]) or _mapping_text(values[6]) or "钟雅娴"
-                row = _mapping_row("湖南 · 钟雅娴", "湖南验货总结表", customer, values[3], values[4], owner, place)
-                if row: result.append(row)
-        elif title.startswith("湖南砚秋") or title.startswith("湖南Evol"):
-            owner = "吕宇祥" if "吕宇祥" in title else "杨海彬"
-            group = f"湖南 · {owner}"
-            for start in (0, 4, 8, 12, 16):
-                if not rows or start >= len(rows[0]): continue
-                customer = _mapping_text(rows[0][start])
+            elif title.startswith("兴信A车间李诗妍"):
+                customer = ""
                 for values in rows[2:]:
-                    row = _mapping_row(group, "湖南验货总结表", customer,
-                                       values[start] if start < len(values) else None,
-                                       values[start + 1] if start + 1 < len(values) else None,
-                                       owner, "湖南")
+                    customer = _mapping_text(values[1]) or customer
+                    place = _mapping_text(values[3]) or "兴信A车间"
+                    row = _mapping_row("兴信A车间 · 李诗妍", "兴信验货总结表", customer, values[2], "",
+                                       "李诗妍", place)
                     if row: result.append(row)
-        elif title.startswith("河源"):
-            for values in rows:
-                note = "自行做柜"
-                if len(values) > 6 and _mapping_text(values[6]): note += "；" + _mapping_text(values[6])
-                row = _mapping_row("河源", "不参与验货检查", "ZURU", values[0], values[1], values[2],
-                                   "河源", note, True)
-                if row: result.append(row)
-        elif title.startswith("华登"):
-            owners = {"东莞华登": "王远露", "湖南华登": _mapping_text(rows[2][5]) if len(rows) > 2 else ""}
-            customer = _mapping_text(rows[0][0]) if rows else "ZURU"
-            for values in rows[2:]:
-                place = _mapping_text(values[2])
-                row = _mapping_row("华登", "华登验货总结表", customer, values[0], values[1],
-                                   owners.get(place, ""), place)
-                if row: result.append(row)
-    unique = {}
-    for row in result:
-        unique[(row["group_name"], row["product_code"])] = row
-    return list(unique.values())
+            elif "华嘉负责货号" in title:
+                customer = ""
+                for values in rows[2:]:
+                    customer = _mapping_text(values[1]) or customer
+                    row = _mapping_row("华嘉", "兴信验货总结表", customer, values[2], "", "华嘉",
+                                       values[3], "兴信表")
+                    if row: result.append(row)
+            elif title.startswith("湖南钟雅娴"):
+                customer = ""
+                place = ""
+                for values in rows[1:]:
+                    place = _mapping_text(values[1]) or place or "湖南"
+                    customer = _mapping_text(values[2]) or customer
+                    owner = _mapping_text(values[7]) or _mapping_text(values[6]) or "钟雅娴"
+                    row = _mapping_row("湖南 · 钟雅娴", "湖南验货总结表", customer, values[3], values[4], owner, place)
+                    if row: result.append(row)
+            elif title.startswith("湖南砚秋") or title.startswith("湖南Evol"):
+                owner = "吕宇祥" if "吕宇祥" in title else "杨海彬"
+                group = f"湖南 · {owner}"
+                for start in (0, 4, 8, 12, 16):
+                    if not rows or start >= len(rows[0]): continue
+                    customer = _mapping_text(rows[0][start])
+                    for values in rows[2:]:
+                        row = _mapping_row(group, "湖南验货总结表", customer,
+                                           values[start] if start < len(values) else None,
+                                           values[start + 1] if start + 1 < len(values) else None,
+                                           owner, "湖南")
+                        if row: result.append(row)
+            elif title.startswith("河源"):
+                for values in rows:
+                    note = "自行做柜"
+                    if len(values) > 6 and _mapping_text(values[6]): note += "；" + _mapping_text(values[6])
+                    row = _mapping_row("河源", "不参与验货检查", "ZURU", values[0], values[1], values[2],
+                                       "河源", note, True)
+                    if row: result.append(row)
+            elif title.startswith("华登"):
+                owners = {"东莞华登": "王远露", "湖南华登": _mapping_text(rows[2][5]) if len(rows) > 2 else ""}
+                customer = _mapping_text(rows[0][0]) if rows else "ZURU"
+                for values in rows[2:]:
+                    place = _mapping_text(values[2])
+                    row = _mapping_row("华登", "华登验货总结表", customer, values[0], values[1],
+                                       owners.get(place, ""), place)
+                    if row: result.append(row)
+        unique = {}
+        for row in result:
+            unique[(row["group_name"], row["product_code"])] = row
+        return list(unique.values())
+    finally:
+        workbook.close()
 
 
 @app.post("/v1/inspection-mappings/parse")

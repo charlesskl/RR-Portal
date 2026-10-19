@@ -118,9 +118,10 @@ class HuadengBusiness(unittest.TestCase):
                 values=m._read_sheet_rows(read['华登分柜明细'])
                 old=parse_huadeng_form(values,[(r.min_row-1,r.max_row,r.min_col-1,r.max_col) for r in full['华登分柜明细'].merged_cells.ranges])
             finally:full.close();read.close()
-            loader=openpyxl.load_workbook;calls=[]
-            def only_streaming(*args,**kwargs):calls.append(kwargs);self.assertTrue(kwargs.get('read_only'));return loader(*args,**kwargs)
-            with patch.object(m.openpyxl,'load_workbook',side_effect=only_streaming):actual=m.parse_excel(path)
+            loader=m.load_values_workbook;calls=[]
+            def only_streaming(*args,**kwargs):
+                calls.append(kwargs);book=loader(*args,**kwargs);self.assertTrue(book.read_only);return book
+            with patch.object(m,'load_values_workbook',side_effect=only_streaming):actual=m.parse_excel(path)
             self.assertEqual(actual,old);self.assertEqual(len(calls),1)
             self.assertEqual(len(actual['items']),2);self.assertEqual(actual['items'][1]['product_code'],'MSLD200')
             self.assertIsNone(actual['items'][1]['pieces']);self.assertEqual(actual['items'][0]['packing_group'],actual['items'][1]['packing_group'])

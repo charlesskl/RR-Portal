@@ -1,9 +1,9 @@
 from io import BytesIO
-from openpyxl import load_workbook
+from .readonly_workbook import load_values_workbook
 
 
 def parse_factory_workbook(content: bytes) -> list[dict]:
-    workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+    workbook = load_values_workbook(BytesIO(content))
     try:
         sheet = workbook.active
         iterator = sheet.iter_rows(values_only=True)

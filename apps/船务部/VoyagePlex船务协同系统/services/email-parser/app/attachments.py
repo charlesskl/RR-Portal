@@ -9,8 +9,8 @@ from typing import Optional
 from xml.parsers import expat
 from openpyxl.worksheet.cell_range import CellRange
 from .warehouse_name import warehouse_name
+from .readonly_workbook import load_values_workbook
 
-import openpyxl
 import pdfplumber
 from docx import Document
 
@@ -139,8 +139,8 @@ def _sheet_merge_ranges(wb, sheet):
 
 
 def parse_excel(path: Path) -> dict:
-    # read_only 模式流式读取单元格值，不加载样式/图形，避免大附件占满容器内存。
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    # Values retain exact date conversions without constructing all style objects.
+    wb = load_values_workbook(path)
     try:
         amazon = _parse_amazon_allocation(wb)
         if amazon:

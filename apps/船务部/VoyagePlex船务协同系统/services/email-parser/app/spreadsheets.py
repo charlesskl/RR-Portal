@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-import openpyxl
 import xlrd
+from .readonly_workbook import load_values_workbook
 
 
 FIELD_ALIASES = {
@@ -50,9 +50,12 @@ FIELD_ALIASES = {
 def parse_business_spreadsheet(path: Path, original_name: str, row_limit: Optional[int] = None) -> dict:
     suffix = Path(original_name).suffix.lower()
     if suffix in (".xlsx", ".xlsm"):
-        wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
-        max_row = None if row_limit is None else max(60, row_limit + 40)
-        sheets = [(ws.title, list(ws.iter_rows(max_row=max_row, values_only=True))) for ws in wb.worksheets]
+        wb = load_values_workbook(path)
+        try:
+            max_row = None if row_limit is None else max(60, row_limit + 40)
+            sheets = [(ws.title, list(ws.iter_rows(max_row=max_row, values_only=True))) for ws in wb.worksheets]
+        finally:
+            wb.close()
     elif suffix == ".xls":
         wb = xlrd.open_workbook(path)
         sheets = [(ws.name, [[ws.cell_value(r, c) for c in range(ws.ncols)] for r in range(ws.nrows)]) for ws in wb.sheets()]

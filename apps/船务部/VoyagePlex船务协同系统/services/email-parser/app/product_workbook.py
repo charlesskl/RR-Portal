@@ -3,7 +3,7 @@
 from io import BytesIO
 import re
 
-from openpyxl import load_workbook
+from .readonly_workbook import load_values_workbook
 
 
 HEADERS = ("序号", "客户", "货号", "货名 / 装箱规格", "玩具类别", "每箱毛重", "每箱净重")
@@ -18,7 +18,7 @@ def parse_product_workbook(content: bytes, filename: str) -> list[dict]:
     if special is not None:
         return special
     try:
-        workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+        workbook = load_values_workbook(BytesIO(content))
     except Exception as error:
         raise ValueError(f"{filename} 不是有效的走柜表 Excel 文件") from error
     try:
@@ -81,7 +81,7 @@ def parse_special_products(content, filename):
         sheets = [(sheet.name, [sheet.row_values(i) for i in range(sheet.nrows)]) for sheet in book.sheets()]
         book.release_resources()
     else:
-        book = load_workbook(BytesIO(content), read_only=True, data_only=True)
+        book = load_values_workbook(BytesIO(content))
         try: sheets = [(sheet.title, list(sheet.iter_rows(values_only=True))) for sheet in book]
         finally: book.close()
     found = False; result = []; seen = set()

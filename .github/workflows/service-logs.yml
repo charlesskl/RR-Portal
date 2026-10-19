@@ -1,91 +1,70 @@
-name: Fixed QC Only Permission Rescue
+name: Fixed Read-Only V3 Prior-Gate Diagnosis
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [rescue]}
-permissions: {contents: read}
+      mode:
+        type: choice
+        required: true
+        options: [diagnostic]
+permissions:
+  contents: read
 concurrency:
   group: deploy-cloud
   queue: max
   cancel-in-progress: false
+env:
+  RELEASE_WORKFLOW_PIN_FROZEN: 'true'
+  RELEASE_HELPER_SHA256: 'fe44c14bd876c688cfc3099df86f385de507b095e4768f7a9b9b3ad1fd67ab4c'
 jobs:
-  rescue:
+  reviewed-data-operation:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 5
     steps:
-      - shell: bash
+      - name: Validate frozen source, exact branch and first attempt
+        shell: bash
         env:
-          RELEASE_REF: ${{ github.ref }}
+          RELEASE_BRANCH: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
           RELEASE_MODE: ${{ inputs.mode }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
-          [[ "$RELEASE_REF" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = rescue && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+          set -euo pipefail
+          [[ "$RELEASE_WORKFLOW_PIN_FROZEN" = true && "$RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_MODE" =~ ^(diagnostic)$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+      - name: Diagnose the sealed source rejection without business changes
         env:
-          RELEASE_REF: ${{ github.ref }}
+          RELEASE_BRANCH: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
           RELEASE_MODE: ${{ inputs.mode }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
-          fingerprint: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 10m
-          envs: RELEASE_REF,RELEASE_ATTEMPT,RELEASE_MODE
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 3m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,RELEASE_WORKFLOW_PIN_FROZEN,RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$RELEASE_REF" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = rescue ]] || exit 1
+            [[ "$RELEASE_WORKFLOW_PIN_FROZEN" = true && "$RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
+            [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_MODE" =~ ^(diagnostic)$ ]] || exit 1
+            cd /opt/rr-portal
+            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch origin ops/release-937-943-944-945-946-950-20261019 >/dev/null 2>&1 || { echo RELEASE_FETCH_FAILED; exit 1; }
+            [[ "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA" ]] || { echo RELEASE_HEAD_MISMATCH; exit 1; }
             umask 077
-            python3 -B - <<'PY'
-            import hashlib,json,os,pathlib,stat,subprocess,sys,tempfile,time
-            sys.excepthook=lambda *_:print('{"success":false,"failedStage":"QC_RESCUE_PREFLIGHT_REJECTED"}')
-            R=pathlib.Path('/opt/rr-portal');TARGET='85d2082c273d3df3e51b2e414855634c56c498dd';TREE='80c360271e705296a4c26ef12c17fb8c5fe4763d'
-            BAD='17b49cc6d19a82b5b455d165afec3c736af22a4a91451fd24604e87ef24c4acf';IMAGE='sha256:2e8b0f4f2abbf56e1715ae35a8e4af9839de3a7a26bb117a22ef8ea0a2e7f69b'
-            D=pathlib.Path(tempfile.mkdtemp(prefix='qc-only-permission-rescue-',dir=R/'deploy/backups'));os.chmod(D,0o700);stage='preflight';result={'success':False,'onlyQcRebuilt':True,'businessCrudPerformed':False,'automaticRollback':False,'target':TARGET,'evidenceDirectory':str(D)};fds=[]
-            def sha(b):return hashlib.sha256(b).hexdigest()
-            def save(name,value):
-             with (D/name).open('xb')as f:f.write(json.dumps(value,sort_keys=True,separators=(',',':')).encode())
-            def read(args):
-             p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,cwd=R,timeout=15);assert p.returncode==0 and len(p.stdout)<=16777216;return p.stdout
-            def snapshot():
-             ids=read(['docker','ps','-aq','--no-trunc']).decode().split();assert 0<len(ids)<=1000;allrows=json.loads(read(['docker','inspect',*ids]));rows={};qc=[]
-             for v in allrows:
-              labels=v['Config'].get('Labels')or{};isqc=labels.get('com.docker.compose.project')=='rr-portal'and labels.get('com.docker.compose.service')=='qc'
-              if isqc:qc.append(v)
-              else:rows[v['Id']]={'image':v['Image'],'start':v['State']['StartedAt'],'restart':v['RestartCount'],'envSHA':sha(json.dumps(v['Config'].get('Env',[]),sort_keys=True).encode()),'mounts':sorted(v.get('Mounts',[]),key=lambda a:json.dumps(a,sort_keys=True)),'resources':{k:v['HostConfig'].get(k)for k in ['Memory','MemorySwap','NanoCpus','CpuPeriod','CpuQuota','CpusetCpus','PidsLimit']},'healthcheck':v['Config'].get('Healthcheck')}
-             assert len(qc)==1;return qc[0],rows
-            def operation(args,seconds):
-             with (D/(stage+'.private.log')).open('xb')as f:p=subprocess.run(args,stdout=f,stderr=subprocess.STDOUT,cwd=R,env=dict(os.environ,COMPOSE_BAKE='false',COMPOSE_PARALLEL_LIMIT='1'),timeout=seconds)
-             assert p.returncode==0
-            compose=['docker','compose','-p','rr-portal','-f',str(R/'docker-compose.cloud.yml'),'--env-file',str(R/'.env.cloud.production')]
-            try:
-             assert read(['git','rev-parse','HEAD']).decode().strip()==TARGET and read(['git','rev-parse','HEAD^{tree}']).decode().strip()==TREE
-             envhash=sha((R/'.env.cloud.production').read_bytes());old,others=snapshot();assert old['Id']==BAD and old['Image']==IMAGE and old['Config']['User']=='appuser'
-             flag=R/'deploy/maintenance/services/qc';assert flag.is_file()and not flag.is_symlink()and not flag.parent.is_symlink()
-             stage='source-plan';plan=[]
-             for rel in ['server/server.js','app.js','qc-backend.js']:
-              name='apps/生产部/品质管理系统/'+rel;path=R/name;assert all(not p.is_symlink()for p in [path,*path.parents]if p!=R)
-              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW);fds.append(fd);v=os.fstat(fd);assert stat.S_ISREG(v.st_mode)and stat.S_IMODE(v.st_mode)in(0o600,0o644)and v.st_size<=4194304
-              body=os.read(fd,4194305);assert len(body)==v.st_size and sha(body)==sha(read(['git','show',TARGET+':'+name]));plan.append({'path':name,'beforeMode':oct(stat.S_IMODE(v.st_mode)),'afterMode':'0o644','sha256':sha(body)})
-             save('permission-plan.private.json',plan);stage='chmod-three-reviewed-sources'
-             for fd in fds:os.fchmod(fd,0o644);assert stat.S_IMODE(os.fstat(fd).st_mode)==0o644
-             for fd in fds:os.close(fd)
-             fds=[];stage='build-qc';print(json.dumps({'stage':stage,'success':None}),flush=True);operation([*compose,'build','qc'],300)
-             built=read(['docker','image','inspect','rr-portal-qc','--format','{{.Id}}']).decode().strip();assert built!=IMAGE
-             stage='replace-qc';switched=time.monotonic();operation([*compose,'up','-d','--no-build','--no-deps','qc'],90);stage='wait-qc-healthy';deadline=time.monotonic()+90
-             while True:
-              now,after=snapshot()
-              if now['Id']!=BAD and now['Image']==built and now['State']['Running']and now['State'].get('Health',{}).get('Status')=='healthy'and not now['State']['OOMKilled']and now['RestartCount']==0:break
-              assert time.monotonic()<deadline;time.sleep(3)
-             stage='dns-grace';time.sleep(max(0,10-(time.monotonic()-switched)));latest,after=snapshot();assert latest['Id']==now['Id']and latest['State']['Running']and latest['State'].get('Health',{}).get('Status')=='healthy'and not latest['State']['OOMKilled']and latest['RestartCount']==0
-             assert latest['Config']['User']=='appuser'and latest['Config'].get('Env')==old['Config'].get('Env')and latest['Config'].get('Healthcheck')==old['Config'].get('Healthcheck')and sorted(latest.get('Mounts',[]),key=lambda a:json.dumps(a,sort_keys=True))==sorted(old.get('Mounts',[]),key=lambda a:json.dumps(a,sort_keys=True))
-             assert sha((R/'.env.cloud.production').read_bytes())==envhash;stage='clear-only-qc-flag';assert flag.is_file()and not flag.is_symlink();flag.unlink()
-             stage='final-readonly-guards';final,after=snapshot();assert final['Id']==latest['Id']and final['Image']==built and final['State']['Running']and final['State'].get('Health',{}).get('Status')=='healthy'and not final['State']['OOMKilled']and final['RestartCount']==0
-             result.update({'qcHealthy':True,'maintenanceCleared':not flag.exists(),'otherContainersUnchanged':after==others,'envFileUnchanged':sha((R/'.env.cloud.production').read_bytes())==envhash,'newQcContainer':latest['Id'],'newQcImage':latest['Image']});result['success']=result['otherContainersUnchanged']and result['envFileUnchanged'];stage='completed'
-            except BaseException:result['failedStage']=stage
-            finally:
-             for fd in fds:os.close(fd)
-             save('first-result.json',result);print(json.dumps(result,sort_keys=True),flush=True)
-            sys.exit(0 if result['success']else 1)
-            PY
+            release_private_tmp=$(mktemp -d /tmp/release-reviewed.XXXXXX)
+            trap 'rm -rf "$release_private_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/release-batch-v3-prior-diagnostic.py" > "$release_private_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$release_private_tmp/release-data-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$release_private_tmp/run.py" | cut -d ' ' -f1)" = "$RELEASE_HELPER_SHA256" ]] || { echo RELEASE_HELPER_MISMATCH; exit 1; }
+            [[ "$(sha256sum "$release_private_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || { echo RELEASE_LIBRARY_MISMATCH; exit 1; }
+            git show "$RELEASE_SHA:deploy/ops/release-batch-scoped-deploy-v3.py" > "$release_private_tmp/reviewed-recovery-v3.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-937-943-944-945-946-950.py" > "$release_private_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$release_private_tmp/reviewed-recovery-v3.py" | cut -d ' ' -f1)" = 40f501d28bcc0fdbbca630be41440b1d2a7f9b89eec2fd0b7a0ee7f81a0ecc01 ]] || exit 1
+            [[ "$(sha256sum "$release_private_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
+            timeout --signal=TERM --kill-after=20s 120s python3 -B "$release_private_tmp/run.py" "$RELEASE_MODE"

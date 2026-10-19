@@ -47,13 +47,32 @@ OWNERS = {2: ('tan123', 'lisa666tan@163.com'), 3: ('秦湘柳', 'hyt9833@163.com
           5: ('莫秀珍', '13768947334@163.com'), 6: ('麦淳恩', '13471221956@163.com')}
 ADMIN = 2
 # Root freezes these only after the final independent application review/build.
-FINAL_PIN_FROZEN = False
-DEPLOYED_HEAD = ''
-SOURCE_FILES = {}  # repository-relative source path -> reviewed SHA256
-PARSER_FILES = {}  # /app/app/... -> corresponding reviewed SHA256
+FINAL_PIN_FROZEN = True
+DEPLOYED_HEAD = '53f482f4b71fc0fd4c6696e9ec4b2058e6a342bc'
+SOURCE_FILES = {
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/Program.cs": "49032d0113e32a718cd5d67a8115dd23c7b84567d00dc4be4e861bf061204d23",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/Services/MailboxSyncService.cs": "ccf8ee214a302fb939450cdb350420047c6e32da4091946f22490a79eec81b37",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/Services/EmailParserClient.cs": "90346ecbe62d6591bec40b6a4f56e529b539e7e087e126d594bf08485dcd9831",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/Services/ServerMailboxConfiguration.cs": "24985cac1ea3e80b3f23e51f0926f0c3372123a1590ba93087d30265870b55a4",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/Data/AppDbContext.cs": "d1ecb504b20d431a4a229b32757a47f99e6efd859011d5c714fdec0100547f00",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/server/VoyagePlex.Api/VoyagePlex.Api.csproj": "faf8094592160f6a187a9eef395031ff70c68ac2a13ad4b0c6f5f9b6c5ccb313",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/Dockerfile.api": "6dea36116bdffd3ae8fdb6d39050786b4ac89b2c2620738c264df7035fc017a9",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/main.py": "37f22c5ac2fc3b22f4d93e5085b08d2046f91c5cbf2def0ea233ac2385429408",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/mailbox.py": "d52ca6140ce7231c64d277fb9b8d5d5c1103847d7d08348f5aeb288ad3daa4df",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/app/mail_worker.py": "ce2ffce53b81224a636d6bc15a1789b7744f0246043b8dc431b7f46a92383407",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/requirements.txt": "a4c21a5b044539deec682a8a98c37ae97b953a344ea8a5bb659ba32454966daa",
+    "apps/\u8239\u52a1\u90e8/VoyagePlex\u8239\u52a1\u534f\u540c\u7cfb\u7edf/services/email-parser/Dockerfile": "098b11980f4589e84d25d9691a97ba2676c0bc27c337e3cd74d97cefb74918b9"
+}
+PARSER_FILES = {
+    "/app/app/main.py": "37f22c5ac2fc3b22f4d93e5085b08d2046f91c5cbf2def0ea233ac2385429408",
+    "/app/app/mailbox.py": "d52ca6140ce7231c64d277fb9b8d5d5c1103847d7d08348f5aeb288ad3daa4df",
+    "/app/app/mail_worker.py": "ce2ffce53b81224a636d6bc15a1789b7744f0246043b8dc431b7f46a92383407"
+}
 API_DLL_SHA256 = ''  # optional independent reviewed artifact; absent is explicitly not byte-source proof
 EXPECTED_LIMITS = {'voyageplex-api': 768 * 1024**2, 'voyageplex-parser': 512 * 1024**2,
                    'voyageplex-web': 1024**3}
+COMPLETED_BACKUP_RESULT_SHA256 = '9d39903386dfb6a7cc9b45e8ac6680b066cd292c9fa189f9f4141487c046e0d7'
+COMPLETED_BACKUP_SEAL_SHA256 = '503d90340baa23ceb49d66275541e05a615293ec019ea0521e8b026e82ade0d3'
 MAX_RUNS = 64
 SAFE_CODES = set()
 
@@ -523,6 +542,15 @@ def source_and_health(private, safe):
         require(actual == digest, 'RUNNING_PARSER_SOURCE_MATCH')
     actual = command(['docker', 'exec', private['voyageplex-api']['Id'], 'sha256sum', '/app/VoyagePlex.Api.dll']).decode().split()[0]
     require(re.fullmatch('[a-f0-9]{64}', actual) is not None, 'RUNNING_API_ARTIFACT_HASH_SHAPE')
+    baseline = read_json(BACKUP / 'runtime-baseline.private.json')
+    original_image = baseline.get('services', {}).get('voyageplex-api', {}).get('image')
+    original_dll = baseline.get('apiDLLSHA256')
+    running_image = private['voyageplex-api']['Image']
+    require(isinstance(original_image, str) and re.fullmatch('sha256:[a-f0-9]{64}', original_image) is not None
+            and isinstance(original_dll, str) and re.fullmatch('[a-f0-9]{64}', original_dll) is not None
+            and isinstance(running_image, str) and re.fullmatch('sha256:[a-f0-9]{64}', running_image) is not None,
+            'BASELINE_AND_RUNNING_API_ARTIFACT_HASH_SHAPES')
+    require(running_image != original_image and actual != original_dll, 'API_IMAGE_AND_DLL_MUST_CHANGE_SINCE_BACKUP')
     if API_DLL_SHA256:
         require(actual == API_DLL_SHA256, 'RUNNING_REVIEWED_API_ARTIFACT_MATCH')
     for service, port, path in [('voyageplex-api', 5088, '/api/health'), ('voyageplex-parser', 8091, '/health')]:
@@ -541,8 +569,10 @@ def source_and_health(private, safe):
         if match:
             resource[match[1] + 'KiB'] = int(match[2])
     revision = (private['voyageplex-api']['Config'].get('Labels') or {}).get('org.opencontainers.image.revision')
+    require(revision is None or revision == DEPLOYED_HEAD, 'PRESENT_API_OCI_REVISION_MUST_MATCH_DEPLOYED_HEAD')
     return {'deployedHead': DEPLOYED_HEAD, 'sourceFilesMatch': True, 'parserImageSourceMatches': True,
             'apiPublishedDLLSHA256': actual, 'apiIndependentReviewedArtifactMatches': True if API_DLL_SHA256 else None,
+            'apiImageChangedSinceBackup': True, 'apiPublishedDLLChangedSinceBackup': True,
             'apiBinarySourceByteProofAvailable': bool(API_DLL_SHA256),
             'apiSourceProvenanceUsesDeployWorkflowAndBehaviorWhenArtifactPinAbsent': not bool(API_DLL_SHA256),
             'apiOCIRevisionPresent': revision is not None, 'apiOCIRevisionMatchesExpected': revision == DEPLOYED_HEAD if revision else None,
@@ -632,9 +662,11 @@ def candidate_summary(value):
 
 
 @contextlib.contextmanager
-def sessions(ids):
+def sessions(ids, cleanup_receipt=None):
     """Only approved existing users; token is memory-only and expires after 25 min."""
     tokens, hashes = {}, []
+    if cleanup_receipt is not None:
+        cleanup_receipt['temporarySessionsCleaned'] = False
     try:
         with connect(writable=True) as db:
             db.execute('BEGIN IMMEDIATE')
@@ -654,15 +686,19 @@ def sessions(ids):
             db.commit()
         yield tokens
     finally:
-        if hashes:
-            with connect(writable=True) as db:
-                db.execute('BEGIN IMMEDIATE')
-                for digest in hashes:
-                    db.execute('DELETE FROM UserSessions WHERE TokenHash=?', (digest,))
-                db.commit()
-                require(all(db.execute('SELECT COUNT(*) FROM UserSessions WHERE TokenHash=?', (v,)).fetchone()[0] == 0
-                            for v in hashes), 'TEMPORARY_SESSION_CLEANUP_REQUIRED')
-        tokens.clear()
+        try:
+            if hashes:
+                with connect(writable=True) as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    for digest in hashes:
+                        db.execute('DELETE FROM UserSessions WHERE TokenHash=?', (digest,))
+                    db.commit()
+                    require(all(db.execute('SELECT COUNT(*) FROM UserSessions WHERE TokenHash=?', (v,)).fetchone()[0] == 0
+                                for v in hashes), 'TEMPORARY_SESSION_CLEANUP_REQUIRED')
+            if cleanup_receipt is not None:
+                cleanup_receipt['temporarySessionsCleaned'] = True
+        finally:
+            tokens.clear()
 
 
 def uid_coverage(path, original, current, bindings):
@@ -675,6 +711,7 @@ def uid_coverage(path, original, current, bindings):
             require(now['uidValidity'] == before['uidValidity'] == state['UidValidity'], 'COVERAGE_UIDVALIDITY_UNCHANGED')
             prefix = 'Huadeng:%d:%s:%s:%d:' % (owner, state['MailboxIdentity'], address, state['UidValidity'])
             seen, samples, failed, duplicate = set(), [], 0, 0
+            failed_uids, duplicate_uids = set(), set()
             for row in db.execute("SELECT Id,MailboxKey,Status FROM ImportEmailItems WHERE Company='Huadeng' AND MailOwnerId=? AND MailboxKey<>''", (owner,)):
                 key = row['MailboxKey']
                 if key.startswith(prefix) and re.fullmatch('[0-9]{1,10}', key[len(prefix):]):
@@ -684,7 +721,11 @@ def uid_coverage(path, original, current, bindings):
                     if len(samples) < 1:
                         samples.append(row['Id'])
                     failed += row['Status'] == 'failed'
-                    duplicate += row['Status'] == 'duplicate'
+                    duplicate += row['Status'] in {'duplicate', 'duplicate_confirmed'}
+                    if row['Status'] == 'failed':
+                        failed_uids.add(uid)
+                    if row['Status'] in {'duplicate', 'duplicate_confirmed'}:
+                        duplicate_uids.add(uid)
             original_set, current_set = set(before['eligible']), set(now['eligible'])
             missing_original, missing_current = original_set - seen, current_set - seen
             result.append({'owner': owner, 'originalEligibleCount': len(original_set), 'originalCoveredCount': len(original_set & seen),
@@ -694,6 +735,10 @@ def uid_coverage(path, original, current, bindings):
                            'originalUIDsNoLongerInCurrentSearch': len(original_set - current_set),
                            'missingAtOrBelowCursorCount': sum(uid <= state['LastUid'] for uid in missing_original | missing_current),
                            'failedRecordsTotal': failed, 'duplicateRecordsTotal': duplicate,
+                           'originalEligibleFailedRecords': len(original_set & failed_uids),
+                           'currentEligibleFailedRecords': len(current_set & failed_uids),
+                           'currentEligibleDuplicateRecords': len(current_set & duplicate_uids),
+                           'coverageDoesNotMeanSuccessfulParsing': True,
                            'lastUid': state['LastUid'], 'cursorId': state['Id'], 'cursorErrorPresent': bool(state['LastError']),
                            '_sample': samples[0] if samples else None})
     return result
@@ -746,10 +791,13 @@ def compare_files(directory):
     write_new(directory / 'current-data-files.private.json', current)
     return {'originalNonDatabaseFiles': len(old), 'currentNonDatabaseFiles': len(current),
             'originalMissing': missing, 'originalByteChanges': changed,
-            'newFiles': len(set(current) - set(old)), 'allOriginalFileBytesPreserved': missing == changed == 0}
+            'newFiles': len(set(current) - set(old)), 'allOriginalFileBytesPreserved': missing == changed == 0,
+            'comparisonScope': 'regular-file-presence-and-byte-SHA256-only',
+            'permissionsOwnershipAndTimestampsCompared': False}
 
 
-def new_mail_counts(before, after):
+
+def new_mail_counts(before, after, path=None):
     old = before['tables']['ImportEmailItems']['rows']
     new = after['tables']['ImportEmailItems']['rows']
     result = []
@@ -758,8 +806,119 @@ def new_mail_counts(before, after):
                 if new[key]['company'] == 'Huadeng' and new[key]['owner'] == owner and new[key]['mailboxItem']]
         result.append({'owner': owner, 'newDatabaseMailRecords': len(rows),
                        'newFailedRecords': sum(row['status'] == 'failed' for row in rows),
-                       'newDuplicateRecords': sum(row['status'] == 'duplicate' for row in rows)})
+                       'newDuplicateRecords': sum(row['status'] in {'duplicate', 'duplicate_confirmed'} for row in rows),
+                       'newParsedRecords': sum(row['status'] in {'pending', 'confirmed'} for row in rows),
+                       'newUnknownStatusRecords': sum(row['status'] not in {'pending', 'confirmed', 'failed', 'duplicate', 'duplicate_confirmed'} for row in rows),
+                       'newFailureKinds': {}})
+    if path is not None:
+        allowed = {'metadata', 'message_size', 'body_read', 'parse_memory', 'parse_timeout',
+                   'parse_result_size', 'parse_process', 'parse_cancelled'}
+        require(after['tables']['ImportEmailItems']['keys'] == ['Id'], 'MAIL_ITEM_ID_KEY_REQUIRED')
+        with connect(path) as db:
+            for owner_result in result:
+                counts = collections.Counter()
+                for row in db.execute("SELECT Id,ResultJson FROM ImportEmailItems WHERE Company='Huadeng' AND MailOwnerId=? AND Status='failed' AND MailboxKey<>''", (owner_result['owner'],)):
+                    key = encoded([typed(row['Id'])]).decode()
+                    if key not in new or key in old:
+                        continue  # Existing failed baseline rows are not new failures.
+                    try:
+                        raw = row['ResultJson']
+                        value = json.loads(raw) if isinstance(raw, str) and len(raw) <= 2 * 1024**2 else {}
+                        kind = value.get('failure_kind') if isinstance(value, dict) else None
+                    except (ValueError, TypeError):
+                        kind = None
+                    counts[kind if isinstance(kind, str) and kind in allowed else 'other'] += 1
+                owner_result['newFailureKinds'] = dict(sorted(counts.items()))
     return result
+
+
+def original_user_fields(path):
+    # Full typed values stay private; exclude exactly the three authorized test results.
+    fields = {'MailboxTestStatus', 'MailboxTestedAt', 'MailboxTestConfigurationKey'}
+    result = {}
+    with connect(path) as db:
+        for row in db.execute('SELECT * FROM Users'):
+            values = {key: typed(row[key]) for key in row.keys() if key not in fields}
+            result[str(row['Id'])] = sha(encoded(values))
+    return result
+
+
+def compare_original_users(directory):
+    before = original_user_fields(BACKUP / 'baseline.sqlite3')
+    after = original_user_fields(directory / 'current.sqlite3')
+    with connect(BACKUP / 'baseline.sqlite3') as db:
+        old = {str(row['Id']): sha(encoded({key: typed(row[key]) for key in row.keys()})) for row in db.execute('SELECT * FROM Users')}
+    with connect(directory / 'current.sqlite3') as db:
+        new = {str(row['Id']): sha(encoded({key: typed(row[key]) for key in row.keys()})) for row in db.execute('SELECT * FROM Users')}
+    changed = {key for key in set(old) & set(new) if old[key] != new[key]}
+    return {'allNonTestTypedUserFieldsIdentical': before == after,
+            'onlyFourTargetUsersHaveAnyRowChanges': changed <= {str(owner) for owner in OWNERS},
+            'fullUserRowsIdentical': old == new, 'changedUserRows': len(changed),
+            'expectedCategory': 'mailbox-test-fields-only-target-users',
+            'excludedFields': ['MailboxTestConfigurationKey', 'MailboxTestStatus', 'MailboxTestedAt']}
+
+
+def mailbox_tests(base, token, directory, label):
+    tests = []
+    for owner in OWNERS:
+        item = {'owner': owner, 'status': None, 'connected': False, 'testedAtUtc': None, 'safeExceptionType': None}
+        try:
+            code, value = http(base, '/api/users/' + str(owner) + '/mailbox-test', token, post=True, timeout=60)
+            item['status'] = code
+            item['connected'] = code == 200 and isinstance(value, dict) and value.get('connected') is True
+            tested = value.get('testedAt') if isinstance(value, dict) else None
+            if isinstance(tested, str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.[0-9]{1,9})?Z', tested):
+                # The format is fixed by .NET; validate the calendar without relying on Python 3.9 nano parsing.
+                dt.datetime.strptime(tested[:19], '%Y-%m-%dT%H:%M:%S')
+                item['testedAtUtc'] = tested
+        except Exception as error:
+            item['safeExceptionType'] = type(error).__name__ if type(error).__name__ in {'CheckError', 'TimeoutError', 'HTTPError', 'URLError', 'OSError', 'ValueError'} else 'Other'
+        tests.append(item)
+        write_new(directory / (label + '-owner-' + str(owner) + '.json'), item)
+    return {'phase': label, 'mailboxes': tests, 'allFourConnected': all(item['connected'] for item in tests),
+            'perTestHardTimeoutSeconds': 60, 'rawMessagesOrErrorsPrinted': False}
+
+
+def successful_prior_mailbox_tests():
+    if not RUNS.exists():
+        return None
+    for path in sorted(RUNS.iterdir()):
+        if not (path / 'seal.json').is_file():
+            continue  # The current exclusive run is not sealed yet.
+        verify_seal(path)
+        result = read_json(path / 'first-result.json')
+        test = result.get('mailboxTestsBeforeRecovery')
+        if (result.get('mode') == 'recover' and result.get('runtimeBefore', {}).get('deployedHead') == DEPLOYED_HEAD
+                and isinstance(test, dict) and test.get('allFourConnected') is True):
+            rows = test.get('mailboxes', [])
+            if ({row.get('owner') for row in rows} == set(OWNERS) and len(rows) == 4
+                    and all(row.get('status') == 200 and row.get('connected') is True for row in rows)):
+                return {'run': path.name, 'resultSHA256': file_sha(path / 'first-result.json'),
+                        'sealSHA256': file_sha(path / 'seal.json')}
+    return None
+
+
+def owner_failed_count(owner):
+    with connect() as db:
+        return db.execute("SELECT COUNT(*) FROM ImportEmailItems WHERE Company='Huadeng' AND MailOwnerId=? AND MailboxKey<>'' AND Status='failed'", (owner,)).fetchone()[0]
+
+
+def require_existing_admin_mail_scope():
+    # The application middleware would create a missing global Huadeng setting.
+    # Fail before authenticated requests instead of causing such an implicit write.
+    with connect() as db:
+        require(db.execute('SELECT COUNT(*) FROM MailSystemSettings WHERE Id=2').fetchone()[0] == 1,
+                'EXISTING_GLOBAL_HUADENG_SETTING_REQUIRED')
+
+
+def mark_user_test_category(comparison):
+    for row in comparison:
+        if row['table'] == 'Users':
+            row['expectedCategory'] = 'mailbox-test-fields-only-target-users'
+
+
+def all_new_parsed_or_duplicate(counts):
+    return all(row['newFailedRecords'] == 0 and row['newUnknownStatusRecords'] == 0 for row in counts)
 
 
 def retain_snapshot(directory):
@@ -769,11 +928,11 @@ def retain_snapshot(directory):
     return value
 
 
-def permission_checks(base, coverage):
+def permission_checks(base, coverage, cleanup_receipt=None):
     results = []
     with connect() as db:
         supervisors = db.execute("SELECT COUNT(*) FROM Users WHERE IsActive=1 AND Role='supervisor' AND CompanyAccess='Huadeng'").fetchone()[0]
-    with sessions([ADMIN, 3, 5, 6]) as tokens:
+    with sessions([ADMIN, 3, 5, 6], cleanup_receipt) as tokens:
         code, accounts = http(base, '/api/mail/accounts', tokens[ADMIN])
         require(code == 200 and {v['id'] for v in accounts['accounts']} >= set(OWNERS), 'ADMIN_EXISTING_SCOPE')
         for owner in OWNERS:
@@ -792,14 +951,21 @@ def permission_checks(base, coverage):
             results.append({'owner': owner, 'ownMail': owncode, 'otherOwnerMail': othercode, 'forgedOwnerIgnored': True})
     return {'adminExistingScope': True, 'shipping': results, 'temporarySessionsCleaned': True,
             'activeHuadengSupervisors': supervisors, 'supervisorSessionExercised': False,
-            'supervisorFollowupRequired': supervisors > 0,
+            'extraSupervisorAccountsOutsideConfiguredFourNotExercised': supervisors > 0,
             'configuredFourMailboxRoles': {'admin': 1, 'shipping': 3, 'supervisor': 0}}
 
 
+
 def selected_backup():
+    prior_failure()  # First and second failed backups remain immutable evidence.
     verify_seal(BACKUP)
+    require(file_sha(BACKUP / 'first-result.json') == COMPLETED_BACKUP_RESULT_SHA256 and
+            file_sha(BACKUP / 'seal.json') == COMPLETED_BACKUP_SEAL_SHA256,
+            'EXACT_COMPLETED_V3_BACKUP_RECEIPT_REQUIRED')
     result = read_json(BACKUP / 'first-result.json')
-    require(result.get('mode') == 'backup' and result.get('backupComplete') is True, 'SUCCESSFUL_ORIGINAL_BACKUP_REQUIRED')
+    require(result.get('mode') == 'backup' and result.get('backupComplete') is True and
+            result.get('source') == BASE and result.get('privateBackupId') == BACKUP.name,
+            'SUCCESSFUL_ORIGINAL_BACKUP_REQUIRED')
     return read_json(BACKUP / 'bindings.private.json'), read_json(BACKUP / 'candidates.private.json'), read_json(BACKUP / 'typed-tables.private.json')
 
 
@@ -833,53 +999,80 @@ def recover(directory, result, original_bindings, original_candidates, original_
     result['runtimeBefore'] = source_and_health(private, safe)
     bindings = settings_and_bindings()
     entries, flags = configuration(private['voyageplex-api'], bindings)
+    require_existing_admin_mail_scope()
     require(all(bindings[owner]['setting'] == original_bindings[str(owner)]['setting'] and
                 bindings[owner]['user'] == original_bindings[str(owner)]['user'] for owner in OWNERS), 'SETTINGS_AND_USERS_UNCHANGED')
     base = service_base(private, 'voyageplex-api', 5088)
     result['bindings'] = flags
     result['ownerRuns'] = []
     result['temporarySessionsCleaned'] = False
+    result['allBatchResponsesSucceeded'] = False
     # One small batch per owner per round prevents the first mailbox monopolizing this continuation.
     stopped = set()
     try:
-        with sessions([ADMIN]) as tokens:
-            while time.monotonic() < deadline - 160 and len(stopped) < len(OWNERS):
+        with sessions([ADMIN], result) as tokens:
+            prior_test = successful_prior_mailbox_tests()
+            if prior_test is None:
+                result['mailboxTestsBeforeRecovery'] = mailbox_tests(base, tokens[ADMIN], directory, 'before-recovery')
+                require(result['mailboxTestsBeforeRecovery']['allFourConnected'], 'ALL_FOUR_RUNNING_PARSER_TESTS_BEFORE_RECOVERY_REQUIRED')
+            else:
+                result['preRecoveryMailboxTestReceipt'] = prior_test
+            while time.monotonic() < deadline - 340 and len(stopped) < len(OWNERS):
                 for owner in OWNERS:
-                    if owner in stopped or time.monotonic() >= deadline - 160:
+                    if owner in stopped or time.monotonic() >= deadline - 340:
                         continue
                     prior = settings_and_bindings()[owner]['state']['LastUid']
+                    prior_failed = owner_failed_count(owner)
                     # A transport timeout aborts this continuation; no overlapping follow-up POST.
-                    code, value = http(base, '/api/imports/email/mailbox/sync', tokens[ADMIN], owner, post=True, timeout=150)
+                    code, value = http(base, '/api/imports/email/mailbox/sync', tokens[ADMIN], owner, post=True, timeout=330)
                     require(isinstance(value, dict), 'SYNC_RESPONSE_OBJECT_REQUIRED')
                     after = settings_and_bindings()[owner]['state']['LastUid']
+                    new_failed = max(0, owner_failed_count(owner) - prior_failed)
                     imported = value.get('imported')
                     blocked = value.get('blockedUid')
                     require(imported is None or type(imported) is int and 0 <= imported <= 5, 'SMALL_BATCH_RESPONSE_REQUIRED')
+                    require(blocked is None or type(blocked) is int and 0 < blocked <= 4294967295,
+                            'BLOCKED_UID_MUST_BE_UINT32_INTEGER')
+                    blocked_guard = blocked is None or after < blocked
+                    batch_success = (code == 200 and value.get('configured') is True and
+                                     imported is not None and not value.get('error') and blocked is None and new_failed == 0)
                     item = {'owner': owner, 'status': code, 'imported': imported, 'cursorBefore': prior, 'cursorAfter': after,
                             'blockedUIDPresent': blocked is not None, 'errorPresent': bool(value.get('error')),
-                            'configured': value.get('configured') is True}
+                            'configured': value.get('configured') is True, 'blockedCursorGuardPassed': blocked_guard,
+                            'newFailedDuringBatchInterval': new_failed, 'batchSucceeded': batch_success}
                     result['ownerRuns'].append(item)
                     write_new(directory / ('batch-%04d.json' % len(result['ownerRuns'])), item)
+                    # Exact blocked UID stays in the private receipt, never the public aggregate.
+                    if blocked is not None:
+                        write_new(directory / ('blocked-%04d.private.json' % len(result['ownerRuns'])), {'owner': owner, 'blockedUid': blocked})
                     require(after >= prior, 'CURSOR_MUST_NOT_REGRESS')
-                    if code != 200 or value.get('configured') is not True or value.get('error') or blocked is not None:
+                    require(blocked_guard, 'CURSOR_MUST_STAY_BEFORE_BLOCKED_UID')
+                    if not batch_success:
                         stopped.add(owner)
                     elif imported == 0 and after == prior:
                         stopped.add(owner)
         result['temporarySessionsCleaned'] = True
         result['recoveryRunFinished'] = True
+        result['allBatchResponsesSucceeded'] = bool(result['ownerRuns']) and all(row['batchSucceeded'] for row in result['ownerRuns'])
     finally:
         # Retain actual committed state even after timeout, blocked UID or cleanup failure.
         snapshot = retain_snapshot(directory)
         result['databaseComparison'] = compare_tables(original_tables, snapshot)
-        result['newDatabaseMailRecordsSinceBackup'] = new_mail_counts(original_tables, snapshot)
+        mark_user_test_category(result['databaseComparison'])
+        result['userPreservation'] = compare_original_users(directory)
+        result['newDatabaseMailRecordsSinceBackup'] = new_mail_counts(original_tables, snapshot, directory / 'current.sqlite3')
+        result['allNewMessagesParsedOrRecognizedDuplicate'] = all_new_parsed_or_duplicate(result['newDatabaseMailRecordsSinceBackup'])
         result['files'] = compare_files(directory)
         write_new(directory / 'bindings-after.private.json', settings_and_bindings(directory / 'current.sqlite3'))
         _, result['runtimeAfter'] = runtime()
         result['runBudgetSeconds'] = 18 * 60
+        result['perPostHardTimeoutSeconds'] = 330
+        result['remainingRunTimeRequiredBeforePostSeconds'] = 340
         result['continuationMayBeRequired'] = True
         result['independentCandidateCoverageAuditStillRequired'] = True
         result['reportedImportedAcrossBatches'] = sum(v['imported'] or 0 for v in result['ownerRuns'])
         result['fullStaticIdentity'] = all(r['added'] == r['removed'] == r['changed'] == 0 for r in result['databaseComparison'])
+
 
 
 def audit(directory, result, original_bindings, original_candidates, original_tables):
@@ -887,13 +1080,18 @@ def audit(directory, result, original_bindings, original_candidates, original_ta
     result['runtime'] = source_and_health(private, safe)
     bindings = settings_and_bindings()
     entries, flags = configuration(private['voyageplex-api'], bindings)
+    require_existing_admin_mail_scope()
+    base = service_base(private, 'voyageplex-api', 5088)
+    result['preRecoveryMailboxTestReceipt'] = successful_prior_mailbox_tests()
+    with sessions([ADMIN], result) as tokens:
+        result['mailboxTestsAfterRecovery'] = mailbox_tests(base, tokens[ADMIN], directory, 'after-recovery')
     current = candidates(private, entries, bindings)
     write_new(directory / 'current-candidates.private.json', current)
     snapshot = retain_snapshot(directory)
     saved_bindings = settings_and_bindings(directory / 'current.sqlite3')
     write_new(directory / 'bindings.private.json', saved_bindings)
     coverage = uid_coverage(directory / 'current.sqlite3', original_candidates, current, saved_bindings)
-    result['permissions'] = permission_checks(service_base(private, 'voyageplex-api', 5088), coverage)
+    result['permissions'] = permission_checks(service_base(private, 'voyageplex-api', 5088), coverage, result)
     for row in coverage:
         row.pop('_sample', None)
     result['coverage'] = coverage
@@ -901,16 +1099,25 @@ def audit(directory, result, original_bindings, original_candidates, original_ta
     result['currentCandidates'] = candidate_summary(current)
     result['bindings'] = flags
     result['databaseComparison'] = compare_tables(original_tables, snapshot)
-    result['newDatabaseMailRecordsSinceBackup'] = new_mail_counts(original_tables, snapshot)
+    mark_user_test_category(result['databaseComparison'])
+    result['userPreservation'] = compare_original_users(directory)
+    result['newDatabaseMailRecordsSinceBackup'] = new_mail_counts(original_tables, snapshot, directory / 'current.sqlite3')
+    result['allNewMessagesParsedOrRecognizedDuplicate'] = all_new_parsed_or_duplicate(result['newDatabaseMailRecordsSinceBackup'])
     result['files'] = compare_files(directory)
-    result['settingsAndUsersUnchanged'] = all(
+    result['settingsAndConfiguredIdentityFieldsUnchanged'] = all(
         bindings[owner]['setting'] == original_bindings[str(owner)]['setting'] and
         bindings[owner]['user'] == original_bindings[str(owner)]['user'] for owner in OWNERS)
     result['allOriginalEligibleUIDsCovered'] = all(row['originalMissingCount'] == 0 for row in coverage)
     result['allCurrentEligibleUIDsCoveredAtSearch'] = all(row['currentMissingCount'] == 0 for row in coverage)
     result['fourIndependentCursors'] = len({row['cursorId'] for row in coverage}) == 4
     result['noCursorErrors'] = all(not row['cursorErrorPresent'] for row in coverage)
-    result['allRequiredExistingRoleChecksCompleted'] = not result['permissions']['supervisorFollowupRequired']
+    result['allConfiguredFourRoleChecksCompleted'] = (result['permissions']['adminExistingScope'] and
+        {row['owner'] for row in result['permissions']['shipping']} == {3, 5, 6})
+    result['fourParserConnectionsPassedBeforeAndAfterRecovery'] = (
+        result['preRecoveryMailboxTestReceipt'] is not None and result['mailboxTestsAfterRecovery']['allFourConnected'])
+    result['allOriginalUserFieldsPreservedExceptAuthorizedTests'] = (
+        result['userPreservation']['allNonTestTypedUserFieldsIdentical'] and
+        result['userPreservation']['onlyFourTargetUsersHaveAnyRowChanges'])
     result['unchangedOtherBusinessTables'] = all(
         row['added'] == row['removed'] == row['changed'] == 0 for row in result['databaseComparison']
         if row['expectedCategory'] == 'unchanged-required')
@@ -923,11 +1130,15 @@ def audit(directory, result, original_bindings, original_candidates, original_ta
     result['contactUpdatesOnlyTargetOwners'] = all(row['allChangedRowsAreFourTargetOwners']
         for row in result['databaseComparison'] if row['table'] == 'MailContacts')
     result['fullStaticIdentity'] = all(row['added'] == row['removed'] == row['changed'] == 0 for row in result['databaseComparison'])
-    result['auditPassed'] = all(result[k] for k in ['settingsAndUsersUnchanged', 'allOriginalEligibleUIDsCovered',
+    result['auditPassed'] = all(result[k] for k in ['settingsAndConfiguredIdentityFieldsUnchanged', 'allOriginalEligibleUIDsCovered',
         'allCurrentEligibleUIDsCoveredAtSearch', 'fourIndependentCursors', 'noCursorErrors', 'unchangedOtherBusinessTables',
         'existingMailRowsRetained', 'existingContactsOnlyCounterAndTimestampChanged',
         'mailAndContactAdditionsOnlyTargetOwners', 'contactUpdatesOnlyTargetOwners',
-        'allRequiredExistingRoleChecksCompleted']) and result['files']['allOriginalFileBytesPreserved']
+        'allConfiguredFourRoleChecksCompleted', 'fourParserConnectionsPassedBeforeAndAfterRecovery',
+        'allOriginalUserFieldsPreservedExceptAuthorizedTests']) and result['files']['allOriginalFileBytesPreserved']
+    result['auditPassedScope'] = 'UID archival coverage, original data preservation, live connection and existing access controls'
+    result['recoveryFullyVerified'] = result['auditPassed'] and result['allNewMessagesParsedOrRecognizedDuplicate']
+
 
 
 def main():
@@ -972,8 +1183,9 @@ def main():
             recover(directory, result, *original)
         else:
             audit(directory, result, *original)
-        result['success'] = result.get('auditPassed', mode != 'audit')
-        result['allMailboxRecoveryVerified'] = result.get('auditPassed', False)
+        result['success'] = (result.get('recoveryFullyVerified', False) if mode == 'audit' else
+                             result.get('allBatchResponsesSucceeded', False) if mode == 'recover' else True)
+        result['allMailboxRecoveryVerified'] = result.get('recoveryFullyVerified', False)
     except BaseException as error:
         result['failed'] = True
         result['failedCheck'] = str(error) if isinstance(error, CheckError) and str(error) in SAFE_CODES else 'REDACTED_OPERATION_FAILURE'
@@ -998,7 +1210,6 @@ if __name__ == '__main__':
     try:
         sys.exit(main())
     except Exception:
-        # Preflight failure may occur before an exclusive receipt directory exists.
-        emit({'failed': True, 'phase': 'preflight', 'reason': 'REDACTED_PREFLIGHT_FAILURE',
-              'noRecoveryPostIssuedByThisPreflight': True})
+        # Setup or receipt finalization can fail before or after recovery requests.
+        emit({'failed': True, 'phase': 'setup-or-receipt-failure', 'reason': 'REDACTED_SETUP_OR_RECEIPT_FAILURE'})
         sys.exit(1)

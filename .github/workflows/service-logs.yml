@@ -1,4 +1,4 @@
-name: VoyagePlex Candidate EML Full Parent Mail Current Worker Diagnosis
+name: VoyagePlex Candidate EML 320MiB Full Parent Mail Current Worker Diagnosis
 on:
   workflow_dispatch:
 permissions:
@@ -45,7 +45,7 @@ jobs:
             git fetch origin ops/voyageplex-maildiag-20261019 >/dev/null 2>&1 || { echo 'MAILDIAG_FIXED_SCRIPT_FETCH_FAILED'; exit 1; }
             [[ "$(git rev-parse FETCH_HEAD)" = "$MAILDIAG_REF" ]] || { echo MAILDIAG_FIXED_HEAD_MISMATCH; exit 1; }
             umask 077
-            mailbox_diagnostic_tmp=$(mktemp -d /tmp/maildiag-candidate-eml.XXXXXX)
+            mailbox_diagnostic_tmp=$(mktemp -d /tmp/maildiag-candidate-eml-320.XXXXXX)
             trap 'rm -rf "$mailbox_diagnostic_tmp"' EXIT
-            git show "$MAILDIAG_REF:deploy/ops/voyageplex-candidate-eml-worker-probe.py" > "$mailbox_diagnostic_tmp/run.py" 2>/dev/null || { echo 'MAILDIAG_FIXED_SCRIPT_READ_FAILED'; exit 1; }
+            git show "$MAILDIAG_REF:deploy/ops/voyageplex-candidate-eml-worker-320-probe.py" > "$mailbox_diagnostic_tmp/run.py" 2>/dev/null || { echo 'MAILDIAG_FIXED_SCRIPT_READ_FAILED'; exit 1; }
             timeout --signal=TERM --kill-after=20s 24m python3 "$mailbox_diagnostic_tmp/run.py"

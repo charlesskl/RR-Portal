@@ -1,5 +1,6 @@
 """Unexecuted fixed read-only deployment progress probe. No raw argv/env/logs."""
 import hashlib
+import collections
 import json
 import os
 import pathlib
@@ -214,12 +215,24 @@ def recovery_snapshot():
         states = {r[0]-1000:r[1:] for r in db.execute("""SELECT s.Id,s.LastUid,s.LastSuccessAt,CASE WHEN s.LastError<>'' THEN 1 ELSE 0 END,
           t.SyncEnabled,t.SyncIntervalMinutes,u.MailboxTestStatus,u.MailboxTestedAt FROM main.MailSyncStates s
           JOIN main.MailSystemSettings t ON t.Id=s.Id JOIN main.Users u ON u.Id=s.Id-1000 WHERE s.Id IN (1002,1003,1005,1006)""")}
+        allowed = {'metadata','message_size','body_read','parse_memory','parse_timeout','parse_result_size','parse_process','parse_cancelled'}
+        failures = {owner:collections.Counter() for owner in [2,3,5,6]}
+        for owner, raw in db.execute("""SELECT i.MailOwnerId,CASE WHEN length(CAST(i.ResultJson AS BLOB))<=2097152 THEN i.ResultJson ELSE NULL END
+          FROM main.ImportEmailItems i LEFT JOIN baseline.ImportEmailItems b ON b.Id=i.Id
+          WHERE i.Company='Huadeng' AND i.MailOwnerId IN (2,3,5,6) AND i.MailboxKey<>'' AND i.Status='failed' AND b.Id IS NULL"""):
+            try:
+                value = json.loads(raw) if isinstance(raw,str) else {}
+                kind = value.get('failure_kind') if isinstance(value,dict) else None
+            except (ValueError,TypeError):
+                kind = None
+            failures[owner][kind if isinstance(kind,str) and kind in allowed else 'other'] += 1
         for owner in [2,3,5,6]:
             a, b, c = old.get(owner, (0,0,0)), current.get(owner, (0,0,0,None,0,0)), states.get(owner)
             date = b[3] if isinstance(b[3], str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', b[3]) else None
             value = {'owner':owner,'mailCount':b[0],'failedCount':b[1],'duplicateCount':b[2],'latestReceivedDate':date,
                      'baselineMailCount':a[0],'baselineFailedCount':a[1],'netMailChangeSinceBaseline':b[0]-a[0],
-                     'newMailRecordsSinceBaseline':b[4],'newFailedRecordsSinceBaseline':b[5],'cursorAvailable':c is not None}
+                     'newMailRecordsSinceBaseline':b[4],'newFailedRecordsSinceBaseline':b[5],
+                     'newFailureKindsSinceBaseline':dict(sorted(failures[owner].items())),'cursorAvailable':c is not None}
             if c is not None:
                 value.update({'lastUid':c[0],'lastSuccessAtUtc':safe_time(c[1]),'syncErrorPresent':bool(c[2]),'syncEnabled':bool(c[3]),
                               'syncIntervalMinutes':c[4],'mailboxTestStatus':c[5] if c[5] in {'Connected','Failed'} else 'Other','mailboxTestedAtUtc':safe_time(c[6])})

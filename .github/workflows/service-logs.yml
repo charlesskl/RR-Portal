@@ -1,4 +1,4 @@
-name: VoyagePlex Read-only Recovery Progress
+name: VoyagePlex Exact Recovery Helper Controlled SIGINT
 on:
   workflow_dispatch:
 permissions:
@@ -10,7 +10,7 @@ concurrency:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 4
     steps:
       - name: Validate fixed branch and SSH fingerprint
         shell: bash
@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           [[ "$MAILDIAG_BRANCH" = refs/heads/ops/voyageplex-maildiag-20261019 && "$MAILDIAG_ATTEMPT" = 1 ]] || exit 1
           [[ "$MAILDIAG_REF" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Fixed read-only recovery progress
+      - name: Exact recovery helper single SIGINT after stage guard
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           MAILDIAG_BRANCH: ${{ github.ref }}
@@ -35,7 +35,7 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 2m
+          command_timeout: 3m
           envs: MAILDIAG_BRANCH,MAILDIAG_REF,MAILDIAG_ATTEMPT
           script: |
             set -euo pipefail
@@ -45,7 +45,7 @@ jobs:
             git fetch origin ops/voyageplex-maildiag-20261019 >/dev/null 2>&1 || { echo 'MAILDIAG_FIXED_SCRIPT_FETCH_FAILED'; exit 1; }
             [[ "$(git rev-parse FETCH_HEAD)" = "$MAILDIAG_REF" ]] || { echo MAILDIAG_FIXED_HEAD_MISMATCH; exit 1; }
             umask 077
-            mailbox_diagnostic_tmp=$(mktemp -d /tmp/maildiag-progress.XXXXXX)
+            mailbox_diagnostic_tmp=$(mktemp -d /tmp/maildiag-controlled-sigint.XXXXXX)
             trap 'rm -rf "$mailbox_diagnostic_tmp"' EXIT
-            git show "$MAILDIAG_REF:deploy/ops/voyageplex-recovery-progress.py" > "$mailbox_diagnostic_tmp/run.py" 2>/dev/null || { echo 'MAILDIAG_FIXED_SCRIPT_READ_FAILED'; exit 1; }
-            timeout --signal=TERM --kill-after=2s 45s python3 "$mailbox_diagnostic_tmp/run.py"
+            git show "$MAILDIAG_REF:deploy/ops/voyageplex-recovery-controlled-sigint.py" > "$mailbox_diagnostic_tmp/run.py" 2>/dev/null || { echo 'MAILDIAG_FIXED_SCRIPT_READ_FAILED'; exit 1; }
+            timeout --signal=TERM --kill-after=5s 125s python3 "$mailbox_diagnostic_tmp/run.py"

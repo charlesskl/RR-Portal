@@ -1,8 +1,8 @@
-name: Fixed Sealed Release Data Differences
+name: Fixed Sealed SQLite Row Classification
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [data-differences]}
+      mode: {type: choice, required: true, options: [sqlite-rows]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
 jobs:
   progress:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - shell: bash
         env:
@@ -20,7 +20,7 @@ jobs:
           RELEASE_MODE: ${{ inputs.mode }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
-          [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = data-differences && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+          [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = sqlite-rows && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Read fixed container and deployment summaries
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
@@ -32,104 +32,127 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 110s
+          command_timeout: 210s
           envs: RELEASE_REF,RELEASE_ATTEMPT,RELEASE_MODE
           script: |
             set -euo pipefail
-            [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = data-differences ]] || exit 1
+            [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = sqlite-rows ]] || exit 1
             umask 077
             python3 -B - <<'PY'
-            """Read-only comparisons of two already sealed release metadata snapshots; no live DB access."""
-            import copy,hashlib,json,os,pathlib,re,signal,stat,sys,time
-            ROOT=pathlib.Path('/opt/rr-portal/deploy/backups')
-            BACKUP=ROOT/'release-937-943-944-945-946-950-20261019-v2'
-            VERIFY=ROOT/'release-937-943-944-945-946-950-20261019-v2-verify-v3'
-            PINS=((BACKUP,'22483bb8f1a2e799ad6bcd14f48c2b60c2913d74ad9a03207c39c8b6f761f93f','16dd085003188dbc56150bac9dfedcd3cd5ae9207732f1b96ed357c5a097458f'),(VERIFY,'864dfeed7692d7be7ac2c69aaf258f011799fc04a912f0b03cae91a8cd5fb6de','0491d4bed4f47764a1ef7600f45dab63c548b48912a16ff897a6e2251f6dccec'))
-            PIN_FROZEN=True
+            """Fixed sealed SQLite row preservation classification; no live database or business output."""
+            import collections,contextlib,datetime,hashlib,json,math,os,pathlib,re,signal,sqlite3,stat,sys
+            ROOT=pathlib.Path('/opt/rr-portal/deploy/backups');PIN_FROZEN=True
             BASE='52c090589d6da542fee74ef17c8edd3b0dfe4fe6';TARGET='85d2082c273d3df3e51b2e414855634c56c498dd'
-            QC_COMPANIES={'dg-xingxin','dg-huadeng-a','dg-huadeng-b','dg-huajia','hy-huakang-a','hy-huakang-b','hy-huakang-c','hy-huakang-d','hy-huadeng','hy-huaxing','sy-huadeng','sy-xingxin','xs-huadeng'}
-            NEW_COLUMNS={'purchase_orders':{'merged_into_id':('integer',False,None),'merge_revision':('integer',True,'0')},'po_items':{'source_po_no':('text',False,None),'source_order_date':('date',False,None),'source_delivery_date':('date',False,None),'delivery_date_override':('date',False,None),'has_delivery_date_override':('boolean',True,'false')}}
-            STAGE='preflight';READ_BYTES=0
+            ARCHIVES=((ROOT/'release-937-943-944-945-946-950-20261019-v2','22483bb8f1a2e799ad6bcd14f48c2b60c2913d74ad9a03207c39c8b6f761f93f','16dd085003188dbc56150bac9dfedcd3cd5ae9207732f1b96ed357c5a097458f'),(ROOT/'release-937-943-944-945-946-950-20261019-v2-verify-v3','864dfeed7692d7be7ac2c69aaf258f011799fc04a912f0b03cae91a8cd5fb6de','0491d4bed4f47764a1ef7600f45dab63c548b48912a16ff897a6e2251f6dccec'))
+            START=datetime.datetime(2026,10,19,7,45,tzinfo=datetime.timezone.utc);END=datetime.datetime(2026,10,19,9,1,tzinfo=datetime.timezone.utc)
+            STAGE='preflight';TOTAL=0
             
-            def need(v):
-             if not v:raise RuntimeError('SEALED_DATA_DIFFERENCES_REJECTED')
-            def enc(v):return json.dumps(v,sort_keys=True,ensure_ascii=True,separators=(',',':'),allow_nan=False).encode()
-            def sha(v):return hashlib.sha256(v).hexdigest()
-            def digest(v):return sha(enc(v))
-            def pairs(items):
-             v={}
-             for k,x in items:need(k not in v);v[k]=x
-             return v
-            def read(path,maximum):
-             global READ_BYTES
-             need(not path.is_symlink());fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
-             with os.fdopen(fd,'rb')as stream:
-              a=os.fstat(stream.fileno());need(stat.S_ISREG(a.st_mode)and a.st_mode&0o077==0 and a.st_size<=maximum);raw=stream.read(maximum+1);b=os.fstat(stream.fileno())
-              fields=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns,s.st_mode)
-              need(len(raw)==a.st_size and fields(a)==fields(b)==fields(path.lstat()))
-             READ_BYTES+=len(raw);need(READ_BYTES<=80*1024**2);return raw
-            def load_capture(path,msha,rsha):
-             need(path.is_dir()and not path.is_symlink()and stat.S_IMODE(path.stat().st_mode)==0o700)
-             raw=read(path/'manifest.json',4*1024**2);need(sha(raw)==msha);manifest=json.loads(raw,object_pairs_hook=pairs);need(manifest.get('first-result.json')==rsha)
-             raw=read(path/'first-result.json',1024**2);need(sha(raw)==rsha);receipt=json.loads(raw,object_pairs_hook=pairs)
-             raw=read(path/'baseline.private.json',32*1024**2);need(sha(raw)==manifest.get('baseline.private.json'));snapshot=json.loads(raw,object_pairs_hook=pairs)
-             return snapshot,receipt
+            def need(x):
+             if not x:raise RuntimeError('SEALED_SQLITE_CLASSIFICATION_REJECTED')
+            def enc(x):return json.dumps(x,sort_keys=True,ensure_ascii=True,separators=(',',':'),allow_nan=False).encode()
+            def sha(x):return hashlib.sha256(x).hexdigest()
+            def digest(x):return sha(enc(x))
+            def cell(x):
+             if x is None:return ['null']
+             if type(x)is bytes:return ['blob',x.hex()]
+             if type(x)is int:return ['integer',str(x)]
+             if type(x)is float:need(math.isfinite(x));return ['real',x.hex()]
+             need(type(x)is str);return ['text',x]
+            def fields(s):return(s.st_dev,s.st_ino,s.st_mode,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+            def private_hash(p,maximum):
+             global TOTAL
+             for q in (p,*p.parents):
+              need(not q.is_symlink())
+              if q==ROOT:break
+             fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
+             with os.fdopen(fd,'rb')as f:
+              a=os.fstat(f.fileno());need(stat.S_ISREG(a.st_mode)and a.st_mode&0o077==0 and a.st_size<=maximum);h=hashlib.sha256()
+              for b in iter(lambda:f.read(1024**2),b''):h.update(b)
+              need(fields(a)==fields(os.fstat(f.fileno()))==fields(p.lstat()))
+             TOTAL+=a.st_size;need(TOTAL<=4*1024**3);return h.hexdigest()
+            def small(p,maximum):
+             need(private_hash(p,maximum));raw=p.read_bytes();need(len(raw)<=maximum and sha(raw)==private_hash(p,maximum));return json.loads(raw)
+            def capture(p,msha,rsha):
+             need(p.is_dir()and not p.is_symlink()and stat.S_IMODE(p.stat().st_mode)==0o700 and private_hash(p/'manifest.json',4*1024**2)==msha);m=small(p/'manifest.json',4*1024**2);need(m.get('first-result.json')==rsha and private_hash(p/'first-result.json',1024**2)==rsha)
+             need(private_hash(p/'baseline.private.json',32*1024**2)==m.get('baseline.private.json'));return small(p/'baseline.private.json',32*1024**2),m
             
-            def name(v):
-             return v if type(v)is str and re.fullmatch('[A-Za-z_][A-Za-z0-9_]{0,100}',v)else'identifier-sha256-'+digest(v)[:16]
-            def eq(a,b,k):return a is not None and b is not None and a.get(k)==b.get(k)
-            def table_counts(a,b):
-             return [{'table':name(t),'beforePresent':t in a,'afterPresent':t in b,'beforeRows':a.get(t,{}).get('rows'),'afterRows':b.get(t,{}).get('rows'),'rowCountSame':eq(a.get(t),b.get(t),'rows'),'typedHashSame':eq(a.get(t),b.get(t),'sha256'),'columnsTypeHashSame':eq(a.get(t),b.get(t),'columnsSha256')}for t in sorted(set(a)|set(b))]
-            def schema_rows(a,b):
-             aa={(r[0],r[1],r[2]):r[3]for r in a};bb={(r[0],r[1],r[2]):r[3]for r in b};need(len(aa)==len(a)and len(bb)==len(b))
-             return [{'kind':k[0]if k[0]in {'table','index','view','trigger'}else'other','name':name(k[1]),'table':name(k[2]),'beforePresent':k in aa,'afterPresent':k in bb,'definitionSame':k in aa and k in bb and aa[k]==bb[k]}for k in sorted(set(aa)|set(bb))if aa.get(k)!=bb.get(k)or(k in aa)!=(k in bb)]
-            def sqlite_allowed(key,relative,a,b):
-             if a==b:return True
-             p=pathlib.PurePosixPath(relative)
-             if not(key=='qc'and len(p.parts)==2 and p.parts[0]in QC_COMPANIES and p.name=='qc.db'and'record_tombstones'not in a['tables']):return False
-             c=copy.deepcopy(b);t=c['tables'].get('record_tombstones');cols=[(0,'id','INTEGER',0,None,1,0),(1,'deletedAt','TEXT',0,None,0,0)]
-             if not t or t['rows']!=0 or t['columnsSha256']!=digest(cols):return False
-             rows=[r for r in c['schema']if r[:3]==['table','record_tombstones','record_tombstones']]
-             if len(rows)!=1 or ''.join((rows[0][3]or'').lower().split())!='createtablerecord_tombstones(idintegerprimarykey,deletedattext)':return False
-             del c['tables']['record_tombstones'];c['schema'].remove(rows[0]);c['schemaSha256']=digest(c['schema']);return c==a
+            def connect(p):
+             db=sqlite3.connect(p.as_uri()+'?mode=ro&immutable=1',uri=True,timeout=3);db.execute('PRAGMA query_only=ON');db.execute('BEGIN');return db
+            def quote(s):need(re.fullmatch('[A-Za-z_][A-Za-z0-9_]*',s));return '"'+s+'"'
+            def columns(db,table):
+             cols=db.execute('PRAGMA table_xinfo('+quote(table)+')').fetchall();need(cols and all(len(c)==7 and c[6]!=1 for c in cols));need([c[1]for c in cols if c[5]]==['id']);return cols
+            def table_audit(db,table,cols):
+             names=[c[1]for c in cols];hashes=sorted(digest([cell(x)for x in row])for row in db.execute('SELECT '+','.join(map(quote,names))+' FROM '+quote(table)));need(len(hashes)<=200000)
+             return {'rows':len(hashes),'sha256':sha(''.join(hashes).encode()),'columnsSha256':digest(cols)}
+            def stamp(value):
+             if type(value)is not str:return None
+             try:
+              v=datetime.datetime.fromisoformat(value.replace('Z','+00:00'));return v.astimezone(datetime.timezone.utc)if v.tzinfo is not None else None
+             except ValueError:return None
+            def in_window(v):return v is not None and START<=v<=END
             
-            def entity_differences(a,b,keys):
-             aa={tuple(r.get(k)for k in keys):r for r in a};bb={tuple(r.get(k)for k in keys):r for r in b};need(len(aa)==len(a)and len(bb)==len(b))
-             return [{'identity':[name(v)for v in k],'beforePresent':k in aa,'afterPresent':k in bb,'changedFields':[name(f)for f in sorted(set(aa.get(k,{}))|set(bb.get(k,{})))if aa.get(k,{}).get(f)!=bb.get(k,{}).get(f)]}for k in sorted(set(aa)|set(bb))if aa.get(k)!=bb.get(k)]
-            def pg_report(schema,a,b):
-             tables=[]
-             for t in sorted(set(a['tables'])|set(b['tables'])):
-              x,y=a['tables'].get(t),b['tables'].get(t);tables.append({'table':name(t),'beforePresent':x is not None,'afterPresent':y is not None,'beforeRows':(x or{}).get('rows'),'afterRows':(y or{}).get('rows'),'rowCountSame':eq(x,y,'rows'),'allColumnsTypedHashSame':eq(x,y,'sha256'),'originalColumnsTypedHashSame':eq(x,y,'originalColumnsSHA256')})
-             old,new=a['schema'],b['schema'];columns=entity_differences(old['columns'],new['columns'],('table','name'));added=[]
-             for table,cols in NEW_COLUMNS.items():
-              for col,(kind,notnull,default)in cols.items():
-               row=next((r for r in new['columns']if r['table']==table and r['name']==col),None)
-               if schema=='indo_shipping':added.append({'table':table,'column':col,'present':row is not None,'expectedTypeNullDefaultIdentityGenerated':row is not None and(row['type'],row['notNull'],row['default'],row['identity'],row['generated'])==(kind,notnull,default,'','')})
-             indexes=entity_differences(old['indexes'],new['indexes'],('table','name'));seq=entity_differences(old.get('sequences',[]),new.get('sequences',[]),('name',));states=[]
-             for n in sorted(set(a.get('sequenceStates',{}))|set(b.get('sequenceStates',{}))):
-              x,y=a.get('sequenceStates',{}).get(n),b.get('sequenceStates',{}).get(n)
-              states.append({'sequence':name(n),'stateSame':x==y,'beforePresent':x is not None,'afterPresent':y is not None,'changedFields':[k for k in ('lastValue','called')if(x or{}).get(k)!=(y or{}).get(k)]})
-             return {'schema':schema,'tables':tables,'columnChanges':columns,'newPurchaseColumns':added,'newPurchaseColumnNonDefaultRowCount':b.get('newColumnNonDefaultRows'),'indexChanges':indexes,'constraintChanges':entity_differences(old['constraints'],new['constraints'],('table','name')),'sequenceDefinitionChanges':seq,'sequenceStateChanges':states,'sequenceBeforeCaptureStable':a.get('sequenceStateStableDuringCapture'),'sequenceAfterCaptureStable':b.get('sequenceStateStableDuringCapture'),'otherSchemaObjectsSame':old['objects']==new['objects'],'otherSchemaObjectsBeforeCount':len(old['objects']),'otherSchemaObjectsAfterCount':len(new['objects']),'completeSchemaSameBeforeAllowedMigration':old==new,'sequenceStatesNotMVCC':True}
+            def row_compare(old,new,table,policy=None):
+             cols=columns(old,table);need(columns(new,table)==cols);names=[c[1]for c in cols];n=len(names);q=quote(table);projection=','.join('a.'+quote(c)for c in names)+','+','.join('b.'+quote(c)for c in names)
+             for db in (old,new):need(db.execute('SELECT count(*),count(DISTINCT id),sum(id IS NULL) FROM '+q).fetchone()[:2]==(db.execute('SELECT count(*) FROM '+q).fetchone()[0],)*2)
+             sql='SELECT '+projection+' FROM main.'+q+' a LEFT JOIN afterdb.'+q+' b ON a.id=b.id AND typeof(a.id)=typeof(b.id)'
+             # The separate new handle is audited; attach this same immutable file to the old handle for indexed joins.
+             result={'oldRows':0,'retainedTypedIdentical':0,'oldMissing':0,'oldChanged':0,'newRows':0,'changedFields':{},'newRowsWithTimestampInConfirmedWindow':0,'changedRowsWithTimestampInConfirmedWindow':0,'missingCreatedBeforeConfirmedWindow':0,'missingWithInvalidTimestamp':0}
+             retention={'missingRowsTested':0,'validCreated':0,'atOrBeforeStartupRetentionCutoff':0,'belowConfiguredMinimumLevel':0,'meetsEitherStartupRetentionRule':0}if policy else None
+             id_index=names.index('id');timestamp='updatedAt'if'updatedAt'in names else'createdAt'if'createdAt'in names else'created'if'created'in names else None
+             for row in old.execute(sql):
+              a,b=row[:n],row[n:];result['oldRows']+=1
+              if b[id_index]is None:
+               result['oldMissing']+=1;created=stamp(a[names.index('created')])if'created'in names else None
+               if created is None:result['missingWithInvalidTimestamp']+=1
+               elif created<START:result['missingCreatedBeforeConfirmedWindow']+=1
+               if retention:
+                retention['missingRowsTested']+=1;retention['validCreated']+=int(created is not None);bydate=created is not None and created<=policy['cutoff'];bylevel='level'in names and type(a[names.index('level')])is int and a[names.index('level')]<policy['minLevel'];retention['atOrBeforeStartupRetentionCutoff']+=int(bydate);retention['belowConfiguredMinimumLevel']+=int(bylevel);retention['meetsEitherStartupRetentionRule']+=int(bydate or bylevel)
+              else:
+               changed=[c for c,x,y in zip(names,a,b)if cell(x)!=cell(y)]
+               if not changed:result['retainedTypedIdentical']+=1
+               else:
+                result['oldChanged']+=1
+                for c in changed:result['changedFields'][c]=result['changedFields'].get(c,0)+1
+                if timestamp:result['changedRowsWithTimestampInConfirmedWindow']+=int(in_window(stamp(b[names.index(timestamp)])))
+             new_rows=old.execute('SELECT '+','.join('b.'+quote(c)for c in names)+' FROM afterdb.'+q+' b LEFT JOIN main.'+q+' a ON a.id=b.id AND typeof(a.id)=typeof(b.id) WHERE a.id IS NULL')
+             for row in new_rows:
+              result['newRows']+=1
+              if timestamp:result['newRowsWithTimestampInConfirmedWindow']+=int(in_window(stamp(row[names.index(timestamp)])))
+             result['allOldRowsRetainedWithoutTypedChanges']=result['oldMissing']==0 and result['oldChanged']==0;result['retainedRowsAllTypedIdentical']=result['oldChanged']==0
+             result['retentionSettingsAvailable']=policy is not None
+             if retention:result['retentionCompatibility']=dict(retention,allMissingMatchEitherStartupRule=retention['missingRowsTested']==retention['meetsEitherStartupRetentionRule'])
+             return result
             
-            def emit(value):
-             raw=enc(value);need(len(raw)<=1024**2);print(raw.decode(),flush=True)
+            def logs_policy(path,started):
+             with contextlib.closing(connect(path))as db:
+              names={r[1]for r in db.execute('PRAGMA table_info(_params)')}
+              if not{'id','value'}<=names:return None
+              row=db.execute("SELECT CASE WHEN json_valid(value) THEN json_extract(value,'$.logs.maxDays') END,CASE WHEN json_valid(value) THEN json_extract(value,'$.logs.minLevel') END FROM _params WHERE id='settings'").fetchone()
+              start=stamp(started)
+              if row is None or type(row[0])is not int or not 0<=row[0]<=36500 or type(row[1])is not int or not -100<=row[1]<=100 or start is None:return None
+              return {'maxDays':row[0],'minLevel':row[1],'cutoff':start-datetime.timedelta(days=row[0])}
+            def db_path(archive,manifest,key,relative):
+             name=key+'/sqlite/'+relative;need(name in manifest and'..'not in pathlib.PurePosixPath(name).parts and not pathlib.PurePosixPath(name).is_absolute());p=archive/name;need(private_hash(p,512*1024**2)==manifest[name]);return p
+            
             def main():
              global STAGE
-             need(PIN_FROZEN and os.environ.get('RELEASE_REF')=='refs/heads/ops/release-progress-v4-20261019'and os.environ.get('RELEASE_ATTEMPT')=='1'and os.environ.get('RELEASE_MODE')=='data-differences');signal.alarm(90)
-             STAGE='sealed-metadata';before,rb=load_capture(*PINS[0]);after,ra=load_capture(*PINS[1]);need(rb.get('success')is True and ra.get('success')is False and before.get('head')==BASE and after.get('head')==TARGET and set(before['trees'])==set(after['trees']))
-             need(ra.get('checks',{}).get('allSQLiteOriginalColumnsAndAllowedSchemaPassed')is False and ra.get('checks',{}).get('allPostgresOriginalColumnsAndAllowedSchemaPassed')is False)
-             STAGE='sqlite-comparisons';db_count=0
-             for key in sorted(before['trees']):
-              aa,bb=before['trees'][key]['sqlite'],after['trees'][key]['sqlite'];need(len(aa)<=100 and len(bb)<=100)
-              for index,relative in enumerate(sorted(set(aa)|set(bb)),1):
-               a,b=aa.get(relative),bb.get(relative);db_count+=1;p=pathlib.PurePosixPath(relative)
-               emit({'kind':'sqlite-database','root':key,'databaseOrdinal':index,'relativeIdentifierSHA256':digest(relative),'company':p.parts[0]if key=='qc'and p.parts[0]in QC_COMPANIES else None,'filenameClass':p.name if p.name in {'qc.db','data.db','auxiliary.db','qc-report.db'}else'other-sqlite','beforePresent':a is not None,'afterPresent':b is not None,'schemaTypeHashSame':eq(a,b,'schemaSha256'),'strictTypedAuditSame':a==b,'comparisonWithOnlyExactEmptyTombstoneAllowed':a is not None and b is not None and sqlite_allowed(key,relative,a,b),'tables':table_counts((a or{}).get('tables',{}),(b or{}).get('tables',{})),'schemaObjectChanges':schema_rows((a or{}).get('schema',[]),(b or{}).get('schema',[]))})
-             STAGE='postgres-comparisons';need(set(before['postgres'])==set(after['postgres'])=={'indo_shipping','internal_quote'})
-             for schema in ('indo_shipping','internal_quote'):emit(dict(kind='postgres-schema',**pg_report(schema,before['postgres'][schema],after['postgres'][schema])))
-             STAGE='final-input-pins'
-             for path,msha,rsha in PINS:need(sha(read(path/'manifest.json',4*1024**2))==msha and sha(read(path/'first-result.json',1024**2))==rsha)
-             emit({'kind':'summary','completed':True,'sqliteDatabaseCount':db_count,'postgresSchemaCount':2,'sourceIsSealedMetadataNotCurrentLiveState':True,'wholeArchiveBytesRevalidated':False,'authenticatedManifestReceiptAndSnapshotBytes':True,'businessRowsPrinted':False,'liveDatabasesAccessed':False,'mutationsPerformed':False,'causeOrActorInferred':False,'originalStrictVerificationRemainsFailed':True})
+             need(PIN_FROZEN and os.environ.get('RELEASE_REF')=='refs/heads/ops/release-progress-v4-20261019'and os.environ.get('RELEASE_ATTEMPT')=='1'and os.environ.get('RELEASE_MODE')=='sqlite-rows');signal.alarm(180)
+             captures=[capture(*a)for a in ARCHIVES];before,after=[a[0]for a in captures];need(before['head']==BASE and after['head']==TARGET)
+             for key,relative,tables in [('qc','sy-huadeng/qc.db',('records','partners')),('factory-review','auxiliary.db',('_logs',)),('factory-review-test','auxiliary.db',('_logs',))]:
+              STAGE=key;paths=[db_path(a[0],c[1],key,relative)for a,c in zip(ARCHIVES,captures)];policy=None;settings_paths=[]
+              if key.startswith('factory-review'):
+               settings_paths=[db_path(a[0],c[1],key,'data.db')for a,c in zip(ARCHIVES,captures)];policies=[logs_policy(p,after['runtime']['services'][key]['started'])for p in settings_paths];need(policies[0]==policies[1]);policy=policies[1]
+              with contextlib.ExitStack()as stack:
+               old,new=[stack.enter_context(contextlib.closing(connect(p)))for p in paths];old.execute('ATTACH DATABASE ? AS afterdb',(paths[1].as_uri()+'?mode=ro&immutable=1',))
+               for table in tables:
+                need(all(0<=snap['trees'][key]['sqlite'][relative]['tables'][table]['rows']<=200000 for snap in (before,after)));cols=columns(old,table);need(table_audit(old,table,cols)==before['trees'][key]['sqlite'][relative]['tables'][table]and table_audit(new,table,cols)==after['trees'][key]['sqlite'][relative]['tables'][table]);result=row_compare(old,new,table,policy);print(enc(dict(kind='sealed-sqlite-table',system=key,company='sy-huadeng'if key=='qc'else None,table=table,fullOldAndNewTypedAuditMatchesSealedManifest=True,**result)).decode(),flush=True)
+               if key=='qc':
+                seqold=dict(old.execute('SELECT name,seq FROM main.sqlite_sequence'));seqnew=dict(old.execute('SELECT name,seq FROM afterdb.sqlite_sequence'));print(enc({'kind':'sqlite-sequence','system':'qc','company':'sy-huadeng','tables':[{'table':t,'oldPresent':t in seqold,'newPresent':t in seqnew,'same':seqold.get(t)==seqnew.get(t),'neverRegressed':type(seqold.get(t))is int and type(seqnew.get(t))is int and seqnew[t]>=seqold[t]}for t in ('records','partners')]}).decode(),flush=True)
+              for rel,pp in [(relative,paths)]+([('data.db',settings_paths)]if settings_paths else[]):
+               for p,a,c in zip(pp,ARCHIVES,captures):need(private_hash(p,512*1024**2)==c[1][key+'/sqlite/'+rel])
+             for a in ARCHIVES:need(private_hash(a[0]/'manifest.json',4*1024**2)==a[1]and private_hash(a[0]/'first-result.json',1024**2)==a[2])
+             print(enc({'kind':'summary','completed':True,'sealedSnapshotsOnly':True,'liveDatabaseAccessed':False,'businessValuesPrinted':False,'businessOrConfigurationWritesPerformed':False,'retentionIsCompatibilityNotActorAttribution':True,'originalStrictAuditRemainsFailed':True}).decode(),flush=True)
             if __name__=='__main__':
              try:main()
-             except BaseException as error:emit({'safeFailure':'SEALED_RELEASE_DIFFERENCES_FAILED','stage':STAGE,'exceptionType':type(error).__name__ if type(error).__name__ in {'RuntimeError','KeyError','ValueError','JSONDecodeError','OSError','PermissionError','FileNotFoundError','TypeError'}else'OtherError'});sys.exit(1)
+             except BaseException as error:print(enc({'safeFailure':'SEALED_SQLITE_CLASSIFICATION_FAILED','stage':STAGE,'exceptionType':type(error).__name__ if type(error).__name__ in {'RuntimeError','KeyError','TypeError','ValueError','OperationalError','OSError','FileNotFoundError','PermissionError'}else'OtherError'}).decode(),flush=True);sys.exit(1)
             PY

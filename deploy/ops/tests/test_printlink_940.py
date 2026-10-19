@@ -668,13 +668,15 @@ class DiagnosticTests(unittest.TestCase):
           'PRINTLINK_OPS_MODE':'diagnose','PRINTLINK_OPS_BEFORE':ops.PRE_DEPLOY_COMMIT,
           'PRINTLINK_OPS_TARGET':ops.PRE_DEPLOY_COMMIT,'PRINTLINK_OPS_BACKUP':ops.DIAGNOSTIC_BACKUP_PATH}
         for script in scripts:
-            result=subprocess.run(['bash','-c',script],env=env,capture_output=True)
-            self.assertEqual(result.returncode,0)
-            for changed in [{'PRINTLINK_OPS_BACKUP':ops.DIAGNOSTIC_BACKUP_PATH+'x'},
-              {'PRINTLINK_OPS_TARGET':'b'*40},{'PRINTLINK_OPS_BRANCH':'refs/heads/main'},
-              {'PRINTLINK_OPS_MODE':'restore'}]:
-                rejected=subprocess.run(['bash','-c',script],env={**env,**changed},capture_output=True)
-                self.assertNotEqual(rejected.returncode,0)
+            for mode in ['diagnose','context']:
+                selected={**env,'PRINTLINK_OPS_MODE':mode}
+                result=subprocess.run(['bash','-c',script],env=selected,capture_output=True)
+                self.assertEqual(result.returncode,0)
+                for changed in [{'PRINTLINK_OPS_BACKUP':ops.DIAGNOSTIC_BACKUP_PATH+'x'},
+                  {'PRINTLINK_OPS_TARGET':'b'*40},{'PRINTLINK_OPS_BRANCH':'refs/heads/main'},
+                  {'PRINTLINK_OPS_MODE':'restore'}]:
+                    rejected=subprocess.run(['bash','-c',script],env={**selected,**changed},capture_output=True)
+                    self.assertNotEqual(rejected.returncode,0)
 
     def test_diagnostic_json_does_not_relabel_original_false_as_passed(self):
         source=HELPER.read_text();import ast
@@ -683,6 +685,83 @@ class DiagnosticTests(unittest.TestCase):
         self.assertIn("'originalStrictVerificationPassed':False",text)
         self.assertIn("'deploymentAuthorizedByThisResult':False",text)
         self.assertNotIn('private_write(',text);self.assertNotIn('production_readiness(',text);self.assertNotIn('read_only_probes(',text)
+
+
+class ContextTests(unittest.TestCase):
+    def lifecycle(self,**changes):
+        return {'containerId':'a'*64,'imageId':'sha256:'+'b'*64,'startedAt':'2026-10-18T01:00:00.123456789Z',
+          'createdAt':'2026-10-18T01:00:00Z','restartCount':0,'running':True,'status':'running',
+          'oomKilled':False,'health':'healthy',**changes}
+
+    def test_context_delta_reports_only_whitelisted_lifecycle_changes(self):
+        before={'core':self.lifecycle(),'removed':self.lifecycle()}
+        current={'core':self.lifecycle(health='unhealthy'),'added':self.lifecycle(restartCount=2)}
+        result=ops.context_lifecycle_delta(before,current)
+        self.assertEqual(result['addedServices'],['added']);self.assertEqual(result['removedServices'],['removed'])
+        self.assertEqual(result['lifecycleDifferences']['core'],{'health':{'before':'healthy','current':'unhealthy'}})
+        self.assertEqual(set(result['lifecycleDifferences']['added']),set(self.lifecycle()))
+        self.assertEqual(before['core']['health'],'healthy')
+        for invalid in [{'core':{**self.lifecycle(),'Config':{'Env':['PRIVATE_TOKEN']}}},
+          {'unsafe service':self.lifecycle()},{'core':self.lifecycle(health='PRIVATE_TOKEN')},
+          {'core':self.lifecycle(containerId='PRIVATE_TOKEN')},{'core':self.lifecycle(containerId=int('1'*64))},
+          {'core':self.lifecycle(restartCount=True)}]:
+            with self.assertRaises(RuntimeError):ops.context_lifecycle_delta(before,invalid)
+
+    def run_context(self,changed_seal=False,changed_context=False,changed_source=False):
+        before={'otherContainers':{'core':self.lifecycle()},'strictVerificationPassed':False}
+        current={'core':self.lifecycle(health='unhealthy')};seal={'files':'original-private-seal'}
+        with contextlib.ExitStack() as stack:
+            source=stack.enter_context(patch.object(ops,'git_commit',side_effect=[ops.PRE_DEPLOY_COMMIT,ops.PRE_DEPLOY_COMMIT,
+              'c'*40 if changed_source else ops.PRE_DEPLOY_COMMIT,ops.PRE_DEPLOY_COMMIT]))
+            stack.enter_context(patch.object(ops,'tested_source_guard',return_value={}))
+            private=stack.enter_context(patch.object(ops,'diagnostic_private_backup',side_effect=[(pathlib.Path(ops.DIAGNOSTIC_BACKUP_PATH),before,seal),
+              (pathlib.Path(ops.DIAGNOSTIC_BACKUP_PATH),before,{'files':'changed'} if changed_seal else seal)]))
+            stack.enter_context(patch.object(ops,'other_containers',side_effect=[current,
+              {'core':self.lifecycle(health='starting')} if changed_context else current]))
+            for name in ['sqlite_audit','diagnostic_snapshot_proof','diagnostic_database_delta','actual_runtime_files',
+              'runtime_context','read_only_probes','production_readiness','private_write','run']:
+                stack.enter_context(patch.object(ops,name,side_effect=AssertionError('forbidden context operation: '+name)))
+            result=ops.context(ops.PRE_DEPLOY_COMMIT,ops.DIAGNOSTIC_BACKUP_PATH)
+            self.assertEqual(private.call_count,2);self.assertIs(before['strictVerificationPassed'],False)
+            self.assertFalse(result['originalStrictVerificationPassed']);self.assertFalse(result['deploymentAuthorizedByThisResult'])
+            self.assertFalse(result['businessWritesPerformed']);self.assertFalse(result['originalBackupFilesWritten'])
+            return result
+
+    def test_context_comparison_difference_is_a_fact_and_preserves_original_failure(self):
+        result=self.run_context()
+        self.assertTrue(result['contextComplete']);self.assertFalse(result['currentMatchesOriginalOtherContainers'])
+        self.assertEqual(result['otherContainerLifecycleDelta']['changedServices'],['core'])
+        self.assertEqual(result['otherContainerLifecycleDelta']['lifecycleDifferences']['core'],
+          {'health':{'before':'healthy','current':'unhealthy'}})
+        for options,check in [({'changed_seal':True},'originalPrivateSealAndFilesUnchanged'),
+          ({'changed_context':True},'allOtherContainersStableDuringContext'),
+          ({'changed_source':True},'sourceStillExactPreDeployMain')]:
+            rejected=self.run_context(**options)
+            self.assertFalse(rejected['contextComplete']);self.assertFalse(rejected['checks'][check])
+
+    def test_context_main_requires_exact_mode_arguments_and_pin_bytes(self):
+        pin=str(HELPER.with_name('printlink-940-source.json'))
+        with patch.object(ops,'context',return_value={'contextComplete':True,'originalStrictVerificationPassed':False}) as context:
+            for mode,before,target,path in [('unknown',ops.PRE_DEPLOY_COMMIT,ops.PRE_DEPLOY_COMMIT,ops.DIAGNOSTIC_BACKUP_PATH),
+              ('context','d'*40,ops.PRE_DEPLOY_COMMIT,ops.DIAGNOSTIC_BACKUP_PATH),
+              ('context',ops.PRE_DEPLOY_COMMIT,'d'*40,ops.DIAGNOSTIC_BACKUP_PATH),
+              ('context',ops.PRE_DEPLOY_COMMIT,ops.PRE_DEPLOY_COMMIT,ops.DIAGNOSTIC_BACKUP_PATH+'x')]:
+                with self.assertRaises(RuntimeError):ops.main([mode,before,target,path,pin])
+            with tempfile.TemporaryDirectory() as folder:
+                altered=pathlib.Path(folder)/'pin.json';altered.write_bytes(pathlib.Path(pin).read_bytes()+b'\n')
+                with self.assertRaises(RuntimeError):ops.main(['context',ops.PRE_DEPLOY_COMMIT,ops.PRE_DEPLOY_COMMIT,ops.DIAGNOSTIC_BACKUP_PATH,str(altered)])
+            context.assert_not_called()
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(ops.main(['context',ops.PRE_DEPLOY_COMMIT,ops.PRE_DEPLOY_COMMIT,ops.DIAGNOSTIC_BACKUP_PATH,pin]),0)
+            self.assertFalse(json.loads(output.getvalue())['originalStrictVerificationPassed'])
+
+    def test_existing_backup_verify_and_diagnosis_function_bodies_are_unchanged(self):
+        import ast
+        old=subprocess.check_output(['git','show','HEAD:deploy/ops/printlink-940.py'],cwd=HELPER.parents[2],text=True)
+        def functions(source):return {node.name:ast.get_source_segment(source,node) for node in ast.parse(source).body if isinstance(node,ast.FunctionDef)}
+        previous,current=functions(old),functions(HELPER.read_text())
+        for name in ['selected_backup','backup','verify','diagnose','diagnostic_private_backup','diagnostic_snapshot_proof']:
+            self.assertEqual(previous[name],current[name],name)
 
 
 if __name__=='__main__':unittest.main()

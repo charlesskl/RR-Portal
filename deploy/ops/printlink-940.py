@@ -908,21 +908,69 @@ def diagnose(target,path):
       'deploymentAuthorizedByThisResult':False}
 
 
+def context_lifecycle_delta(before,current):
+    fields={'containerId','imageId','startedAt','createdAt','restartCount','running','status','oomKilled','health'}
+    for values in [before,current]:
+        require(isinstance(values,dict), 'contextLifecycleServiceMapping')
+        for service,value in values.items():
+            require(isinstance(service,str) and bool(re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',service))
+                    and isinstance(value,dict) and set(value)==fields, 'contextOnlySafeServiceAndLifecycleFields')
+            require(isinstance(value['containerId'],str) and bool(re.fullmatch('[a-f0-9]{64}',value['containerId']))
+                    and isinstance(value['imageId'],str) and bool(re.fullmatch('sha256:[a-f0-9]{64}',value['imageId'])), 'contextSafeContainerAndImageIds')
+            for name in ['startedAt','createdAt']:
+                require(isinstance(value[name],str) and bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z',value[name])),
+                        'contextSafeLifecycleTimestamp')
+                parse_timestamp(value[name])
+            require(type(value['restartCount']) is int and value['restartCount']>=0
+                    and type(value['running']) is bool and type(value['oomKilled']) is bool
+                    and value['status'] in {'created','restarting','running','removing','paused','exited','dead'}
+                    and value['health'] in {'none','starting','healthy','unhealthy'}, 'contextSafeLifecycleScalars')
+    differences={}
+    for service in sorted(set(before)|set(current)):
+        changes={name:{'before':before.get(service,{}).get(name),'current':current.get(service,{}).get(name)}
+                 for name in sorted(fields) if before.get(service,{}).get(name)!=current.get(service,{}).get(name)}
+        if changes:differences[service]=changes
+    return {'beforeServices':len(before),'currentServices':len(current),
+      'addedServices':sorted(set(current)-set(before)),'removedServices':sorted(set(before)-set(current)),
+      'changedServices':sorted(differences),'lifecycleDifferences':differences}
+
+
+def context(target,path):
+    require(git_commit()==git_commit('origin/main')==PRE_DEPLOY_COMMIT==target, 'contextExactPreDeployMain')
+    tested_source_guard(target)
+    directory,before,seal_before=diagnostic_private_backup(path)
+    others=other_containers()
+    delta=context_lifecycle_delta(before['otherContainers'],others)
+    _,original_again,seal_after=diagnostic_private_backup(path)
+    after=other_containers();context_lifecycle_delta(others,after)
+    checks={'originalPrivateSealAndFilesUnchanged':seal_before==seal_after,
+      'originalStrictFalseUnchanged':original_again['strictVerificationPassed'] is False,
+      'originalOtherContainersBaselineUnchanged':original_again['otherContainers']==before['otherContainers'],
+      'sourceStillExactPreDeployMain':git_commit()==git_commit('origin/main')==target,
+      'allOtherContainersStableDuringContext':others==after}
+    return {'mode':'context','contextComplete':all(checks.values()),'sourceCommit':target,
+      'originalBackup':str(directory),'originalStrictVerificationPassed':False,'originalStrictResultPreserved':True,
+      'currentMatchesOriginalOtherContainers':others==before['otherContainers'],'checks':checks,
+      'otherContainerLifecycleDelta':delta,'finishedAtUtc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+      'businessWritesPerformed':False,'businessHttpRequestsPerformed':False,'originalBackupFilesWritten':False,
+      'automaticRestoreOrRecreatePerformed':False,'deploymentAuthorizedByThisResult':False}
+
+
 def main(argv):
     global TESTED_SOURCE
     require(len(argv)==5, 'exactFiveArguments')
     mode,before,target,path,pin = argv
-    require(mode in {'backup','verify','diagnose'} and before==PRE_DEPLOY_COMMIT and bool(re.fullmatch('[a-f0-9]{40}',target)), 'exactModeAndCommitArguments')
+    require(mode in {'backup','verify','diagnose','context'} and before==PRE_DEPLOY_COMMIT and bool(re.fullmatch('[a-f0-9]{40}',target)), 'exactModeAndCommitArguments')
     TESTED_SOURCE = json.loads(pathlib.Path(pin).read_bytes())
     require(TESTED_SOURCE.get('finalPinFrozen') is True, 'finalSourcePinEmptyFailClosed')
     require((mode=='backup' and target==before and not path) or
             (mode=='verify' and target!=before and bool(re.fullmatch('/opt/rr-portal/deploy/backups/printlink-pre-940-[0-9]{8}T[0-9]{12}Z',path))) or
-            (mode=='diagnose' and target==before and path==DIAGNOSTIC_BACKUP_PATH), 'exactModeSpecificArguments')
-    if mode=='diagnose':require(file_hash(pathlib.Path(pin))==DIAGNOSTIC_PIN_SHA256, 'diagnosticExactReviewedFrozenPinBytes')
+            (mode in {'diagnose','context'} and target==before and path==DIAGNOSTIC_BACKUP_PATH), 'exactModeSpecificArguments')
+    if mode in {'diagnose','context'}:require(file_hash(pathlib.Path(pin))==DIAGNOSTIC_PIN_SHA256, 'diagnosticExactReviewedFrozenPinBytes')
     os.umask(0o077)
-    result = backup(target) if mode=='backup' else diagnose(target,path) if mode=='diagnose' else verify(target,path)
+    result = backup(target) if mode=='backup' else diagnose(target,path) if mode=='diagnose' else context(target,path) if mode=='context' else verify(target,path)
     print(json.dumps(result,ensure_ascii=True))
-    return 0 if (result['diagnosticComplete'] if mode=='diagnose' else result['strictVerificationPassed']) else 1
+    return 0 if (result['diagnosticComplete'] if mode=='diagnose' else result['contextComplete'] if mode=='context' else result['strictVerificationPassed']) else 1
 
 
 if __name__=='__main__':

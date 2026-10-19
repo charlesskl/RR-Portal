@@ -1,7 +1,27 @@
-name: Indo Shipping Diag
+name: PR941 Factory Review Private Backup and Read-only Verification
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Private backup, one read-only verification, or retained result'
+        type: choice
+        required: true
+        default: backup
+        options: [backup, verify, result]
+      before_commit:
+        description: 'Exact pre-deployment main SHA'
+        type: string
+        required: true
+        default: '1c295d6418a64a1610b9075acd4da2a38d875328'
+      target_commit:
+        description: 'Exact main SHA; base SHA for backup'
+        type: string
+        required: true
+      backup_path:
+        description: 'Exact returned private backup path; verify/result only'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -14,32 +34,64 @@ concurrency:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - name: Validate SSH host fingerprint
+      - name: Validate fixed branch, exact arguments and SSH fingerprint
         shell: bash
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          FR_OPS_BRANCH: ${{ github.ref }}
+          FR_OPS_REF: ${{ github.sha }}
+          FR_OPS_MODE: ${{ inputs.mode }}
+          FR_OPS_BEFORE: ${{ inputs.before_commit }}
+          FR_OPS_TARGET: ${{ inputs.target_commit }}
+          FR_OPS_BACKUP: ${{ inputs.backup_path }}
         run: |
           set -euo pipefail
-          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
-            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
-            exit 1
+          [[ "$FR_OPS_BRANCH" = refs/heads/ops/factory-review-941-20261019 ]] || exit 1
+          [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+          [[ "$FR_OPS_REF" =~ ^[a-f0-9]{40}$ && "$FR_OPS_MODE" =~ ^(backup|verify|result)$ ]] || exit 1
+          [[ "$FR_OPS_BEFORE" = 1c295d6418a64a1610b9075acd4da2a38d875328 && "$FR_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          if [[ "$FR_OPS_MODE" = backup ]]; then
+            [[ "$FR_OPS_TARGET" = "$FR_OPS_BEFORE" && -z "$FR_OPS_BACKUP" ]] || exit 1
+          else
+            [[ "$FR_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/factory-review-pre-941-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
+            if [[ "$FR_OPS_MODE" = verify ]]; then [[ "$FR_OPS_TARGET" != "$FR_OPS_BEFORE" ]] || exit 1; fi
           fi
 
-      - name: Fetch indo-shipping container logs via SSH
+      - name: Fixed private backup or one read-only verification
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          FR_OPS_BRANCH: ${{ github.ref }}
+          FR_OPS_REF: ${{ github.sha }}
+          FR_OPS_MODE: ${{ inputs.mode }}
+          FR_OPS_BEFORE: ${{ inputs.before_commit }}
+          FR_OPS_TARGET: ${{ inputs.target_commit }}
+          FR_OPS_BACKUP: ${{ inputs.backup_path }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 5m
+          command_timeout: 17m
+          envs: FR_OPS_BRANCH,FR_OPS_REF,FR_OPS_MODE,FR_OPS_BEFORE,FR_OPS_TARGET,FR_OPS_BACKUP
           script: |
             set -euo pipefail
-            echo "== 容器状态 =="
-            docker ps -a --filter name=indo-shipping --format 'table {{.Names}}\t{{.Status}}'
-            echo "== 最近 100 行日志 =="
-            docker logs rr-portal-indo-shipping-1 --tail 100 2>&1 || true
+            [[ "$FR_OPS_BRANCH" = refs/heads/ops/factory-review-941-20261019 ]] || exit 1
+            [[ "$FR_OPS_REF" =~ ^[a-f0-9]{40}$ && "$FR_OPS_MODE" =~ ^(backup|verify|result)$ ]] || exit 1
+            [[ "$FR_OPS_BEFORE" = 1c295d6418a64a1610b9075acd4da2a38d875328 && "$FR_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            if [[ "$FR_OPS_MODE" = backup ]]; then
+              [[ "$FR_OPS_TARGET" = "$FR_OPS_BEFORE" && -z "$FR_OPS_BACKUP" ]] || exit 1
+            else
+              [[ "$FR_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/factory-review-pre-941-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
+              if [[ "$FR_OPS_MODE" = verify ]]; then [[ "$FR_OPS_TARGET" != "$FR_OPS_BEFORE" ]] || exit 1; fi
+            fi
+            cd /opt/rr-portal
+            git fetch origin main ops/factory-review-941-20261019 refs/pull/941/head:refs/remotes/origin/pr-941-reviewed >/dev/null 2>&1 || { echo 'FR_941_SCRIPT_FETCH_FAILED'; exit 1; }
+            umask 077
+            rr_941_temporary=$(mktemp -d /tmp/fr-941.XXXXXX)
+            trap 'rm -rf "$rr_941_temporary"' EXIT
+            git show "$FR_OPS_REF:deploy/ops/factory-review-941.py" > "$rr_941_temporary/ops.py" 2>/dev/null || { echo 'FR_941_SCRIPT_READ_FAILED'; exit 1; }
+            git show "$FR_OPS_REF:deploy/ops/factory-review-941-source.json" > "$rr_941_temporary/source.json" 2>/dev/null || { echo 'FR_941_PIN_READ_FAILED'; exit 1; }
+            python3 "$rr_941_temporary/ops.py" "$FR_OPS_MODE" "$FR_OPS_BEFORE" "$FR_OPS_TARGET" "$FR_OPS_BACKUP" "$rr_941_temporary/source.json"

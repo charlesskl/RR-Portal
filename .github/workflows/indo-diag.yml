@@ -1,4 +1,7 @@
-name: Indo Shipping Diag
+# DRAFT ONLY. If approved, put this at .github/workflows/indo-diag.yml on
+# ops/printlink-940-ci-diag-20261019. Do not alter the existing ops ref or
+# cancel/rerun the original PrintLink check. This is supplemental evidence.
+name: PrintLink PR 940 Linux test diagnosis
 
 on:
   workflow_dispatch:
@@ -6,40 +9,106 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: deploy-cloud
-  queue: max
-  cancel-in-progress: false
-
 jobs:
-  diag:
+  diagnose:
+    if: github.ref == 'refs/heads/ops/printlink-940-ci-diag-20261019'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 4
     steps:
-      - name: Validate SSH host fingerprint
+      - name: Checkout the exact reviewed application source
+        uses: actions/checkout@v4
+        with:
+          ref: f9f949667e722247032771ad730dc1b7af9f2ca1
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up the same Node major as the original check
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Diagnose the unchanged npm test command with a hard deadline
         shell: bash
-        env:
-          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        working-directory: apps/工程部/3D打印协同平台
         run: |
           set -euo pipefail
-          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
-            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+          expected_source=f9f949667e722247032771ad730dc1b7af9f2ca1
+          actual_source=$(git rev-parse HEAD)
+          if [[ "$actual_source" != "$expected_source" ]]; then
+            echo 'Refusing to test an unexpected source commit.' >&2
             exit 1
           fi
+          echo "reviewed_source=$actual_source"
+          node --input-type=module -e 'import os from "node:os"; import v8 from "node:v8"; console.log(JSON.stringify({node:process.version,platform:process.platform,arch:process.arch,availableParallelism:os.availableParallelism(),heapLimitMiB:v8.getHeapStatistics().heap_size_limit/1048576}));'
+          npm --version
 
-      - name: Fetch indo-shipping container logs via SSH
-        env:
-          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
-        with:
-          host: ${{ secrets.CLOUD_HOST }}
-          username: ${{ secrets.CLOUD_USER }}
-          key: ${{ secrets.CLOUD_SSH_KEY }}
-          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 5m
-          script: |
-            set -euo pipefail
-            echo "== 容器状态 =="
-            docker ps -a --filter name=indo-shipping --format 'table {{.Names}}\t{{.Status}}'
-            echo "== 最近 100 行日志 =="
-            docker logs rr-portal-indo-shipping-1 --tail 100 2>&1 || true
+          # No arguments, environment variables, credentials or tokens are read
+          # by the sampler. Process-group membership is used only for filtering.
+          sampler_file="$RUNNER_TEMP/printlink-940-safe-sampler.py"
+          cat > "$sampler_file" <<'PY'
+          import datetime
+          import subprocess
+          import sys
+          import time
+
+          owned_pgid = int(sys.argv[1])
+          while True:
+              print('sample_utc=' + datetime.datetime.now(datetime.timezone.utc).isoformat(), flush=True)
+              try:
+                  result = subprocess.run(
+                      ['ps', '-e', '-o', 'pid=,ppid=,pgid=,comm=,etime=,rss=,pcpu='],
+                      check=True, capture_output=True, text=True, timeout=2)
+                  print('PID PPID COMM ELAPSED RSS_KiB CPU_PERCENT', flush=True)
+                  for line in result.stdout.splitlines():
+                      fields = line.split()
+                      if len(fields) == 7 and fields[2] == str(owned_pgid):
+                          print(' '.join(fields[:2] + fields[3:]), flush=True)
+              except (OSError, subprocess.SubprocessError):
+                  print('safe_ps_sample_unavailable', flush=True)
+              time.sleep(3)
+          PY
+
+          test_pid=''
+          sampler_pid=''
+          cleanup() {
+            local result=$?
+            trap - EXIT INT TERM
+            if [[ -n "$sampler_pid" ]]; then
+              kill -TERM "$sampler_pid" 2>/dev/null || true
+              wait "$sampler_pid" 2>/dev/null || true
+            fi
+            if [[ -n "$test_pid" ]]; then
+              # setsid isolates this synthetic test tree from the action runner.
+              kill -TERM -- "-$test_pid" 2>/dev/null || true
+              for attempt in {1..10}; do
+                if ! kill -0 -- "-$test_pid" 2>/dev/null; then break; fi
+                sleep 0.2
+              done
+              kill -KILL -- "-$test_pid" 2>/dev/null || true
+              wait "$test_pid" 2>/dev/null || true
+            fi
+            rm -f -- "$sampler_file"
+            exit "$result"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          # Keep the actual test command unchanged. GNU timeout terminates its
+          # own process group at 120s, then forces termination after 10s.
+          setsid timeout --signal=TERM --kill-after=10s 120s npm test &
+          test_pid=$!
+          python3 -u "$sampler_file" "$test_pid" &
+          sampler_pid=$!
+          set +e
+          wait "$test_pid"
+          test_result=$?
+          set -e
+          echo "npm_test_exit=$test_result"
+          if [[ "$test_result" -eq 124 ]]; then
+            echo 'Supplemental diagnosis reached the 120-second test deadline.'
+          elif [[ "$test_result" -eq 137 ]]; then
+            echo 'Supplemental diagnosis was killed; compare safe process samples and the 130-second kill-after boundary.'
+          fi
+          echo 'This supplemental run does not replace, cancel, rerun, or waive the original check.'
+          exit "$test_result"

@@ -10,9 +10,9 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  VOYAGEPLEX_DEPLOY_WORKFLOW_PIN: 'true'
-  VOYAGEPLEX_VERIFY_WORKFLOW_PIN: 'false'
-  VOYAGEPLEX_RELEASE_HELPER_SHA256: 'ad2d959b6c0e3723e8fb94a1185167e2e8bb3d9d64a1ecad106a9ea4545c3858'
+  VOYAGEPLEX_DEPLOY_WORKFLOW_PIN: 'false'
+  VOYAGEPLEX_VERIFY_WORKFLOW_PIN: 'true'
+  VOYAGEPLEX_RELEASE_HELPER_SHA256: '5f6ab3ef3aee34fdfa6ce5805ef58e1a37305f26ccdad9cfa4c9c999b6f1d6cb'
 jobs:
   fixed-voyageplex-release:
     runs-on: ubuntu-latest

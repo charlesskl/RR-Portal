@@ -1,4 +1,4 @@
-name: VoyagePlex Four Mailboxes Read-only Initial Diagnosis
+name: VoyagePlex Four Mailboxes Read-only IMAP Metadata Diagnosis
 on:
   workflow_dispatch:
 permissions:
@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           [[ "$MAILDIAG_BRANCH" = refs/heads/ops/voyageplex-maildiag-20261019 && "$MAILDIAG_ATTEMPT" = 1 ]] || exit 1
           [[ "$MAILDIAG_REF" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Fixed phase 1 read-only mailbox diagnosis
+      - name: Fixed metadata-only IMAP diagnosis
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           MAILDIAG_BRANCH: ${{ github.ref }}
@@ -44,7 +44,7 @@ jobs:
             cd /opt/rr-portal
             git fetch origin ops/voyageplex-maildiag-20261019 >/dev/null 2>&1 || { echo 'MAILDIAG_FIXED_SCRIPT_FETCH_FAILED'; exit 1; }
             umask 077
-            mailbox_diagnostic_tmp=$(mktemp -d /tmp/maildiag-phase1.XXXXXX)
+            mailbox_diagnostic_tmp=$(mktemp -d /tmp/maildiag-imap.XXXXXX)
             trap 'rm -rf "$mailbox_diagnostic_tmp"' EXIT
-            git show "$MAILDIAG_REF:deploy/ops/voyageplex-maildiag-initial.py" > "$mailbox_diagnostic_tmp/run.py" 2>/dev/null || { echo 'MAILDIAG_FIXED_SCRIPT_READ_FAILED'; exit 1; }
-            python3 "$mailbox_diagnostic_tmp/run.py"
+            git show "$MAILDIAG_REF:deploy/ops/voyageplex-maildiag-imap.py" > "$mailbox_diagnostic_tmp/run.py" 2>/dev/null || { echo 'MAILDIAG_FIXED_SCRIPT_READ_FAILED'; exit 1; }
+            python3 "$mailbox_diagnostic_tmp/run.py" --execute-read-only

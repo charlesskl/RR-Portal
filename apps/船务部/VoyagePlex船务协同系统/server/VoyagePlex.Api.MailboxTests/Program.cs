@@ -202,18 +202,16 @@ await Test("known-date retryable failure retains prefix and later fills without 
         !await db.ImportEmailItems.IgnoreQueryFilters().AnyAsync(x => x.Status == "failed"), "Transient UID was not recovered"));
 });
 
-await Test("retry repairs original row and batch without changing cursor, notes, identity or contact counts", async () =>
+await Test("retry repairs untouched original row and batch without changing cursor, handling, identity or contact counts", async () =>
 {
     await using var f = await Fixture.Create((p, _) => Task.FromResult(Reply(p,
         p.ContainsKey("selected_uids") ? Item(11) : Item(11, failed: true))));
     await f.Sync(2);
     long id = 0, batchId = 0; string key = "", state = ""; DateTime created = default;
-    var reviewed = new DateTime(2026, 10, 19, 0, 0, 0, DateTimeKind.Utc);
     await f.Read(async db =>
     {
         var row = await db.ImportEmailItems.IgnoreQueryFilters().SingleAsync();
         id = row.Id; batchId = row.ImportBatchId; key = row.MailboxKey; created = row.CreatedAt;
-        row.WorkNote = "existing note"; row.ReviewedAt = reviewed; await db.SaveChangesAsync();
         state = JsonSerializer.Serialize(await db.MailSyncStates.IgnoreQueryFilters().SingleAsync());
     });
     var result = JsonSerializer.SerializeToNode(await f.Retry(2, [id]))!;
@@ -222,7 +220,7 @@ await Test("retry repairs original row and batch without changing cursor, notes,
     {
         var row = await db.ImportEmailItems.IgnoreQueryFilters().SingleAsync();
         Require(row.Id == id && row.ImportBatchId == batchId && row.MailboxKey == key && row.CreatedAt == created &&
-            row.Company == "Huadeng" && row.MailOwnerId == 2 && row.WorkNote == "existing note" && row.ReviewedAt == reviewed &&
+            row.Company == "Huadeng" && row.MailOwnerId == 2 && row.WorkNote == "" && row.ReviewedAt is null &&
             row.HandlingStatus == "Pending" && row.TaskIdsJson == "[]" && row.Status == "pending" && row.DuplicateOfItemId is null && row.Error == "",
             "Retry replaced protected fields or treated itself as duplicate");
         var batch = await db.ImportBatches.IgnoreQueryFilters().SingleAsync();
@@ -388,6 +386,62 @@ await Test("retry rechecks concurrent user handling before writes and preserves 
         Require(row.Status == "failed" && row.HandlingStatus == "Processed" && row.WorkNote == "user changed", "Concurrent user handling overwritten");
         Require((await db.ImportBatches.IgnoreQueryFilters().SingleAsync()).FailedCount == 1, "Concurrent rejection changed counters");
     });
+});
+
+await Test("retry rejects existing work notes, review timestamps and manual classification before parser", async () =>
+{
+    foreach (var kind in new[] { "note", "review", "manual" })
+    {
+        var retryCalls = 0;
+        await using var f = await Fixture.Create((p, _) =>
+        {
+            if (p.ContainsKey("selected_uids")) retryCalls++;
+            return Task.FromResult(Reply(p, Item(11, failed: !p.ContainsKey("selected_uids"))));
+        });
+        await f.Sync(2);
+        await f.Read(async db =>
+        {
+            var row = await db.ImportEmailItems.IgnoreQueryFilters().SingleAsync();
+            if (kind == "note") row.WorkNote = "user note";
+            if (kind == "review") row.ReviewedAt = new DateTime(2026, 10, 19, 1, 2, 3, DateTimeKind.Utc);
+            if (kind == "manual") row.ClassificationSource = "Manual";
+            await db.SaveChangesAsync();
+        });
+        var ids = await f.ItemIds(); var before = await f.Snapshot();
+        try { await f.Retry(2, ids); throw new InvalidOperationException("Existing manual change accepted: " + kind); }
+        catch (MailboxRetryRejectedException error) when (error.StatusCode == 409) { }
+        Require(retryCalls == 0 && await f.Snapshot() == before, "Existing manual handling was overwritten: " + kind);
+    }
+});
+
+await Test("retry rejects notes, review or manual changes made while parser awaits and preserves all fields", async () =>
+{
+    foreach (var kind in new[] { "note", "review", "manual" })
+    {
+        Fixture? fixture = null;
+        var changedSnapshot = "";
+        await using var f = await Fixture.Create(async (p, _) =>
+        {
+            if (p.ContainsKey("selected_uids"))
+            {
+                await fixture!.Read(async db =>
+                {
+                    var row = await db.ImportEmailItems.IgnoreQueryFilters().SingleAsync();
+                    if (kind == "note") row.WorkNote = "concurrent user note";
+                    if (kind == "review") row.ReviewedAt = new DateTime(2026, 10, 19, 1, 2, 3, DateTimeKind.Utc);
+                    if (kind == "manual") row.ClassificationSource = "Manual";
+                    await db.SaveChangesAsync();
+                });
+                changedSnapshot = await fixture.Snapshot();
+            }
+            return Reply(p, Item(11, failed: !p.ContainsKey("selected_uids")));
+        });
+        fixture = f; await f.Sync(2); var ids = await f.ItemIds();
+        try { await f.Retry(2, ids); throw new InvalidOperationException("Concurrent manual change accepted: " + kind); }
+        catch (MailboxRetryRejectedException error) when (error.StatusCode == 409) { }
+        Require(changedSnapshot != "" && await f.Snapshot() == changedSnapshot,
+            "Retry modified fields after concurrent manual handling: " + kind);
+    }
 });
 
 await Test("retry cancellation propagates without writes and releases shared synchronization lock", async () =>

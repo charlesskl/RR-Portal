@@ -334,7 +334,8 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                     current.BusinessFingerprint != original.BusinessFingerprint || current.ShipmentMode != original.ShipmentMode ||
                     current.WorkCategory != original.WorkCategory || current.ClassificationSource != original.ClassificationSource ||
                     current.ClassificationConfidence != original.ClassificationConfidence ||
-                    current.NeedsClassificationReview != original.NeedsClassificationReview || current.DuplicateOfItemId != original.DuplicateOfItemId)
+                    current.NeedsClassificationReview != original.NeedsClassificationReview || current.DuplicateOfItemId != original.DuplicateOfItemId ||
+                    current.WorkNote != original.WorkNote || current.ReviewedAt != original.ReviewedAt)
                     throw new MailboxRetryRejectedException("失败邮件在重试期间已变化，请重新核对");
             }
             var recovered = new List<long>();
@@ -402,6 +403,8 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             throw new MailboxRetryRejectedException("部分邮件不存在或不属于所选邮箱", 404);
         if (rows.Any(item => item.Company != db.Company || item.MailOwnerId != db.MailOwnerId ||
                 item.Status != "failed" || item.HandlingStatus != "Pending" || item.HandlingOutcome != "" ||
+                item.WorkNote != "" || item.ReviewedAt is not null ||
+                string.Equals(item.ClassificationSource, "Manual", StringComparison.OrdinalIgnoreCase) ||
                 item.ImportBatch is not { Kind: "Email", Status: "PendingConfirmation" } ||
                 item.ImportBatch.Company != db.Company || item.ImportBatch.MailOwnerId != db.MailOwnerId) ||
             await db.ShipmentTasks.IgnoreQueryFilters().AnyAsync(task => task.SourceImportItemId != null &&

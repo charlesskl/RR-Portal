@@ -27,6 +27,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/orders/dept/:craft/:id', component: () => import('../views/OrderDetailView.vue') },
   { path: '/order-tracking', component: () => import('../views/OrderTrackingView.vue') },
   { path: '/quality', component: () => import('../views/QualityHubView.vue') },
+  { path: '/quality-patrol', component: () => import('../views/QualityPatrolView.vue') },
   { path: '/quality-qms', component: () => import('../views/QualityQmsView.vue') },
   { path: '/quality-5s', component: () => import('../views/Quality5sView.vue') },
   { path: '/quality-inspection', component: () => import('../views/QualityInspectionView.vue') },

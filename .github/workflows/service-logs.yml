@@ -1,8 +1,8 @@
-name: Fixed Report Original Image Evidence
+name: Fixed Sealed Release Data Differences
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [report-drift]}
+      mode: {type: choice, required: true, options: [data-differences]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
 jobs:
   progress:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 3
     steps:
       - shell: bash
         env:
@@ -20,7 +20,7 @@ jobs:
           RELEASE_MODE: ${{ inputs.mode }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
-          [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = report-drift && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+          [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = data-differences && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Read fixed container and deployment summaries
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
@@ -32,69 +32,104 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 150s
+          command_timeout: 110s
           envs: RELEASE_REF,RELEASE_ATTEMPT,RELEASE_MODE
           script: |
             set -euo pipefail
-            [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = report-drift ]] || exit 1
+            [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = data-differences ]] || exit 1
             umask 077
             python3 -B - <<'PY'
-            """Read-only report/worker drift evidence; two private original-image metadata files."""
-            import hashlib,json,os,pathlib,re,stat,subprocess,sys,time
-            R=pathlib.Path('/opt/rr-portal');TARGET='85d2082c273d3df3e51b2e414855634c56c498dd';BASE='52c090589d6da542fee74ef17c8edd3b0dfe4fe6';SOURCE='ce7588d3c181f9ca7d9806541c0dd572d552665c';PIN_FROZEN=True
-            V4=R/'deploy/backups/release-937-943-944-945-946-950-deploy-20261019-v4';OUT=R/'deploy/backups/release-qc-report-original-image-evidence-20261019'
-            WEB='c4a4386e1b79b072d9a86bca5fba024791b7b99682cab04295045a4d4da3ead7';STAGE='preflight';LAST_COMMAND=None
-            def need(x):
-             if not x:raise RuntimeError('REPORT_IMAGE_EVIDENCE_REJECTED')
-            def enc(x):return json.dumps(x,sort_keys=True,ensure_ascii=True,separators=(',',':'),allow_nan=False).encode()
-            def sha(x):return hashlib.sha256(x).hexdigest()
-            def run(args):
-             global LAST_COMMAND
-             LAST_COMMAND='git-read'if args[0]=='git'else'images'if args[:2]==['docker','image']else'compose-config'if args[:2]==['docker','compose']else'containers'
-             need(time.monotonic()<END);p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,cwd=R,timeout=max(.1,min(15,END-time.monotonic())));need(p.returncode==0 and len(p.stdout)<=32*1024**2);return p.stdout
-            def save(name,value):
-             fd=os.open(OUT/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-             with os.fdopen(fd,'wb')as f:f.write(enc(value));f.flush();os.fsync(f.fileno())
-            def evidence(old,new,old_default,new_default,explicit):
-             changed=sorted(k for k in old.keys()&new.keys()if old[k]!=new[k]);added=sorted(new.keys()-old.keys());removed=sorted(old.keys()-new.keys())
-             return {'changedKeys':changed,'addedKeys':added,'removedKeys':removed,'mapsIdentical':old==new,'keyEvidence':[{'key':k,'explicitlyConfigured':k in explicit,'oldRuntimePresent':k in old,'newRuntimePresent':k in new,'oldImageDefaultPresent':k in old_default,'newImageDefaultPresent':k in new_default,'oldEqualsItsImageDefault':k in old and k in old_default and old[k]==old_default[k],'newEqualsItsImageDefault':k in new and k in new_default and new[k]==new_default[k]}for k in sorted(set(changed+added+removed))]}
+            """Read-only comparisons of two already sealed release metadata snapshots; no live DB access."""
+            import copy,hashlib,json,os,pathlib,re,signal,stat,sys,time
+            ROOT=pathlib.Path('/opt/rr-portal/deploy/backups')
+            BACKUP=ROOT/'release-937-943-944-945-946-950-20261019-v2'
+            VERIFY=ROOT/'release-937-943-944-945-946-950-20261019-v2-verify-v3'
+            PINS=((BACKUP,'22483bb8f1a2e799ad6bcd14f48c2b60c2913d74ad9a03207c39c8b6f761f93f','16dd085003188dbc56150bac9dfedcd3cd5ae9207732f1b96ed357c5a097458f'),(VERIFY,'864dfeed7692d7be7ac2c69aaf258f011799fc04a912f0b03cae91a8cd5fb6de','0491d4bed4f47764a1ef7600f45dab63c548b48912a16ff897a6e2251f6dccec'))
+            PIN_FROZEN=True
+            BASE='52c090589d6da542fee74ef17c8edd3b0dfe4fe6';TARGET='85d2082c273d3df3e51b2e414855634c56c498dd'
+            QC_COMPANIES={'dg-xingxin','dg-huadeng-a','dg-huadeng-b','dg-huajia','hy-huakang-a','hy-huakang-b','hy-huakang-c','hy-huakang-d','hy-huadeng','hy-huaxing','sy-huadeng','sy-xingxin','xs-huadeng'}
+            NEW_COLUMNS={'purchase_orders':{'merged_into_id':('integer',False,None),'merge_revision':('integer',True,'0')},'po_items':{'source_po_no':('text',False,None),'source_order_date':('date',False,None),'source_delivery_date':('date',False,None),'delivery_date_override':('date',False,None),'has_delivery_date_override':('boolean',True,'false')}}
+            STAGE='preflight';READ_BYTES=0
+            
+            def need(v):
+             if not v:raise RuntimeError('SEALED_DATA_DIFFERENCES_REJECTED')
+            def enc(v):return json.dumps(v,sort_keys=True,ensure_ascii=True,separators=(',',':'),allow_nan=False).encode()
+            def sha(v):return hashlib.sha256(v).hexdigest()
+            def digest(v):return sha(enc(v))
+            def pairs(items):
+             v={}
+             for k,x in items:need(k not in v);v[k]=x
+             return v
+            def read(path,maximum):
+             global READ_BYTES
+             need(not path.is_symlink());fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+             with os.fdopen(fd,'rb')as stream:
+              a=os.fstat(stream.fileno());need(stat.S_ISREG(a.st_mode)and a.st_mode&0o077==0 and a.st_size<=maximum);raw=stream.read(maximum+1);b=os.fstat(stream.fileno())
+              fields=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns,s.st_mode)
+              need(len(raw)==a.st_size and fields(a)==fields(b)==fields(path.lstat()))
+             READ_BYTES+=len(raw);need(READ_BYTES<=80*1024**2);return raw
+            def load_capture(path,msha,rsha):
+             need(path.is_dir()and not path.is_symlink()and stat.S_IMODE(path.stat().st_mode)==0o700)
+             raw=read(path/'manifest.json',4*1024**2);need(sha(raw)==msha);manifest=json.loads(raw,object_pairs_hook=pairs);need(manifest.get('first-result.json')==rsha)
+             raw=read(path/'first-result.json',1024**2);need(sha(raw)==rsha);receipt=json.loads(raw,object_pairs_hook=pairs)
+             raw=read(path/'baseline.private.json',32*1024**2);need(sha(raw)==manifest.get('baseline.private.json'));snapshot=json.loads(raw,object_pairs_hook=pairs)
+             return snapshot,receipt
+            
+            def name(v):
+             return v if type(v)is str and re.fullmatch('[A-Za-z_][A-Za-z0-9_]{0,100}',v)else'identifier-sha256-'+digest(v)[:16]
+            def eq(a,b,k):return a is not None and b is not None and a.get(k)==b.get(k)
+            def table_counts(a,b):
+             return [{'table':name(t),'beforePresent':t in a,'afterPresent':t in b,'beforeRows':a.get(t,{}).get('rows'),'afterRows':b.get(t,{}).get('rows'),'rowCountSame':eq(a.get(t),b.get(t),'rows'),'typedHashSame':eq(a.get(t),b.get(t),'sha256'),'columnsTypeHashSame':eq(a.get(t),b.get(t),'columnsSha256')}for t in sorted(set(a)|set(b))]
+            def schema_rows(a,b):
+             aa={(r[0],r[1],r[2]):r[3]for r in a};bb={(r[0],r[1],r[2]):r[3]for r in b};need(len(aa)==len(a)and len(bb)==len(b))
+             return [{'kind':k[0]if k[0]in {'table','index','view','trigger'}else'other','name':name(k[1]),'table':name(k[2]),'beforePresent':k in aa,'afterPresent':k in bb,'definitionSame':k in aa and k in bb and aa[k]==bb[k]}for k in sorted(set(aa)|set(bb))if aa.get(k)!=bb.get(k)or(k in aa)!=(k in bb)]
+            def sqlite_allowed(key,relative,a,b):
+             if a==b:return True
+             p=pathlib.PurePosixPath(relative)
+             if not(key=='qc'and len(p.parts)==2 and p.parts[0]in QC_COMPANIES and p.name=='qc.db'and'record_tombstones'not in a['tables']):return False
+             c=copy.deepcopy(b);t=c['tables'].get('record_tombstones');cols=[(0,'id','INTEGER',0,None,1,0),(1,'deletedAt','TEXT',0,None,0,0)]
+             if not t or t['rows']!=0 or t['columnsSha256']!=digest(cols):return False
+             rows=[r for r in c['schema']if r[:3]==['table','record_tombstones','record_tombstones']]
+             if len(rows)!=1 or ''.join((rows[0][3]or'').lower().split())!='createtablerecord_tombstones(idintegerprimarykey,deletedattext)':return False
+             del c['tables']['record_tombstones'];c['schema'].remove(rows[0]);c['schemaSha256']=digest(c['schema']);return c==a
+            
+            def entity_differences(a,b,keys):
+             aa={tuple(r.get(k)for k in keys):r for r in a};bb={tuple(r.get(k)for k in keys):r for r in b};need(len(aa)==len(a)and len(bb)==len(b))
+             return [{'identity':[name(v)for v in k],'beforePresent':k in aa,'afterPresent':k in bb,'changedFields':[name(f)for f in sorted(set(aa.get(k,{}))|set(bb.get(k,{})))if aa.get(k,{}).get(f)!=bb.get(k,{}).get(f)]}for k in sorted(set(aa)|set(bb))if aa.get(k)!=bb.get(k)]
+            def pg_report(schema,a,b):
+             tables=[]
+             for t in sorted(set(a['tables'])|set(b['tables'])):
+              x,y=a['tables'].get(t),b['tables'].get(t);tables.append({'table':name(t),'beforePresent':x is not None,'afterPresent':y is not None,'beforeRows':(x or{}).get('rows'),'afterRows':(y or{}).get('rows'),'rowCountSame':eq(x,y,'rows'),'allColumnsTypedHashSame':eq(x,y,'sha256'),'originalColumnsTypedHashSame':eq(x,y,'originalColumnsSHA256')})
+             old,new=a['schema'],b['schema'];columns=entity_differences(old['columns'],new['columns'],('table','name'));added=[]
+             for table,cols in NEW_COLUMNS.items():
+              for col,(kind,notnull,default)in cols.items():
+               row=next((r for r in new['columns']if r['table']==table and r['name']==col),None)
+               if schema=='indo_shipping':added.append({'table':table,'column':col,'present':row is not None,'expectedTypeNullDefaultIdentityGenerated':row is not None and(row['type'],row['notNull'],row['default'],row['identity'],row['generated'])==(kind,notnull,default,'','')})
+             indexes=entity_differences(old['indexes'],new['indexes'],('table','name'));seq=entity_differences(old.get('sequences',[]),new.get('sequences',[]),('name',));states=[]
+             for n in sorted(set(a.get('sequenceStates',{}))|set(b.get('sequenceStates',{}))):
+              x,y=a.get('sequenceStates',{}).get(n),b.get('sequenceStates',{}).get(n)
+              states.append({'sequence':name(n),'stateSame':x==y,'beforePresent':x is not None,'afterPresent':y is not None,'changedFields':[k for k in ('lastValue','called')if(x or{}).get(k)!=(y or{}).get(k)]})
+             return {'schema':schema,'tables':tables,'columnChanges':columns,'newPurchaseColumns':added,'newPurchaseColumnNonDefaultRowCount':b.get('newColumnNonDefaultRows'),'indexChanges':indexes,'constraintChanges':entity_differences(old['constraints'],new['constraints'],('table','name')),'sequenceDefinitionChanges':seq,'sequenceStateChanges':states,'sequenceBeforeCaptureStable':a.get('sequenceStateStableDuringCapture'),'sequenceAfterCaptureStable':b.get('sequenceStateStableDuringCapture'),'otherSchemaObjectsSame':old['objects']==new['objects'],'otherSchemaObjectsBeforeCount':len(old['objects']),'otherSchemaObjectsAfterCount':len(new['objects']),'completeSchemaSameBeforeAllowedMigration':old==new,'sequenceStatesNotMVCC':True}
+            
+            def emit(value):
+             raw=enc(value);need(len(raw)<=1024**2);print(raw.decode(),flush=True)
             def main():
-             global STAGE,END
-             os.umask(0o077);need(PIN_FROZEN and os.environ.get('RELEASE_REF')=='refs/heads/ops/release-progress-v4-20261019'and os.environ.get('RELEASE_ATTEMPT')=='1'and os.environ.get('RELEASE_MODE')=='report-drift');END=time.monotonic()+120
-             STAGE='proof-import';raw=run(['git','show',SOURCE+':deploy/ops/release-environment-proof.py']);need(sha(raw)=='9ba097453d46298d6e16e8a3ea5051f08dbe1e3cf39711ef4c8f75bc4f257480');e={'__name__':'report_metadata_only'};exec(compile(raw,'reviewed-env','exec'),e)
-             STAGE='original-baseline';old_records=e['records'](e['old_inspections']());backup=R/'deploy/backups/release-937-943-944-945-946-950-20261019-v2';mr=e['private_read'](backup/'manifest.json',1024**2);need(sha(mr)=='22483bb8f1a2e799ad6bcd14f48c2b60c2913d74ad9a03207c39c8b6f761f93f');bm=e['decoded'](mr);br=e['private_read'](backup/'baseline.private.json',32*1024**2);need(sha(br)==bm['baseline.private.json']);baseline=e['decoded'](br)
-             STAGE='v4-complete-seal';need(V4.is_dir()and not V4.is_symlink()and stat.S_IMODE(V4.stat().st_mode)==0o700);entries=list(V4.rglob('*'));need(len(entries)<=5000 and all(not p.is_symlink()and(p.is_file()or p.is_dir())and p.stat().st_mode&0o077==0 for p in entries))
-             raw_manifest=e['private_read'](V4/'manifest.json',4*1024**2);manifest=e['decoded'](raw_manifest);need(set(manifest)=={str(p.relative_to(V4))for p in entries if p.is_file()and p!=V4/'manifest.json'}and sum(p.stat().st_size for p in entries if p.is_file())<=1024**3)
-             for name,wanted in manifest.items():
-              need(type(name)is str and not pathlib.PurePosixPath(name).is_absolute()and '..'not in pathlib.PurePosixPath(name).parts and re.fullmatch('[a-f0-9]{64}',wanted));need(sha(e['private_read'](V4/name,32*1024**2))==wanted)
-             receipt_raw=e['private_read'](V4/'first-result.json',1024**2);receipt=e['decoded'](receipt_raw);need(receipt.get('success')is False and receipt.get('target')==TARGET and receipt.get('failedStage')=='verify-environment-maps'and receipt.get('failedService')=='qc-report')
-             STAGE='old-web-image-artifact';old_web=baseline['runtime']['services']['qc-report'];candidates=[]
-             for name in sorted(manifest):
-              if not re.fullmatch('[0-9]{3,4}-qc-report-before-build\\.stdout\\.private',name):continue
-              try:value=e['decoded'](e['private_read'](V4/name,32*1024**2))
-              except (ValueError,e['EnvironmentEvidenceError']):continue
-              if type(value)is list:
-               for item in value:
-                if type(item)is dict and item.get('Id')==old_web['image']and type(item.get('Config'))is dict:candidates.append((name,item))
-             need(len(candidates)==1);old_web_file,old_web_image=candidates[0];e['environments'](old_web_image['Config'].get('Env')or[])
-             STAGE='current-web-worker';roles=('qc-report','qc-report-worker');ids=[WEB,baseline['runtime']['services']['qc-report-worker']['id']];current=e['records'](e['decoded'](run(['docker','inspect',*ids])));need(set(current)==set(ids));old={};new={}
-             for role,cid in zip(roles,ids):
-              old[role]=old_records[baseline['runtime']['services'][role]['id']];e['bound_environment'](old[role],baseline['runtime']['services'][role],role);new[role]=current[cid];e['bound_environment'](new[role],{'id':cid,'image':new[role]['Image'],'environmentSHA256':sha(enc(new[role]['Config']['Env']))},role)
-             need(new['qc-report-worker']['Image']==baseline['runtime']['services']['qc-report-worker']['image'])
-             STAGE='live-new-and-worker-images';wanted={new[role]['Image']for role in roles};images=e['decoded'](run(['docker','image','inspect',*sorted(wanted)]));image_map={v['Id']:v for v in images};need(len(image_map)==len(images)and set(image_map)==wanted);original_images={'qc-report':old_web_image,'qc-report-worker':image_map[new['qc-report-worker']['Image']]}
-             STAGE='fixed-compose';need(run(['git','rev-parse','HEAD']).decode().strip()==TARGET and(R/'docker-compose.cloud.yml').read_bytes()==run(['git','show',BASE+':docker-compose.cloud.yml'])and sha((R/'.env.cloud.production').read_bytes())==baseline['envSHA256']);compose=e['decoded'](run(['docker','compose','-p','rr-portal','-f',str(R/'docker-compose.cloud.yml'),'--env-file',str(R/'.env.cloud.production'),'config','--format','json']))
-             result={'completed':False,'success':False,'businessWritesPerformed':False,'configurationChanged':False,'oldEvidenceModified':False,'oldWebImageSourceVerified':True,'oldWorkerBaselineContainerAndImageBound':True,'sourceAndEnvironmentFrozen':True,'v4ManifestSHA256':sha(raw_manifest),'v4ResultSHA256':sha(receipt_raw),'oldWebImageSourceFile':old_web_file,'oldWebImageSourceSHA256':manifest[old_web_file],'services':{}}
-             for role in roles:
-              a,b=old[role],new[role];explicit=compose['services'][role].get('environment',{});need(type(explicit)is dict);explicit_keys=set(e['environments']([k+'='for k in explicit]));defaults=e['environments'](original_images[role]['Config'].get('Env')or[]);new_defaults=e['environments'](image_map[b['Image']]['Config'].get('Env')or[])
-              row=evidence(e['environments'](a['Config']['Env']),e['environments'](b['Config']['Env']),defaults,new_defaults,explicit_keys);row.update(currentContainer=b['Id'],oldImageIdentifierSHA256=sha(a['Image'].encode()),newImageIdentifierSHA256=sha(b['Image'].encode()),strictArraySame=a['Config']['Env']==b['Config']['Env'],healthcheckSame=a['Config'].get('Healthcheck')==b['Config'].get('Healthcheck'),mountsSame=sorted(a.get('Mounts',[]),key=enc)==sorted(b.get('Mounts',[]),key=enc),memorySame=a['HostConfig'].get('Memory')==b['HostConfig'].get('Memory'),swapSame=a['HostConfig'].get('MemorySwap')==b['HostConfig'].get('MemorySwap'),running=b['State']['Running'],health=b['State'].get('Health',{}).get('Status'),oom=b['State']['OOMKilled'],restarts=b['RestartCount']);result['services'][role]=row
-             STAGE='seal-two-original-images';OUT.mkdir(mode=0o700)
-             try:
-              for role,name in [('qc-report','old-web-image.private.json'),('qc-report-worker','old-worker-image.private.json')]:save(name,original_images[role])
-              final=e['records'](e['decoded'](run(['docker','inspect',*ids])));need(all(final[cid]['Image']==current[cid]['Image']and final[cid]['Config']['Env']==current[cid]['Config']['Env']for cid in ids));need(sha(e['private_read'](V4/'manifest.json',4*1024**2))==sha(raw_manifest));need(run(['git','rev-parse','HEAD']).decode().strip()==TARGET and sha((R/'.env.cloud.production').read_bytes())==baseline['envSHA256']and(R/'docker-compose.cloud.yml').read_bytes()==run(['git','show',BASE+':docker-compose.cloud.yml']));result['completed']=True;result['success']=True
-             finally:
-              save('first-result.json',result);save('manifest.json',{p.name:sha(e['private_read'](p,32*1024**2))for p in OUT.iterdir()if p.is_file()});print(enc(dict(result,resultSHA256=sha(e['private_read'](OUT/'first-result.json',1024**2)),manifestSHA256=sha(e['private_read'](OUT/'manifest.json',1024**2)))).decode(),flush=True)
-             need(result['completed'])
+             global STAGE
+             need(PIN_FROZEN and os.environ.get('RELEASE_REF')=='refs/heads/ops/release-progress-v4-20261019'and os.environ.get('RELEASE_ATTEMPT')=='1'and os.environ.get('RELEASE_MODE')=='data-differences');signal.alarm(90)
+             STAGE='sealed-metadata';before,rb=load_capture(*PINS[0]);after,ra=load_capture(*PINS[1]);need(rb.get('success')is True and ra.get('success')is False and before.get('head')==BASE and after.get('head')==TARGET and set(before['trees'])==set(after['trees']))
+             need(ra.get('checks',{}).get('allSQLiteOriginalColumnsAndAllowedSchemaPassed')is False and ra.get('checks',{}).get('allPostgresOriginalColumnsAndAllowedSchemaPassed')is False)
+             STAGE='sqlite-comparisons';db_count=0
+             for key in sorted(before['trees']):
+              aa,bb=before['trees'][key]['sqlite'],after['trees'][key]['sqlite'];need(len(aa)<=100 and len(bb)<=100)
+              for index,relative in enumerate(sorted(set(aa)|set(bb)),1):
+               a,b=aa.get(relative),bb.get(relative);db_count+=1;p=pathlib.PurePosixPath(relative)
+               emit({'kind':'sqlite-database','root':key,'databaseOrdinal':index,'relativeIdentifierSHA256':digest(relative),'company':p.parts[0]if key=='qc'and p.parts[0]in QC_COMPANIES else None,'filenameClass':p.name if p.name in {'qc.db','data.db','auxiliary.db','qc-report.db'}else'other-sqlite','beforePresent':a is not None,'afterPresent':b is not None,'schemaTypeHashSame':eq(a,b,'schemaSha256'),'strictTypedAuditSame':a==b,'comparisonWithOnlyExactEmptyTombstoneAllowed':a is not None and b is not None and sqlite_allowed(key,relative,a,b),'tables':table_counts((a or{}).get('tables',{}),(b or{}).get('tables',{})),'schemaObjectChanges':schema_rows((a or{}).get('schema',[]),(b or{}).get('schema',[]))})
+             STAGE='postgres-comparisons';need(set(before['postgres'])==set(after['postgres'])=={'indo_shipping','internal_quote'})
+             for schema in ('indo_shipping','internal_quote'):emit(dict(kind='postgres-schema',**pg_report(schema,before['postgres'][schema],after['postgres'][schema])))
+             STAGE='final-input-pins'
+             for path,msha,rsha in PINS:need(sha(read(path/'manifest.json',4*1024**2))==msha and sha(read(path/'first-result.json',1024**2))==rsha)
+             emit({'kind':'summary','completed':True,'sqliteDatabaseCount':db_count,'postgresSchemaCount':2,'sourceIsSealedMetadataNotCurrentLiveState':True,'wholeArchiveBytesRevalidated':False,'authenticatedManifestReceiptAndSnapshotBytes':True,'businessRowsPrinted':False,'liveDatabasesAccessed':False,'mutationsPerformed':False,'causeOrActorInferred':False,'originalStrictVerificationRemainsFailed':True})
             if __name__=='__main__':
              try:main()
-             except BaseException as error:print(enc({'safeFailure':'FIXED_REPORT_IMAGE_EVIDENCE_FAILED','stage':STAGE,'exceptionType':type(error).__name__ if type(error).__name__ in {'RuntimeError','EnvironmentEvidenceError','TimeoutExpired','JSONDecodeError','KeyError','TypeError','ValueError','FileNotFoundError','PermissionError','OSError'}else'OtherError','lastReadCommandCategory':LAST_COMMAND}).decode(),flush=True);sys.exit(1)
+             except BaseException as error:emit({'safeFailure':'SEALED_RELEASE_DIFFERENCES_FAILED','stage':STAGE,'exceptionType':type(error).__name__ if type(error).__name__ in {'RuntimeError','KeyError','ValueError','JSONDecodeError','OSError','PermissionError','FileNotFoundError','TypeError'}else'OtherError'});sys.exit(1)
             PY

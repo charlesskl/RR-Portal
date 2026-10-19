@@ -1,4 +1,4 @@
-name: PrintLink Bounded Runtime Memory Relief
+name: PrintLink Fast Post Deployment Read Only Preflight
 on:
   workflow_dispatch:
 permissions:
@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           [[ "$PRINTLINK_DIAG_BRANCH" = refs/heads/ops/printlink-current-diagnosis-20261019 && "$PRINTLINK_DIAG_ATTEMPT" = 1 ]] || exit 1
           [[ "$PRINTLINK_DIAG_REF" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Increase only the exact existing PrintLink resource limit
+      - name: Verify PrintLink service and retained business data read only
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           PRINTLINK_DIAG_BRANCH: ${{ github.ref }}
@@ -45,8 +45,10 @@ jobs:
             git fetch origin ops/printlink-current-diagnosis-20261019 >/dev/null 2>&1 || { echo PRINTLINK_DIAG_FETCH_FAILED; exit 1; }
             [[ "$(git rev-parse FETCH_HEAD)" = "$PRINTLINK_DIAG_REF" ]] || { echo PRINTLINK_DIAG_HEAD_MISMATCH; exit 1; }
             umask 077
-            printlink_diagnostic_tmp=$(mktemp -d /tmp/printlink-resource-relief.XXXXXX)
+            printlink_diagnostic_tmp=$(mktemp -d /tmp/printlink-post-health.XXXXXX)
             trap 'rm -rf "$printlink_diagnostic_tmp"' EXIT
             git show "$PRINTLINK_DIAG_REF:deploy/ops/printlink-runtime-resources.py" > "$printlink_diagnostic_tmp/printlink-runtime-resources.py" 2>/dev/null || { echo PRINTLINK_DIAG_SCRIPT_READ_FAILED; exit 1; }
-            git show "$PRINTLINK_DIAG_REF:deploy/ops/printlink-runtime-memory-relief.py" > "$printlink_diagnostic_tmp/run.py" 2>/dev/null || { echo PRINTLINK_RELIEF_SCRIPT_READ_FAILED; exit 1; }
-            timeout --signal=TERM --kill-after=5s 85s python3 "$printlink_diagnostic_tmp/run.py"
+            git show "$PRINTLINK_DIAG_REF:deploy/ops/printlink-runtime-source-951-pins.json" > "$printlink_diagnostic_tmp/printlink-runtime-source-951-pins.json" 2>/dev/null || { echo PRINTLINK_SOURCE_PINS_READ_FAILED; exit 1; }
+            git show "$PRINTLINK_DIAG_REF:deploy/ops/printlink-post-health-verify.py" > "$printlink_diagnostic_tmp/printlink-post-health-verify.py" 2>/dev/null || { echo PRINTLINK_POST_HEALTH_SCRIPT_READ_FAILED; exit 1; }
+            git show "$PRINTLINK_DIAG_REF:deploy/ops/printlink-post-health-preflight.py" > "$printlink_diagnostic_tmp/run.py" 2>/dev/null || { echo PRINTLINK_PREFLIGHT_SCRIPT_READ_FAILED; exit 1; }
+            timeout --signal=TERM --kill-after=5s 55s python3 "$printlink_diagnostic_tmp/run.py"

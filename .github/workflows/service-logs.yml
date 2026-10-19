@@ -1,101 +1,51 @@
-name: Service Logs
-
-# 通用服务日志诊断（手动触发）：查看任意 compose 服务的容器状态、健康检查结果与日志。
-# 背景：2026-09-15 voyageplex 上线时 api 容器 unhealthy，仓库里没有一个能看任意服务日志的
-# 入口，只能靠猜。此 workflow 填补该空缺。
-#   service —— compose 服务名（如 voyageplex-api）；容器名按 rr-portal-<service>-1 推导
-#   tail    —— 日志行数，默认 100
-
+name: PrintLink Portal Read Only Diagnosis
 on:
   workflow_dispatch:
-    inputs:
-      service:
-        description: "compose 服务名（如 voyageplex-api）"
-        type: string
-        required: true
-      tail:
-        description: "日志行数"
-        type: string
-        required: false
-        default: "100"
-      tomy_smoke:
-        description: "仅 TOMY：使用合成文件验证上传核对及 ZIP 下载"
-        type: boolean
-        required: false
-        default: false
-
 permissions:
   contents: read
-
 concurrency:
-  group: deploy-cloud
+  group: printlink-current-diagnosis-20261019
   queue: max
   cancel-in-progress: false
-
 jobs:
-  logs:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 3
     steps:
-      - name: Validate SSH host fingerprint
+      - name: Validate fixed diagnostic ref and SSH fingerprint
         shell: bash
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          PRINTLINK_DIAG_BRANCH: ${{ github.ref }}
+          PRINTLINK_DIAG_REF: ${{ github.sha }}
+          PRINTLINK_DIAG_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
-            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
-            exit 1
-          fi
-
-      - name: Fetch service logs via SSH
+          [[ "$PRINTLINK_DIAG_BRANCH" = refs/heads/ops/printlink-current-diagnosis-20261019 && "$PRINTLINK_DIAG_ATTEMPT" = 1 ]] || exit 1
+          [[ "$PRINTLINK_DIAG_REF" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+      - name: Read only PrintLink portal and runtime checks
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          OPS_SERVICE: ${{ inputs.service }}
-          OPS_TAIL: ${{ inputs.tail }}
-          TOMY_SMOKE: ${{ inputs.tomy_smoke }}
+          PRINTLINK_DIAG_BRANCH: ${{ github.ref }}
+          PRINTLINK_DIAG_REF: ${{ github.sha }}
+          PRINTLINK_DIAG_ATTEMPT: ${{ github.run_attempt }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 5m
-          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE
+          command_timeout: 2m
+          envs: PRINTLINK_DIAG_BRANCH,PRINTLINK_DIAG_REF,PRINTLINK_DIAG_ATTEMPT
           script: |
             set -euo pipefail
-            # 服务名只允许字母数字和连字符，防止注入
-            if [[ ! "$OPS_SERVICE" =~ ^[a-z0-9-]+$ ]]; then
-              echo "非法服务名: $OPS_SERVICE" >&2
-              exit 1
-            fi
-            [[ "$OPS_TAIL" =~ ^[0-9]+$ ]] || OPS_TAIL=100
-            CTR="rr-portal-${OPS_SERVICE}-1"
-
-            echo "=== 容器状态 ==="
-            docker ps -a --filter "name=^${CTR}$" --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
-
-            echo ""
-            echo "=== 健康检查最近结果 ==="
-            docker inspect --format '{{json .State.Health}}' "$CTR" 2>/dev/null | head -c 3000 || echo "(无健康检查信息)"
-
-            echo ""
-            echo "=== 最近 ${OPS_TAIL} 行日志 ==="
-            docker logs --timestamps --tail "$OPS_TAIL" "$CTR" 2>&1 || true
-
-            echo ""
-            echo "=== 重启次数 ==="
-            docker inspect --format 'RestartCount={{.RestartCount}} StartedAt={{.State.StartedAt}}' "$CTR" 2>/dev/null || true
-
-            if [ "$OPS_SERVICE" = "tomy-paiqi" ]; then
-              echo "=== TOMY 实际内存配置（只读） ==="
-              docker inspect --format 'Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}} OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}}' "$CTR" || true
-              docker exec "$CTR" node -e 'console.log(JSON.stringify({nodeOptions:process.env.NODE_OPTIONS,heapLimit:require("v8").getHeapStatistics().heap_size_limit}))' || true
-              echo "=== 最近内存终止记录（只读） ==="
-              journalctl -k --since '2 hours ago' --no-pager 2>/dev/null | grep -Ei 'oom-kill|killed process|memory cgroup out of memory' | tail -20 || true
-              if [ "${TOMY_SMOKE:-false}" = "true" ]; then
-                echo "=== TOMY 合成上传与下载验证 ==="
-                docker exec "$CTR" node server/upload-smoke.mjs
-                docker inspect --format 'RestartCountAfterSmoke={{.RestartCount}} Health={{.State.Health.Status}}' "$CTR"
-              fi
-            fi
+            [[ "$PRINTLINK_DIAG_BRANCH" = refs/heads/ops/printlink-current-diagnosis-20261019 && "$PRINTLINK_DIAG_ATTEMPT" = 1 ]] || exit 1
+            [[ "$PRINTLINK_DIAG_REF" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            cd /opt/rr-portal
+            git fetch origin ops/printlink-current-diagnosis-20261019 >/dev/null 2>&1 || { echo PRINTLINK_DIAG_FETCH_FAILED; exit 1; }
+            [[ "$(git rev-parse FETCH_HEAD)" = "$PRINTLINK_DIAG_REF" ]] || { echo PRINTLINK_DIAG_HEAD_MISMATCH; exit 1; }
+            umask 077
+            printlink_diagnostic_tmp=$(mktemp -d /tmp/printlink-current-diagnosis.XXXXXX)
+            trap 'rm -rf "$printlink_diagnostic_tmp"' EXIT
+            git show "$PRINTLINK_DIAG_REF:deploy/ops/printlink-current-diagnosis.py" > "$printlink_diagnostic_tmp/run.py" 2>/dev/null || { echo PRINTLINK_DIAG_SCRIPT_READ_FAILED; exit 1; }
+            timeout --signal=TERM --kill-after=5s 65s python3 "$printlink_diagnostic_tmp/run.py"

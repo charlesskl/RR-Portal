@@ -24,10 +24,12 @@ class Contracts(unittest.TestCase):
         self.root = pathlib.Path(self.temporary.name)
         self.previous_pin = ops.PIN
         self.previous_backups = ops.BACKUPS
+        self.previous_attempt = ops.BACKUP_ATTEMPT
 
     def tearDown(self):
         ops.PIN = self.previous_pin
         ops.BACKUPS = self.previous_backups
+        ops.BACKUP_ATTEMPT = self.previous_attempt
         self.temporary.cleanup()
 
     def database(self, name='data.db'):
@@ -96,10 +98,71 @@ class Contracts(unittest.TestCase):
         ops.BACKUPS = self.root
         first = ops.create_backup_directory()
         receipt = (self.root / 'factory-review-941-first-backup-attempt.json').read_bytes()
-        with self.assertRaises(FileExistsError):
+        with self.assertRaises(RuntimeError):
             ops.create_backup_directory()
         self.assertTrue(first.is_dir())
         self.assertEqual(receipt, (self.root / 'factory-review-941-first-backup-attempt.json').read_bytes())
+
+    def original_fixed_failure(self):
+        ops.BACKUPS = self.root
+        original = self.root / pathlib.Path(ops.FIRST_FAILED_BACKUP).name
+        original.mkdir(mode=0o700)
+        result = {'automaticRecoveryPerformed': False, 'businessWritesPerformed': False,
+                  'errorType': 'RuntimeError', 'failed': True, 'failedCheck': 'everyPublicAssetMatchesActualContainer',
+                  'mode': 'backup', 'resultPath': ops.FIRST_FAILED_BACKUP + '/backup-first-result.json',
+                  'sourceCommit': ops.BASE, 'strictAllChecksPassed': False}
+        self.assertEqual(ops.sha(ops.encoded(result)), ops.FIRST_FAILED_RESULT_SHA256)
+        ops.private_write(original / 'backup-first-result.json', ops.encoded(result))
+        ops.private_write(original / 'private-material', b'private bytes remain unchanged')
+        ops.seal(original)
+        marker = self.root / 'factory-review-941-first-backup-attempt.json'
+        ops.private_write(marker, ops.encoded({'backup': ops.FIRST_FAILED_BACKUP, 'sourceCommit': ops.BASE}))
+        return original, marker
+
+    def test_exact_authorized_second_backup_preserves_original_and_cannot_run_third(self):
+        original, marker = self.original_fixed_failure()
+        before = {str(p): p.read_bytes() for p in [marker, *original.iterdir()] if p.is_file()}
+        second = ops.create_backup_directory()
+        self.assertTrue(second.is_dir())
+        self.assertNotEqual(second, original)
+        self.assertEqual(ops.BACKUP_ATTEMPT['number'], 2)
+        self.assertIs(ops.BACKUP_ATTEMPT['priorFailure']['remainsFailed'], True)
+        self.assertEqual(ops.BACKUP_ATTEMPT['priorFailure']['resultSha256'], ops.FIRST_FAILED_RESULT_SHA256)
+        second_marker = self.root / 'factory-review-941-second-backup-attempt.json'
+        second_bytes = second_marker.read_bytes()
+        with self.assertRaises(FileExistsError):
+            ops.create_backup_directory()
+        self.assertEqual(second_marker.read_bytes(), second_bytes)
+        self.assertEqual(before, {str(p): p.read_bytes() for p in [marker, *original.iterdir()] if p.is_file()})
+
+    def test_second_backup_rejects_changed_first_marker_or_receipt_even_if_resealed(self):
+        original, marker = self.original_fixed_failure()
+        original_marker = marker.read_bytes()
+        marker.write_bytes(ops.encoded({'backup': '/different/failure', 'sourceCommit': ops.BASE}))
+        with self.assertRaises(RuntimeError):
+            ops.create_backup_directory()
+        marker.write_bytes(original_marker)
+        receipt = original / 'backup-first-result.json'
+        changed = json.loads(receipt.read_bytes())
+        changed['failedCheck'] = 'unrelatedFailure'
+        receipt.write_bytes(ops.encoded(changed))
+        (original / 'manifest.json').unlink()
+        ops.seal(original)
+        with self.assertRaises(RuntimeError):
+            ops.create_backup_directory()
+        self.assertFalse((self.root / 'factory-review-941-second-backup-attempt.json').exists())
+
+    def test_second_backup_rejects_original_seal_tamper_and_loose_permissions(self):
+        original, marker = self.original_fixed_failure()
+        material = original / 'private-material'
+        material.write_bytes(b'changed sealed material')
+        with self.assertRaises(RuntimeError):
+            ops.create_backup_directory()
+        material.write_bytes(b'private bytes remain unchanged')
+        marker.chmod(0o644)
+        with self.assertRaises(RuntimeError):
+            ops.create_backup_directory()
+        self.assertFalse((self.root / 'factory-review-941-second-backup-attempt.json').exists())
 
     def test_pin_fail_closed_before_any_production_command(self):
         pin = self.root / 'pin.json'
@@ -199,6 +262,65 @@ class Contracts(unittest.TestCase):
         self.assertEqual(ops.sha(raw), receipt['fullSha256'])
         self.assertEqual(len(raw), receipt['bytes'])
         self.assertEqual(len(decoded), receipt['parts'])
+
+    def fake_public_routes(self, service, corrupted=None):
+        prefix = '/' + service + '/'
+        index, script = b'<html>current container index</html>', b'const current = true;'
+        visited = []
+        def fake_run(arguments, data=None):
+            if arguments == ops.COMPOSE + ['ps', '-q', service]:
+                return b'container-id\n'
+            if arguments[-5:] == ['find', '/pb/pb_public', '-type', 'f', '-print0']:
+                return b'/pb/pb_public/index.html\0/pb/pb_public/assets/app.js\0'
+            if arguments[-2:] == ['cat', '/pb/pb_public/index.html']:
+                return index
+            if arguments[-2:] == ['cat', '/pb/pb_public/assets/app.js']:
+                return script
+            raise AssertionError('Unexpected container read')
+        def fake_get(path):
+            visited.append(path)
+            if path == prefix + 'index.html':
+                return 301, b''  # Real PocketBase route: Location: /
+            if path in {prefix, prefix + 'quality-patrol'}:
+                return 200, b'wrong index' if corrupted == path else index
+            if path == prefix + 'assets/app.js':
+                return 200, b'wrong script' if corrupted == path else script
+            if path == prefix + 'health':
+                return 200, b'{}'
+            if path in {prefix + '_/', prefix + 'api/collections/_superusers/records'}:
+                return 404, b''
+            if path in {prefix + 'api/collections/orders/records?perPage=1', prefix + 'api/collections/quality_patrols/records?perPage=1'}:
+                return 200, b'{"totalItems":0,"items":[]}'
+            raise AssertionError('Unexpected public read')
+        return fake_run, fake_get, visited
+
+    def test_pocketbase_index_redirect_uses_prefixed_root_for_both_services_before_and_after(self):
+        for service in ops.SERVICES:
+            for deployed in [False, True]:
+                with self.subTest(service=service, deployed=deployed):
+                    run, get, visited = self.fake_public_routes(service)
+                    with patch.object(ops, 'run', side_effect=run), patch.object(ops, 'get', side_effect=get):
+                        result = ops.probes(service, deployed)
+                    self.assertTrue(result['passed'])
+                    self.assertEqual(result['publicFilesVerified'], 2)
+                    self.assertNotIn('/' + service + '/index.html', visited)
+                    self.assertIn('/' + service + '/', visited)
+                    self.assertIn('/' + service + '/assets/app.js', visited)
+                    if deployed:
+                        self.assertIn('/' + service + '/quality-patrol', visited)
+
+    def test_index_root_and_all_other_assets_still_require_exact_container_bytes(self):
+        for service in ops.SERVICES:
+            prefix = '/' + service + '/'
+            for corrupted in [prefix, prefix + 'assets/app.js']:
+                with self.subTest(service=service, corrupted=corrupted):
+                    run, get, _ = self.fake_public_routes(service, corrupted)
+                    with patch.object(ops, 'run', side_effect=run), patch.object(ops, 'get', side_effect=get), self.assertRaises(RuntimeError):
+                        ops.probes(service, True)
+                    self.assertEqual(ops.FAILED, 'everyPublicAssetMatchesActualContainer')
+            run, get, _ = self.fake_public_routes(service, prefix + 'quality-patrol')
+            with patch.object(ops, 'run', side_effect=run), patch.object(ops, 'get', side_effect=get):
+                self.assertFalse(ops.probes(service, True)['passed'])
 
     def test_private_outputs_never_overwrite_first_attempt(self):
         output = self.root / 'first-result.json'

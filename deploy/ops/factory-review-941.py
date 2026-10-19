@@ -38,6 +38,9 @@ MAX_FILE = 8 * 1024 ** 3
 PIN = {}
 FAILED = 'entrypoint'
 RESULT_DIRECTORY = None
+FIRST_FAILED_BACKUP = '/opt/rr-portal/deploy/backups/factory-review-pre-941-20261019T023133028210Z'
+FIRST_FAILED_RESULT_SHA256 = '8ab1ca4bc84b60df59b5aaf21ea14119de4fd42ce95ddfb251396a2ee900c91d'
+BACKUP_ATTEMPT = {'number': 1, 'secondAttempt': False, 'priorFailure': None}
 
 
 def require(value, label):
@@ -394,7 +397,9 @@ def probes(service, deployed):
         content = run(['docker', 'exec', identifier, 'cat', name])
         total += len(content)
         require(total <= 64 * 1024 ** 2, 'boundedTotalPublicAssets')
-        status, body = get(prefix + urllib.parse.quote(relative, safe='/'))
+        # PocketBase redirects index.html to '/' (301), which would lose the
+        # reverse-proxy prefix. Compare the actual index bytes at the SPA root.
+        status, body = get(prefix if relative == 'index.html' else prefix + urllib.parse.quote(relative, safe='/'))
         hashes[relative] = sha(content)
         require(status == 200 and sha(body) == hashes[relative], 'everyPublicAssetMatchesActualContainer')
     require('index.html' in hashes, 'actualPublicIndexExists')
@@ -515,10 +520,36 @@ def operational_checks(checks):
 
 
 def create_backup_directory():
+    global BACKUP_ATTEMPT
     BACKUPS.mkdir(mode=0o700, parents=True, exist_ok=True)
     require(not BACKUPS.is_symlink(), 'regularPrivateBackupRoot')
     directory = BACKUPS / ('factory-review-pre-941-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
-    private_write(BACKUPS / 'factory-review-941-first-backup-attempt.json', encoded({'backup': str(directory), 'sourceCommit': BASE}))
+    first = BACKUPS / 'factory-review-941-first-backup-attempt.json'
+    marker = first
+    BACKUP_ATTEMPT = {'number': 1, 'secondAttempt': False, 'priorFailure': None}
+    if first.exists() or first.is_symlink():
+        # One explicitly authorized second backup after the fixed index-route
+        # diagnostic error. Preserve the first lock, receipt and sealed files.
+        require(not first.is_symlink() and first.is_file() and stat.S_IMODE(first.stat().st_mode) == 0o600 and first.stat().st_size <= 4096, 'privateOriginalBackupAttemptMarker')
+        require(json.loads(first.read_bytes()) == {'backup': FIRST_FAILED_BACKUP, 'sourceCommit': BASE}, 'secondBackupOnlyAfterExactFirstAttempt')
+        original = BACKUPS / pathlib.Path(FIRST_FAILED_BACKUP).name
+        require(original.is_dir() and not original.is_symlink() and stat.S_IMODE(original.stat().st_mode) == 0o700, 'privateOriginalFailedBackupDirectory')
+        entries = list(original.rglob('*'))
+        require(all(not p.is_symlink() and (p.is_file() or p.is_dir()) and p.stat().st_mode & 0o077 == 0 for p in entries), 'originalFailedBackupEntriesRemainPrivate')
+        manifest_path = original / 'manifest.json'
+        require(manifest_path.is_file() and manifest_path.stat().st_size <= 4 * 1024 ** 2, 'boundedOriginalFailedBackupManifest')
+        manifest = json.loads(manifest_path.read_bytes())
+        actual = {str(p.relative_to(original)) for p in entries if p.is_file() and p != manifest_path}
+        require(set(manifest) == actual and 'backup-first-result.json' in actual, 'completeOriginalFailureSealInventory')
+        require(all(safe_path(n) and isinstance(h, str) and re.fullmatch('[a-f0-9]{64}', h) and file_hash(original / n) == h for n, h in manifest.items()), 'allOriginalFailureSealedBytesUnchanged')
+        receipt = original / 'backup-first-result.json'
+        require(file_hash(receipt) == FIRST_FAILED_RESULT_SHA256, 'exactOriginalFailureReceiptBytes')
+        failed = json.loads(receipt.read_bytes())
+        require(failed.get('mode') == 'backup' and failed.get('failed') is True and failed.get('sourceCommit') == BASE and failed.get('failedCheck') == 'everyPublicAssetMatchesActualContainer', 'exactOriginalFailureScope')
+        marker = BACKUPS / 'factory-review-941-second-backup-attempt.json'
+        BACKUP_ATTEMPT = {'number': 2, 'secondAttempt': True, 'priorFailure': {'backup': FIRST_FAILED_BACKUP,
+            'resultSha256': FIRST_FAILED_RESULT_SHA256, 'failedCheck': failed['failedCheck'], 'remainsFailed': True}}
+    private_write(marker, encoded({'backup': str(directory), 'sourceCommit': BASE, **({'priorFailure': BACKUP_ATTEMPT['priorFailure']} if BACKUP_ATTEMPT['number'] == 2 else {})}))
     directory.mkdir(mode=0o700)
     return directory
 
@@ -562,10 +593,10 @@ def backup(target):
     checks['privateConfigurationStable'] = private_context()[0] == context
     checks['sourceStable'] = git() == git('origin/main') == target
     before = {'sourceCommit': target, 'backupComplete': True, 'strictStaticChecksPassed': all(checks.values()),
-              'checks': checks, 'services': baseline, 'otherContainers': others, 'context': context}
+              'checks': checks, 'services': baseline, 'otherContainers': others, 'context': context, 'backupAttempt': BACKUP_ATTEMPT}
     private_write(directory / 'baseline.json', encoded(before))
     result = {'mode': 'backup', 'backup': str(directory), 'resultPath': str(directory / 'backup-first-result.json'),
-              'sourceCommit': target, 'backupComplete': True, 'preflightChecksPassed': operational_checks(checks),
+              'sourceCommit': target, 'backupComplete': True, 'backupAttempt': BACKUP_ATTEMPT, 'preflightChecksPassed': operational_checks(checks),
               'strictStaticChecksPassed': all(checks.values()), 'checks': checks,
               'services': public, 'otherContainersBefore': others, 'otherContainersAfter': other_containers(),
               'sqliteSnapshotsIndividuallyConsistent': True, 'crossDatabaseAtomicClaimed': False,
@@ -677,6 +708,8 @@ if __name__ == '__main__':
                   'sourceCommit': sys.argv[3] if len(sys.argv) > 3 and re.fullmatch('[a-f0-9]{40}', sys.argv[3]) else None,
                   'resultPath': str(RESULT_DIRECTORY / ('first-result.json' if len(sys.argv) > 1 and sys.argv[1] == 'verify' else 'backup-first-result.json')) if RESULT_DIRECTORY else '',
                   'strictAllChecksPassed': False, 'businessWritesPerformed': False, 'automaticRecoveryPerformed': False}
+        if result['mode'] == 'backup':
+            result['backupAttempt'] = BACKUP_ATTEMPT
         if RESULT_DIRECTORY:
             output = pathlib.Path(result['resultPath'])
             if not output.exists():

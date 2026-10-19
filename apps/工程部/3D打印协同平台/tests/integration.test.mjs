@@ -1,13 +1,46 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
-import {spawn} from 'node:child_process';import {mkdtemp,rm,readFile,writeFile,mkdir} from 'node:fs/promises';
+import {spawn} from 'node:child_process';import {once,EventEmitter} from 'node:events';import {mkdtemp,rm,readFile,writeFile,mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';import path from 'node:path';import {fileURLToPath} from 'node:url';import {DatabaseSync} from 'node:sqlite';import {randomUUID,createHash} from 'node:crypto';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
-for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,batches:1},{stock:35,batches:2}])test(`cloud production integration: permissions, scheduling, quality, restart; stock=${scenario.stock}, prepaid batches=${scenario.batches}`,async()=>{
- const dir=await mkdtemp(path.join(tmpdir(),'printlink-integrated-'));const port=33100+Math.floor(Math.random()*500),base=`http://127.0.0.1:${port}`;let processHandle,collector,logs='';
- async function launch(){processHandle=spawn(process.execPath,['start.mjs','--cloud-only'],{cwd:root,env:{...process.env,APP_MODE:'production',PLATFORM_DATA_DIR:dir,PORT:String(port),PRODUCTION_PORT:String(port+600),ADMIN_PASSWORD:'test-secret-123',COOKIE_SECURE:'false'},stdio:['ignore','pipe','pipe']});processHandle.stdout.on('data',x=>logs+=x);processHandle.stderr.on('data',x=>logs+=x);for(let i=0;i<80;i++){try{if((await fetch(base+'/api/health')).ok){await delay(200);return;}}catch{}await delay(100);}throw Error(logs);}
- async function stop(){if(processHandle){const p=processHandle;processHandle=null;p.kill('SIGTERM');await new Promise(r=>p.once('exit',r));}}
- async function request(route,{auth,data,method,token}={}){const r=await fetch(base+route,{method:method||(data?'POST':'GET'),headers:{'Content-Type':'application/json',...(auth?{Cookie:auth.cookie,'X-CSRF-Token':auth.csrf}:{}),...(token?{Authorization:'Bearer '+token}:{})},body:data?JSON.stringify(data):undefined});const text=await r.text();let body;try{body=JSON.parse(text);}catch{body=text;}return {status:r.status,body,headers:r.headers};}
+const exited=p=>p.exitCode!==null||p.signalCode!==null;
+function stopChild(p,{termMs=1500,killMs=1000}={}){
+ if(!p||exited(p))return Promise.resolve();
+ return new Promise((resolve,reject)=>{
+  let termTimer,deadline,settled=false;
+  const finish=error=>{if(settled)return;settled=true;clearTimeout(termTimer);clearTimeout(deadline);p.removeListener('exit',onExit);p.removeListener('error',onError);if(error)reject(error);else resolve();};
+  const onExit=()=>finish(),onError=error=>finish(error);
+  p.once('exit',onExit);p.once('error',onError);
+  if(exited(p)){finish();return;}
+  termTimer=setTimeout(()=>{try{p.kill('SIGKILL');}catch(error){finish(error);}},termMs);
+  deadline=setTimeout(()=>finish(Error('Fixture child did not exit after SIGTERM and SIGKILL')),termMs+killMs);
+  try{if(!p.kill('SIGTERM')&&exited(p))finish();}catch(error){finish(error);}
+ });
+}
+async function cleanupFixture(children,dir,primaryError,report=()=>{},options){
+ const results=await Promise.allSettled(children.map(child=>stopChild(child,options))),errors=results.filter(r=>r.status==='rejected').map(r=>r.reason);
+ if(!errors.length)try{await rm(dir,{recursive:true,force:true});}catch(error){errors.push(error);}
+ if(errors.length){
+  if(primaryError){primaryError.cleanupErrors=errors;report('Fixture cleanup also failed: '+errors.map(e=>e.message).join('; '));}
+  else throw new AggregateError(errors,'Fixture cleanup failed');
+ }
+}
+for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,batches:1},{stock:35,batches:2}])test(`cloud production integration: permissions, scheduling, quality, restart; stock=${scenario.stock}, prepaid batches=${scenario.batches}`,async t=>{
+ const dir=await mkdtemp(path.join(tmpdir(),'printlink-integrated-'));const port=33100+Math.floor(Math.random()*500),base=`http://127.0.0.1:${port}`;let processHandle,collector,primaryError,logs='';
+ async function launch(){
+  let spawnError;const child=spawn(process.execPath,['start.mjs','--cloud-only'],{cwd:root,env:{...process.env,APP_MODE:'production',PLATFORM_DATA_DIR:dir,PORT:String(port),PRODUCTION_PORT:String(port+600),ADMIN_PASSWORD:'test-secret-123',COOKIE_SECURE:'false'},stdio:['ignore','pipe','pipe']});processHandle=child;
+  child.once('error',error=>{spawnError=error;});child.stdout.on('data',x=>logs+=x);child.stderr.on('data',x=>logs+=x);
+  const deadline=Date.now()+10000;
+  const checkExit=()=>{if(spawnError||exited(child))throw Error('Fixture exited before ready: '+(spawnError?.message||String(child.exitCode??child.signalCode))+'\n'+logs);};
+  for(let i=0;i<80&&Date.now()<deadline;i++){
+   checkExit();let healthy=false;
+   try{const response=await fetch(base+'/api/health',{signal:AbortSignal.timeout(1000)});healthy=response.ok;await response.arrayBuffer();}catch{}
+   if(healthy){await delay(200);checkExit();return;}await delay(100);
+  }
+  checkExit();throw Error('Fixture startup timed out\n'+logs);
+ }
+ async function stop(){const p=processHandle;await stopChild(p);if(processHandle===p)processHandle=null;}
+ async function request(route,{auth,data,method,token}={}){const r=await fetch(base+route,{signal:AbortSignal.timeout(30000),method:method||(data?'POST':'GET'),headers:{'Content-Type':'application/json',...(auth?{Cookie:auth.cookie,'X-CSRF-Token':auth.csrf}:{}),...(token?{Authorization:'Bearer '+token}:{})},body:data?JSON.stringify(data):undefined});const text=await r.text();let body;try{body=JSON.parse(text);}catch{body=text;}return {status:r.status,body,headers:r.headers};}
  async function login(username='admin'){const r=await request('/api/login',{data:{username,password:username==='admin'?'test-secret-123':'member123'}});assert.equal(r.status,200);return {cookie:r.headers.get('set-cookie').split(';')[0],csrf:r.body.csrf};}
  try{
   await writeFile(path.join(dir,'production-source.json'),JSON.stringify({settings:null,products:[{id:'test-product',name:'测试产品',image:'data:image/png;base64,aGVsbG8='}],materials:[{id:'test-material',name:'PLA'}],inventory:{PLA:{stockG:scenario.stock}},records:{},schedules:[],maintenance:[],stockInLogs:[],miscExpenses:[]}));
@@ -22,10 +55,10 @@ for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,b
   assert.equal((await request('/api/production/legacy-import/apply',{auth:admin,data:{data:legacySource,fingerprint:'stale'}})).status,409);
   const imported=await request('/api/production/legacy-import/apply',{auth:admin,data:{data:legacySource,fingerprint:preview.body.fingerprint}});assert.equal(imported.status,200);assert.ok(imported.body.backupId);
   for(let refresh=0;refresh<3;refresh++){
-   const r=await fetch(base+'/api/production/data',{headers:{Cookie:admin.cookie,'Accept-Encoding':'gzip'}});
+   const r=await fetch(base+'/api/production/data',{signal:AbortSignal.timeout(30000),headers:{Cookie:admin.cookie,'Accept-Encoding':'gzip'}});
    assert.equal(r.headers.get('content-encoding'),'gzip');assert.equal((await r.json()).records['2026-09-01'].items.length,1);
   }
-  const plain=await fetch(base+'/api/production/data',{headers:{Cookie:admin.cookie,'Accept-Encoding':'identity'}});
+  const plain=await fetch(base+'/api/production/data',{signal:AbortSignal.timeout(30000),headers:{Cookie:admin.cookie,'Accept-Encoding':'identity'}});
   assert.equal(plain.headers.get('content-encoding'),null);assert.equal((await plain.json()).products.length,2);
   const compactData=await request('/api/production/data?view=compact',{auth:admin});
   assert.equal(compactData.headers.get('content-encoding'),'gzip');
@@ -38,7 +71,7 @@ for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,b
   const again=await request('/api/production/legacy-import/preview',{auth:admin,data:{data:legacySource}});assert.equal(again.body.summary.after.products,2);
   assert.equal((await request('/api/production/legacy-import/apply',{auth:admin,data:{data:legacySource,fingerprint:again.body.fingerprint}})).status,200);
   const snapDB=new DatabaseSync(path.join(dir,'production.sqlite'));assert.ok(snapDB.prepare('SELECT value FROM import_backups WHERE id=?').get(imported.body.backupId));snapDB.close();
-  const upload=await fetch(base+'/api/uploads',{method:'POST',headers:{Cookie:member.cookie,'X-CSRF-Token':member.csrf,'X-File-Name':'test.stl'},body:'solid test\nendsolid test'});assert.equal(upload.status,201);const file=await upload.json();
+  const upload=await fetch(base+'/api/uploads',{signal:AbortSignal.timeout(30000),method:'POST',headers:{Cookie:member.cookie,'X-CSRF-Token':member.csrf,'X-File-Name':'test.stl'},body:'solid test\nendsolid test'});assert.equal(upload.status,201);const file=await upload.json();
   const input={factory:'清溪',workshop:'A',customer:'测试',sku:'INTEGRATION',product:'整合测试件',quantity:2,material:'PLA',color:'白色',dueDate:'2026-12-01',engineer:'测试',follower:'测试',fileIds:[file.id]};
   const created=await request('/api/orders',{auth:member,data:input});assert.equal(created.status,201,JSON.stringify(created.body));const orderId=created.body.id;
   const sourceCatalog=(await request('/api/platform/catalog',{auth:admin})).body;
@@ -127,7 +160,7 @@ for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,b
   assert.equal((await request('/api/platform/jobs/'+id,{auth:admin,method:'PATCH',data:{action:'resync'}})).status,200);
   assert.equal((await request('/api/production/data',{auth:admin})).body.inventory[material.name].stockG,material.stockG-24,'restart and late-batch retries must preserve the single inventory debit');
   // An order manually marked as printing can be explicitly linked without regression.
-  const extraUpload=await fetch(base+'/api/uploads',{method:'POST',headers:{Cookie:admin.cookie,'X-CSRF-Token':admin.csrf,'X-File-Name':'link.stl'},body:'solid link\nendsolid link'});
+  const extraUpload=await fetch(base+'/api/uploads',{signal:AbortSignal.timeout(30000),method:'POST',headers:{Cookie:admin.cookie,'X-CSRF-Token':admin.csrf,'X-File-Name':'link.stl'},body:'solid link\nendsolid link'});
   assert.equal(extraUpload.status,201);const extraFile=await extraUpload.json();
   const extraOrder=await request('/api/orders',{auth:admin,data:{...input,fileIds:[extraFile.id]}});assert.equal(extraOrder.status,201);
   for(const status of ['待排产','打印中'])assert.equal((await request('/api/orders/'+extraOrder.body.id,{auth:admin,method:'PATCH',data:{status,follower:'测试',replyDate:'2026-11-30'}})).status,200);
@@ -191,6 +224,27 @@ for(const scenario of [{stock:1000,batches:1},{stock:1000,batches:2},{stock:35,b
   collector=spawn(process.execPath,['collector/agent.mjs'],{cwd:root,env:{...process.env,COLLECTOR_CONFIG:conf,COLLECTOR_DATA_DIR:agentDir},stdio:'ignore'});
   for(let i=0;i<40;i++){const database=new DatabaseSync(path.join(dir,'orders/printlink.sqlite'));const done=database.prepare('SELECT id FROM collector_events WHERE id=?').get(replay);database.close();if(done)break;await delay(150);}
   const check=new DatabaseSync(path.join(dir,'orders/printlink.sqlite'));assert.ok(check.prepare('SELECT id FROM collector_events WHERE id=?').get(replay));check.close();
- }finally{if(collector){collector.kill();await new Promise(r=>collector.once('exit',r));}await stop();await rm(dir,{recursive:true,force:true});}
+ }catch(error){primaryError=error;throw error;}finally{await cleanupFixture([collector,processHandle],dir,primaryError,message=>t.diagnostic(message));}
 });
 test('vendored scripts match original SRI hashes',async()=>{for(const [file,expected]of [['chart.js','9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4'],['xlsx.js','OUW9euuUyxyHcAhTqbhI+Iyb8LMssXt/cpz0yXhs9UWG2/R/uaWdakx/4cfww7Vb']])assert.equal(createHash('sha384').update(await readFile(path.join(root,'production',file))).digest('base64'),expected);});
+
+test('integration fixture cleanup handles exited, live and SIGTERM-resistant children',async t=>{
+ const children=[],dir=await mkdtemp(path.join(tmpdir(),'printlink-child-cleanup-'));let primaryError;
+ try{
+  const done=spawn(process.execPath,['-e','process.exit(7)'],{stdio:'ignore'});children.push(done);await once(done,'exit',{signal:AbortSignal.timeout(3000)});await stopChild(done);assert.equal(done.exitCode,7);
+  const live=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});children.push(live);await once(live,'spawn',{signal:AbortSignal.timeout(3000)});await stopChild(live);assert.equal(live.signalCode,'SIGTERM');
+  const resistant=spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{});console.log('ready');setInterval(()=>{},1000)"],{stdio:['ignore','pipe','ignore']});children.push(resistant);
+  await once(resistant.stdout,'data',{signal:AbortSignal.timeout(3000)});await stopChild(resistant,{termMs:100,killMs:1000});assert.equal(resistant.signalCode,'SIGKILL');
+  for(const p of children){assert.equal(p.listenerCount('exit'),0);assert.equal(p.listenerCount('error'),0);}
+ }catch(error){primaryError=error;throw error;}finally{await cleanupFixture(children,dir,primaryError,message=>t.diagnostic(message),{termMs:100,killMs:1000});}
+});
+test('integration fixture cleanup has a hard deadline and preserves the original failure',async()=>{
+ const child=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null,kill:()=>false}),primary=new Error('original fixture failure'),diagnostics=[];
+ const dir=await mkdtemp(path.join(tmpdir(),'printlink-cleanup-proof-'));
+ try{
+  await assert.rejects(async()=>{try{throw primary;}finally{await cleanupFixture([child],dir,primary,message=>diagnostics.push(message),{termMs:10,killMs:10});}},error=>error===primary);
+  assert.equal(primary.cleanupErrors.length,1);assert.match(primary.cleanupErrors[0].message,/SIGTERM and SIGKILL/);assert.equal(diagnostics.length,1);
+  assert.equal(child.listenerCount('exit'),0);assert.equal(child.listenerCount('error'),0);
+  await assert.rejects(cleanupFixture([child],dir,null,()=>{},{termMs:10,killMs:10}),/Fixture cleanup failed/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});

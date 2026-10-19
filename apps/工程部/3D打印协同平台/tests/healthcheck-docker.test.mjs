@@ -6,7 +6,7 @@ import {randomBytes} from 'node:crypto';
 const sourceImage = process.env.PRINTLINK_HEALTH_TEST_DOCKER_IMAGE;
 function docker(args, input) {
   const result = spawnSync('docker', args, {encoding: 'utf8', input, timeout: 30000, maxBuffer: 1024 * 1024});
-  assert.equal(result.status, 0, `Owned Docker fixture failed: ${result.error?.code || result.status}`);
+  assert.equal(result.status, 0, `Owned Docker ${args[0]} fixture failed: ${result.error?.code || result.status}`);
   return result.stdout.trim();
 }
 
@@ -40,7 +40,9 @@ test('Docker timing out a direct healthcheck leaves no accumulated Node processe
     assert.ok(state.failures >= 3);
     assert.equal(state.oom, false);
     assert.equal(state.restarts, 0);
-    const processes = docker(['top', container, '-eo', 'args']).split('\n').slice(1);
+    // Docker uses the PID column to filter host ps output to this container.
+    const processes = docker(['top', container, '-eo', 'pid,args']).split('\n').slice(1)
+      .map(line => line.replace(/^\s*\d+\s+/, ''));
     const probes = processes.filter(line => /(?:^|\/)node ops\/healthcheck\.mjs$/.test(line.trim()));
     // At most the single healthcheck currently running is present; all earlier
     // timed-out checks must have exited, while the synthetic listener survives.

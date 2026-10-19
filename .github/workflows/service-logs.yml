@@ -1,4 +1,4 @@
-name: Reviewed Batch Post-Deploy Data and Code Acceptance V3
+name: Reviewed Final Code Acceptance V4
 on:
   workflow_dispatch:
     inputs:
@@ -15,7 +15,7 @@ concurrency:
 env:
   RELEASE_POST_WORKFLOW_FROZEN: 'true'
   RELEASE_VERIFY_HELPER_SHA256: '6748311ec6ddeec8c9ac2d11dbc4d1b5d22ef3478362470aaea64664f3b3487c'
-  RELEASE_ACCEPTANCE_HELPER_SHA256: 'a548a856b460808428261db4349081c261d64dfd315631975c20507eb15c47ca'
+  RELEASE_ACCEPTANCE_HELPER_SHA256: '38ac73550e56cda427e247659b3ce0553657c546ed918c85084a1e3804d1daa9'
   RELEASE_ENVIRONMENT_PROOF_SHA256: '6294323fec201ebb1929fada673f99de6b824a546898c9052843a81fe2f6f1d7'
 jobs:
   reviewed-post-deploy-operation:
@@ -68,7 +68,7 @@ jobs:
                 release_arguments=(verify)
                 ;;
               acceptance)
-                git show "$RELEASE_SHA:deploy/ops/release-code-acceptance-v3.py" > "$release_private_tmp/run.py" 2>/dev/null || exit 1
+                git show "$RELEASE_SHA:deploy/ops/release-code-acceptance-v4.py" > "$release_private_tmp/run.py" 2>/dev/null || exit 1
                 release_expected_sha="$RELEASE_ACCEPTANCE_HELPER_SHA256"
                 release_arguments=()
                 ;;

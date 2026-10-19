@@ -107,7 +107,7 @@ class MailWorkerTests(unittest.TestCase):
         self.assertEqual(result["attachments"][0]["size"], count * 57)
         self.assertEqual(result["attachments"][0]["sha256"], expected.hexdigest())
         self.assertEqual(self.run_entry(VALID)["status"], "parsed")
-        self.assertEqual(mail_worker.WORKER_ADDRESS_SPACE, 256 * 1024**2)
+        self.assertEqual(mail_worker.WORKER_ADDRESS_SPACE, 320 * 1024**2)
         self.assertEqual(mail_worker.WORKER_SECONDS, 18)
         self.assertEqual(mail_worker.MAX_RESULT_BYTES, 1024**2)
         del result, raw, held
@@ -127,7 +127,7 @@ class MailWorkerTests(unittest.TestCase):
                 parse_email_entries([{"filename": "synthetic.eml", "raw": message.as_bytes()}], "Huadeng")
 
     @unittest.skipUnless(sys.platform == "linux", "Linux actual AS/cgroup memory pressure coverage")
-    def test_full_parent_and_near_48m_batch_survive_256m_worker_limit(self):
+    def test_full_parent_and_near_48m_batch_survive_320m_worker_limit(self):
         # app.main is already loaded in this parent, including all production
         # parser libraries. Retain an actual 40MiB + almost 8MiB batch while its
         # first raw body also enters the disposable supervisor/worker pipeline.
@@ -188,8 +188,8 @@ class MailWorkerTests(unittest.TestCase):
                     self.assertEqual(observed.get("failure_kind"), "parse_memory")
                     self.assertTrue(marker.is_file())
                     evidence = json.loads(marker.read_text())
-                    self.assertEqual(evidence["addressSpaceLimitBytes"], 256 * 1024**2)
-                    self.assertGreater(evidence["workerPeakRSSKiB"], 180 * 1024)
+                    self.assertEqual(evidence["addressSpaceLimitBytes"], 320 * 1024**2)
+                    self.assertGreater(evidence["workerPeakRSSKiB"], 240 * 1024)
                     self.assertGreater(len(latencies), 1)
                     self.assertLess(max(latencies), 1)
                     self.assertEqual(self.run_entry(VALID)["status"], "parsed")

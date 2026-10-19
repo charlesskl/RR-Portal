@@ -12,7 +12,10 @@ from urllib.parse import quote
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
-from pydantic import BaseModel, Field
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+from pydantic import BaseModel, Field, field_validator
+from typing import Annotated
 from fastapi.responses import Response
 
 from .factory_workbook import parse_factory_workbook
@@ -26,12 +29,24 @@ from .shipment_export import build_completed_shipment_summary_workbook, build_in
 from .product_workbook import parse_product_workbook
 from .inventory_writeback import build_inventory_writeback
 from .destination_country import infer_destination_country
-from .mailbox import MailboxControl, fetch_mailbox, test_mailbox_connection
+from .mailbox import MailboxControl, MailboxUidValidityChanged, fetch_mailbox, selected_mailbox_uids, test_mailbox_connection
 from .mail_worker import parse_isolated
 
 PARSER_VERSION = "voyageplex-rules-0.1.3+cargo-notification"
 app = FastAPI(title="VoyagePlex Email Parser", version=PARSER_VERSION)
 _mail_poll_gate = threading.Lock()
+
+
+@app.exception_handler(RequestValidationError)
+async def mailbox_validation_error(request, error):
+    if not request.url.path.startswith("/v1/mailbox/"):
+        return await request_validation_exception_handler(request, error)
+    # A missing-field error normally includes the whole JSON body, including
+    # auth_code. Mailbox callers only need the invalid field and safe reason.
+    details = [{key: value for key, value in item.items() if key in {"type", "loc", "msg"}}
+               for item in error.errors()]
+    return Response(content=json.dumps({"detail": details}, ensure_ascii=False),
+                    status_code=422, media_type="application/json")
 
 
 class PersonalMailboxRequest(BaseModel):
@@ -42,6 +57,19 @@ class PersonalMailboxRequest(BaseModel):
     auth_code: str = Field(max_length=1024)
     host: str = Field(default="imap.exmail.qq.com", max_length=253)
     folder: str = Field(default="INBOX", max_length=100)
+
+
+MailboxUid = Annotated[int, Field(strict=True, gt=0, le=4294967295)]
+
+
+class RetryMailboxRequest(PersonalMailboxRequest):
+    selected_uids: list[MailboxUid] = Field(min_length=1, max_length=5)
+    expected_uid_validity: MailboxUid
+
+    @field_validator("selected_uids")
+    @classmethod
+    def unique_selected_uids(cls, values):
+        return selected_mailbox_uids(values)
 
 
 @app.post("/v1/mailbox/test")
@@ -61,6 +89,13 @@ async def poll_personal_mailbox(payload: PersonalMailboxRequest):
                               {"address": payload.address, "auth_code": payload.auth_code, "host": payload.host, "folder": payload.folder})
 
 
+@app.post("/v1/mailbox/retry")
+async def retry_personal_mailbox(payload: RetryMailboxRequest):
+    return await poll_mailbox(payload.after_uid, payload.start_date, payload.company,
+                              {"address": payload.address, "auth_code": payload.auth_code, "host": payload.host, "folder": payload.folder},
+                              payload.selected_uids, payload.expected_uid_validity)
+
+
 async def _mail_thread(function, args, control):
     task = asyncio.create_task(asyncio.to_thread(function, *args))
     control.tasks.append(task)
@@ -77,14 +112,14 @@ async def _mail_thread(function, args, control):
         raise
 
 
-async def poll_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: str = "Xingxin", credentials: dict | None = None):
+async def poll_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: str = "Xingxin", credentials: dict | None = None, selected_uids: list[int] | None = None, expected_uid_validity: int | None = None):
     if after_uid < 0:
         return Response(content='{"error":"after_uid 无效"}', status_code=400, media_type="application/json")
     if not _mail_poll_gate.acquire(blocking=False):
         return Response(content='{"error":"邮箱读取正在进行，请稍后重试"}', status_code=429, media_type="application/json")
     control = MailboxControl()
     try:
-        return await asyncio.wait_for(_poll_mailbox(after_uid, start_date, company, credentials, control), timeout=150)
+        return await asyncio.wait_for(_poll_mailbox(after_uid, start_date, company, credentials, control, selected_uids, expected_uid_validity), timeout=150)
     except asyncio.TimeoutError:
         return Response(content='{"error":"本轮邮箱读取超时，请稍后重试"}', status_code=504, media_type="application/json")
     finally:
@@ -103,10 +138,13 @@ async def poll_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", compa
                 task.add_done_callback(completed)
 
 
-async def _poll_mailbox(after_uid, start_date, company, credentials, control):
+async def _poll_mailbox(after_uid, start_date, company, credentials, control, selected_uids=None, expected_uid_validity=None):
     deadline = time.monotonic() + 150
     try:
-        mailbox = await _mail_thread(fetch_mailbox, (after_uid, start_date, company, credentials, control), control)
+        fetch_args = (after_uid, start_date, company, credentials, control)
+        if selected_uids is not None:
+            fetch_args += (selected_uids, expected_uid_validity)
+        mailbox = await _mail_thread(fetch_mailbox, fetch_args, control)
         if not mailbox["configured"]:
             return {"configured": False, "items": []}
         items = []
@@ -125,12 +163,16 @@ async def _poll_mailbox(after_uid, start_date, company, credentials, control):
                 item = {"filename": f'mail-{entry["uid"]}.eml', "status": "failed", "error": entry["error"],
                         "failure_kind": entry.get("failure_kind", "body_read")}
             items.append({**item, "mailbox_uid": entry["uid"],
-                          "mailbox_received_at": entry["received_at"], "retryable": entry.get("retryable", False)})
-            if entry.get("retryable") and not entry["received_at"]:
+                          "mailbox_received_at": entry["received_at"],
+                          "retryable": entry.get("retryable", False)})
+            if entry.get("retryable"):
                 blocked_uid = entry["uid"]
                 break
         return {"configured": True, "address": mailbox["address"],
                 "uid_validity": mailbox["uid_validity"], "items": items, "blocked_uid": blocked_uid}
+    except MailboxUidValidityChanged:
+        return Response(content='{"error":"邮箱 UIDVALIDITY 已变化，无法安全重试原邮件"}',
+                        status_code=409, media_type="application/json")
     except Exception:
         return Response(content='{"error":"邮箱连接或读取失败，请检查账号、授权码和网络"}',
                         status_code=502, media_type="application/json")

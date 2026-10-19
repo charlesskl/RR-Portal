@@ -1007,6 +1007,28 @@ app.MapPost("/api/imports/email/mailbox/sync", async (HttpContext context, Mailb
     { return Results.Json(new { error = "邮箱同步失败，已保留同步断点，请稍后重试或联系管理员" }, statusCode: 502); }
 });
 
+app.MapPost("/api/imports/email/mailbox/retry-failed", async (JsonObject payload, HttpContext context,
+    AppDbContext db, MailboxSyncService sync, CancellationToken cancellationToken) =>
+{
+    if (context.Items["CurrentUser"] is not AppUser { Role: "admin" })
+        return Results.Json(new { error = "只有管理员可以重试失败邮件" }, statusCode: 403);
+    if (db.Company != "Huadeng" || db.MailOwnerId is null or <= 0)
+        return Results.BadRequest(new { error = "请先选择华登船务员邮箱" });
+    if (payload["itemIds"] is not JsonArray ids || ids.Count is < 1 or > 5 ||
+        ids.Any(value => value is not JsonValue number || !number.TryGetValue<long>(out var id) || id <= 0))
+        return Results.BadRequest(new { error = "请选择1至5封不同的失败邮件" });
+    var itemIds = ids.Select(value => value!.GetValue<long>()).ToArray();
+    if (itemIds.Distinct().Count() != itemIds.Length)
+        return Results.BadRequest(new { error = "请选择1至5封不同的失败邮件" });
+    try { return Results.Ok(await sync.RetryFailedAsync(itemIds, cancellationToken, db.Company, db.MailOwnerId)); }
+    catch (MailboxRetryRejectedException error)
+    { return Results.Json(new { error = error.Message }, statusCode: error.StatusCode); }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    { return Results.Json(new { error = "邮箱重试请求超时，已保留原邮件与同步断点" }, statusCode: 504); }
+    catch (Exception) when (!cancellationToken.IsCancellationRequested)
+    { return Results.Json(new { error = "邮箱重试失败，已保留原邮件与同步断点，请联系管理员" }, statusCode: 502); }
+});
+
 app.MapPost("/api/imports/email/split-preview", (JsonObject payload) =>
 {
     try

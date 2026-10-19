@@ -23,6 +23,19 @@ public sealed class EmailParserClient(HttpClient httpClient, VoyagePlex.Api.Data
         return new ParserResponse((int)response.StatusCode, "application/json", await response.Content.ReadAsStringAsync(timeout.Token));
     }
 
+    public async Task<ParserResponse> RetryMailboxAsync(IReadOnlyList<long> selectedUids, long expectedUidValidity,
+        ServerMailboxCredentials credentials, CancellationToken cancellationToken)
+    {
+        using var response = await httpClient.PostAsJsonAsync("/v1/mailbox/retry", new
+        {
+            company = "Huadeng", selected_uids = selectedUids, expected_uid_validity = expectedUidValidity,
+            address = credentials.Address, auth_code = credentials.AuthCode, host = credentials.Host, folder = credentials.Folder
+        }, cancellationToken);
+        return new ParserResponse((int)response.StatusCode,
+            response.Content.Headers.ContentType?.ToString() ?? "application/json",
+            await response.Content.ReadAsStringAsync(cancellationToken));
+    }
+
     public async Task<ParserResponse> ParseBatchAsync(
         IReadOnlyList<IFormFile> files,
         CancellationToken cancellationToken)

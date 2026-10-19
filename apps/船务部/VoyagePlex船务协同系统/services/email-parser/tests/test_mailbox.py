@@ -145,7 +145,7 @@ class MailboxTests(unittest.TestCase):
             with self.assertRaises(imaplib.IMAP4.error):
                 fetch_mailbox(credentials={"address": "shipping@example.com", "auth_code": "test-code"})
 
-    def test_single_message_fetch_failure_does_not_abort_batch(self):
+    def test_transient_body_failure_preserves_date_and_blocks_later_uids(self):
         class FlakyImap(FakeImap):
             def uid(self, command, *args):
                 if command == "FETCH" and int(args[0]) == 11 and args[1] == "(BODY.PEEK[])":
@@ -157,13 +157,13 @@ class MailboxTests(unittest.TestCase):
             "VOYAGEPLEX_MAIL_AUTH_CODE": "test-code",
         }, clear=True), patch("app.mailbox.BoundedImap", return_value=FlakyImap()):
             result = fetch_mailbox(after_uid=10)
-        self.assertEqual([item["uid"] for item in result["messages"]], [11, 12])
-        failed, ok = result["messages"]
+        self.assertEqual([item["uid"] for item in result["messages"]], [11])
+        failed = result["messages"][0]
         self.assertIsNone(failed["raw"])
         self.assertIn("正文读取失败", failed["error"])
         self.assertEqual(failed["received_at"], "2026-09-17T16:30:00+00:00")
-        self.assertEqual(ok["error"], "")
-        self.assertIsNotNone(ok["raw"])
+        self.assertTrue(failed["retryable"])
+        self.assertEqual(result["blocked_uid"], 11)
 
 
 

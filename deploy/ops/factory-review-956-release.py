@@ -1,9 +1,9 @@
 """PR956 two-service factory-review deployment and sealed read-only verification. Draft gates false."""
 import contextlib,datetime,html.parser,sqlite3,hashlib,importlib.util,json,os,pathlib,re,signal,stat,subprocess,sys,time,urllib.request,urllib.error
 ROOT=pathlib.Path('/opt/rr-portal');BASE='062b5d40441098f3e1e4ccdf44b9aca9d9d730c7';TARGET='6eece9ec6802533c077dd53d46e89902ffb4e90f';TREE='c63d0231e7eef47b9bccdbf8cb6efc02b9ee3572'
-BRANCH='refs/heads/ops/factory-review-956-20261020';DEPLOY_PIN=True;VERIFY_PIN=False
+BRANCH='refs/heads/ops/factory-review-956-20261020';DEPLOY_PIN=False;VERIFY_PIN=True
 BACKUP=ROOT/'deploy/backups/factory-review-956-20261020-backup';BACKUP_MANIFEST='bf4feaad52bfcc875459a0cfdd681a5a4b438d39be0cff6c15a73cc167d34eba';BACKUP_RESULT='eca7930fdd15e05c5146a6ff631ede907417577851d8c9f0c099206b1bd0420e'
-DEPLOY=BACKUP.with_name('factory-review-956-20261020-deploy');VERIFY=BACKUP.with_name('factory-review-956-20261020-verify');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+DEPLOY=BACKUP.with_name('factory-review-956-20261020-deploy');VERIFY=BACKUP.with_name('factory-review-956-20261020-verify');DEPLOY_MANIFEST='406556714295a8fa000731ceb229262466f19b4c25f7582fb4873a071cf87e4a';DEPLOY_RESULT='6d0ff65eba44e529f96e001c8b60fd0871f502b1ac533d2901ffde59487bbf37'
 CORE_SHA='d683b299bc142f88c16b7efbbe99572c4b096fb02b58c8e80480b0fdd45ec498'
 SOURCE_MANIFEST_SHA='33a4b65d65eb8686c932105f467fe12c5e28fbc47d16bc2e2d3b1596014da61d'
 STAGE='preflight';CORE=None;OUT=None;ENV=None

@@ -59,3 +59,78 @@ test('cloud rollback is atomic and a different bridge instance cannot take over'
  input.remote.inventory.PETG.stockG=900;failWrite=true;assert.throws(()=>sync(input),/disk full/);assert.equal(load().inventory.PETG.stockG,1000);assert.equal(db.prepare('SELECT COUNT(*) n FROM business_sync_backups').get().n,backupsBefore);
  failWrite=false;assert.equal(sync(input).ok,true);assert.equal(sync(input).ok,true);assert.equal(load().inventory.PETG.stockG,900);db.close();delete process.env.BUSINESS_SYNC_STATION;
 });
+
+test('keep both preserves colliding products, images and source-side references without touching stock',()=>{
+ const base=doc(),cloud=doc(),windows=doc();
+ cloud.products['658']={id:658,name:'车轮47705',image:'data:image/png;base64,cloud'};
+ cloud.products['659']={id:659,name:'47756A自卸卡车'};
+ windows.products['658']={id:658,name:'老奶奶眼睛底模',image:'data:image/png;base64,windows'};
+ windows.products['659']={id:659,name:'71137眼镜蛇身前段身'};
+ windows.products['900']={id:900,name:'占用编号'};
+ cloud.days['2026-10-16']={off:false};windows.days['2026-10-16']={off:false};
+ cloud.records.c={_id:'c',date:'2026-10-16',productId:658};
+ windows.records.w={_id:'w',date:'2026-10-16',productId:'658'};
+ windows.schedules['3']={id:3,productId:659};
+ const conflicts=core.merge(base,cloud,windows);
+ const choices=resolve(conflicts,'both'),result=core.merge(base,cloud,windows,choices);
+ assert.equal(result.conflicts.length,0);
+ assert.equal(result.data.products['658'].name,'车轮47705');
+ assert.equal(result.data.products['901'].name,'老奶奶眼睛底模');
+ assert.equal(result.data.products['901'].image,windows.products['658'].image);
+ assert.equal(result.data.products['902'].name,'71137眼镜蛇身前段身');
+ assert.equal(result.data.records.c.productId,658);assert.equal(result.data.records.w.productId,'901');
+ assert.equal(result.data.schedules['3'].productId,902);assert.deepEqual(result.data.inventory,base.inventory);
+ assert.deepEqual(core.project(core.apply({},result.data)),result.data);
+ assert.equal(windows.products['658'].id,658,'input is not mutated');
+ // Lost response followed by a new Windows edit must reuse the allocated ID.
+ windows.products['658'].price=7;
+ const retry=core.merge(base,result.data,windows,{},result.productRemaps);
+ assert.equal(Object.keys(retry.data.products).length,6);
+ assert.equal(retry.conflicts.length,1);assert.deepEqual(retry.conflicts[0].path,['products','901']);
+ const resolved=core.merge(base,result.data,windows,resolve(retry,'windows'),result.productRemaps);
+ assert.equal(resolved.conflicts.length,0);assert.equal(resolved.data.products['901'].price,7);
+ const ack=core.merge(resolved.data,resolved.data,resolved.data,{},result.productRemaps);
+ assert.equal(ack.conflicts.length,0);assert.deepEqual(ack.productRemaps,[]);
+});
+
+test('keep both choice expires on edits and cannot split existing shared products or inventory',()=>{
+ const base=doc(),cloud=doc(),windows=doc();cloud.products['2']={id:2,name:'云产品'};windows.products['2']={id:2,name:'现场产品'};
+ const choices=resolve(core.merge(base,cloud,windows),'both');windows.products['2'].name='已修改';
+ assert.equal(core.merge(base,cloud,windows,choices).conflicts.length,1);
+ cloud.inventory.PETG.stockG=900;windows.inventory.PETG.stockG=800;
+ const result=core.merge(base,cloud,windows);const merged=core.merge(base,cloud,windows,resolve(result,'both'));
+ assert.equal(merged.conflicts.length,1);assert.equal(merged.conflicts[0].path[0],'inventory');
+});
+
+test('product split mapping survives server restart and lost response without duplicating products',()=>{
+ process.env.BUSINESS_SYNC_STATION='test';const db=new DatabaseSync(':memory:');
+ try{
+ db.exec('CREATE TABLE snapshot(value TEXT)');const initial=snapshot();initial.products.push({id:658,name:'云产品'});
+ db.prepare('INSERT INTO snapshot VALUES (?)').run(JSON.stringify(initial));
+ const load=()=>JSON.parse(db.prepare('SELECT value FROM snapshot').get().value),write=x=>db.prepare('UPDATE snapshot SET value=?').run(JSON.stringify(x));
+ let sync=createSync(db,{load,write});const remote=doc();remote.products['658']={id:658,name:'现场产品'};
+ const input={action:'exchange',station:'test',clientId:'11111111-1111-1111-1111-111111111111',base:doc(),remote};
+ assert.equal(sync(input).ok,false);
+ sync({action:'resolve',choices:sync({action:'status'}).conflicts.map(c=>({id:c.id,signature:c.signature,side:'both'}))});
+ assert.equal(sync(input).ok,true);assert.equal(load().products.length,3);
+ sync=createSync(db,{load,write});assert.equal(sync(input).ok,true);assert.equal(load().products.length,3);
+ remote.days['2026-10-16']={off:false};remote.records.new={_id:'new',date:'2026-10-16',productId:658};
+ assert.equal(sync(input).ok,true);assert.equal(load().products.length,3);
+ assert.equal(load().records['2026-10-16'].items[0].productId,659);
+ }finally{db.close();delete process.env.BUSINESS_SYNC_STATION;}
+});
+
+test('first reconciliation can keep both products without approving unrelated differences',()=>{
+ const cloud=doc(),windows=doc();cloud.products['658']={id:658,name:'云产品'};windows.products['658']={id:658,name:'现场产品'};windows.inventory.PETG.stockG=800;
+ const initial=core.merge(null,cloud,windows),choices=Object.fromEntries(initial.conflicts.filter(core.canKeepBoth).map(c=>[c.id,{signature:c.signature,side:'both'}]));
+ const result=core.merge(null,cloud,windows,choices);
+ assert.equal(result.data.products['658'].name,'云产品');assert.equal(result.data.products['659'].name,'现场产品');
+ assert.equal(result.conflicts.length,1);assert.equal(result.conflicts[0].path[0],'inventory');
+});
+
+test('a newly occupied remap target stops retry instead of confusing unrelated products',()=>{
+ const base=doc(),cloud=doc(),windows=doc();cloud.products['658']={id:658,name:'云产品'};windows.products['658']={id:658,name:'现场产品'};
+ const initial=core.merge(base,cloud,windows),split=core.merge(base,cloud,windows,resolve(initial,'both'));
+ windows.products['659']={id:659,name:'另一新增产品'};
+ assert.throws(()=>core.merge(base,split.data,windows,{},split.productRemaps),/占用/);
+});

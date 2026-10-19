@@ -18,8 +18,26 @@ function project(data){
  return clean(out);
 }
 function fingerprint(data){const hash=createHash('sha256');for(const part of jsonStream.parts(clean(data)))hash.update(part);return hash.digest('hex');}
+// A product collision can only be split by an explicit, signature-bound choice.
+const canKeepBoth=c=>c.path?.length===2&&c.path[0]==='products'&&c.baseMissing&&!c.cloudMissing&&!c.windowsMissing&&!c.cloud?._deleted&&!c.windows?._deleted;
+function remapProduct(doc,from,to){
+ const row=doc.products[from];delete doc.products[from];doc.products[String(to)]={...row,id:to};
+ // References in business JSON belong to their source side. Names and images stay intact.
+ function visit(value){if(!value||typeof value!=='object')return;for(const [key,child]of Object.entries(value)){if(key==='productId'&&String(child)===String(from))value[key]=typeof child==='string'?String(to):to;else visit(child);}}
+ visit(doc);
+}
 // Three-way merge: simultaneous changes to a field never silently win.
-function merge(base,cloud,windows,choices={}){
+function merge(base,cloud,windows,choices={},productRemaps=[]){
+ windows=structuredClone(windows);
+ const remaps=productRemaps.filter(m=>!base?.products?.[String(m.to)]);
+ for(const m of remaps){
+  if(!windows.products?.[m.from])continue;
+  if(windows.products?.[String(m.to)]){
+   if(!equal(windows.products[m.from],cloud.products?.[m.from])&&!equal(windows.products[String(m.to)],cloud.products?.[String(m.to)]))throw Error('产品重编号目标已被现场其他产品占用，请核对产品 '+m.to);
+  }else remapProduct(windows,m.from,m.to);
+ }
+ // Allocate above both catalogs, including tombstones; never reuse an existing ID.
+ let nextId=0;for(const d of [base,cloud,windows])for(const id of Object.keys(d?.products||{})){const n=Number(id);if(Number.isSafeInteger(n))nextId=Math.max(nextId,n);}
  const conflicts=[];const absent=undefined;
  function walk(b,c,w,path){
   const object=v=>v&&typeof v==='object'&&!Array.isArray(v);
@@ -31,12 +49,35 @@ function merge(base,cloud,windows,choices={}){
   if(equal(c,w)&&!concurrentStock)return c;
   if(base){if(equal(c,b))return w;if(equal(w,b))return c;}
   const id=JSON.stringify(path),signature=fingerprint({base:[b!==undefined,b??null],cloud:[c!==undefined,c??null],windows:[w!==undefined,w??null]});
-  if(choices[id]?.signature===signature&&['cloud','windows'].includes(choices[id].side))return choices[id].side==='cloud'?c:w;
+  if(choices[id]?.signature===signature){
+   if(['cloud','windows'].includes(choices[id].side))return choices[id].side==='cloud'?c:w;
+   if(choices[id].side==='both'&&canKeepBoth({path,baseMissing:b===undefined,cloudMissing:c===undefined,windowsMissing:w===undefined,cloud:c,windows:w})){
+    if(!Number.isSafeInteger(++nextId))throw Error('产品编号超出安全范围');
+    remaps.push({from:path[1],to:nextId});return c;
+   }
+  }
   conflicts.push({id,path,signature,base:b??null,cloud:c??null,windows:w??null,baseMissing:b===undefined,cloudMissing:c===undefined,windowsMissing:w===undefined});return c;
  }
  // First connection has no trustworthy common baseline. Existing differences require review.
  const initial=base||Object.fromEntries(Object.keys(cloud).map(k=>[k,{}]));
- const result=walk(initial,cloud,windows,[]);return {data:result,conflicts};
+ let result=walk(initial,cloud,windows,[]);
+ // Re-run after remapping so every reference participates in the ordinary three-way merge.
+ if(remaps.length>productRemaps.filter(m=>!base?.products?.[String(m.to)]).length){
+  const mapped=structuredClone(windows);
+  for(const m of remaps)if(mapped.products?.[m.from]&&!mapped.products?.[String(m.to)])remapProduct(mapped,m.from,m.to);
+  let merged=merge(base,cloud,mapped,choices);
+  if(!base){
+   // The explicit split also approves its two one-sided product rows on first reconciliation.
+   const splitChoices={...choices};
+   for(const c of merged.conflicts)if(c.path.length===2&&c.path[0]==='products'){
+    const side=remaps.some(m=>m.from===c.path[1])?'cloud':remaps.some(m=>String(m.to)===c.path[1])?'windows':null;
+    if(side)splitChoices[c.id]={signature:c.signature,side};
+   }
+   merged=merge(base,cloud,mapped,splitChoices);
+  }
+  return {...merged,productRemaps:remaps};
+ }
+ return {data:result,conflicts,productRemaps:remaps};
 }
 function validateKeys(value){if(!value||typeof value!=='object')return;for(const [key,child]of Object.entries(value)){if(!safeKey(key)||ignored.has(key)||blocked.test(key))throw Error('同步文档含有保留字段：'+key);validateKeys(child);}}
 function apply(original,doc){
@@ -53,4 +94,4 @@ function apply(original,doc){
  result.settings={...original.settings};for(const k of settingKeys)delete result.settings[k];Object.assign(result.settings,doc.settings);result._snapshotUpdatedAt=stamp;
  if(!equal(project(result),clean(doc)))throw Error('同步文档含有不支持的字段或格式');return result;
 }
-module.exports={project,apply,merge,fingerprint};
+module.exports={project,apply,merge,fingerprint,canKeepBoth};

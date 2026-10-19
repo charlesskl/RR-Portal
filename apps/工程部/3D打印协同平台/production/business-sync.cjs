@@ -8,7 +8,7 @@ module.exports=function createBusinessSync(store,{load,write}){
   if(input.action==='status')return {lastSuccess:state.lastSuccess,conflicts:state.conflicts||[],active:process.env.BUSINESS_SYNC_STATION||null};
   if(input.action==='resolve'){
    if(!Array.isArray(input.choices))throw Error('请选择冲突处理方式');
-   state.choices||={};for(const choice of input.choices){const c=state.conflicts?.find(c=>c.id===choice.id&&c.signature===choice.signature);if(!c||!['cloud','windows'].includes(choice.side))throw Error('冲突已变化，请刷新');state.choices[c.id]={signature:c.signature,side:choice.side};}put(state);return {ok:true};
+   state.choices||={};for(const choice of input.choices){const c=state.conflicts?.find(c=>c.id===choice.id&&c.signature===choice.signature);if(!c||!(['cloud','windows'].includes(choice.side)||choice.side==='both'&&core.canKeepBoth(c)))throw Error('冲突已变化，请刷新');state.choices[c.id]={signature:c.signature,side:choice.side};}put(state);return {ok:true};
   }
   if(!['exchange','probe'].includes(input.action))throw Error('未知同步操作');
   if(!process.env.BUSINESS_SYNC_STATION||input.station!==process.env.BUSINESS_SYNC_STATION)throw Error('未启用此站双向同步');
@@ -22,7 +22,7 @@ module.exports=function createBusinessSync(store,{load,write}){
    core.apply({},input.remote);if(input.base)core.apply({},input.base);
    const requestHash=core.fingerprint({base:input.base||null,remote:input.remote});
    if(state.receipt?.request===requestHash&&state.receipt.result===core.fingerprint(cloud)){store.exec('COMMIT');return {ok:true,data:cloud};}
-   const merged=core.merge(input.base,cloud,input.remote,state.choices);
+   const merged=core.merge(input.base,cloud,input.remote,state.choices,state.productRemaps);
    if(merged.conflicts.length){state.conflicts=merged.conflicts;state.choices=state.choices||{};put(state);store.exec('COMMIT');return {ok:false,conflicts:merged.conflicts.length};}
    const next=core.apply(original,merged.data);
    let inventoryModeChanged=false;for(const day of Object.values(next.records||{}))for(const row of day.items||[]){if(!row.inventorySync)inventoryModeChanged=true;row.inventorySync=true;}
@@ -31,6 +31,7 @@ module.exports=function createBusinessSync(store,{load,write}){
     write(next);
     store.exec('DELETE FROM business_sync_backups WHERE id NOT IN (SELECT id FROM business_sync_backups ORDER BY id DESC LIMIT 5)');
    }
+   state.productRemaps=merged.productRemaps;
    state.receipt={request:requestHash,result:core.fingerprint(merged.data)};
    state.conflicts=[];state.choices={};state.lastSuccess=new Date().toISOString();put(state);store.exec('COMMIT');return {ok:true,data:merged.data};
   }catch(e){store.exec('ROLLBACK');throw e;}

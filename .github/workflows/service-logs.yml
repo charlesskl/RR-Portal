@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 env:
   IQ_RELEASE_WORKFLOW_PIN: 'true'
-  IQ_RELEASE_HELPER_SHA256: '5b1edd69fbad6c27f9c07b0000b8b321c8c1c3463bf6f986787f597b50aded85'
+  IQ_RELEASE_HELPER_SHA256: 'f40e9987c8f13c0c2faf01a012b3a3b9a4b9b43469878c77517cf7425a48f80e'
 jobs:
   fixed-internal-quote-release:
     runs-on: ubuntu-latest

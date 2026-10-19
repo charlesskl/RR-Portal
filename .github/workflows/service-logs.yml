@@ -1,82 +1,63 @@
-name: Reviewed Batch Post-Deploy Data and Code Acceptance V2
+name: Release V4 Read Only Progress
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        type: choice
-        required: true
-        options: [verify, acceptance]
+      mode: {type: choice, required: true, options: [progress]}
 permissions:
   contents: read
 concurrency:
-  group: deploy-cloud
-  queue: max
+  group: release-read-only-progress
   cancel-in-progress: false
-env:
-  RELEASE_POST_WORKFLOW_FROZEN: 'true'
-  RELEASE_VERIFY_HELPER_SHA256: '786935abc580ba1513e8d1069e2f01c6aded0c78ddcc96d93d1d2b47863a39e1'
-  RELEASE_ACCEPTANCE_HELPER_SHA256: 'f598532e246c778693f57b15dac04d26af384c87364f963fef821d081e216401'
-  RELEASE_ENVIRONMENT_PROOF_SHA256: '9ba097453d46298d6e16e8a3ea5051f08dbe1e3cf39711ef4c8f75bc4f257480'
 jobs:
-  reviewed-post-deploy-operation:
+  progress:
     runs-on: ubuntu-latest
-    timeout-minutes: 23
+    timeout-minutes: 3
     steps:
-      - name: Validate frozen source, exact branch and first attempt
-        shell: bash
+      - shell: bash
         env:
-          RELEASE_BRANCH: ${{ github.ref }}
-          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_REF: ${{ github.ref }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
           RELEASE_MODE: ${{ inputs.mode }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
-          set -euo pipefail
-          [[ "$RELEASE_POST_WORKFLOW_FROZEN" = true && "$RELEASE_VERIFY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$RELEASE_ACCEPTANCE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$RELEASE_ENVIRONMENT_PROOF_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
-          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_MODE" =~ ^(verify|acceptance)$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run fixed read-only verification or synthetic acceptance
+          [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = progress && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+      - name: Read fixed container and deployment summaries
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
-          RELEASE_BRANCH: ${{ github.ref }}
-          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_REF: ${{ github.ref }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
           RELEASE_MODE: ${{ inputs.mode }}
-          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
-          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 21m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,RELEASE_POST_WORKFLOW_FROZEN,RELEASE_VERIFY_HELPER_SHA256,RELEASE_ACCEPTANCE_HELPER_SHA256,RELEASE_ENVIRONMENT_PROOF_SHA256
+          fingerprint: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 90s
+          envs: RELEASE_REF,RELEASE_ATTEMPT,RELEASE_MODE
           script: |
             set -euo pipefail
-            [[ "$RELEASE_POST_WORKFLOW_FROZEN" = true && "$RELEASE_VERIFY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$RELEASE_ACCEPTANCE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$RELEASE_ENVIRONMENT_PROOF_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
-            [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_MODE" =~ ^(verify|acceptance)$ ]] || exit 1
-            cd /opt/rr-portal
-            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch origin ops/release-937-943-944-945-946-950-20261019 >/dev/null 2>&1 || { echo RELEASE_FETCH_FAILED; exit 1; }
-            [[ "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA" ]] || { echo RELEASE_HEAD_MISMATCH; exit 1; }
+            [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = progress ]] || exit 1
             umask 077
-            release_private_tmp=$(mktemp -d /tmp/release-post-reviewed.XXXXXX)
-            trap 'rm -rf "$release_private_tmp"' EXIT
-            case "$RELEASE_MODE" in
-              verify)
-                git show "$RELEASE_SHA:deploy/ops/release-batch-post-verify-v2.py" > "$release_private_tmp/run.py" 2>/dev/null || exit 1
-                release_expected_sha="$RELEASE_VERIFY_HELPER_SHA256"
-                release_arguments=(verify)
-                ;;
-              acceptance)
-                git show "$RELEASE_SHA:deploy/ops/release-code-acceptance-v2.py" > "$release_private_tmp/run.py" 2>/dev/null || exit 1
-                release_expected_sha="$RELEASE_ACCEPTANCE_HELPER_SHA256"
-                release_arguments=()
-                ;;
-              *) exit 1 ;;
-            esac
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$release_private_tmp/release-data-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-environment-proof.py" > "$release_private_tmp/release-environment-proof.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$release_private_tmp/release-environment-proof.py" | cut -d ' ' -f1)" = "$RELEASE_ENVIRONMENT_PROOF_SHA256" ]] || { echo RELEASE_ENVIRONMENT_PROOF_MISMATCH; exit 1; }
-            [[ "$(sha256sum "$release_private_tmp/run.py" | cut -d ' ' -f1)" = "$release_expected_sha" ]] || { echo RELEASE_HELPER_MISMATCH; exit 1; }
-            [[ "$(sha256sum "$release_private_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || { echo RELEASE_LIBRARY_MISMATCH; exit 1; }
-            timeout --signal=TERM --kill-after=20s 18m python3 -B "$release_private_tmp/run.py" "${release_arguments[@]}"
+            python3 -B - <<'PY'
+            import json,pathlib,re,subprocess,sys
+            sys.excepthook=lambda *_:print('{"safeFailure":"RELEASE_PROGRESS_READ_FAILED"}')
+            services=('qc','indo-shipping','internal-quote','factory-review','factory-review-test','qc-report','qc-report-worker')
+            stages={'source-root-tree', 'source-dirty-snapshot', 'verify-environment-maps', 'preflight', 'before-build', 'wait-healthy', 'final-guards', 'validate-prior-seal', 'validate-six-baseline-and-qc', 'source-fixed-inputs', 'repair-source-modes', 'switch', 'validate-environment-maps', 'source-current-head', 'source-current-branch', 'build', 'validate-backup', 'validate-qc-clear-receipt'}
+            root=pathlib.Path('/opt/rr-portal/deploy/backups');directory=root/'release-937-943-944-945-946-950-deploy-20261019-v4'
+            assert root.is_dir() and not root.is_symlink() and directory.is_dir() and not directory.is_symlink()
+            def call(args):
+             p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=8);assert p.returncode==0 and len(p.stdout)<=65536;return p.stdout
+            fmt='{"id":{{json .Id}},"image":{{json .Image}},"running":{{json .State.Running}},"oom":{{json .State.OOMKilled}},"restarts":{{json .RestartCount}},"status":{{json .State.Status}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}}}'
+            rows={}
+            for service in services:
+             ids=call(['docker','ps','-aq','--no-trunc','--filter','label=com.docker.compose.project=rr-portal','--filter','label=com.docker.compose.service='+service]).decode().split();assert len(ids)<=1 and all(re.fullmatch('[a-f0-9]{64}',v)for v in ids)
+             rows[service]=json.loads(call(['docker','inspect','--format',fmt,ids[0]]))if ids else{'missing':True}
+            files=list(directory.iterdir());assert len(files)<=5000
+            pattern=r'([0-9]{3,4})-('+ '|'.join((*services,'release')) +r')-([a-z-]+)\.(log|stdout\.private)'
+            logs=sorted((int(m[1]),p.name)for p in files if (m:=re.fullmatch(pattern,p.name)) and m[3]in stages and p.is_file() and not p.is_symlink())
+            result={'containers':rows,'latestDeployLog':logs[-1][1]if logs else None,'safeReceipt':None}
+            receipt=directory/'first-result.json'
+            if receipt.is_file() and not receipt.is_symlink() and receipt.stat().st_size<=1048576:
+             r=json.loads(receipt.read_bytes());result['safeReceipt']={k:r[k]for k in ['success','globalHooksRun','globalMaintenanceChanged','envFileModified','automaticRollback','businessCrudPerformed','allSevenHealthy','onlySixContainersRebuilt','qcContainerPreserved','nonTargetContainersUnchanged','fourPreexistingTrackedChangesPreserved','exactEnvironmentMapsVerifiedWithoutChangingRawArrayEvidence']if type(r.get(k))is bool};result['safeReceipt'].update({'failedStage':r.get('failedStage')if r.get('failedStage')in stages else None,'failedService':r.get('failedService')if r.get('failedService')in services else None})
+            print(json.dumps(result,sort_keys=True))
+            PY

@@ -89,9 +89,9 @@ class MailWorkerTests(unittest.TestCase):
                   b"Content-Disposition: attachment; filename=synthetic.bin\r\n"
                   b"Content-Transfer-Encoding: base64\r\n\r\n")
         line = b"QUFB" * 19 + b"\r\n"  # 57 decoded A bytes per SMTP line.
-        count = (35712788 - len(prefix) - 13) // len(line)
+        count = (46195009 - len(prefix) - 13) // len(line)
         raw = prefix + line * count + b"\r\n--LARGE--\r\n"
-        self.assertGreater(len(raw), 34 * 1024**2)
+        self.assertGreater(len(raw), 44 * 1024**2)
         held = b"y" * (MAX_BATCH_BYTES - len(raw) - 1024)
         self.assertEqual(len(raw) + len(held), MAX_BATCH_BYTES - 1024)
         expected = hashlib.sha256()
@@ -107,6 +107,10 @@ class MailWorkerTests(unittest.TestCase):
         self.assertEqual(result["attachments"][0]["size"], count * 57)
         self.assertEqual(result["attachments"][0]["sha256"], expected.hexdigest())
         self.assertEqual(self.run_entry(VALID)["status"], "parsed")
+        from app.mailbox import MAX_MESSAGE_BYTES
+        self.assertEqual(MAX_MESSAGE_BYTES, 48 * 1024**2)
+        self.assertEqual(mail_worker.MAX_RAW_BYTES, MAX_MESSAGE_BYTES)
+        self.assertEqual(MAX_BATCH_BYTES, 48 * 1024**2)
         self.assertEqual(mail_worker.WORKER_ADDRESS_SPACE, 320 * 1024**2)
         self.assertEqual(mail_worker.WORKER_SECONDS, 18)
         self.assertEqual(mail_worker.MAX_RESULT_BYTES, 1024**2)
@@ -129,7 +133,7 @@ class MailWorkerTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "linux", "Linux actual AS/cgroup memory pressure coverage")
     def test_full_parent_and_near_48m_batch_survive_320m_worker_limit(self):
         # app.main is already loaded in this parent, including all production
-        # parser libraries. Retain an actual 40MiB + almost 8MiB batch while its
+        # parser libraries. Retain an actual 47MiB + almost 1MiB batch while its
         # first raw body also enters the disposable supervisor/worker pipeline.
         from app.mailbox import MAX_BATCH_BYTES, MAX_MESSAGE_BYTES
         import resource
@@ -149,7 +153,8 @@ class MailWorkerTests(unittest.TestCase):
                 return None
 
         before_oom = oom_kills()
-        batch = [b"x" * MAX_MESSAGE_BYTES, b"y" * (MAX_BATCH_BYTES - MAX_MESSAGE_BYTES - 1024)]
+        first_size = min(MAX_MESSAGE_BYTES, MAX_BATCH_BYTES - 1024 * 1024)
+        batch = [b"x" * first_size, b"y" * (MAX_BATCH_BYTES - first_size - 1024)]
         self.assertEqual(sum(map(len, batch)), MAX_BATCH_BYTES - 1024)
         sock = socket.socket()
         sock.bind(("127.0.0.1", 0))

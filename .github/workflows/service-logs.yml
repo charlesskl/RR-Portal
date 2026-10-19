@@ -1,8 +1,8 @@
-name: Fixed SQLite Partners and Retention Explanation
+name: Fixed Release PostgreSQL Read-Only Row Diagnostics
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [sqlite-partners-retention]}
+      mode: {type: choice, required: true, options: [pg-rows]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
 jobs:
   progress:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - shell: bash
         env:
@@ -20,8 +20,8 @@ jobs:
           RELEASE_MODE: ${{ inputs.mode }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
-          [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = sqlite-partners-retention && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Read fixed container and deployment summaries
+          [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = pg-rows && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+      - name: Compare sealed PostgreSQL rows with one read-only snapshot
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_REF: ${{ github.ref }}
@@ -32,154 +32,237 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 210s
+          command_timeout: 7m
           envs: RELEASE_REF,RELEASE_ATTEMPT,RELEASE_MODE
           script: |
             set -euo pipefail
-            [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = sqlite-partners-retention ]] || exit 1
+            [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = pg-rows ]] || exit 1
             umask 077
-            python3 -B - <<'PY'
-            """Fixed sealed SQLite row preservation classification; no live database or business output."""
-            import collections,contextlib,datetime,hashlib,json,math,os,pathlib,re,signal,sqlite3,stat,sys
-            ROOT=pathlib.Path('/opt/rr-portal/deploy/backups');PIN_FROZEN=True
+            python3 -B - <<'PYCODE'
+            """Fixed PostgreSQL row diagnostics. No restore, SQL writes, or raw business output."""
+            import base64,datetime,hashlib,json,os,pathlib,re,select,signal,stat,subprocess,sys,time
+            ROOT=pathlib.Path('/opt/rr-portal')
+            BACKUP=ROOT/'deploy/backups/release-937-943-944-945-946-950-20261019-v2'
+            VERIFY=BACKUP.with_name(BACKUP.name+'-verify-v3')
+            PINS=((BACKUP,'22483bb8f1a2e799ad6bcd14f48c2b60c2913d74ad9a03207c39c8b6f761f93f','16dd085003188dbc56150bac9dfedcd3cd5ae9207732f1b96ed357c5a097458f'),(VERIFY,'864dfeed7692d7be7ac2c69aaf258f011799fc04a912f0b03cae91a8cd5fb6de','0491d4bed4f47764a1ef7600f45dab63c548b48912a16ff897a6e2251f6dccec'))
             BASE='52c090589d6da542fee74ef17c8edd3b0dfe4fe6';TARGET='85d2082c273d3df3e51b2e414855634c56c498dd'
-            ARCHIVES=((ROOT/'release-937-943-944-945-946-950-20261019-v2','22483bb8f1a2e799ad6bcd14f48c2b60c2913d74ad9a03207c39c8b6f761f93f','16dd085003188dbc56150bac9dfedcd3cd5ae9207732f1b96ed357c5a097458f'),(ROOT/'release-937-943-944-945-946-950-20261019-v2-verify-v3','864dfeed7692d7be7ac2c69aaf258f011799fc04a912f0b03cae91a8cd5fb6de','0491d4bed4f47764a1ef7600f45dab63c548b48912a16ff897a6e2251f6dccec'))
-            START=datetime.datetime(2026,10,19,7,45,tzinfo=datetime.timezone.utc);END=datetime.datetime(2026,10,19,9,1,tzinfo=datetime.timezone.utc)
-            STAGE='preflight';TOTAL=0
+            PIN_FROZEN=True
+            TABLES={'indo_shipping':('audit_logs','materials','products','purchase_orders','po_items'),'internal_quote':('audit_log','quote_sections')}
+            WINDOW_START='2026-10-19T07:45:00+00:00';WINDOW_END='2026-10-19T09:01:59.999999+00:00'
+            PG_SHELL='exec psql -X -q -At -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-rrportal}" -d "${POSTGRES_DB:-rrportal}"'
+            STAGE='entrypoint';DEADLINE=None
+            MAX_DUMP=128*1024**2;MAX_COPY=192*1024**2;MAX_ROWS=20000;MAX_LINE=16*1024**2
+            ACTIONS={'create','update','delete','merge','change_delivery_date','cancel','restore','import','view','login','logout','translate_vq','save','submit','approve','reject','mixed_config','mixed_product_delete_backup','publish_material_prices','other'}
+            PAYLOAD_KEYS={'header','material_prices','machine_prices','materials','parts','molds','molding_rows','electronics_extra','mixed_quote','mixed_products','mixed_shared','mixed_part_selections','mixed_imported_parts','parts_catalog','legacy_import','excel_native','groups','tax_label','rows','workshop_assignment'}
             
-            def need(x):
-             if not x:raise RuntimeError('SEALED_SQLITE_CLASSIFICATION_REJECTED')
-            def enc(x):return json.dumps(x,sort_keys=True,ensure_ascii=True,separators=(',',':'),allow_nan=False).encode()
-            def sha(x):return hashlib.sha256(x).hexdigest()
-            def digest(x):return sha(enc(x))
-            def cell(x):
-             if x is None:return ['null']
-             if type(x)is bytes:return ['blob',x.hex()]
-             if type(x)is int:return ['integer',str(x)]
-             if type(x)is float:need(math.isfinite(x));return ['real',x.hex()]
-             need(type(x)is str);return ['text',x]
-            def fields(s):return(s.st_dev,s.st_ino,s.st_mode,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
-            def private_hash(p,maximum):
-             global TOTAL
-             for q in (p,*p.parents):
-              need(not q.is_symlink())
-              if q==ROOT:break
-             fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
-             with os.fdopen(fd,'rb')as f:
-              a=os.fstat(f.fileno());need(stat.S_ISREG(a.st_mode)and a.st_mode&0o077==0 and a.st_size<=maximum);h=hashlib.sha256()
-              for b in iter(lambda:f.read(1024**2),b''):h.update(b)
-              need(fields(a)==fields(os.fstat(f.fileno()))==fields(p.lstat()))
-             TOTAL+=a.st_size;need(TOTAL<=4*1024**3);return h.hexdigest()
-            def small(p,maximum):
-             need(private_hash(p,maximum));raw=p.read_bytes();need(len(raw)<=maximum and sha(raw)==private_hash(p,maximum));return json.loads(raw)
-            def capture(p,msha,rsha):
-             need(p.is_dir()and not p.is_symlink()and stat.S_IMODE(p.stat().st_mode)==0o700 and private_hash(p/'manifest.json',4*1024**2)==msha);m=small(p/'manifest.json',4*1024**2);need(m.get('first-result.json')==rsha and private_hash(p/'first-result.json',1024**2)==rsha)
-             need(private_hash(p/'baseline.private.json',32*1024**2)==m.get('baseline.private.json'));return small(p/'baseline.private.json',32*1024**2),m
-            
-            def connect(p):
-             db=sqlite3.connect(p.as_uri()+'?mode=ro&immutable=1',uri=True,timeout=3);db.execute('PRAGMA query_only=ON');db.execute('BEGIN');return db
-            def quote(s):need(re.fullmatch('[A-Za-z_][A-Za-z0-9_]*',s));return '"'+s+'"'
-            def columns(db,table):
-             cols=db.execute('PRAGMA table_xinfo('+quote(table)+')').fetchall();need(cols and all(len(c)==7 and c[6]!=1 for c in cols));need([c[1]for c in cols if c[5]]==['id']);return cols
-            def table_audit(db,table,cols):
-             names=[c[1]for c in cols];hashes=sorted(digest([cell(x)for x in row])for row in db.execute('SELECT '+','.join(map(quote,names))+' FROM '+quote(table)));need(len(hashes)<=200000)
-             return {'rows':len(hashes),'sha256':sha(''.join(hashes).encode()),'columnsSha256':digest(cols)}
-            def legacy_stamp(value):
-             if type(value)is not str:return None
+            def need(v):
+             if not v:raise RuntimeError('PG_ROW_DIAGNOSTIC_REJECTED')
+            def enc(v):return json.dumps(v,sort_keys=True,ensure_ascii=True,separators=(',',':'),allow_nan=False).encode()
+            def sha(v):return hashlib.sha256(v).hexdigest()
+            def pairs(items):
+             result={}
+             for k,v in items:need(k not in result);result[k]=v
+             return result
+            def parsed(raw):return json.loads(raw,object_pairs_hook=pairs)
+            def remaining(maximum=60):
+             left=(DEADLINE-time.monotonic())if DEADLINE is not None else maximum
+             need(left>0);return min(maximum,left)
+            def identifier(value):
+             need(type(value)is str and re.fullmatch('[A-Za-z_][A-Za-z0-9_]{0,62}',value));return '"'+value+'"'
+            def stable_read(path,maximum):
+             need(not path.is_symlink())
+             with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb')as f:
+              a=os.fstat(f.fileno());need(stat.S_ISREG(a.st_mode)and a.st_mode&0o077==0 and a.st_size<=maximum)
+              raw=f.read(maximum+1);b=os.fstat(f.fileno())
+              fields=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns,s.st_mode)
+              need(len(raw)==a.st_size and fields(a)==fields(b)==fields(path.lstat()))
+             return raw
+            def capture(path,msha,rsha):
+             need(path.is_dir()and not path.is_symlink()and stat.S_IMODE(path.stat().st_mode)==0o700)
+             raw=stable_read(path/'manifest.json',4*1024**2);need(sha(raw)==msha);manifest=parsed(raw);need(manifest.get('first-result.json')==rsha)
+             raw=stable_read(path/'first-result.json',1024**2);need(sha(raw)==rsha);receipt=parsed(raw)
+             raw=stable_read(path/'baseline.private.json',32*1024**2);need(sha(raw)==manifest.get('baseline.private.json'));snapshot=parsed(raw)
+             return snapshot,receipt,manifest
+            def stamps(s):return(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns,s.st_mode)
+            def restore_copy(path,expected,cid,schema,tables):
+             """Hash and feed the same nofollow descriptor; only pg_restore --file=-, never --dbname."""
+             need(not path.is_symlink())
+             with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb')as source:
+              a=os.fstat(source.fileno());need(stat.S_ISREG(a.st_mode)and a.st_mode&0o077==0 and 0<a.st_size<=MAX_DUMP)
+              digest=hashlib.sha256()
+              for block in iter(lambda:source.read(1024**2),b''):remaining();digest.update(block)
+              need(digest.hexdigest()==expected and stamps(a)==stamps(os.fstat(source.fileno()))==stamps(path.lstat()));source.seek(0)
+              output=command(['docker','exec','-i',cid,'pg_restore','--data-only','--schema='+schema,'--strict-names',*['--table='+t for t in tables],'--file=-'],stdin=source,timeout=90)
+              need(stamps(a)==stamps(os.fstat(source.fileno()))==stamps(path.lstat()));return output
+            def command(args,stdin=None,limit=MAX_COPY,timeout=90):
+             """Bound stdout while reading; no subprocess output or exception text is printed."""
+             end=time.monotonic()+remaining(timeout);p=subprocess.Popen(args,stdin=stdin,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,cwd=ROOT,bufsize=0)
+             chunks=[];count=0
              try:
-              v=datetime.datetime.fromisoformat(value.replace('Z','+00:00'));return v.astimezone(datetime.timezone.utc)if v.tzinfo is not None else None
-             except ValueError:return None
-            def stamp(value):
-             if type(value)is not str:return None
-             match=re.fullmatch(r'(\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d)(?:\.(\d{1,9}))?(Z|[+-]\d\d:\d\d)',value)
-             if not match:return None
-             normalized=match[1]+('.'+match[2][:6].ljust(6,'0')if match[2]else'')+match[3]
-             return legacy_stamp(normalized)
+              while True:
+               need(time.monotonic()<end);ready=select.select([p.stdout],[],[],min(1,max(.001,end-time.monotonic())))[0]
+               if not ready:continue
+               block=os.read(p.stdout.fileno(),65536)
+               if not block:break
+               count+=len(block);need(count<=limit);chunks.append(block)
+              need(p.wait(timeout=remaining(10))==0);return b''.join(chunks)
+             finally:
+              if p.poll()is None:p.kill();p.wait(timeout=5)
+              p.stdout.close()
+            def copy_text(token):
+             if token==b'\\N':return None
+             out=bytearray();i=0;esc={ord(k):ord(v)for k,v in [('b','\b'),('f','\f'),('n','\n'),('r','\r'),('t','\t'),('v','\v'),('\\','\\')]}
+             while i<len(token):
+              c=token[i];i+=1
+              if c!=92:out.append(c);continue
+              need(i<len(token));c=token[i];i+=1
+              if c in esc:out.append(esc[c])
+              elif 48<=c<=55:
+               digits=bytes([c])
+               while i<len(token)and len(digits)<3 and 48<=token[i]<=55:digits+=bytes([token[i]]);i+=1
+               need(int(digits,8)<=255);out.append(int(digits,8))
+              elif c==120:
+               digits=b''
+               while i<len(token)and len(digits)<2 and token[i]in b'0123456789abcdefABCDEF':digits+=bytes([token[i]]);i+=1
+               need(digits);out.append(int(digits,16))
+              else:out.append(c)
+             need(0 not in out);return out.decode('utf-8')
+            def copy_blocks(data,schema):
+             need(schema in TABLES and len(data)<=MAX_COPY);blocks={};active=None
+             for line in data.split(b'\n'):
+              need(len(line)<=MAX_LINE)
+              if active is not None:
+               if line==b'\\.':active=None;continue
+               fields=line.split(b'\t');need(len(fields)==len(blocks[active]['columns']))
+               blocks[active]['rows'].append([copy_text(v)for v in fields]);need(len(blocks[active]['rows'])<=MAX_ROWS)
+              elif line.startswith(b'COPY '):
+               match=re.fullmatch(rb'COPY ([A-Za-z_][A-Za-z0-9_]*)\.(?:"([A-Za-z_][A-Za-z0-9_]*)"|([A-Za-z_][A-Za-z0-9_]*)) \(([^\r\n]+)\) FROM stdin;',line)
+               need(match is not None and match[1].decode()==schema);name=(match[2]or match[3]).decode();need(name in TABLES[schema]and name not in blocks)
+               columns=[]
+               for token in match[4].split(b', '):
+                part=re.fullmatch(rb'(?:"([A-Za-z_][A-Za-z0-9_]*)"|([A-Za-z_][A-Za-z0-9_]*))',token);need(part is not None);columns.append((part[1]or part[2]).decode())
+               need(columns and len(columns)==len(set(columns))and len(columns)<=150);blocks[name]={'columns':columns,'rows':[]};active=name
+             need(active is None and set(blocks)==set(TABLES[schema]))
+             for name,block in blocks.items():
+              key='code'if name=='products'else'id';need(key in block['columns']);idx=block['columns'].index(key);values=[r[idx]for r in block['rows']]
+              need(all(type(v)is str and bool(v)for v in values)and len(set(values))==len(values))
+              if key=='id':need(all(re.fullmatch('[1-9][0-9]{0,18}',v)and int(v)<=9223372036854775807 for v in values))
+             return blocks
+            def column_type(value):
+             need(type(value)is str and bool(re.fullmatch(r'(?:smallint|integer|bigint|text|boolean|json|jsonb|date|numeric(?:\([1-9][0-9]{0,3},[0-9]{1,4}\))?|(?:character varying|character)\([1-9][0-9]{0,6}\)|timestamp(?:\([0-6]\))? (?:with|without) time zone)',value)))
+             return value
+            def table_columns(snapshot,schema,table):
+             rows=[r for r in snapshot['postgres'][schema]['schema']['columns']if r['table']==table];rows.sort(key=lambda r:r['position'])
+             need(0<len(rows)<=150 and len({r['name']for r in rows})==len(rows))
+             for r in rows:identifier(r['name']);column_type(r['type'])
+             return rows
+            def validate_current_columns(session,schema,table,columns):
+             relation=identifier(schema)+'.'+identifier(table)
+             metadata=session.ask("SELECT COALESCE(jsonb_agg(jsonb_build_object('name',a.attname,'type',format_type(a.atttypid,a.atttypmod)) ORDER BY a.attnum),'[]') FROM pg_attribute a WHERE a.attrelid='"+relation+"'::regclass AND a.attnum>0 AND NOT a.attisdropped;\n")
+             need(type(metadata)is list and len(metadata)<=150);by_name={r['name']:r['type']for r in metadata};need(len(by_name)==len(metadata)and all(by_name.get(c['name'])==c['type']for c in columns))
+            def old_cte(block,columns,alias='old'):
+             need(block['columns']==[r['name']for r in columns]);rows=[dict(zip(block['columns'],row))for row in block['rows']]
+             encoded=base64.b64encode(enc(rows)).decode();need(len(encoded)<=256*1024**2)
+             definitions=','.join(identifier(r['name'])+' text'for r in columns)
+             cast=','.join('x.'+identifier(r['name'])+'::'+column_type(r['type'])+' AS '+identifier(r['name'])for r in columns)
+             return alias+" AS MATERIALIZED (SELECT "+cast+" FROM jsonb_to_recordset(convert_from(decode('"+encoded+"','base64'),'UTF8')::jsonb) AS x("+definitions+"))"
+            def row_hash(alias):return "encode(sha256(convert_to(to_jsonb("+alias+")::text,'UTF8')),'hex')"
+            def aggregate(alias):return "(SELECT jsonb_build_object('rows',count(*),'sha256',encode(sha256(convert_to(COALESCE(string_agg(h,'' ORDER BY h),''),'UTF8')),'hex')) FROM (SELECT "+row_hash('z')+' h FROM '+alias+' z) h)'
+            def action_case(expr):return 'CASE WHEN '+expr+' IN ('+','.join("'"+v+"'"for v in sorted(ACTIONS))+") THEN "+expr+" ELSE 'other' END"
+            def window(expr,kind):
+             stamp=expr+" AT TIME ZONE 'UTC'"if kind.endswith('without time zone')else expr
+             return '('+stamp+") BETWEEN '"+WINDOW_START+"'::timestamptz AND '"+WINDOW_END+"'::timestamptz"
+            def audit_sql(schema,table,columns):
+             col={r['name']:r['type']for r in columns};indo=schema=='indo_shipping';stamp='occurred_at'if indo else'at';who='username'if indo else'actor'
+             account=('EXISTS (SELECT 1 FROM indo_shipping."Users" u WHERE u."Id"=a.user_id AND u."Username"=a.username AND u."IsActive")'if indo else'(SELECT count(*)=1 FROM internal_quote.users u WHERE u.username=a.actor OR u.display_name=a.actor)')
+             inside=window('a.'+identifier(stamp),col[stamp]);action=action_case('a.action')
+             return ",(SELECT COALESCE(jsonb_agg(jsonb_build_object('action',action,'rows',n,'existingAccountMatches',account_match,'inConfirmedWindow',in_window) ORDER BY action,account_match,in_window),'[]') FROM (SELECT "+action+' action,'+account+' account_match,COALESCE('+inside+",false) in_window,count(*) n FROM cur a WHERE NOT EXISTS(SELECT 1 FROM old o WHERE o.id=a.id) GROUP BY 1,2,3) stats) AS audit_summary"
+            def query(schema,table,block,columns):
+             need(schema in TABLES and table in TABLES[schema]);key='code'if table=='products'else'id';names=[r['name']for r in columns];need(key in names)
+             qualified=identifier(schema)+'.'+identifier(table);projection=','.join(identifier(n)for n in names)
+             cte=old_cte(block,columns)+',cur AS MATERIALIZED (SELECT '+projection+' FROM '+qualified+')'
+             cte+=',d AS MATERIALIZED (SELECT to_jsonb(o) oldrow,to_jsonb(c) newrow FROM old o FULL JOIN cur c ON o.'+identifier(key)+'=c.'+identifier(key)+')'
+             fields="(SELECT COALESCE(jsonb_object_agg(k,n),'{}') FROM (SELECT f.k,count(*) n FROM d CROSS JOIN LATERAL jsonb_object_keys(d.oldrow) f(k) WHERE oldrow IS NOT NULL AND newrow IS NOT NULL AND oldrow->f.k IS DISTINCT FROM newrow->f.k GROUP BY f.k) q)"
+             sql='WITH '+cte+' SELECT jsonb_build_object(\'baseline\','+aggregate('old')+",'current',"+aggregate('cur')+",'addedRows',(SELECT count(*) FROM d WHERE oldrow IS NULL),'removedRows',(SELECT count(*) FROM d WHERE newrow IS NULL),'changedRows',(SELECT count(*) FROM d WHERE oldrow IS NOT NULL AND newrow IS NOT NULL AND oldrow IS DISTINCT FROM newrow),'changedFields',"+fields
+             if table in {'audit_log','audit_logs'}:
+              tail=audit_sql(schema,table,columns);sql+=",'newAuditActions',"+tail.split(' AS audit_summary')[0][1:]
+             if table=='quote_sections':
+              sql+=",'payload',"+payload_sql()
+             sql+=');\n';return sql
+            def payload_sql():
+             good="pg_input_is_valid(oldrow->>'payload_json','jsonb') AND pg_input_is_valid(newrow->>'payload_json','jsonb')"
+             keys=','.join("'"+v+"'"for v in sorted(PAYLOAD_KEYS))
+             return "(WITH changed AS (SELECT * FROM d WHERE oldrow IS NOT NULL AND newrow IS NOT NULL AND oldrow->'payload_json' IS DISTINCT FROM newrow->'payload_json'), valid AS (SELECT CASE WHEN "+good+" THEN (oldrow->>'payload_json')::jsonb ELSE NULL END a,CASE WHEN "+good+" THEN (newrow->>'payload_json')::jsonb ELSE NULL END b FROM changed), object_rows AS(SELECT * FROM valid WHERE jsonb_typeof(a)='object' AND jsonb_typeof(b)='object'), names AS (SELECT k,count(*) n FROM object_rows CROSS JOIN LATERAL (SELECT jsonb_object_keys(a) k UNION SELECT jsonb_object_keys(b)) x WHERE a->k IS DISTINCT FROM b->k GROUP BY k) SELECT jsonb_build_object('textChangedRows',(SELECT count(*) FROM changed),'validPairRows',(SELECT count(*) FROM valid WHERE a IS NOT NULL AND b IS NOT NULL),'semanticEqualRows',(SELECT count(*) FROM valid WHERE a=b),'knownTopLevelChangedKeys',COALESCE((SELECT jsonb_object_agg(k,n) FROM names WHERE k IN ("+keys+")),'{}'),'otherTopLevelChangedKeyCount',(SELECT count(*) FROM names WHERE k NOT IN ("+keys+")),'changedRowsFilledAtInConfirmedWindow',(SELECT count(*) FROM changed WHERE "+window("(newrow->>'filled_at')::timestamptz",'timestamp with time zone')+")))"
             
-            def in_window(v):return v is not None and START<=v<=END
+            class Session:
+             def __init__(self,cid):
+              self.p=subprocess.Popen(['docker','exec','-i',cid,'sh','-c',PG_SHELL],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,cwd=ROOT,bufsize=0)
+             def ask(self,sql):
+              data=sql.encode();need(len(data)<=256*1024**2);view=memoryview(data)
+              while view:
+               remaining();sent=os.write(self.p.stdin.fileno(),view);need(sent>0);view=view[sent:]
+              self.p.stdin.flush();end=time.monotonic()+remaining(30);out=bytearray()
+              while True:
+               need(time.monotonic()<end)
+               if not select.select([self.p.stdout],[],[],min(1,max(.001,end-time.monotonic())))[0]:continue
+               b=os.read(self.p.stdout.fileno(),65536);need(b);out.extend(b);need(len(out)<=1024**2)
+               if b'\n'in out:
+                need(out.endswith(b'\n')and out.count(b'\n')==1);return parsed(out)
+             def close(self):
+              if self.p.poll()is None:
+               try:self.p.stdin.close();self.p.wait(timeout=3)
+               except Exception:self.p.kill();self.p.wait(timeout=5)
+              for stream in (self.p.stdin,self.p.stdout):
+               if stream and not stream.closed:stream.close()
             
-            def row_compare(old,new,table,policy=None):
-             cols=columns(old,table);need(columns(new,table)==cols);names=[c[1]for c in cols];n=len(names);q=quote(table);projection=','.join('a.'+quote(c)for c in names)+','+','.join('b.'+quote(c)for c in names)
-             for db in (old,new):need(db.execute('SELECT count(*),count(DISTINCT id),sum(id IS NULL) FROM '+q).fetchone()[:2]==(db.execute('SELECT count(*) FROM '+q).fetchone()[0],)*2)
-             sql='SELECT '+projection+' FROM main.'+q+' a LEFT JOIN afterdb.'+q+' b ON a.id=b.id AND typeof(a.id)=typeof(b.id)'
-             # The separate new handle is audited; attach this same immutable file to the old handle for indexed joins.
-             result={'oldRows':0,'retainedTypedIdentical':0,'oldMissing':0,'oldChanged':0,'newRows':0,'changedFields':{},'newRowsWithTimestampInConfirmedWindow':0,'changedRowsWithTimestampInConfirmedWindow':0,'missingCreatedBeforeConfirmedWindow':0,'missingWithInvalidTimestamp':0}
-             retention={'missingRowsTested':0,'validCreated':0,'atOrBeforeStartupRetentionCutoff':0,'belowConfiguredMinimumLevel':0,'meetsEitherStartupRetentionRule':0}if policy else None
-             id_index=names.index('id');timestamp='updatedAt'if'updatedAt'in names else'createdAt'if'createdAt'in names else'created'if'created'in names else None
-             for row in old.execute(sql):
-              a,b=row[:n],row[n:];result['oldRows']+=1
-              if b[id_index]is None:
-               result['oldMissing']+=1;created=stamp(a[names.index('created')])if'created'in names else None
-               if created is None:result['missingWithInvalidTimestamp']+=1
-               elif created<START:result['missingCreatedBeforeConfirmedWindow']+=1
-               if retention:
-                retention['missingRowsTested']+=1;retention['validCreated']+=int(created is not None);bydate=created is not None and created<=policy['cutoff'];bylevel='level'in names and type(a[names.index('level')])is int and a[names.index('level')]<policy['minLevel'];retention['atOrBeforeStartupRetentionCutoff']+=int(bydate);retention['belowConfiguredMinimumLevel']+=int(bylevel);retention['meetsEitherStartupRetentionRule']+=int(bydate or bylevel)
-              else:
-               changed=[c for c,x,y in zip(names,a,b)if cell(x)!=cell(y)]
-               if not changed:result['retainedTypedIdentical']+=1
-               else:
-                result['oldChanged']+=1
-                for c in changed:result['changedFields'][c]=result['changedFields'].get(c,0)+1
-                if timestamp:result['changedRowsWithTimestampInConfirmedWindow']+=int(in_window(stamp(b[names.index(timestamp)])))
-             new_rows=old.execute('SELECT '+','.join('b.'+quote(c)for c in names)+' FROM afterdb.'+q+' b LEFT JOIN main.'+q+' a ON a.id=b.id AND typeof(a.id)=typeof(b.id) WHERE a.id IS NULL')
-             for row in new_rows:
-              result['newRows']+=1
-              if timestamp:result['newRowsWithTimestampInConfirmedWindow']+=int(in_window(stamp(row[names.index(timestamp)])))
-             result['allOldRowsRetainedWithoutTypedChanges']=result['oldMissing']==0 and result['oldChanged']==0;result['retainedRowsAllTypedIdentical']=result['oldChanged']==0
-             result['retentionSettingsAvailable']=policy is not None
-             if retention:result['retentionCompatibility']=dict(retention,allMissingMatchEitherStartupRule=retention['missingRowsTested']==retention['meetsEitherStartupRetentionRule'])
+            def safe_result(raw,columns,old_expected,verified):
+             need(type(raw)is dict and raw['baseline']=={'rows':old_expected['rows'],'sha256':old_expected['originalColumnsSHA256']})
+             ints=('addedRows','removedRows','changedRows')
+             need(all(type(raw[k])is int and 0<=raw[k]<=MAX_ROWS for k in ints))
+             fields=raw['changedFields'];need(type(fields)is dict and set(fields)<={r['name']for r in columns}and all(type(v)is int and 0<v<=MAX_ROWS for v in fields.values()))
+             current=raw['current'];need(type(current)is dict and type(current['rows'])is int and 0<=current['rows']<=MAX_ROWS and re.fullmatch('[a-f0-9]{64}',current['sha256']))
+             result={k:raw[k]for k in ints};result['changedFields']=fields;result['baselineTypedAggregateExactlyVerified']=True;result['baselineRows']=raw['baseline']['rows'];result['currentRows']=current['rows']
+             result['currentAggregateMatchesSealedVerification']=current=={'rows':verified['rows'],'sha256':verified['originalColumnsSHA256']}
+             if 'newAuditActions'in raw:
+              values=raw['newAuditActions'];need(type(values)is list and len(values)<=4*len(ACTIONS))
+              for r in values:need(type(r)is dict and set(r)=={'action','rows','existingAccountMatches','inConfirmedWindow'}and r['action']in ACTIONS and type(r['rows'])is int and 0<r['rows']<=MAX_ROWS and type(r['existingAccountMatches'])is bool and type(r['inConfirmedWindow'])is bool)
+              need(sum(r['rows']for r in values)==raw['addedRows']);result['newAuditActions']=values
+             if 'payload'in raw:
+              v=raw['payload'];need(set(v)=={'textChangedRows','validPairRows','semanticEqualRows','knownTopLevelChangedKeys','otherTopLevelChangedKeyCount','changedRowsFilledAtInConfirmedWindow'})
+              need(all(type(v[k])is int and 0<=v[k]<=MAX_ROWS for k in set(v)-{'knownTopLevelChangedKeys'}));need(type(v['knownTopLevelChangedKeys'])is dict and set(v['knownTopLevelChangedKeys'])<=PAYLOAD_KEYS and all(type(n)is int and 0<n<=MAX_ROWS for n in v['knownTopLevelChangedKeys'].values()));result['payload']=v
              return result
-            
-            def logs_policy(path,started):
-             with contextlib.closing(connect(path))as db:
-              names={r[1]for r in db.execute('PRAGMA table_info(_params)')}
-              if not{'id','value'}<=names:return None
-              row=db.execute("SELECT CASE WHEN json_valid(value) THEN json_extract(value,'$.logs.maxDays') END,CASE WHEN json_valid(value) THEN json_extract(value,'$.logs.minLevel') END,CASE WHEN json_valid(value) THEN json_type(value,'$.logs.maxDays') END,CASE WHEN json_valid(value) THEN json_type(value,'$.logs.minLevel') END FROM _params WHERE id='settings'").fetchone()
-              start=stamp(started)
-              if row is None or row[2:]!=('integer','integer')or type(row[0])is not int or not 0<=row[0]<=36500 or type(row[1])is not int or not -100<=row[1]<=100 or start is None:return None
-              return {'maxDays':row[0],'minLevel':row[1],'cutoff':start-datetime.timedelta(days=row[0])}
-            def db_path(archive,manifest,key,relative):
-             name=key+'/sqlite/'+relative;need(name in manifest and'..'not in pathlib.PurePosixPath(name).parts and not pathlib.PurePosixPath(name).is_absolute());p=archive/name;need(private_hash(p,512*1024**2)==manifest[name]);return p
-            
-            def projected_partners(old,new):
-             expected=['id','name','type','createdAt'];need([c[1]for c in columns(old,'partners')]==expected and columns(new,'partners')==columns(old,'partners'))
-             def count(db,names):return collections.Counter(enc([cell(x)for x in row])for row in db.execute('SELECT '+','.join(map(quote,names))+' FROM partners'))
-             reports=[]
-             for names,excluded in [(['name','type','createdAt'],['id']),(['name','type'],['id','createdAt'])]:
-              a,b=count(old,names),count(new,names);missing=sum((a-b).values());added=sum((b-a).values());reports.append({'comparedFields':names,'excludedFields':excluded,'oldRows':sum(a.values()),'newRows':sum(b.values()),'retainedOldTypedMultisetRows':sum((a&b).values()),'missingOldTypedMultisetRows':missing,'additionalNewTypedMultisetRows':added,'allOldProjectedRowsPreserved':missing==0,'createdAtPreservationVerified':names==['name','type','createdAt']and missing==0,'excludingCreatedAtIsDiagnosticOnlyNotPreservationApproval':names==['name','type']})
-             return reports
-            
-            def settings_shape(path,started):
-             with contextlib.closing(connect(path))as db:
-              names={r[1]for r in db.execute('PRAGMA table_info(_params)')};result={'expectedParamsColumnsPresent':{'id','value'}<=names,'storedSettingsRowCount':None,'storageType':None,'jsonValid':None,'jsonRootType':None,'logsType':None,'maxDaysType':None,'minLevelType':None}
-              if result['expectedParamsColumnsPresent']:
-               row=db.execute("SELECT count(*) FROM _params WHERE id='settings'").fetchone();result['storedSettingsRowCount']=row[0];need(row[0]<=1)
-               if row[0]:
-                values=db.execute("SELECT typeof(value),json_valid(value),CASE WHEN json_valid(value) THEN json_type(value) END,CASE WHEN json_valid(value) THEN json_type(value,'$.logs') END,CASE WHEN json_valid(value) THEN json_type(value,'$.logs.maxDays') END,CASE WHEN json_valid(value) THEN json_type(value,'$.logs.minLevel') END FROM _params WHERE id='settings'").fetchone();storage,valid,root,logs,days,level=values;need(storage in {'text','blob','null','integer','real'}and all(x in {None,'object','array','text','null','integer','real','true','false'}for x in (root,logs,days,level)));result.update(storageType=storage,jsonValid=bool(valid),jsonRootType=root,logsType=logs,maxDaysType=days,minLevelType=level)
-             match=re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.(\d{1,9}))?Z',started or'');result.update(startedTimestampFractionDigits=len(match[1]or'')if match else None,legacyTimestampParserAccepted=legacy_stamp(started)is not None,nanosecondCompatibleParserAccepted=stamp(started)is not None,configuredNumericPolicyAvailable=logs_policy(path,started)is not None)
-             return result
-            
+            def emit(value):
+             raw=enc(value);need(len(raw)<=256*1024);print(raw.decode(),flush=True)
             def main():
-             global STAGE
-             need(PIN_FROZEN and os.environ.get('RELEASE_REF')=='refs/heads/ops/release-progress-v4-20261019'and os.environ.get('RELEASE_ATTEMPT')=='1'and os.environ.get('RELEASE_MODE')=='sqlite-partners-retention');signal.alarm(180)
-             captures=[capture(*a)for a in ARCHIVES];before,after=[a[0]for a in captures];need(before['head']==BASE and after['head']==TARGET)
-             for key,relative,tables in [('qc','sy-huadeng/qc.db',('partners',)),('factory-review','auxiliary.db',('_logs',)),('factory-review-test','auxiliary.db',('_logs',))]:
-              STAGE=key;paths=[db_path(a[0],c[1],key,relative)for a,c in zip(ARCHIVES,captures)];policy=None;settings_paths=[]
-              if key.startswith('factory-review'):
-               settings_paths=[db_path(a[0],c[1],key,'data.db')for a,c in zip(ARCHIVES,captures)];started=after['runtime']['services'][key]['started'];policies=[logs_policy(p,started)for p in settings_paths];need(policies[0]==policies[1]);policy=policies[1]
-               print(enc({'kind':'sealed-logs-settings-shape','system':key,'before':settings_shape(settings_paths[0],started),'after':settings_shape(settings_paths[1],started),'numericPolicyUnchanged':policies[0]==policies[1]if policy else None,'rawSettingsValuesPrinted':False}).decode(),flush=True)
-              with contextlib.ExitStack()as stack:
-               old,new=[stack.enter_context(contextlib.closing(connect(p)))for p in paths];old.execute('ATTACH DATABASE ? AS afterdb',(paths[1].as_uri()+'?mode=ro&immutable=1',))
+             global STAGE,DEADLINE
+             need(PIN_FROZEN and os.environ.get('RELEASE_REF')=='refs/heads/ops/release-progress-v4-20261019'and os.environ.get('RELEASE_ATTEMPT')=='1'and os.environ.get('RELEASE_MODE')=='pg-rows')
+             DEADLINE=time.monotonic()+300
+             def stop(*_):need(False)
+             signal.signal(signal.SIGALRM,stop);signal.signal(signal.SIGTERM,stop);signal.alarm(305)
+             STAGE='authenticate-sealed-inputs';before,rb,manifest=capture(*PINS[0]);verify,rv,_=capture(*PINS[1]);need(before['head']==BASE and verify['head']==TARGET and rb.get('success')is True and rv.get('success')is False)
+             need(rv.get('checks',{}).get('allPostgresOriginalColumnsAndAllowedSchemaPassed')is False)
+             cid=before['runtime']['services']['db']['id'];need(re.fullmatch('[a-f0-9]{64}',cid))
+             session=None;reports=[]
+             try:
+              for schema,tables in TABLES.items():
+               STAGE='read-sealed-'+schema+'-dump';output=restore_copy(BACKUP/(schema+'.dump'),manifest.get(schema+'.dump'),cid,schema,tables)
+               blocks=copy_blocks(output,schema);del output
+               if session is None:
+                session=Session(cid);setup=session.ask("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL statement_timeout='20s'; SET LOCAL lock_timeout='2s'; SET LOCAL TimeZone='UTC'; SET LOCAL DateStyle='ISO, YMD'; SELECT jsonb_build_object('readOnly',current_setting('transaction_read_only'),'timezone',current_setting('TimeZone'));\n");need(setup=={'readOnly':'on','timezone':'UTC'})
+               account_table='Users'if schema=='indo_shipping'else'users';account_names={'Id','Username','IsActive'}if schema=='indo_shipping'else{'username','display_name'}
+               account_columns=[r for r in table_columns(before,schema,account_table)if r['name']in account_names];need({r['name']for r in account_columns}==account_names);validate_current_columns(session,schema,account_table,account_columns)
                for table in tables:
-                need(all(0<=snap['trees'][key]['sqlite'][relative]['tables'][table]['rows']<=200000 for snap in (before,after)));cols=columns(old,table);need(table_audit(old,table,cols)==before['trees'][key]['sqlite'][relative]['tables'][table]and table_audit(new,table,cols)==after['trees'][key]['sqlite'][relative]['tables'][table])
-                if key=='qc':result={'projectedMultisetComparisons':projected_partners(old,new),'idRegeneratedByKnownAPIIsMechanismNotActorProof':True}
-                else:result=row_compare(old,new,table,policy)
-                print(enc(dict(kind='sealed-sqlite-explanation',system=key,table=table,fullOldAndNewTypedAuditMatchesSealedManifest=True,**result)).decode(),flush=True)
-              for rel,pp in [(relative,paths)]+([('data.db',settings_paths)]if settings_paths else[]):
-               for p,a,c in zip(pp,ARCHIVES,captures):need(private_hash(p,512*1024**2)==c[1][key+'/sqlite/'+rel])
-             for a in ARCHIVES:need(private_hash(a[0]/'manifest.json',4*1024**2)==a[1]and private_hash(a[0]/'first-result.json',1024**2)==a[2])
-             print(enc({'kind':'summary','completed':True,'sealedSnapshotsOnly':True,'liveDatabaseAccessed':False,'businessValuesPrinted':False,'businessOrConfigurationWritesPerformed':False,'retentionIsCompatibilityNotActorAttribution':True,'originalStrictAuditRemainsFailed':True,'createdAtNotAutomaticallyExempted':True}).decode(),flush=True)
+                STAGE='compare-'+schema+'-'+table;columns=table_columns(before,schema,table)
+                validate_current_columns(session,schema,table,columns)
+                raw=session.ask(query(schema,table,blocks[table],columns));report=safe_result(raw,columns,before['postgres'][schema]['tables'][table],verify['postgres'][schema]['tables'][table]);report.update(schema=schema,table=table);reports.append(report);emit(dict(kind='postgres-row-difference',**report))
+               del blocks
+              STAGE='close-readonly-snapshot';closed=session.ask('COMMIT; SELECT to_jsonb(true);\n');need(closed is True);session.close();session=None
+              STAGE='revalidate-input-pins'
+              for path,msha,rsha in PINS:need(sha(stable_read(path/'manifest.json',4*1024**2))==msha and sha(stable_read(path/'first-result.json',1024**2))==rsha)
+              emit({'kind':'summary','completed':True,'tableCount':len(reports),'allCurrentSelectedTablesStillMatchSealedVerification':all(r['currentAggregateMatchesSealedVerification']for r in reports),'businessWritesPerformed':False,'restoreExecuted':False,'temporaryTablesCreated':False,'businessOrIdentityValuesPrinted':False,'causeOrActorProven':False,'originalStrictVerificationRemainsFailed':True,'onlySelectedManifestReceiptBaselineAndDumpBytesVerified':True,'wholeArchiveBytesRevalidated':False,'currentRowsReadInOneRepeatableReadOnlyTransaction':True})
+             finally:
+              if session is not None:session.close()
             if __name__=='__main__':
              try:main()
-             except BaseException as error:print(enc({'safeFailure':'SEALED_SQLITE_EXPLANATION_FAILED','stage':STAGE,'exceptionType':type(error).__name__ if type(error).__name__ in {'RuntimeError','KeyError','TypeError','ValueError','OperationalError','OSError','FileNotFoundError','PermissionError'}else'OtherError'}).decode(),flush=True);sys.exit(1)
-            PY
+             except BaseException:emit({'completed':False,'safeFailure':'PG_ROW_DIAGNOSTIC_FAILED','stage':STAGE});sys.exit(1)
+            PYCODE

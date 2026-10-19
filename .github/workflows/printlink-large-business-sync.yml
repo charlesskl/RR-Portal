@@ -26,6 +26,10 @@ jobs:
         run: npm test
       - name: Build production Node 24 image
         run: docker build --tag printlink-large-sync:test .
+      - name: Verify timed out direct healthchecks do not accumulate
+        env:
+          PRINTLINK_HEALTH_TEST_DOCKER_IMAGE: printlink-large-sync:test
+        run: node --test tests/healthcheck-docker.test.mjs
       - name: Exercise full upload inside the production 512 MiB cgroup
         env:
           PRINTLINK_LARGE_TEST_DOCKER_IMAGE: printlink-large-sync:test

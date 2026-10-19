@@ -255,12 +255,12 @@ services:
     volumes:
       - printlink-data:/app/runtime
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3100/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      test: ["CMD", "node", "ops/healthcheck.mjs"]
       interval: 10s
       timeout: 5s
       retries: 3
-    mem_limit: 512m
-    memswap_limit: 512m
+    mem_limit: 768m
+    memswap_limit: 768m
     restart: unless-stopped
     logging:
       driver: json-file

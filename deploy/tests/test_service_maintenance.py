@@ -258,6 +258,25 @@ ensure_service_base_images() { :; }
         return before, after, services
 
     @unittest.skipUnless(BASH_MAJOR >= 4, 'full server script requires Bash 4+; covered on Linux CI')
+    def test_printlink_bounded_health_resource_change_only_recreates_printlink(self):
+        old_test = b'''      test: ["CMD-SHELL", "node -e \\"fetch('http://127.0.0.1:3100/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\\""]\n'''
+        before = (b'services:\n  printlink:\n    healthcheck:\n' + old_test
+                  + b'      interval: 10s\n      timeout: 5s\n      retries: 3\n'
+                  b'    mem_limit: 512m\n    memswap_limit: 512m\n'
+                  b'  voyageplex-api:\n    image: same-mail-api\n')
+        after = before.replace(old_test, b'      test: ["CMD", "node", "ops/healthcheck.mjs"]\n').replace(
+            b'    mem_limit: 512m\n    memswap_limit: 512m\n',
+            b'    mem_limit: 768m\n    memswap_limit: 768m\n')
+        services = {svc: {} for svc in ['db', 'paiji', 'printlink', 'voyageplex-api', 'nginx']}
+        changed = ('docker-compose.cloud.yml\n'
+                   'apps/工程部/3D打印协同平台/ops/healthcheck.mjs\n')
+        result, calls = self.run_update_script(before, after, changed, services)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([a[-1] for a in calls if 'up' in a], ['printlink'])
+        self.assertEqual([a[-1] for a in calls if 'build' in a], ['printlink'])
+        self.assertEqual(list(self.flags.iterdir()), [])
+
+    @unittest.skipUnless(BASH_MAJOR >= 4, 'full server script requires Bash 4+; covered on Linux CI')
     def test_station_compose_addition_deploys_only_printlink(self):
         before, after, services = self.station_compose_fixture()
         result, calls = self.run_update_script(before, after, services_config=services)

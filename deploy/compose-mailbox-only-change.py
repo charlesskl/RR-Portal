@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Accept exact Compose environment additions or the Peise OCR model update.
+"""Accept exact Compose environment additions and reviewed single-service fixes.
 
 Exit 0 means update-server.sh may deploy the matching service incrementally. All other
 changes and read failures exit 1, preserving the full Compose rollout fallback.
@@ -22,6 +22,14 @@ PEISE_MODEL_BEFORE = ("      # 注意: 阿里云已关闭 -latest 别名模型�
                       "      - BAILIAN_MODEL=${PEISE_BAILIAN_MODEL:-qwen-vl-max}\n").encode()
 PEISE_MODEL_AFTER = ("      # 使用已验证可访问的视觉模型；API Key 所属地域与模型权限需匹配\n"
                      "      - BAILIAN_MODEL=${PEISE_BAILIAN_MODEL:-qwen3-vl-plus}\n").encode()
+PRINTLINK_HEALTH_BEFORE = b'''      test: ["CMD-SHELL", "node -e \\"fetch('http://127.0.0.1:3100/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\\""]\n'''
+PRINTLINK_HEALTH_AFTER = b'      test: ["CMD", "node", "ops/healthcheck.mjs"]\n'
+PRINTLINK_HEALTH_BLOCK_BEFORE = (b'    healthcheck:\n' + PRINTLINK_HEALTH_BEFORE
+    + b'      interval: 10s\n      timeout: 5s\n      retries: 3\n')
+PRINTLINK_HEALTH_BLOCK_AFTER = (b'    healthcheck:\n' + PRINTLINK_HEALTH_AFTER
+    + b'      interval: 10s\n      timeout: 5s\n      retries: 3\n')
+PRINTLINK_MEMORY_BEFORE = b'    mem_limit: 512m\n    memswap_limit: 512m\n'
+PRINTLINK_MEMORY_AFTER = b'    mem_limit: 768m\n    memswap_limit: 768m\n'
 
 
 def is_mailbox_only_addition(before: bytes, after: bytes) -> bool:
@@ -37,9 +45,64 @@ def incremental_service(before: bytes, after: bytes):
         return "voyageplex-api"
     if is_station_only_addition(before, after):
         return "printlink"
+    if is_printlink_health_only_change(before, after):
+        return "printlink"
     if is_peise_model_only_change(before, after):
         return "peise"
     return None
+
+
+def _plain_service_block(blob: bytes, target: bytes):
+    if not _quoted_scalars_complete_on_their_line(blob):
+        return None
+    services_seen = target_seen = 0
+    in_services = False
+    service = None
+    start = end = None
+    position = 0
+    for line in blob.splitlines(keepends=True):
+        significant = bool(line.strip()) and not line.lstrip().startswith(b"#")
+        if significant and not line.startswith(b" "):
+            if service == target:
+                end = position
+            in_services = line == b"services:\n"
+            services_seen += int(in_services)
+            service = None
+        elif significant and in_services and line.startswith(b"  ") and not line.startswith(b"   "):
+            if not re.fullmatch(rb"  [A-Za-z0-9_-]+:\n", line):
+                return None
+            if service == target:
+                end = position
+            service = line[2:-2]
+            if service == target:
+                target_seen += 1
+                start = position
+        elif significant and in_services and not line.startswith(b"    "):
+            return None
+        position += len(line)
+    if service == target:
+        end = len(blob)
+    if services_seen != 1 or target_seen != 1 or start is None or end is None:
+        return None
+    return start, end, blob[start:end]
+
+
+def is_printlink_health_only_change(before: bytes, after: bytes) -> bool:
+    # Permit this exact resource/deadline fix only. All bytes outside the plain
+    # PrintLink service, including all other services and credentials, must match.
+    old = _plain_service_block(before, b"printlink")
+    new = _plain_service_block(after, b"printlink")
+    if old is None or new is None:
+        return False
+    block = old[2]
+    if (block.count(PRINTLINK_HEALTH_BLOCK_BEFORE) != 1 or block.count(PRINTLINK_MEMORY_BEFORE) != 1
+            or block.count(b"    healthcheck:\n") != 1
+            or block.count(b"      test:") != 1
+            or block.count(b"    mem_limit:") != 1 or block.count(b"    memswap_limit:") != 1):
+        return False
+    changed = block.replace(PRINTLINK_HEALTH_BLOCK_BEFORE, PRINTLINK_HEALTH_BLOCK_AFTER, 1)
+    changed = changed.replace(PRINTLINK_MEMORY_BEFORE, PRINTLINK_MEMORY_AFTER, 1)
+    return new[2] == changed and before[:old[0]] + changed + before[old[1]:] == after
 
 
 def is_peise_model_only_change(before: bytes, after: bytes) -> bool:

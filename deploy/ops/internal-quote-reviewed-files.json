@@ -1,0 +1,15 @@
+{
+  "apps/业务部/内部报价系统/backend/routes/mixedQuotes.js": "3d5200f5db158e64264fd60a38365663ac80a17fb381ec5277ca16bd5cbfc019",
+  "apps/业务部/内部报价系统/backend/services/mixedPartImport.js": "3d3f51dde263cad688ff3da3b6c04ab5104356e82e5c0245010cd897486f81c5",
+  "apps/业务部/内部报价系统/backend/services/parseMoldSheet.js": "a3c8accf8b53021899f455d51097c7f794c8bbc40d4690b72d6ad7059eacec91",
+  "apps/业务部/内部报价系统/frontend/mixed-molds.js": "a4814362068717ef280a91ebd7f705d3cbaca12d725964d52dab5225864d9831",
+  "apps/业务部/内部报价系统/frontend/mixed-quotation.js": "c53cdab23c2ee24fbdb9fbc80f89943c1467186ae2b2eef8dac9fcba53b62080",
+  "apps/业务部/内部报价系统/frontend/mixed-sku.js": "f87dbe3f69a00631c5849147ad31c5d1749933d104cab9f27e9e9b869c117693",
+  "apps/业务部/内部报价系统/frontend/quote.html": "28027f7b778bc016d18e84a264be5361333c9323cb8c3013647256e2c27fa254",
+  "apps/业务部/内部报价系统/tests/mixed-assembly-bulk-base-api.test.js": "8dd57d4cd799110eaa262a5fcdb6c6de974ff1745fbe52174579a65aec4ea615",
+  "apps/业务部/内部报价系统/tests/mixed-assembly-bulk-base.test.js": "1cbb01da1ac15f1a76aa106165114cbd4b3a98389f91abdf0dbf75e7bfe76daf",
+  "apps/业务部/内部报价系统/tests/mixed-official-sku-links.test.js": "98ae623e9dce6c4dd8d95d84bc7b620500602bb707a33b29aa8809624ebcabb1",
+  "apps/业务部/内部报价系统/tests/mixed-official-sku-review.test.js": "3e88719d28dfd0b3807bc212b4d251f2580ff482b4a67b627f3653ad1d72531c",
+  "apps/业务部/内部报价系统/tests/mixed-sku-import-api.test.js": "d07a2d2e63548b640ae6fa6751c04ba25844578d1a55c58f04f76e54c2f05dd8",
+  "apps/业务部/内部报价系统/tests/mixed-sku.test.js": "e6f998ff6b8d7665bcbd870b1fedd0f4ac354dc4fcd17fd4e7cefbd943b93278"
+}

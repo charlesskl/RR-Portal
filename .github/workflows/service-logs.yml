@@ -1,31 +1,30 @@
-name: Service Logs - Fixed Reviewed Seven-Service Remaining Six Recovery V4
+name: Reviewed Batch Post-Deploy Data and Code Acceptance V2
 on:
   workflow_dispatch:
     inputs:
       mode:
         type: choice
         required: true
-        options: [deploy]
+        options: [verify, acceptance]
 permissions:
   contents: read
-  actions: read
 concurrency:
   group: deploy-cloud
   queue: max
   cancel-in-progress: false
 env:
-  RELEASE_DEPLOY_WORKFLOW_FROZEN: 'true'
-  RELEASE_DEPLOY_HELPER_SHA256: 'd6ce37d6d35ca2d0e5a01cd75a1f021ae70d483572bbe9c1b8ae5ae5f5dfd1a7'
+  RELEASE_POST_WORKFLOW_FROZEN: 'true'
+  RELEASE_VERIFY_HELPER_SHA256: '786935abc580ba1513e8d1069e2f01c6aded0c78ddcc96d93d1d2b47863a39e1'
+  RELEASE_ACCEPTANCE_HELPER_SHA256: 'f598532e246c778693f57b15dac04d26af384c87364f963fef821d081e216401'
+  RELEASE_ENVIRONMENT_PROOF_SHA256: '9ba097453d46298d6e16e8a3ea5051f08dbe1e3cf39711ef4c8f75bc4f257480'
 jobs:
-  deploy-reviewed-scope:
+  reviewed-post-deploy-operation:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 23
     steps:
-      - name: Validate frozen source and disabled regular deployment
+      - name: Validate frozen source, exact branch and first attempt
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           RELEASE_BRANCH: ${{ github.ref }}
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
@@ -33,50 +32,51 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$RELEASE_DEPLOY_WORKFLOW_FROZEN" = true && "$RELEASE_DEPLOY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy ]] || exit 1
-          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-          gh api "repos/$GH_REPO/actions/workflows/deploy.yml" > "$RUNNER_TEMP/regular-deploy-state.json"
-          python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["state"]=="disabled_manually"' "$RUNNER_TEMP/regular-deploy-state.json"
-          for state in queued in_progress waiting requested pending; do
-            gh api --method GET "repos/$GH_REPO/actions/workflows/deploy.yml/runs" -f status="$state" -f per_page=1 > "$RUNNER_TEMP/regular-deploy-runs.json"
-            python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["total_count"]==0' "$RUNNER_TEMP/regular-deploy-runs.json"
-          done
-      - name: Deploy only the fixed seven services
+          [[ "$RELEASE_POST_WORKFLOW_FROZEN" = true && "$RELEASE_VERIFY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$RELEASE_ACCEPTANCE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$RELEASE_ENVIRONMENT_PROOF_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_MODE" =~ ^(verify|acceptance)$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+      - name: Run fixed read-only verification or synthetic acceptance
         env:
-          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           RELEASE_BRANCH: ${{ github.ref }}
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 110m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_DEPLOY_WORKFLOW_FROZEN,RELEASE_DEPLOY_HELPER_SHA256
+          command_timeout: 21m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,RELEASE_POST_WORKFLOW_FROZEN,RELEASE_VERIFY_HELPER_SHA256,RELEASE_ACCEPTANCE_HELPER_SHA256,RELEASE_ENVIRONMENT_PROOF_SHA256
           script: |
             set -euo pipefail
-            [[ "$RELEASE_DEPLOY_WORKFLOW_FROZEN" = true && "$RELEASE_DEPLOY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_POST_WORKFLOW_FROZEN" = true && "$RELEASE_VERIFY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$RELEASE_ACCEPTANCE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$RELEASE_ENVIRONMENT_PROOF_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/release-937-943-944-945-946-950-20261019 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
+            [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_MODE" =~ ^(verify|acceptance)$ ]] || exit 1
             cd /opt/rr-portal
-            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch origin ops/release-937-943-944-945-946-950-20261019 >/dev/null 2>&1 || exit 1
-            [[ "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA" ]] || exit 1
+            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch origin ops/release-937-943-944-945-946-950-20261019 >/dev/null 2>&1 || { echo RELEASE_FETCH_FAILED; exit 1; }
+            [[ "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA" ]] || { echo RELEASE_HEAD_MISMATCH; exit 1; }
             umask 077
-            scoped_release_tmp=$(mktemp -d /tmp/scoped-release.XXXXXX)
-            trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/release-batch-scoped-deploy-v4.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-937-943-944-945-946-950.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = "$RELEASE_DEPLOY_HELPER_SHA256" ]] || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-environment-proof.py" > "$scoped_release_tmp/release-environment-proof.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/release-environment-proof.py" | cut -d ' ' -f1)" = 9ba097453d46298d6e16e8a3ea5051f08dbe1e3cf39711ef4c8f75bc4f257480 ]] || exit 1
-            timeout --signal=TERM --kill-after=30s 105m python3 -B "$scoped_release_tmp/run.py"
-      - name: Report explicit regular-workflow restoration requirement
-        if: always()
-        shell: bash
-        run: |
-          echo 'MANUAL_ATTENTION: After inspecting this result, the release owner must re-enable deploy.yml and verify its state. This read-only-token workflow cannot enable it.'
+            release_private_tmp=$(mktemp -d /tmp/release-post-reviewed.XXXXXX)
+            trap 'rm -rf "$release_private_tmp"' EXIT
+            case "$RELEASE_MODE" in
+              verify)
+                git show "$RELEASE_SHA:deploy/ops/release-batch-post-verify-v2.py" > "$release_private_tmp/run.py" 2>/dev/null || exit 1
+                release_expected_sha="$RELEASE_VERIFY_HELPER_SHA256"
+                release_arguments=(verify)
+                ;;
+              acceptance)
+                git show "$RELEASE_SHA:deploy/ops/release-code-acceptance-v2.py" > "$release_private_tmp/run.py" 2>/dev/null || exit 1
+                release_expected_sha="$RELEASE_ACCEPTANCE_HELPER_SHA256"
+                release_arguments=()
+                ;;
+              *) exit 1 ;;
+            esac
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$release_private_tmp/release-data-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-environment-proof.py" > "$release_private_tmp/release-environment-proof.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$release_private_tmp/release-environment-proof.py" | cut -d ' ' -f1)" = "$RELEASE_ENVIRONMENT_PROOF_SHA256" ]] || { echo RELEASE_ENVIRONMENT_PROOF_MISMATCH; exit 1; }
+            [[ "$(sha256sum "$release_private_tmp/run.py" | cut -d ' ' -f1)" = "$release_expected_sha" ]] || { echo RELEASE_HELPER_MISMATCH; exit 1; }
+            [[ "$(sha256sum "$release_private_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || { echo RELEASE_LIBRARY_MISMATCH; exit 1; }
+            timeout --signal=TERM --kill-after=20s 18m python3 -B "$release_private_tmp/run.py" "${release_arguments[@]}"

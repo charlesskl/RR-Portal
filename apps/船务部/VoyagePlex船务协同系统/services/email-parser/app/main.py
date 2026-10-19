@@ -537,6 +537,8 @@ def parse_email_entries(entries: list[dict], company: str = "Xingxin") -> dict:
                         supported_attachment_count += 1
                     try:
                         parsed_attachment = parse_attachment(Path(attachment["stored_path"]), attachment["filename"])
+                    except MemoryError:
+                        raise  # The disposable worker reports its resource failure.
                     except Exception as exc:
                         attachment_results.append({
                             "filename": attachment["filename"], "kind": "failed", "status": "failed",
@@ -720,6 +722,8 @@ def parse_email_entries(entries: list[dict], company: str = "Xingxin") -> dict:
                     "rule_trace": policy["trace"],
                     "review_reasons": policy["review"],
                 })
+            except MemoryError:
+                raise
             except Exception as exc:
                 item.update({"status": "failed", "error": str(exc)})
             results.append(item)

@@ -51,4 +51,4 @@ jobs:
             --memory=512m --memory-swap=512m --cpus=2 --pids-limit=128 \
             --mount "type=bind,source=$PWD/tests,target=/app/tests,readonly" \
             --entrypoint python voyageplex-mailbox-regression \
-            -m pytest tests -v
+            -m pytest tests -v -rP

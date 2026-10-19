@@ -24,6 +24,33 @@ from app.mail_worker import failure_headers
 VALID = b"Subject: synthetic shipment\r\nFrom: fixture@example.invalid\r\n\r\nSO: SYNTHETIC-1\r\n"
 
 
+def pressure_command(marker):
+    # Load the real application inside the real resource-limited worker, then
+    # touch incremental allocations until RLIMIT_AS rejects further growth.
+    code = '''
+import json,pathlib,resource,sys
+from app import mail_worker as worker
+original=worker._parse
+def parse(raw,filename,company):
+    import app.main
+    if len(raw)>1024*1024:
+        held=[]
+        try:
+            while True:held.append(bytearray(1024*1024))
+        except MemoryError:
+            held.clear()
+            pathlib.Path(MARKER).write_text(json.dumps({"workerPeakRSSKiB":resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                                                       "addressSpaceLimitBytes":resource.getrlimit(resource.RLIMIT_AS)[0]}))
+            raise
+    return original(raw,filename,company)
+worker._parse=parse
+company,filename=sys.argv[1:]
+raw=sys.stdin.buffer.read(worker.MAX_RAW_BYTES+1)
+print(json.dumps(worker.supervise(raw,filename,company)))
+'''.replace("MARKER", repr(str(marker)))
+    return [sys.executable, "-c", code]
+
+
 def controlled_command(pid_file):
     # Test-only child injection. Production always executes the fixed module.
     code = '''
@@ -50,6 +77,102 @@ print(json.dumps(worker.supervise(raw,filename,company)))
 
 
 class MailWorkerTests(unittest.TestCase):
+    def test_email_and_attachment_memory_errors_reach_worker_instead_of_business_failure(self):
+        from app.main import parse_email_entries
+        with patch("app.main.parse_eml", side_effect=MemoryError()):
+            with self.assertRaises(MemoryError):
+                parse_email_entries([{"filename": "synthetic.eml", "raw": VALID}], "Huadeng")
+        message = EmailMessage()
+        message["From"] = "fixture@example.invalid"
+        message["Subject"] = "SYNTHETIC MEMORY CLASSIFICATION"
+        message.set_content("Synthetic fixture only.")
+        message.add_attachment(b"synthetic", maintype="application", subtype="pdf", filename="synthetic.pdf")
+        with patch("app.main.parse_attachment", side_effect=MemoryError()):
+            with self.assertRaises(MemoryError):
+                parse_email_entries([{"filename": "synthetic.eml", "raw": message.as_bytes()}], "Huadeng")
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux actual AS/cgroup memory pressure coverage")
+    def test_full_parent_and_near_32m_batch_survive_256m_worker_limit(self):
+        # app.main is already loaded in this parent, including all production
+        # parser libraries. Retain an actual 25MiB + almost 7MiB batch while its
+        # first raw body also enters the disposable supervisor/worker pipeline.
+        from app.mailbox import MAX_BATCH_BYTES, MAX_MESSAGE_BYTES
+        import resource
+
+        def cgroup_number(path):
+            try:
+                value = Path(path).read_text().strip()
+                return int(value) if value.isdigit() else None
+            except OSError:
+                return None
+
+        def oom_kills():
+            try:
+                events = dict(line.split() for line in Path("/sys/fs/cgroup/memory.events").read_text().splitlines())
+                return int(events["oom_kill"])
+            except (OSError, KeyError, ValueError):
+                return None
+
+        before_oom = oom_kills()
+        batch = [b"x" * MAX_MESSAGE_BYTES, b"y" * (MAX_BATCH_BYTES - MAX_MESSAGE_BYTES - 1024)]
+        self.assertEqual(sum(map(len, batch)), MAX_BATCH_BYTES - 1024)
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+        server_thread = threading.Thread(target=server.run, daemon=True)
+        server_thread.start()
+        for _ in range(100):
+            if server.started:
+                break
+            time.sleep(.02)
+        self.assertTrue(server.started)
+        observed, errors = {}, []
+        try:
+            with tempfile.TemporaryDirectory() as temp:
+                marker = Path(temp) / "resource.json"
+                with patch.object(mail_worker, "WORKER_COMMAND", pressure_command(marker)):
+                    def pressure():
+                        try:
+                            observed.update(self.run_entry(batch[0], seconds=25))
+                        except BaseException as error:
+                            errors.append(type(error).__name__)
+
+                    thread = threading.Thread(target=pressure)
+                    thread.start()
+                    latencies = []
+                    while thread.is_alive():
+                        started = time.monotonic()
+                        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as response:
+                            self.assertEqual(response.status, 200)
+                        latencies.append(time.monotonic() - started)
+                        time.sleep(.02)
+                    thread.join(timeout=1)
+                    self.assertFalse(errors)
+                    self.assertEqual(observed.get("failure_kind"), "parse_memory")
+                    self.assertTrue(marker.is_file())
+                    evidence = json.loads(marker.read_text())
+                    self.assertEqual(evidence["addressSpaceLimitBytes"], 256 * 1024**2)
+                    self.assertGreater(evidence["workerPeakRSSKiB"], 180 * 1024)
+                    self.assertGreater(len(latencies), 1)
+                    self.assertLess(max(latencies), 1)
+                    self.assertEqual(self.run_entry(VALID)["status"], "parsed")
+                evidence.update({"parentPeakRSSKiB": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                                 "batchBytesRetained": sum(map(len, batch)),
+                                 "cgroupMemoryMaxBytes": cgroup_number("/sys/fs/cgroup/memory.max"),
+                                 "cgroupMemoryPeakBytes": cgroup_number("/sys/fs/cgroup/memory.peak"),
+                                 "oomKillsBefore": before_oom, "oomKillsAfter": oom_kills(),
+                                 "maxHealthSeconds": round(max(latencies), 4), "nextMailParsed": True})
+                self.assertEqual(evidence["oomKillsAfter"], before_oom)
+                if evidence["cgroupMemoryMaxBytes"] == 512 * 1024**2 and evidence["cgroupMemoryPeakBytes"] is not None:
+                    self.assertLess(evidence["cgroupMemoryPeakBytes"], 512 * 1024**2)
+                print("synthetic-full-parent-memory-evidence=" + json.dumps(evidence, sort_keys=True))
+        finally:
+            server.should_exit = True
+            server_thread.join(timeout=5)
+            batch.clear()
+
     def test_actual_worker_parses_excel_and_pdf_attachments_with_business_content(self):
         book = openpyxl.Workbook()
         sheet = book.active

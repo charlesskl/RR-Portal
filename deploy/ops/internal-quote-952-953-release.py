@@ -1,9 +1,9 @@
 """Fixed one-service deployment and strict read-only verification. Gates remain false."""
 import hashlib,importlib.util,json,os,pathlib,re,signal,stat,subprocess,sys,time,urllib.request,urllib.error
 ROOT=pathlib.Path('/opt/rr-portal');BASE='85d2082c273d3df3e51b2e414855634c56c498dd';TARGET='593e7e35857a8f434362b7fb078a08870ac56299';TREE='68e209a5bc8ad17b8f72d98ec729db22bad9f797'
-BRANCH='refs/heads/ops/internal-quote-952-953-20261019';DEPLOY_PIN=True;VERIFY_PIN=False
+BRANCH='refs/heads/ops/internal-quote-952-953-20261019';DEPLOY_PIN=False;VERIFY_PIN=True
 BACKUP=ROOT/'deploy/backups/internal-quote-952-953-20261019-backup';BACKUP_MANIFEST='3167ace441a10589644ced79e501993909a7c7be5d9f016de9de4a9f2761e00c';BACKUP_RESULT='7021d496b60a21792f4f4e5a543a9a26c94d971e2ddf3f8236647ea49b549da8'
-DEPLOY=BACKUP.with_name('internal-quote-952-953-20261019-deploy');VERIFY=BACKUP.with_name('internal-quote-952-953-20261019-verify');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+DEPLOY=BACKUP.with_name('internal-quote-952-953-20261019-deploy');VERIFY=BACKUP.with_name('internal-quote-952-953-20261019-verify');DEPLOY_MANIFEST='416783ff53298df3c953a0961db5b9aa24ab5219ef744c7a2e236eb012b2a551';DEPLOY_RESULT='0c0b25cc7298d52e62f8c03f9611c717681e7545607d99b7d1b0ef3ad9b2cc81'
 CORE_SHA='67fb555ac8f614c743b889b4411a2fc415140a96765cacff6c42da448e408a66'
 SOURCE_MANIFEST_SHA='ec6abe3e3dfaa406189859f58d6f3b7358cac1fba5a10246b8dec634231fd132';CACHE='20261019-952-953-reviewed'
 STAGE='preflight';CORE=None;OUT=None;ENV=None

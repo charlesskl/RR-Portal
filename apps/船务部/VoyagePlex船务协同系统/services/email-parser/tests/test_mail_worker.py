@@ -10,9 +10,12 @@ import threading
 import time
 import unittest
 import urllib.request
+from email.message import EmailMessage
+from io import BytesIO
 from unittest.mock import patch
 
 import uvicorn
+import openpyxl
 
 from app import mail_worker
 from app.main import app, poll_mailbox
@@ -47,6 +50,51 @@ print(json.dumps(worker.supervise(raw,filename,company)))
 
 
 class MailWorkerTests(unittest.TestCase):
+    def test_actual_worker_parses_excel_and_pdf_attachments_with_business_content(self):
+        book = openpyxl.Workbook()
+        sheet = book.active
+        sheet.title = "Packing List"
+        sheet.append(["ITEM NO", "DESCRIPTION", "QTY", "CTNS", "CBM"])
+        sheet.append(["SYNTHETIC-A1", "SYNTHETIC TOY", 100, 10, 1.5])
+        excel = BytesIO()
+        book.save(excel)
+        book.close()
+        text = b"BT /F1 12 Tf 50 750 Td (PLACE OF DELIVERY: ELWOOD) Tj ET"
+        objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+                   b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+                   b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+                   b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+                   b"<< /Length " + str(len(text)).encode() + b" >>\nstream\n" + text + b"\nendstream"]
+        pdf = bytearray(b"%PDF-1.4\n")
+        offsets = [0]
+        for index, obj in enumerate(objects, 1):
+            offsets.append(len(pdf))
+            pdf.extend(str(index).encode() + b" 0 obj\n" + obj + b"\nendobj\n")
+        xref = len(pdf)
+        pdf.extend(b"xref\n0 6\n0000000000 65535 f \n")
+        for offset in offsets[1:]:
+            pdf.extend(f"{offset:010d} 00000 n \n".encode())
+        pdf.extend(b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" + str(xref).encode() + b"\n%%EOF\n")
+        for name, content, subtype in (("packing.xlsx", excel.getvalue(), "vnd.openxmlformats-officedocument.spreadsheetml.sheet"), ("booking.pdf", bytes(pdf), "pdf")):
+            with self.subTest(attachment=name):
+                message = EmailMessage()
+                message["From"] = "fixture@example.invalid"
+                message["Subject"] = "SYNTHETIC SHIPMENT"
+                message.set_content("Please see the synthetic attachment.")
+                message.add_attachment(content, maintype="application", subtype=subtype, filename=name)
+                result = self.run_entry(message.as_bytes())
+                self.assertEqual(result["status"], "parsed", result.get("failure_kind"))
+                details = result["attachment_results"]
+                self.assertEqual(len(details), 1)
+                self.assertNotEqual(details[0].get("status"), "failed")
+                if name.endswith("xlsx"):
+                    self.assertEqual(details[0]["kind"], "packing_list")
+                    self.assertEqual(result["items"][0]["product_code"], "SYNTHETIC-A1")
+                    self.assertEqual(result["items"][0]["quantity"], 100)
+                else:
+                    self.assertEqual(details[0]["kind"], "booking_pdf")
+                    self.assertEqual(details[0]["fields"]["delivery_address"], "ELWOOD")
+
     def test_failure_headers_are_bounded_identifiers_without_body(self):
         raw = b"From: fixture@example.invalid\r\nSubject: =?utf-8?b?5rWL6K+V?=\r\nMessage-ID: <synthetic>\r\n\r\nPRIVATE-SYNTHETIC-BODY"
         result = failure_headers(raw)

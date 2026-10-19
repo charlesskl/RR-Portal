@@ -1,7 +1,13 @@
 import imaplib
+import errno
+import json
 import os
 import re
+import select
 import socket
+import ssl
+import subprocess
+import sys
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -21,6 +27,113 @@ class OversizedLiteral(ValueError):
 
 class BoundedImap(imaplib.IMAP4_SSL):
     literal_limit = MAX_MESSAGE_BYTES
+
+    def __init__(self, host, port=993, *, timeout=20, ssl_context=None, control=None, deadline=None):
+        self.control = control or MailboxControl()
+        self.deadline = deadline or time.monotonic() + FETCH_BUDGET_SECONDS
+        self.sock = None
+        self.file = None
+        # IMAP4.__init__ reads greeting and CAPABILITY before it returns.
+        self.control.client = self
+        try:
+            super().__init__(host, port, timeout=timeout,
+                             ssl_context=ssl_context or ssl.create_default_context())
+        except BaseException:
+            if self.file is not None:
+                self.file.close()
+            if self.sock is not None:
+                self.sock.close()
+            raise
+
+    def open(self, host='', port=993, timeout=20):
+        super().open(host, port, min(timeout, self.control.remaining(self.deadline)))
+        self.control.check(self.deadline)  # Before greeting/CAPABILITY, not after __init__.
+
+    def _resolve(self):
+        # System getaddrinfo itself is not cancellable in a Python thread. Use
+        # one small, killable stdlib-only process, with no mailbox credentials.
+        code = ('import json,socket,sys; '
+                'values=socket.getaddrinfo(sys.argv[1],int(sys.argv[2]),type=socket.SOCK_STREAM,proto=socket.IPPROTO_TCP); '
+                'print(json.dumps([[int(f),int(t),int(p),a] for f,t,p,c,a in values if f in (socket.AF_INET,socket.AF_INET6)][:16]))')
+        environment = {key: value for key, value in os.environ.items() if key in {"PATH", "LANG", "LC_ALL"}}
+        process = subprocess.Popen([sys.executable, '-I', '-c', code, self.host, str(self.port)],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, env=environment, start_new_session=True)
+        deadline = min(self.deadline, time.monotonic() + 5)
+        try:
+            while True:
+                self.control.remaining(deadline)
+                try:
+                    raw, _ = process.communicate(timeout=min(.05, self.control.remaining(deadline)))
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+            if process.returncode != 0 or len(raw) > 16384:
+                raise OSError("邮箱服务器域名解析失败")
+            values = json.loads(raw)
+            if not isinstance(values, list) or not 0 < len(values) <= 16:
+                raise OSError("邮箱服务器域名解析失败")
+            for family, kind, protocol, address in values:
+                if (family not in (socket.AF_INET, socket.AF_INET6) or kind != socket.SOCK_STREAM
+                        or protocol != socket.IPPROTO_TCP or not isinstance(address, list)
+                        or len(address) != (2 if family == socket.AF_INET else 4)
+                        or not isinstance(address[0], str) or len(address[0]) > 256
+                        or address[1] != self.port):
+                    raise OSError("邮箱服务器域名解析失败")
+                socket.inet_pton(family, address[0])
+            return [(family, kind, protocol, tuple(address)) for family, kind, protocol, address in values]
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=1)
+            process.stdout.close()
+
+    def _create_socket(self, timeout):
+        last_error = None
+        connected = None
+        for family, kind, protocol, address in self._resolve():
+            self.control.remaining(self.deadline)
+            sock = socket.socket(family, kind, protocol)
+            self.sock = sock  # Register even while a TCP connect is in progress.
+            try:
+                sock.setblocking(False)
+                status = sock.connect_ex(address)
+                deadline = min(self.deadline, time.monotonic() + timeout)
+                while status in {errno.EINPROGRESS, errno.EWOULDBLOCK, errno.EALREADY, errno.EINTR}:
+                    remaining = self.control.remaining(deadline)
+                    _, write, error = select.select([], [sock], [sock], min(.1, remaining))
+                    if write or error:
+                        status = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                if status:
+                    raise OSError(status, "邮箱服务器连接失败")
+                connected = sock
+                break
+            except OSError as error:
+                last_error = error
+                sock.close()
+        if connected is None:
+            raise last_error or OSError("邮箱服务器连接失败")
+        try:
+            self.control.remaining(self.deadline)
+            wrapped = self.ssl_context.wrap_socket(connected, server_hostname=self.host,
+                                                   do_handshake_on_connect=False)
+            self.sock = wrapped
+            wrapped.setblocking(False)
+            deadline = min(self.deadline, time.monotonic() + timeout)
+            while True:
+                remaining = self.control.remaining(deadline)
+                try:
+                    wrapped.do_handshake()
+                    break
+                except ssl.SSLWantReadError:
+                    select.select([wrapped], [], [], min(.1, remaining))
+                except ssl.SSLWantWriteError:
+                    select.select([], [wrapped], [], min(.1, remaining))
+            self.control.check(self.deadline)
+            return wrapped
+        except BaseException:
+            self.sock.close()
+            raise
 
     def read(self, size):
         # Reject the server's literal length before imaplib allocates the body.
@@ -52,12 +165,16 @@ class MailboxControl:
             except (AttributeError, OSError):
                 pass
 
-    def check(self, deadline):
+    def remaining(self, deadline):
         if self.cancelled.is_set():
             raise InterruptedError("邮箱读取已取消")
         remaining = deadline - time.monotonic()
         if remaining <= 0 or self.fetch_expired.is_set():
             raise TimeoutError("本轮邮箱读取已达到时间预算")
+        return remaining
+
+    def check(self, deadline):
+        remaining = self.remaining(deadline)
         if self.client is not None:
             self.client.sock.settimeout(min(20, remaining))
 
@@ -138,7 +255,7 @@ def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-10-08", company: s
     timer.start()
     client = None
     try:
-        client = BoundedImap(host, 993, timeout=20)
+        client = BoundedImap(host, 993, timeout=20, control=control, deadline=deadline)
         control.client = client
         control.check(deadline)
         client.login(address, secret)

@@ -6,10 +6,78 @@ import time
 import unittest
 from unittest.mock import patch
 
-from app.mailbox import BoundedImap, fetch_mailbox, test_mailbox_connection
+from app.mailbox import BoundedImap, MailboxControl, fetch_mailbox, test_mailbox_connection
 
 
 class MailboxProtocolTests(unittest.TestCase):
+    def test_constructor_greeting_and_capability_drip_and_caller_cancel(self):
+        for scenario in ("greeting", "capability", "cancel"):
+            with self.subTest(scenario=scenario):
+                accepted, finished = threading.Event(), threading.Event()
+
+                class Handler(socketserver.StreamRequestHandler):
+                    def handle(self):
+                        accepted.set()
+                        try:
+                            welcome = b"* OK synthetic slow constructor greeting\r\n"
+                            if scenario in ("greeting", "cancel"):
+                                for byte in welcome:
+                                    self.wfile.write(bytes([byte]))
+                                    self.wfile.flush()
+                                    time.sleep(.02)
+                            else:
+                                self.wfile.write(welcome)
+                            while line := self.rfile.readline():
+                                tag, command, *_ = line.decode().split(" ")
+                                if command == "CAPABILITY\r\n" or command == "CAPABILITY":
+                                    for byte in b"* CAPABILITY IMAP4rev1 ID\r\n":
+                                        self.wfile.write(bytes([byte]))
+                                        self.wfile.flush()
+                                        time.sleep(.02)
+                                self.wfile.write(f"{tag} OK complete\r\n".encode())
+                        except OSError:
+                            pass
+                        finally:
+                            finished.set()
+
+                class Server(socketserver.ThreadingTCPServer):
+                    daemon_threads = True
+
+                server = Server(("127.0.0.1", 0), Handler)
+                serving = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": .01}, daemon=True)
+                serving.start()
+                control = MailboxControl()
+                errors = []
+
+                def transport(_client, timeout):
+                    return socket.create_connection(("127.0.0.1", server.server_address[1]), timeout)
+
+                def read():
+                    try:
+                        fetch_mailbox(credentials={"address": "fixture@example.invalid", "auth_code": "synthetic", "host": "imap.163.com", "folder": "INBOX"}, control=control)
+                    except Exception as error:
+                        errors.append(type(error).__name__)
+
+                try:
+                    with patch.object(BoundedImap, "_create_socket", transport), patch("app.mailbox.FETCH_BUDGET_SECONDS", 5 if scenario == "cancel" else .12):
+                        start = time.monotonic()
+                        thread = threading.Thread(target=read)
+                        thread.start()
+                        self.assertTrue(accepted.wait(1))
+                        if scenario == "cancel":
+                            time.sleep(.03)
+                            control.cancel()
+                        thread.join(timeout=1)
+                        self.assertFalse(thread.is_alive())
+                        self.assertLess(time.monotonic() - start, 1)
+                        self.assertTrue(errors)
+                        self.assertTrue(finished.wait(1))
+                finally:
+                    control.cancel()
+                    server.shutdown()
+                    server.server_close()
+                    serving.join(timeout=2)
+
     def test_real_wire_trailing_uid_unsolicited_fetch_and_continuous_drip_deadline(self):
         raw = b"Subject: synthetic wire\r\nFrom: fixture@example.invalid\r\n\r\n" + b"x" * 100
         for scenario in ("uid-before", "uid-after", "drip"):

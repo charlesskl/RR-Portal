@@ -1,4 +1,4 @@
-name: VoyagePlex Isolated Private Mail Worker Diagnosis
+name: VoyagePlex Full Parent Private Mail Worker Diagnosis
 on:
   workflow_dispatch:
 permissions:
@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           [[ "$MAILDIAG_BRANCH" = refs/heads/ops/voyageplex-maildiag-20261019 && "$MAILDIAG_ATTEMPT" = 1 ]] || exit 1
           [[ "$MAILDIAG_REF" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Fixed isolated mail-worker diagnosis
+      - name: Fixed full-parent isolated mail-worker diagnosis
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           MAILDIAG_BRANCH: ${{ github.ref }}
@@ -47,5 +47,5 @@ jobs:
             umask 077
             mailbox_diagnostic_tmp=$(mktemp -d /tmp/maildiag-progress.XXXXXX)
             trap 'rm -rf "$mailbox_diagnostic_tmp"' EXIT
-            git show "$MAILDIAG_REF:deploy/ops/voyageplex-isolated-worker-probe.py" > "$mailbox_diagnostic_tmp/run.py" 2>/dev/null || { echo 'MAILDIAG_FIXED_SCRIPT_READ_FAILED'; exit 1; }
+            git show "$MAILDIAG_REF:deploy/ops/voyageplex-full-parent-worker-probe.py" > "$mailbox_diagnostic_tmp/run.py" 2>/dev/null || { echo 'MAILDIAG_FIXED_SCRIPT_READ_FAILED'; exit 1; }
             timeout --signal=TERM --kill-after=20s 12m python3 "$mailbox_diagnostic_tmp/run.py"

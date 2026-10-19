@@ -5,7 +5,7 @@ module.exports=function createBusinessSync(store,{load,write}){
  const put=s=>store.prepare('INSERT INTO business_sync_state VALUES (1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value').run(JSON.stringify(s));
  return function(input){
   const state=get();
-  if(input.action==='status')return {lastSuccess:state.lastSuccess,conflicts:state.conflicts||[],active:process.env.BUSINESS_SYNC_STATION||null};
+  if(input.action==='status')return {lastSuccess:state.lastSuccess,conflicts:(state.conflicts||[]).map(c=>({...c,canKeepBoth:core.canKeepBoth(c)})),active:process.env.BUSINESS_SYNC_STATION||null};
   if(input.action==='resolve'){
    if(!Array.isArray(input.choices))throw Error('请选择冲突处理方式');
    state.choices||={};for(const choice of input.choices){const c=state.conflicts?.find(c=>c.id===choice.id&&c.signature===choice.signature);if(!c||!(['cloud','windows'].includes(choice.side)||choice.side==='both'&&core.canKeepBoth(c)))throw Error('冲突已变化，请刷新');state.choices[c.id]={signature:c.signature,side:choice.side};}put(state);return {ok:true};

@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {spawn, spawnSync} from 'node:child_process';
-import {chmodSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import http from 'node:http';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {fileURLToPath} from 'node:url';
+import {createRequire} from 'node:module';
 import core from '../shared/business-sync.cjs';
 import {startBusinessSync} from '../collector/business-sync.mjs';
 
@@ -101,17 +102,27 @@ test('Docker process parsing identifies the three service roles and excludes hea
 
 function watchRss(parentPid) {
   let peakKiB = 0, lastKiB = 0;
+  const processPeakKiB = {};
   const sample = () => {
-    const result = spawnSync('ps', ['-axo', 'pid=,ppid=,rss='], {encoding: 'utf8'});
+    const result = spawnSync('ps', ['-axo', 'pid=,ppid=,rss=,args='], {encoding: 'utf8'});
     if (result.status !== 0) return;
-    const rows = result.stdout.trim().split('\n').map(line => line.trim().split(/\s+/).map(Number));
+    const rows = result.stdout.trim().split('\n').map(line => {
+      const [pid, ppid, rss, ...args] = line.trim().split(/\s+/);
+      return [Number(pid), Number(ppid), Number(rss), args];
+    });
     const app = rows.filter(([pid, ppid]) => pid === parentPid || ppid === parentPid);
     lastKiB = app.reduce((sum, row) => sum + row[2], 0);
     peakKiB = Math.max(peakKiB, lastKiB);
+    for (const [, , rss, args] of app) {
+      const role = ['start.mjs', 'cloud/server.mjs', 'production/server.js'].find(file => args.includes(file));
+      if (role) processPeakKiB[role] = Math.max(processPeakKiB[role] || 0, rss);
+    }
   };
   sample();
   const timer = setInterval(sample, 30);
-  return {sample, read: () => ({currentMiB: lastKiB / 1024, peakMiB: peakKiB / 1024}), close: () => clearInterval(timer)};
+  return {sample, read: () => ({currentMiB: lastKiB / 1024, peakMiB: peakKiB / 1024,
+    processPeakMiB: Object.fromEntries(Object.entries(processPeakKiB).map(([role, rss]) => [role, rss / 1024]))}),
+    close: () => clearInterval(timer)};
 }
 
 async function launch(dir) {
@@ -188,10 +199,10 @@ function readState(dir) {
   } finally {db.close(); cloudDb.close();}
 }
 
-async function request(base, route, {data, body, headers = {}} = {}) {
+async function request(base, route, {data, body, headers = {}, timeoutMs = 120000} = {}) {
   const response = await fetch(base + route, {method: data || body ? 'POST' : 'GET',
     headers: {'Content-Type': 'application/json', ...headers}, body: body || (data ? JSON.stringify(data) : undefined),
-    signal: AbortSignal.timeout(120000)});
+    signal: AbortSignal.timeout(timeoutMs)});
   const text = await response.text();
   return {status: response.status, data: JSON.parse(text), bytes: Buffer.byteLength(text), headers: response.headers};
 }
@@ -220,16 +231,25 @@ test('real three-process app preserves images through 21/42 MiB sync, conflicts,
       await delay(100);
     }
     assert.ok(ready, app.logs());
+    // Cloud health is independent of production startup. Wait for the real,
+    // non-mutating sync probe before inspecting production-owned tables.
+    const auth = {Authorization: 'Bearer ' + token};
+    const productionDeadline = Date.now() + 15000;
+    let probe;
+    do {
+      probe = await request(app.base, '/api/collector/business-sync', {headers: auth, data: {
+        clientId, probe: true, baseHash: remoteSha, remoteHash: remoteSha},
+        timeoutMs: Math.max(1, productionDeadline - Date.now())});
+      if (probe.status !== 502 || Date.now() >= productionDeadline) break;
+      await delay(Math.min(100, productionDeadline - Date.now()));
+    } while (Date.now() < productionDeadline);
+    assert.equal(probe.status, 200, app.logs()); assert.equal(probe.data.unchanged, false);
     const before = readState(dir), initialContainer = app.id ? app.state() : null;
     const initialProcessInfo = app.id ? app.processes() : null;
     const initialProcesses = initialProcessInfo?.pids;
     if (app.id) {assert.equal(initialProcesses.length, 3, JSON.stringify(initialProcessInfo.roles)); assert.equal(initialContainer.memory, 512 * MiB); assert.equal(initialContainer.swap, 512 * MiB);}
     app.rss?.sample();
     const beforeRss = app.rss?.read();
-    const auth = {Authorization: 'Bearer ' + token};
-    const probe = await request(app.base, '/api/collector/business-sync', {headers: auth, data: {
-      clientId, probe: true, baseHash: remoteSha, remoteHash: remoteSha}});
-    assert.equal(probe.status, 200); assert.equal(probe.data.unchanged, false);
 
     // Real collector implementation against an isolated synthetic Windows HTTP
     // endpoint. The baseline must remain exact when reconciliation is blocked.
@@ -341,5 +361,154 @@ test('real three-process app preserves images through 21/42 MiB sync, conflicts,
     bridgeDb.close();
     await app?.stop();
     rmSync(dir, {recursive: true, force: true});
+  }
+});
+
+test('real large keep-both sync survives lost response, collector restart and Windows CAS without duplicating images', {timeout: 180000}, async t => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'printlink-large-both-http-'));
+  const {source, remote, baseline} = fixture();
+  remote.records['split-record'] = {_id: 'split-record', date: '2026-10-19', productId: 1, productName: remote.products['1'].name};
+  remote.days['2026-10-19'] = {off: false};
+  writeFileSync(path.join(dir, 'production-source.json'), JSON.stringify(source), {mode: 0o644});
+  const bridgeDb = new DatabaseSync(path.join(dir, 'collector.sqlite'));
+  bridgeDb.exec('CREATE TABLE business_sync_base(id INTEGER PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE business_sync_client(id INTEGER PRIMARY KEY,value TEXT NOT NULL)');
+  bridgeDb.prepare('INSERT INTO business_sync_base VALUES(1,?)').run(baseline);
+  bridgeDb.prepare('INSERT INTO business_sync_client VALUES(1,?)').run(clientId);
+  // Use the real installed Windows adapter, including its disk verification and
+  // compare-and-swap check, with an isolated synthetic business file.
+  for (const [source, target] of [['../legacy/business-sync-adapter.cjs', 'adapter.cjs'],
+    ['../shared/business-sync.cjs', 'business-sync-core.cjs'], ['../shared/json-stream.cjs', 'json-stream.cjs']]) {
+    copyFileSync(new URL(source, import.meta.url), path.join(dir, target));
+  }
+  const adapter = createRequire(import.meta.url)(path.join(dir, 'adapter.cjs'));
+  const windowsFile = path.join(dir, 'windows.json');
+  let windowsData = core.apply(empty(), remote), localWrites = 0, loseResponse = false;
+  writeFileSync(windowsFile, JSON.stringify(windowsData));
+  const initialWindowsSha = sha(readFileSync(windowsFile));
+  const localAuth = 'Basic ' + Buffer.from('synthetic:synthetic').toString('base64');
+  const windows = http.createServer((req, res) => {
+    if (req.headers.authorization !== localAuth) {res.writeHead(401); res.end('{}'); return;}
+    adapter(req, res, {enabled: true, load: () => windowsData,
+      readDisk: () => JSON.parse(readFileSync(windowsFile, 'utf8')),
+      save: next => {localWrites++; windowsData = next; writeFileSync(windowsFile, JSON.stringify(next));}});
+  });
+  let app, runner;
+  const results = [];
+  let clientPeakRss = 0, clientPeakHeap = 0;
+  const sampleClient = () => {const memory = process.memoryUsage(); clientPeakRss = Math.max(clientPeakRss, memory.rss); clientPeakHeap = Math.max(clientPeakHeap, memory.heapUsed);};
+  const clientTimer = setInterval(sampleClient, 30);
+  sampleClient();
+  try {
+    app = await launch(dir);
+    const auth = {Authorization: 'Bearer ' + token};
+    let probe;
+    const deadline = Date.now() + 15000;
+    do {
+      try {probe = await request(app.base, '/api/collector/business-sync', {headers: auth,
+        data: {clientId, probe: true, baseHash: 'not-equal', remoteHash: 'not-equal'}, timeoutMs: Math.max(1, deadline - Date.now())});}
+      catch (error) {if (error.cause?.code !== 'ECONNREFUSED') throw error;}
+      if (probe && probe.status !== 502) break;
+      await delay(100);
+    } while (Date.now() < deadline);
+    assert.equal(probe?.status, 200, app.logs()); assert.equal(probe.data.unchanged, false);
+    const before = readState(dir), initialContainer = app.id ? app.state() : null;
+    const initialProcesses = app.id ? app.processes().pids : null;
+    if (app.id) {assert.equal(initialProcesses.length, 3); assert.equal(initialContainer.memory, 512 * MiB); assert.equal(initialContainer.swap, 512 * MiB);}
+    const windowsUrl = await listen(windows);
+    const makeRunner = () => startBusinessSync({config: {url: windowsUrl, username: 'synthetic', password: 'synthetic'}, db: bridgeDb, autoStart: false,
+      call: async (route, data) => {
+        const result = await request(app.base, route, {headers: auth, data});
+        results.push({status: result.status, ok: result.data.ok, requestBytes: Buffer.byteLength(JSON.stringify(data)), responseBytes: result.bytes});
+        assert.equal(result.status, 200);
+        sampleClient();
+        if (loseResponse && !data.probe) {loseResponse = false; throw Error('synthetic response lost after cloud commit');}
+        return result.data;
+      }});
+    runner = makeRunner();
+    await runner.sync();
+    assert.match(runner().error, /未写入/); assert.equal(localWrites, 0);
+    assert.equal(bridgeDb.prepare('SELECT value FROM business_sync_base WHERE id=1').get().value, baseline);
+    const blocked = readState(dir);
+    for (const key of ['snapshotSha', 'imagesSha', 'inventorySha', 'localMetadataSha', 'ledgerSha', 'usersSha', 'ordersSha', 'backupCount']) assert.equal(blocked[key], before[key], key);
+    const login = await request(app.base, '/api/login', {data: {username: 'admin', password}});
+    assert.equal(login.status, 200);
+    const admin = {Cookie: login.headers.get('set-cookie').split(';')[0], 'X-CSRF-Token': login.data.csrf};
+    const status = await request(app.base, '/api/platform/business-sync', {headers: admin});
+    assert.equal(status.status, 200); assert.equal(status.data.conflicts.length, 1);
+    assert.ok(core.canKeepBoth(status.data.conflicts[0]));
+    const choices = status.data.conflicts.map(({id, signature}) => ({id, signature, side: 'both'}));
+    assert.equal((await request(app.base, '/api/platform/business-sync', {headers: admin, data: {choices}})).status, 200);
+    loseResponse = true;
+    await Promise.all([runner.sync(), app.concurrentHealth?.()]);
+    assert.match(runner().error, /response lost/); assert.equal(localWrites, 0);
+    assert.equal(sha(readFileSync(windowsFile)), initialWindowsSha);
+    assert.equal(bridgeDb.prepare('SELECT value FROM business_sync_base WHERE id=1').get().value, baseline);
+    const committed = readState(dir);
+    assert.equal(committed.backupCount, before.backupCount + 1); assert.ok(committed.receipt && committed.lastSuccess);
+    runner.close(); runner = makeRunner();
+    await runner.sync();
+    assert.equal(runner().error, ''); assert.equal(runner().uploaded, 1); assert.equal(localWrites, 1);
+    assert.equal(windowsData.products.length, 43);
+    assert.equal(windowsData.products.find(row => row.id === 1).name, source.products[0].name);
+    assert.equal(windowsData.products.find(row => row.id === 43).name, remote.products['1'].name);
+    assert.equal(windowsData.products.find(row => row.id === 43).image, remote.products['1'].image);
+    for (const product of source.products) assert.equal(windowsData.products.find(row => row.id === product.id).image, product.image);
+    assert.equal(windowsData.records['2026-10-19'].items[0].productId, 43);
+    const common = core.project(windowsData);
+    assert.equal(core.fingerprint(common), core.fingerprint(JSON.parse(bridgeDb.prepare('SELECT value FROM business_sync_base WHERE id=1').get().value)));
+    const retried = readState(dir);
+    assert.equal(retried.snapshotSha, committed.snapshotSha); assert.equal(retried.backupCount, committed.backupCount);
+    assert.deepEqual(retried.receipt, committed.receipt); assert.equal(retried.businessSha, core.fingerprint(common));
+    for (const key of ['inventorySha', 'localMetadataSha', 'ledgerSha', 'usersSha', 'ordersSha']) assert.equal(retried[key], before[key], key);
+    const staleCas = await fetch(windowsUrl + '/api/business-sync', {method: 'POST', headers: {'Content-Type': 'application/json', Authorization: localAuth},
+      body: JSON.stringify({expected: core.fingerprint(remote), data: common})});
+    assert.equal(staleCas.status, 409); assert.equal(localWrites, 1);
+    windowsData.products.find(row => row.id === 2).name = 'Synthetic Windows edit after keep-both';
+    writeFileSync(windowsFile, JSON.stringify(windowsData));
+    await Promise.all([runner.sync(), app.concurrentHealth?.()]);
+    assert.equal(runner().error, ''); assert.equal(localWrites, 1);
+    const subsequent = results.at(-1);
+    assert.ok(subsequent.requestBytes > 43 * MiB && subsequent.requestBytes < 43.2 * MiB);
+    assert.ok(subsequent.responseBytes > 21.5 * MiB);
+    const after = readState(dir);
+    assert.equal(after.businessSha, core.fingerprint(core.project(windowsData)));
+    assert.equal(after.backupCount, committed.backupCount + 1);
+    await runner.sync();
+    assert.equal(runner().error, ''); assert.equal(localWrites, 1);
+    assert.equal(windowsData.products.length, 43); assert.equal(readState(dir).backupCount, after.backupCount);
+    for (const key of ['inventorySha', 'localMetadataSha', 'ledgerSha', 'usersSha', 'ordersSha']) assert.equal(after[key], before[key], key);
+    sampleClient(); app.rss?.sample();
+    const diagnostic = {mode: app.id ? 'linux-cgroup' : 'local-rss-not-cgroup-proof', scenario: 'keep-both-lost-response-cas',
+      requestBytes: results.map(row => row.requestBytes), responseBytes: results.map(row => row.responseBytes),
+      clientOutsideAppCgroup: true,
+      clientPeakRssMiB: Number((clientPeakRss / MiB).toFixed(1)), clientPeakHeapMiB: Number((clientPeakHeap / MiB).toFixed(1)),
+      appRss: app.rss?.read()};
+    if (app.id) {
+      for (let i = 0; i < 150 && app.state().health !== 'healthy'; i++) await delay(100);
+      const state = app.state();
+      assert.equal(state.health, 'healthy'); assert.equal(state.running, true); assert.equal(state.oom, false); assert.equal(state.restarts, 0);
+      assert.equal(state.pid, initialContainer.pid); assert.equal(state.started, initialContainer.started);
+      assert.deepEqual(app.processes().pids, initialProcesses);
+      diagnostic.cgroupPeakMiB = app.peak(); assert.ok(diagnostic.cgroupPeakMiB > 0 && diagnostic.cgroupPeakMiB <= 512);
+    } else {assert.equal(app.child.exitCode, null); assert.equal(app.child.signalCode, null);}
+    assert.ok(!/子服务退出|heap out of memory|FATAL ERROR/i.test(app.logs()));
+    t.diagnostic(JSON.stringify(diagnostic));
+  } catch (error) {
+    if (app) {
+      t.diagnostic(app.logs());
+      t.diagnostic(JSON.stringify({mode: app.id ? 'linux-cgroup' : 'local-rss-not-cgroup-proof',
+        scenario: 'keep-both-lost-response-cas', appRss: app.rss?.read(), clientOutsideAppCgroup: true,
+        clientPeakRssMiB: clientPeakRss / MiB, clientPeakHeapMiB: clientPeakHeap / MiB}));
+      if (app.id) {
+        const state = app.state(); t.diagnostic(JSON.stringify(state));
+        if (state.running) t.diagnostic(JSON.stringify({processRoles: app.processes().roles, cgroupPeakMiB: app.peak()}));
+      }
+    }
+    throw error;
+  }
+  finally {
+    clearInterval(clientTimer); runner?.close();
+    windows.closeAllConnections(); await new Promise(resolve => windows.close(resolve));
+    bridgeDb.close(); await app?.stop(); rmSync(dir, {recursive: true, force: true});
   }
 });

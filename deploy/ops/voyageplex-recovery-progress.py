@@ -338,6 +338,17 @@ def retry_attempts_progress():
         if re.fullmatch('attempt-[0-9]{4}', path.name) and not path.is_symlink() and path.is_dir(): paths.append(path)
     else:
         result['scanComplete'] = True
+    # Report unfinished artifacts before potentially expensive sealed DB hashing.
+    sealed_paths = []
+    for path in sorted(paths):
+        if not (path / 'seal.json').exists():
+            result['pendingUnsealed'] += 1
+            try: timing = step_timing(path)
+            except (OSError, ValueError): timing = {'stage': 'unavailable'}
+            emit('pendingRetryStepTiming', timing)
+        else:
+            sealed_paths.append(path)
+    paths = sealed_paths
     code = command(['git', '-C', str(ROOT), 'show', LIB_COMMIT + ':deploy/ops/voyageplex-mail-recovery.py'], seconds=4, cap=262144)
     if code is None or hashlib.sha256(code).hexdigest() != LIB_SHA:
         result['unverified'] = len(paths)
@@ -351,12 +362,6 @@ def retry_attempts_progress():
             result['budgetLimited'] = True
             result['unverified'] += len(paths) - index
             break
-        if not (path / 'seal.json').exists():
-            result['pendingUnsealed'] += 1
-            try: timing = step_timing(path)
-            except (OSError, ValueError): timing = {'stage': 'unavailable'}
-            emit('pendingRetryStepTiming', timing)
-            continue
         try:
             # Same SHA semantics as the reviewed helper, with a deadline inside
             # large SQLite-file hashing. Private maps are hashed, never parsed.

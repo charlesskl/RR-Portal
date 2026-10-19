@@ -1,0 +1,2488 @@
+{
+  "reviewedHead": "49e667e89be08d7bbe29e3e810e1d39bf2fe234c",
+  "files": {
+    "apps/业务部/内部报价系统/frontend/mixed-quotation.js": "e6189282b59654ea8980db0a0646b9c7242e802da9f83cd800186be6117bf233",
+    "apps/业务部/内部报价系统/frontend/mixed-sku.js": "b8d995f56c08d4a7b61deb0e74655ee5bd93fe1120c83027df6a5fab39805278",
+    "apps/业务部/内部报价系统/frontend/quote.html": "72ebc92795e82de474191cdf9c6776be75ba3dc52b0ec738a25715a463c2abd2",
+    "apps/业务部/内部报价系统/frontend/workbench.js": "059886204af5849a0e0fd7a635bf0d340669cbc0054faa20b79ff886a216d077",
+    "apps/业务部/内部报价系统/tests/mixed-supplier-header-lifecycle.test.js": "ddeadf01ed8e13b4a6d25a0a2090f2bdd0d1e9cea605a785df884de5b4a8e757",
+    "apps/业务部/内部报价系统/tests/section-save-queue.test.js": "e309f0196f76f56a3833630b13d134f6906d3389011853a849acbdd860542b41",
+    "apps/业务部/内部报价系统/tests/shared-supplier-import.test.js": "c526f0ba7ca97f289ca2ae6f062fedd6d1d335397b5b0770238feed68ea704df"
+  },
+  "expectedSummaryColumns": [
+    {
+      "code": "cost_with_labor",
+      "name": "成本（含人工）",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "cost_without_labor",
+      "name": "成本（不含人工）",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "0000FF",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "injection_labor",
+      "name": "啤工",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "张副总",
+        "owner_fill": "FCE4D6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "injection_labor_after_tax",
+      "name": "退税后啤工",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "injection_labor_amount",
+      "name": "啤工金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "injection_labor_share",
+      "name": "啤工占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "injection_labor_amount"
+      ]
+    },
+    {
+      "code": "assembly_labor",
+      "name": "装工",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "张副总",
+        "owner_fill": "FCE4D6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "assembly_labor_after_tax",
+      "name": "退税后装工",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "assembly_labor_amount",
+      "name": "装工金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "assembly_labor_share",
+      "name": "装工占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "assembly_labor_amount"
+      ]
+    },
+    {
+      "code": "painting_labor",
+      "name": "喷印工",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "张副总",
+        "owner_fill": "FCE4D6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "painting_labor_after_tax",
+      "name": "退税后喷印工",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "painting_labor_amount",
+      "name": "喷印工金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "painting_labor_share",
+      "name": "喷印工占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "painting_labor_amount"
+      ]
+    },
+    {
+      "code": "imp_mat",
+      "name": "料价进口料",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "彭副总",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "dom_mat",
+      "name": "料价国内料",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "彭副总",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "raw_material_after_tax",
+      "name": "退税后原料",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "raw_material_amount",
+      "name": "原料金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "raw_material_share",
+      "name": "原料占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "raw_material_amount"
+      ]
+    },
+    {
+      "code": "abs_material_cost",
+      "name": "ABS料价成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "abs_material_share",
+      "name": "ABS占货价%",
+      "format": "percent",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "0000FF",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null,
+      "share_unit": "abs_material_cost"
+    },
+    {
+      "code": "total_purchase_price",
+      "name": "总采购价",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "0000FF",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "color_box",
+      "name": "彩盒",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "张副总",
+        "owner_fill": "FCE4D6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "color_box_after_tax",
+      "name": "退税后彩盒",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "color_box_amount",
+      "name": "彩盒金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "color_box_share",
+      "name": "彩盒占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "color_box_amount"
+      ]
+    },
+    {
+      "code": "libao",
+      "name": "贴纸",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "张副总",
+        "owner_fill": "FCE4D6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "libao_after_tax",
+      "name": "退税后贴纸",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "libao_amount",
+      "name": "贴纸金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "libao_share",
+      "name": "贴纸占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "libao_amount"
+      ]
+    },
+    {
+      "code": "suction",
+      "name": "吸塑",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "彭副总",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "suction_after_tax",
+      "name": "退税后吸塑",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "suction_amount",
+      "name": "吸塑金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "suction_share",
+      "name": "吸塑占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "suction_amount"
+      ]
+    },
+    {
+      "code": "carton",
+      "name": "纸箱",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "张副总",
+        "owner_fill": "FCE4D6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "carton_after_tax",
+      "name": "退税后纸箱",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "carton_amount",
+      "name": "纸箱金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "carton_share",
+      "name": "纸箱占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "carton_amount"
+      ]
+    },
+    {
+      "code": "plating",
+      "name": "电镀",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "张副总",
+        "owner_fill": "FCE4D6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "flocking",
+      "name": "植绒",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "electronic",
+      "name": "电子",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "胡总",
+        "owner_fill": "9BC2E6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "electronic_after_tax",
+      "name": "退税后电子",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "electronic_amount",
+      "name": "电子金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "electronic_share",
+      "name": "电子占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "electronic_amount"
+      ]
+    },
+    {
+      "code": "battery",
+      "name": "电池",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "胡总",
+        "owner_fill": "9BC2E6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "battery_after_tax",
+      "name": "退税后电池",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "battery_amount",
+      "name": "电池金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "battery_share",
+      "name": "电池占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "battery_amount"
+      ]
+    },
+    {
+      "code": "hardware",
+      "name": "五金",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "胡总",
+        "owner_fill": "9BC2E6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "hardware_after_tax",
+      "name": "退税后五金",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "hardware_amount",
+      "name": "五金金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "hardware_share",
+      "name": "五金占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "hardware_amount"
+      ]
+    },
+    {
+      "code": "slush",
+      "name": "搪胶",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "彭副总",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "slush_after_tax",
+      "name": "退税后搪胶",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "slush_amount",
+      "name": "搪胶金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "slush_share",
+      "name": "搪胶占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "slush_amount"
+      ]
+    },
+    {
+      "code": "sewing_hair",
+      "name": "车发",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "彭副总",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "sewing_hair_after_tax",
+      "name": "退税后车发",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "sewing_hair_amount",
+      "name": "车发金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "sewing_hair_share",
+      "name": "车发占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "sewing_hair_amount"
+      ]
+    },
+    {
+      "code": "sewing_cloth",
+      "name": "车衣",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "彭副总",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "sewing_cloth_after_tax",
+      "name": "退税后车衣",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "sewing_cloth_amount",
+      "name": "车衣金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "sewing_cloth_share",
+      "name": "车衣占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "sewing_cloth_amount"
+      ]
+    },
+    {
+      "code": "paint_material",
+      "name": "油漆",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "胡总",
+        "owner_fill": "9BC2E6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "paint_material_after_tax",
+      "name": "退税后油漆",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "paint_material_amount",
+      "name": "油漆金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "paint_material_share",
+      "name": "油漆占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "paint_material_amount"
+      ]
+    },
+    {
+      "code": "other_buy",
+      "name": "其他外购",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "胡总",
+        "owner_fill": "9BC2E6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "other_buy_after_tax",
+      "name": "退税后其他外购",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "other_buy_amount",
+      "name": "其他外购金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "other_buy_share",
+      "name": "其他外购占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "other_buy_amount"
+      ]
+    },
+    {
+      "code": "misc",
+      "name": "杂项",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "胡总",
+        "owner_fill": "9BC2E6"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "misc_after_tax",
+      "name": "退税后杂项",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "misc_amount",
+      "name": "杂项金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "misc_share",
+      "name": "杂项占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "misc_amount"
+      ]
+    },
+    {
+      "code": "freight",
+      "name": "运费",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "cabinet",
+      "name": "吊柜费",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "freight_after_tax",
+      "name": "退税后运费",
+      "format": "unit",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "freight_amount",
+      "name": "运费金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "freight_share",
+      "name": "运费占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "D9E1F2",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "D9E1F2"
+      },
+      "share_amounts": [
+        "freight_amount"
+      ]
+    },
+    {
+      "code": "surtax_04",
+      "name": "附加税0.4%",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "0000FF",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "rmb_purchase_cost",
+      "name": "人民币采购成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "0000FF",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "rmb_purchase_share",
+      "name": "人民币采购成本占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null,
+      "share_unit": "rmb_purchase_cost"
+    },
+    {
+      "code": "gross_before_tax",
+      "name": "未退税前毛利",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "gross_before_tax_rate",
+      "name": "未退税前毛利率",
+      "format": "percent",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "profit_before_tax",
+      "name": "未退税前利润",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "profit_before_tax_rate",
+      "name": "未退税前利润率",
+      "format": "percent",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "markup_before_tax",
+      "name": "未退税前码点",
+      "format": "number",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "FF0000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "tax_1_cost",
+      "name": "含税1%成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "labor_13_cost",
+      "name": "人工类13%成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "freight_9_cost",
+      "name": "运费含税9%成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "tax_13_cost",
+      "name": "含税13%成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "carton_13_cost",
+      "name": "纸箱(含税13%）成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "slush_3_cost",
+      "name": "搪胶类3%成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "hair_13_cost",
+      "name": "车发类13%成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "cloth_13_cost",
+      "name": "车衣类13%成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "suction_6_cost",
+      "name": "吸塑类6%成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "rebate_reduction",
+      "name": "总退税可减少成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "cost_after_rebate",
+      "name": "退税及返点后总成本（含人工）",
+      "format": "unit",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "markup_after_tax",
+      "name": "退税后码数",
+      "format": "number",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "FF0000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "raw_cost_after_tax",
+      "name": "退税后原料成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "labor_cost_after_tax",
+      "name": "退税后人工成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "no_labor_cost_after_tax",
+      "name": "退税后不含人工成本",
+      "format": "unit",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "gross_after_tax",
+      "name": "退税后毛利",
+      "format": "unit",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "gross_after_tax_rate",
+      "name": "退税后毛利率",
+      "format": "percent",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "profit_after_tax",
+      "name": "退税后利润",
+      "format": "unit",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "profit_after_tax_rate",
+      "name": "退税后利润率",
+      "format": "percent",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "production_amount",
+      "name": "总生产金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "production_cost",
+      "name": "总生产成本",
+      "format": "amount",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "total_gross_before_tax",
+      "name": "总未退税前毛利",
+      "format": "amount",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "total_gross_before_tax_rate",
+      "name": "总未退税前毛利率",
+      "format": "percent",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": [
+        "total_gross_before_tax"
+      ]
+    },
+    {
+      "code": "total_profit_before_tax",
+      "name": "总未退税前利润",
+      "format": "amount",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "total_profit_before_tax_rate",
+      "name": "总未退税前利润率",
+      "format": "percent",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": [
+        "total_profit_before_tax"
+      ]
+    },
+    {
+      "code": "total_raw_before_tax",
+      "name": "总未退税前料价",
+      "format": "amount",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "total_raw_before_tax_share",
+      "name": "总未退税前料价占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": [
+        "total_raw_before_tax"
+      ]
+    },
+    {
+      "code": "total_labor_before_tax",
+      "name": "总未退税人工成本",
+      "format": "amount",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "total_labor_before_tax_share",
+      "name": "总未退税人工成本占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "FFFF00",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFF00"
+      },
+      "share_amounts": [
+        "total_labor_before_tax"
+      ]
+    },
+    {
+      "code": "total_rmb_purchase",
+      "name": "总人民币结算外购件成本",
+      "format": "amount",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "total_rmb_purchase_share",
+      "name": "总人民币结算外购件成本占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": [
+        "total_rmb_purchase"
+      ]
+    },
+    {
+      "code": "total_rebate_reduction",
+      "name": "总退税及返点减少成本金额",
+      "format": "amount",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "total_no_labor_after_tax",
+      "name": "退税后不含人工成本",
+      "format": "amount",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "total_no_labor_after_tax_share",
+      "name": "退税后不含人工成本占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": [
+        "total_no_labor_after_tax"
+      ]
+    },
+    {
+      "code": "total_gross_after_tax",
+      "name": "总退税后毛利",
+      "format": "amount",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "total_gross_after_tax_rate",
+      "name": "总退税后毛利率",
+      "format": "percent",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": [
+        "total_gross_after_tax"
+      ]
+    },
+    {
+      "code": "total_profit_after_tax",
+      "name": "总退税后利润",
+      "format": "amount",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "total_profit_after_tax_rate",
+      "name": "总退税后利润率",
+      "format": "percent",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": [
+        "total_profit_after_tax"
+      ]
+    },
+    {
+      "code": "total_raw_after_tax",
+      "name": "总退税后料成本",
+      "format": "amount",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "total_raw_after_tax_share",
+      "name": "总未退税前料成本占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": [
+        "total_raw_after_tax"
+      ]
+    },
+    {
+      "code": "total_labor_after_tax",
+      "name": "总退税后人工成本",
+      "format": "amount",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": null
+    },
+    {
+      "code": "total_labor_after_tax_share",
+      "name": "总退税后人工成本占比",
+      "format": "percent",
+      "header_style": {
+        "fill": "00B0F0",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "00B0F0"
+      },
+      "share_amounts": [
+        "total_labor_after_tax"
+      ]
+    },
+    {
+      "code": "amount_share_total",
+      "name": "各金额占比求和",
+      "format": "percent",
+      "header_style": {
+        "fill": "FFFFFF",
+        "color": "000000",
+        "owner": "",
+        "owner_fill": "FFFFFF"
+      },
+      "share_amounts": [
+        "injection_labor_amount",
+        "assembly_labor_amount",
+        "painting_labor_amount",
+        "raw_material_amount",
+        "color_box_amount",
+        "libao_amount",
+        "suction_amount",
+        "carton_amount",
+        "electronic_amount",
+        "battery_amount",
+        "hardware_amount",
+        "slush_amount",
+        "sewing_hair_amount",
+        "sewing_cloth_amount",
+        "paint_material_amount",
+        "other_buy_amount",
+        "misc_amount",
+        "freight_amount"
+      ]
+    }
+  ],
+  "expectedVerificationColumns": [
+    {
+      "key": "A",
+      "label": "客名",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "B",
+      "label": "货号",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "C",
+      "label": "货品名称",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "D",
+      "label": "2026年1-7月份实际接单数量",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "E",
+      "label": "货价(HK$)",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "F",
+      "label": "成本(含人工)",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "G",
+      "label": "成本(不含人工)",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "H",
+      "label": "啤工",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "I",
+      "label": "退税后啤工",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "J",
+      "label": "啤工金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "K",
+      "label": "啤工占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "L",
+      "label": "装工",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "M",
+      "label": "退税后装工",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "N",
+      "label": "装工金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "O",
+      "label": "装工占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "P",
+      "label": "喷印工",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "Q",
+      "label": "退税后喷印工",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "R",
+      "label": "喷印工金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "S",
+      "label": "喷印工占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "T",
+      "label": "料价进口料",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "U",
+      "label": "料价国内料",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "V",
+      "label": "退税后原料",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "W",
+      "label": "原料金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "X",
+      "label": "原料占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "Y",
+      "label": "ABS料价成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "Z",
+      "label": "ABS占货价%",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "AA",
+      "label": "总采购价",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AB",
+      "label": "彩盒",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AC",
+      "label": "退税后彩盒",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AD",
+      "label": "彩盒金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AE",
+      "label": "彩盒占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AF",
+      "label": "贴纸",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AG",
+      "label": "退税后贴纸",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AH",
+      "label": "贴纸金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AI",
+      "label": "贴纸占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AJ",
+      "label": "吸塑",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AK",
+      "label": "退税后吸塑",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AL",
+      "label": "吸塑金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AM",
+      "label": "吸塑占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AN",
+      "label": "纸箱",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AO",
+      "label": "退税后纸箱",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AP",
+      "label": "纸箱金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AQ",
+      "label": "纸箱占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AR",
+      "label": "电镀",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AS",
+      "label": "电子",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AT",
+      "label": "退税后电子",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AU",
+      "label": "电子金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AV",
+      "label": "电子占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "AW",
+      "label": "电池",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "AX",
+      "label": "退税后电池",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AY",
+      "label": "电池金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "AZ",
+      "label": "电池占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BA",
+      "label": "五金",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BB",
+      "label": "退税后五金",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BC",
+      "label": "五金金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BD",
+      "label": "五金占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BE",
+      "label": "搪胶",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BF",
+      "label": "退税后搪胶",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BG",
+      "label": "搪胶金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BH",
+      "label": "搪胶占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BI",
+      "label": "车发",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BJ",
+      "label": "退税后车发",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BK",
+      "label": "车发金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BL",
+      "label": "车发占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BM",
+      "label": "车衣",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BN",
+      "label": "退税后车衣",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BO",
+      "label": "车衣金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BP",
+      "label": "车衣占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BQ",
+      "label": "油漆",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BR",
+      "label": "退税后油漆",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BS",
+      "label": "油漆金额",
+      "hidden": true,
+      "percent": false
+    },
+    {
+      "key": "BT",
+      "label": "油漆占比",
+      "hidden": true,
+      "percent": true
+    },
+    {
+      "key": "BU",
+      "label": "其他外购",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BV",
+      "label": "退税后其他外购",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BW",
+      "label": "其他外购金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BX",
+      "label": "其他外购占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "BY",
+      "label": "杂项",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "BZ",
+      "label": "退税后杂项",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CA",
+      "label": "杂项金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CB",
+      "label": "杂项占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CC",
+      "label": "运费",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CD",
+      "label": "吊柜费",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CE",
+      "label": "退税后运费",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CF",
+      "label": "运费金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CG",
+      "label": "运费占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CH",
+      "label": "附加税0.4%",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CI",
+      "label": "人民币采购成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CJ",
+      "label": "人民币采购成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CK",
+      "label": "未退税前毛利",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CL",
+      "label": "未退税前毛利率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CM",
+      "label": "未退税前利润",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CN",
+      "label": "未退税前利润率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "CO",
+      "label": "未退税前码点",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CP",
+      "label": "含税1%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CQ",
+      "label": "人工类13%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CR",
+      "label": "运费含税9%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CS",
+      "label": "含税13%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CT",
+      "label": "纸箱(含税13%）成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CU",
+      "label": "搪胶类3%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CV",
+      "label": "车发类13%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CW",
+      "label": "车衣类13%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CX",
+      "label": "吸塑类6%成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CY",
+      "label": "总退税可减少成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "CZ",
+      "label": "退税及返点后总成本（含人工）",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DA",
+      "label": "退税后码数",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DB",
+      "label": "退税后原料成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DC",
+      "label": "退税后人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DD",
+      "label": "退税后不含人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DE",
+      "label": "退税后毛利",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DF",
+      "label": "退税后毛利率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DG",
+      "label": "退税后利润",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DH",
+      "label": "退税后利润率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DI",
+      "label": "总生产金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DJ",
+      "label": "总生产成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DK",
+      "label": "总未退税前毛利",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DL",
+      "label": "总未退税前毛利率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DM",
+      "label": "总未退税前利润",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DN",
+      "label": "总未退税前利润率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DO",
+      "label": "总未退税前料价",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DP",
+      "label": "总未退税前料价占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DQ",
+      "label": "总未退税人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DR",
+      "label": "总未退税人工成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DS",
+      "label": "总人民币结算外购件成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DT",
+      "label": "总人民币结算外购件成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DU",
+      "label": "总退税及返点减少成本金额",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DV",
+      "label": "退税后不含人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DW",
+      "label": "退税后不含人工成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DX",
+      "label": "总退税后毛利",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "DY",
+      "label": "总退税后毛利率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "DZ",
+      "label": "总退税后利润",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "EA",
+      "label": "总退税后利润率",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "EB",
+      "label": "总退税后料成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "EC",
+      "label": "总未退税前料成本占比",
+      "hidden": false,
+      "percent": true
+    },
+    {
+      "key": "ED",
+      "label": "总退税后人工成本",
+      "hidden": false,
+      "percent": false
+    },
+    {
+      "key": "EE",
+      "label": "总退税后人工成本占比",
+      "hidden": false,
+      "percent": true
+    }
+  ],
+  "finalPinFrozen": true
+}

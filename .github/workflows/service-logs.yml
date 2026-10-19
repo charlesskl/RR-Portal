@@ -1,16 +1,17 @@
-name: Fixed QC Report Environment Evidence
+name: Fixed Report Original Image Evidence
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [report-env]}
-permissions: {contents: read}
-concurrency: {group: release-read-only-progress, cancel-in-progress: false}
-env:
-  RELEASE_REPORT_ENV_FROZEN: 'true'
+      mode: {type: choice, required: true, options: [report-drift]}
+permissions:
+  contents: read
+concurrency:
+  group: release-read-only-progress
+  cancel-in-progress: false
 jobs:
-  report-env:
+  progress:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 4
     steps:
       - shell: bash
         env:
@@ -19,8 +20,9 @@ jobs:
           RELEASE_MODE: ${{ inputs.mode }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
-          [[ "$RELEASE_REPORT_ENV_FROZEN" = true && "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = report-env && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+          [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = report-drift && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+      - name: Read fixed container and deployment summaries
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_REF: ${{ github.ref }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
@@ -30,30 +32,69 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 90s
-          envs: RELEASE_REF,RELEASE_ATTEMPT,RELEASE_MODE,RELEASE_REPORT_ENV_FROZEN
+          command_timeout: 150s
+          envs: RELEASE_REF,RELEASE_ATTEMPT,RELEASE_MODE
           script: |
             set -euo pipefail
-            [[ "$RELEASE_REPORT_ENV_FROZEN" = true && "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = report-env ]] || exit 1
-            cd /opt/rr-portal
+            [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = report-drift ]] || exit 1
+            umask 077
             python3 -B - <<'PY'
-            import hashlib,json,pathlib,subprocess,sys
-            stage='source-bytes';R=pathlib.Path('/opt/rr-portal');CID='c4a4386e1b79b072d9a86bca5fba024791b7b99682cab04295045a4d4da3ead7'
-            def read(args):
-             p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=15,cwd=R);assert p.returncode==0 and len(p.stdout)<=33554432;return p.stdout
-            try:
-             raw=read(['git','show','ce7588d3c181f9ca7d9806541c0dd572d552665c:deploy/ops/release-environment-proof.py']);assert hashlib.sha256(raw).hexdigest()=='9ba097453d46298d6e16e8a3ea5051f08dbe1e3cf39711ef4c8f75bc4f257480'
-             m={'__name__':'reviewed_readonly_environment','__file__':'reviewed-git-object'};exec(compile(raw,'reviewed-environment-proof','exec'),m)
-             stage='original-baseline';B=R/'deploy/backups/release-937-943-944-945-946-950-20261019-v2';manifest=m['private_read'](B/'manifest.json',1048576);assert m['sha'](manifest)=='22483bb8f1a2e799ad6bcd14f48c2b60c2913d74ad9a03207c39c8b6f761f93f'
-             index=m['decoded'](manifest);baseline=m['private_read'](B/'baseline.private.json',33554432);assert m['sha'](baseline)==index['baseline.private.json'];expected=m['decoded'](baseline)['runtime']['services']['qc-report']
-             stage='old-inspection';old=m['records'](m['old_inspections']())[expected['id']];oldrows,a=m['bound_environment'](old,expected,'qc-report')
-             stage='current-inspection';new=m['records'](m['decoded'](read(['docker','inspect',CID])))[CID];actual={'id':CID,'image':new['Image'],'environmentSHA256':m['sha'](m['encoded'](new['Config']['Env']))};newrows,b=m['bound_environment'](new,actual,'qc-report')
-             changed=sorted(k for k in a.keys()&b.keys()if a[k]!=b[k]);added=sorted(b.keys()-a.keys());removed=sorted(a.keys()-b.keys())
-             print(json.dumps({'success':None,'stage':'runtime-key-delta','changedKeys':changed,'addedKeys':added,'removedKeys':removed,'strictMapEqual':a==b},sort_keys=True),flush=True)
-             stage='two-image-defaults';imageids=sorted({expected['image'],actual['image']});imagerows=m['decoded'](read(['docker','image','inspect',*imageids]));assert type(imagerows)is list and len(imagerows)==len(imageids);images={v['Id']:v for v in imagerows};assert set(images)==set(imageids)
-             oldimage=m['environments'](images[expected['image']]['Config']['Env']);newimage=m['environments'](images[actual['image']]['Config']['Env'])
-             stage='compose-key-presence';compose=m['decoded'](read(['docker','compose','-p','rr-portal','-f',str(R/'docker-compose.cloud.yml'),'--env-file',str(R/'.env.cloud.production'),'config','--format','json']));explicit=compose['services']['qc-report'].get('environment',{});assert type(explicit)is dict
-             proof={k:{'oldMatchesOwnImageDefault':k in a and k in oldimage and a[k]==oldimage[k],'newMatchesOwnImageDefault':k in b and k in newimage and b[k]==newimage[k],'composeExplicitKeyPresent':k in explicit}for k in sorted(set(changed+added+removed))}
-             print(json.dumps({'success':True,'stage':'completed','changedKeys':changed,'addedKeys':added,'removedKeys':removed,'uniqueEnvironmentMapsEqual':a==b,'strictArraySHAEqual':m['sha'](m['encoded'](oldrows))==actual['environmentSHA256'],'imageDefaultProof':proof},sort_keys=True))
-            except Exception as e:print(json.dumps({'success':False,'stage':stage,'exceptionType':type(e).__name__},sort_keys=True));sys.exit(1)
+            """Read-only report/worker drift evidence; two private original-image metadata files."""
+            import hashlib,json,os,pathlib,re,stat,subprocess,sys,time
+            R=pathlib.Path('/opt/rr-portal');TARGET='85d2082c273d3df3e51b2e414855634c56c498dd';BASE='52c090589d6da542fee74ef17c8edd3b0dfe4fe6';SOURCE='ce7588d3c181f9ca7d9806541c0dd572d552665c';PIN_FROZEN=True
+            V4=R/'deploy/backups/release-937-943-944-945-946-950-deploy-20261019-v4';OUT=R/'deploy/backups/release-qc-report-original-image-evidence-20261019'
+            WEB='c4a4386e1b79b072d9a86bca5fba024791b7b99682cab04295045a4d4da3ead7';STAGE='preflight';LAST_COMMAND=None
+            def need(x):
+             if not x:raise RuntimeError('REPORT_IMAGE_EVIDENCE_REJECTED')
+            def enc(x):return json.dumps(x,sort_keys=True,ensure_ascii=True,separators=(',',':'),allow_nan=False).encode()
+            def sha(x):return hashlib.sha256(x).hexdigest()
+            def run(args):
+             global LAST_COMMAND
+             LAST_COMMAND='git-read'if args[0]=='git'else'images'if args[:2]==['docker','image']else'compose-config'if args[:2]==['docker','compose']else'containers'
+             need(time.monotonic()<END);p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,cwd=R,timeout=max(.1,min(15,END-time.monotonic())));need(p.returncode==0 and len(p.stdout)<=32*1024**2);return p.stdout
+            def save(name,value):
+             fd=os.open(OUT/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+             with os.fdopen(fd,'wb')as f:f.write(enc(value));f.flush();os.fsync(f.fileno())
+            def evidence(old,new,old_default,new_default,explicit):
+             changed=sorted(k for k in old.keys()&new.keys()if old[k]!=new[k]);added=sorted(new.keys()-old.keys());removed=sorted(old.keys()-new.keys())
+             return {'changedKeys':changed,'addedKeys':added,'removedKeys':removed,'mapsIdentical':old==new,'keyEvidence':[{'key':k,'explicitlyConfigured':k in explicit,'oldRuntimePresent':k in old,'newRuntimePresent':k in new,'oldImageDefaultPresent':k in old_default,'newImageDefaultPresent':k in new_default,'oldEqualsItsImageDefault':k in old and k in old_default and old[k]==old_default[k],'newEqualsItsImageDefault':k in new and k in new_default and new[k]==new_default[k]}for k in sorted(set(changed+added+removed))]}
+            def main():
+             global STAGE,END
+             os.umask(0o077);need(PIN_FROZEN and os.environ.get('RELEASE_REF')=='refs/heads/ops/release-progress-v4-20261019'and os.environ.get('RELEASE_ATTEMPT')=='1'and os.environ.get('RELEASE_MODE')=='report-drift');END=time.monotonic()+120
+             STAGE='proof-import';raw=run(['git','show',SOURCE+':deploy/ops/release-environment-proof.py']);need(sha(raw)=='9ba097453d46298d6e16e8a3ea5051f08dbe1e3cf39711ef4c8f75bc4f257480');e={'__name__':'report_metadata_only'};exec(compile(raw,'reviewed-env','exec'),e)
+             STAGE='original-baseline';old_records=e['records'](e['old_inspections']());backup=R/'deploy/backups/release-937-943-944-945-946-950-20261019-v2';mr=e['private_read'](backup/'manifest.json',1024**2);need(sha(mr)=='22483bb8f1a2e799ad6bcd14f48c2b60c2913d74ad9a03207c39c8b6f761f93f');bm=e['decoded'](mr);br=e['private_read'](backup/'baseline.private.json',32*1024**2);need(sha(br)==bm['baseline.private.json']);baseline=e['decoded'](br)
+             STAGE='v4-complete-seal';need(V4.is_dir()and not V4.is_symlink()and stat.S_IMODE(V4.stat().st_mode)==0o700);entries=list(V4.rglob('*'));need(len(entries)<=5000 and all(not p.is_symlink()and(p.is_file()or p.is_dir())and p.stat().st_mode&0o077==0 for p in entries))
+             raw_manifest=e['private_read'](V4/'manifest.json',4*1024**2);manifest=e['decoded'](raw_manifest);need(set(manifest)=={str(p.relative_to(V4))for p in entries if p.is_file()and p!=V4/'manifest.json'}and sum(p.stat().st_size for p in entries if p.is_file())<=1024**3)
+             for name,wanted in manifest.items():
+              need(type(name)is str and not pathlib.PurePosixPath(name).is_absolute()and '..'not in pathlib.PurePosixPath(name).parts and re.fullmatch('[a-f0-9]{64}',wanted));need(sha(e['private_read'](V4/name,32*1024**2))==wanted)
+             receipt_raw=e['private_read'](V4/'first-result.json',1024**2);receipt=e['decoded'](receipt_raw);need(receipt.get('success')is False and receipt.get('target')==TARGET and receipt.get('failedStage')=='verify-environment-maps'and receipt.get('failedService')=='qc-report')
+             STAGE='old-web-image-artifact';old_web=baseline['runtime']['services']['qc-report'];candidates=[]
+             for name in sorted(manifest):
+              if not re.fullmatch('[0-9]{3,4}-qc-report-before-build\\.stdout\\.private',name):continue
+              try:value=e['decoded'](e['private_read'](V4/name,32*1024**2))
+              except (ValueError,e['EnvironmentEvidenceError']):continue
+              if type(value)is list:
+               for item in value:
+                if type(item)is dict and item.get('Id')==old_web['image']and type(item.get('Config'))is dict:candidates.append((name,item))
+             need(len(candidates)==1);old_web_file,old_web_image=candidates[0];e['environments'](old_web_image['Config'].get('Env')or[])
+             STAGE='current-web-worker';roles=('qc-report','qc-report-worker');ids=[WEB,baseline['runtime']['services']['qc-report-worker']['id']];current=e['records'](e['decoded'](run(['docker','inspect',*ids])));need(set(current)==set(ids));old={};new={}
+             for role,cid in zip(roles,ids):
+              old[role]=old_records[baseline['runtime']['services'][role]['id']];e['bound_environment'](old[role],baseline['runtime']['services'][role],role);new[role]=current[cid];e['bound_environment'](new[role],{'id':cid,'image':new[role]['Image'],'environmentSHA256':sha(enc(new[role]['Config']['Env']))},role)
+             need(new['qc-report-worker']['Image']==baseline['runtime']['services']['qc-report-worker']['image'])
+             STAGE='live-new-and-worker-images';wanted={new[role]['Image']for role in roles};images=e['decoded'](run(['docker','image','inspect',*sorted(wanted)]));image_map={v['Id']:v for v in images};need(len(image_map)==len(images)and set(image_map)==wanted);original_images={'qc-report':old_web_image,'qc-report-worker':image_map[new['qc-report-worker']['Image']]}
+             STAGE='fixed-compose';need(run(['git','rev-parse','HEAD']).decode().strip()==TARGET and(R/'docker-compose.cloud.yml').read_bytes()==run(['git','show',BASE+':docker-compose.cloud.yml'])and sha((R/'.env.cloud.production').read_bytes())==baseline['envSHA256']);compose=e['decoded'](run(['docker','compose','-p','rr-portal','-f',str(R/'docker-compose.cloud.yml'),'--env-file',str(R/'.env.cloud.production'),'config','--format','json']))
+             result={'completed':False,'success':False,'businessWritesPerformed':False,'configurationChanged':False,'oldEvidenceModified':False,'oldWebImageSourceVerified':True,'oldWorkerBaselineContainerAndImageBound':True,'sourceAndEnvironmentFrozen':True,'v4ManifestSHA256':sha(raw_manifest),'v4ResultSHA256':sha(receipt_raw),'oldWebImageSourceFile':old_web_file,'oldWebImageSourceSHA256':manifest[old_web_file],'services':{}}
+             for role in roles:
+              a,b=old[role],new[role];explicit=compose['services'][role].get('environment',{});need(type(explicit)is dict);explicit_keys=set(e['environments']([k+'='for k in explicit]));defaults=e['environments'](original_images[role]['Config'].get('Env')or[]);new_defaults=e['environments'](image_map[b['Image']]['Config'].get('Env')or[])
+              row=evidence(e['environments'](a['Config']['Env']),e['environments'](b['Config']['Env']),defaults,new_defaults,explicit_keys);row.update(currentContainer=b['Id'],oldImageIdentifierSHA256=sha(a['Image'].encode()),newImageIdentifierSHA256=sha(b['Image'].encode()),strictArraySame=a['Config']['Env']==b['Config']['Env'],healthcheckSame=a['Config'].get('Healthcheck')==b['Config'].get('Healthcheck'),mountsSame=sorted(a.get('Mounts',[]),key=enc)==sorted(b.get('Mounts',[]),key=enc),memorySame=a['HostConfig'].get('Memory')==b['HostConfig'].get('Memory'),swapSame=a['HostConfig'].get('MemorySwap')==b['HostConfig'].get('MemorySwap'),running=b['State']['Running'],health=b['State'].get('Health',{}).get('Status'),oom=b['State']['OOMKilled'],restarts=b['RestartCount']);result['services'][role]=row
+             STAGE='seal-two-original-images';OUT.mkdir(mode=0o700)
+             try:
+              for role,name in [('qc-report','old-web-image.private.json'),('qc-report-worker','old-worker-image.private.json')]:save(name,original_images[role])
+              final=e['records'](e['decoded'](run(['docker','inspect',*ids])));need(all(final[cid]['Image']==current[cid]['Image']and final[cid]['Config']['Env']==current[cid]['Config']['Env']for cid in ids));need(sha(e['private_read'](V4/'manifest.json',4*1024**2))==sha(raw_manifest));need(run(['git','rev-parse','HEAD']).decode().strip()==TARGET and sha((R/'.env.cloud.production').read_bytes())==baseline['envSHA256']and(R/'docker-compose.cloud.yml').read_bytes()==run(['git','show',BASE+':docker-compose.cloud.yml']));result['completed']=True;result['success']=True
+             finally:
+              save('first-result.json',result);save('manifest.json',{p.name:sha(e['private_read'](p,32*1024**2))for p in OUT.iterdir()if p.is_file()});print(enc(dict(result,resultSHA256=sha(e['private_read'](OUT/'first-result.json',1024**2)),manifestSHA256=sha(e['private_read'](OUT/'manifest.json',1024**2)))).decode(),flush=True)
+             need(result['completed'])
+            if __name__=='__main__':
+             try:main()
+             except BaseException as error:print(enc({'safeFailure':'FIXED_REPORT_IMAGE_EVIDENCE_FAILED','stage':STAGE,'exceptionType':type(error).__name__ if type(error).__name__ in {'RuntimeError','EnvironmentEvidenceError','TimeoutExpired','JSONDecodeError','KeyError','TypeError','ValueError','FileNotFoundError','PermissionError','OSError'}else'OtherError','lastReadCommandCategory':LAST_COMMAND}).decode(),flush=True);sys.exit(1)
             PY

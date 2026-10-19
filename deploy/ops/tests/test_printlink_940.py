@@ -563,19 +563,20 @@ class DiagnosticTests(unittest.TestCase):
         self.assertIsNone(ops.diagnostic_time('1800-01-01T00:00:00Z','iso'))
 
     def test_original_strict_false_seal_is_read_only_and_tampering_is_rejected(self):
-        import shutil
         self.build('CREATE TABLE t(id INTEGER PRIMARY KEY,value)',[(1,'private-value')],'INSERT INTO t VALUES(?,?)')
-        second=self.private/'sqlite-snapshots/production.sqlite'
-        with contextlib.closing(sqlite3.connect(second)) as db:
-            db.execute('CREATE TABLE snapshot(id INTEGER PRIMARY KEY,value)');db.execute("INSERT INTO snapshot VALUES(1,'private-state')");db.commit()
-            second_audit=ops.sqlite_audit(db)
+        second=sqlite3.connect(self.live/'production.sqlite');self.addCleanup(second.close)
+        second.execute('PRAGMA journal_mode=WAL')
+        second.execute('CREATE TABLE snapshot(id INTEGER PRIMARY KEY,value)');second.execute("INSERT INTO snapshot VALUES(1,'private-state')");second.commit()
         backups=self.root/'backups';backups.mkdir(mode=0o700)
         directory=backups/'printlink-pre-940-20261019T011955726437Z';directory.mkdir(mode=0o700)
-        shutil.copytree(self.private/'sqlite-snapshots',directory/'sqlite-snapshots')
+        audits=ops.sqlite_snapshots(self.live,directory/'sqlite-snapshots')
+        for name in audits:
+            self.assertEqual((directory/'sqlite-snapshots'/(name+'-wal')).stat().st_size,0)
+            self.assertEqual((directory/'sqlite-snapshots'/(name+'-shm')).stat().st_size,32768)
         raw=ops.tree_inventory(self.live,directory/'runtime-raw.tar')
         before={'deployment':'PR940','sourceCommit':ops.PRE_DEPLOY_COMMIT,'strictVerificationPassed':False,
           'checks':{'allLogicalSQLiteDataStable':False,'sourceStable':True},'rawInventory':raw,
-          'sqlite':{self.database:self.original,'production.sqlite':second_audit}}
+          'sqlite':audits}
         (directory/'baseline.json').write_text(json.dumps(before))
         for name in ['env.before','runtime.private.json','nginx.configuration']:(directory/name).write_text('private-token-never-output')
         for entry in directory.rglob('*'):entry.chmod(0o700 if entry.is_dir() else 0o600)
@@ -585,10 +586,51 @@ class DiagnosticTests(unittest.TestCase):
             _,retained,seal=ops.diagnostic_private_backup(str(directory))
             self.assertIs(retained['strictVerificationPassed'],False)
             self.assertNotIn('private-token-never-output',json.dumps(seal))
+            proof=ops.diagnostic_snapshot_proof(directory,retained['sqlite'])
+            for name in audits:
+                self.assertEqual(proof[name],{'filesBytes':{name:(directory/'sqlite-snapshots'/name).stat().st_size,name+'-wal':0,name+'-shm':32768},
+                  'immutableMainMatchesCompleteOriginalTypedAudit':True})
             self.assertEqual({str(file.relative_to(directory)):file.read_bytes() for file in directory.rglob('*') if file.is_file()},original)
+            unknown=directory/'sqlite-snapshots/production.sqlite-extra';unknown.write_bytes(b'not-a-sidecar');unknown.chmod(0o600)
+            manifest=json.loads(original['manifest.json']);manifest['sqlite-snapshots/production.sqlite-extra']=ops.file_hash(unknown)
+            (directory/'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaises(RuntimeError):ops.diagnostic_private_backup(str(directory))
+            self.assertEqual(ops.FAILED_CHECK,'diagnosticExactOriginalSQLiteSnapshotFiles')
+            unknown.unlink();(directory/'manifest.json').write_bytes(original['manifest.json'])
             (directory/'env.before').write_bytes(b'tampered')
             with self.assertRaises(RuntimeError):ops.diagnostic_private_backup(str(directory))
             self.assertEqual((directory/'manifest.json').read_bytes(),original['manifest.json'])
+
+    def test_sealed_snapshot_nonempty_wal_is_never_ignored(self):
+        self.build('CREATE TABLE t(id INTEGER PRIMARY KEY,value)',[(1,'before')],'INSERT INTO t VALUES(?,?)')
+        writer=sqlite3.connect(self.private_file);self.addCleanup(writer.close)
+        writer.execute('PRAGMA journal_mode=WAL');writer.execute("UPDATE t SET value='after' WHERE id=1");writer.commit()
+        self.assertGreater((self.private_file.parent/(self.private_file.name+'-wal')).stat().st_size,0)
+        with contextlib.closing(sqlite3.connect(self.private_file.as_uri()+'?mode=ro&immutable=1',uri=True)) as main:
+            immutable_audit=ops.sqlite_audit(main)
+        committed_audit=ops.sqlite_audit(writer)
+        self.assertEqual(immutable_audit['schemaSha256'],committed_audit['schemaSha256'])
+        self.assertEqual(immutable_audit['tables']['t']['rows'],committed_audit['tables']['t']['rows'])
+        self.assertEqual(immutable_audit['tables']['t']['columnsSha256'],committed_audit['tables']['t']['columnsSha256'])
+        self.assertNotEqual(immutable_audit,committed_audit)
+        original={str(file.relative_to(self.private)):file.read_bytes() for file in self.private.rglob('*') if file.is_file()}
+        with self.assertRaises(RuntimeError):ops.diagnostic_snapshot_proof(self.private,{self.database:committed_audit})
+        self.assertEqual(ops.FAILED_CHECK,'diagnosticSealedSnapshotsHaveNoNonemptyWAL')
+        self.assertEqual({str(file.relative_to(self.private)):file.read_bytes() for file in self.private.rglob('*') if file.is_file()},original)
+
+    def test_immutable_snapshot_complete_typed_audit_rejects_same_count_content_change(self):
+        self.build('CREATE TABLE t(id INTEGER PRIMARY KEY,value)',[(1,1)],'INSERT INTO t VALUES(?,?)')
+        with contextlib.closing(sqlite3.connect(self.private_file)) as db:
+            db.execute('UPDATE t SET value=1.0 WHERE id=1');db.commit()
+            changed=ops.sqlite_audit(db)
+        self.assertEqual(changed['schemaSha256'],self.original['schemaSha256'])
+        self.assertEqual(changed['tables']['t']['rows'],self.original['tables']['t']['rows'])
+        self.assertEqual(changed['tables']['t']['columnsSha256'],self.original['tables']['t']['columnsSha256'])
+        self.assertNotEqual(changed,self.original)
+        original=self.private_file.read_bytes()
+        with self.assertRaises(RuntimeError):ops.diagnostic_snapshot_proof(self.private,{self.database:self.original})
+        self.assertEqual(ops.FAILED_CHECK,'diagnosticImmutableMainMatchesCompleteOriginalTypedAudit')
+        self.assertEqual(self.private_file.read_bytes(),original)
 
     def test_modified_and_deleted_timestamp_ranges_use_only_changed_rows(self):
         self.build('CREATE TABLE collector_events(id TEXT PRIMARY KEY,station TEXT,received TEXT)',

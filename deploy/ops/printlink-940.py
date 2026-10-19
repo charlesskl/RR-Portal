@@ -708,10 +708,27 @@ def diagnostic_private_backup(path):
             and all(value is True for key,value in before['checks'].items() if key!='allLogicalSQLiteDataStable'),
             'diagnosticOriginalFailureScopeUnchanged')
     require(set(before['sqlite'])=={'orders/printlink.sqlite','production.sqlite'}, 'diagnosticBothOriginalSQLiteSnapshots')
-    require({name for name in files if name.startswith('sqlite-snapshots/')}=={'sqlite-snapshots/'+name for name in before['sqlite']},
-            'diagnosticExactOriginalSQLiteSnapshotFiles')
+    required={'sqlite-snapshots/'+name for name in before['sqlite']}
+    allowed={name+suffix for name in required for suffix in ['', '-wal', '-shm']}
+    actual={name for name in files if name.startswith('sqlite-snapshots/')}
+    require(required<=actual<=allowed, 'diagnosticExactOriginalSQLiteSnapshotFiles')
     verify_archive(directory/'runtime-raw.tar',before['rawInventory'])
     return directory,before,{'manifestSha256':file_hash(manifest_file),'files':manifest}
+
+
+def diagnostic_snapshot_proof(directory,original):
+    """Sealed zero WAL only; immutable main must contain the entire baseline."""
+    result={}
+    for name,audit in original.items():
+        main=directory/'sqlite-snapshots'/name
+        sizes={name+suffix:(main.parent/(main.name+suffix)).stat().st_size
+               for suffix in ['', '-wal', '-shm'] if (main.parent/(main.name+suffix)).exists()}
+        require(sizes.get(name+'-wal',0)==0, 'diagnosticSealedSnapshotsHaveNoNonemptyWAL')
+        with contextlib.closing(sqlite3.connect(main.as_uri()+'?mode=ro&immutable=1',uri=True)) as connection:
+            connection.execute('PRAGMA query_only=ON')
+            require(sqlite_audit(connection)==audit, 'diagnosticImmutableMainMatchesCompleteOriginalTypedAudit')
+        result[name]={'filesBytes':sizes,'immutableMainMatchesCompleteOriginalTypedAudit':True}
+    return result
 
 
 def diagnostic_cell_equal(left,right):
@@ -857,6 +874,7 @@ def diagnose(target,path):
     require(git_commit()==git_commit('origin/main')==PRE_DEPLOY_COMMIT==target, 'diagnosticExactPreDeployMain')
     expected=tested_source_guard(target)
     directory,before,seal_before=diagnostic_private_backup(path)
+    snapshot_proof=diagnostic_snapshot_proof(directory,before['sqlite'])
     app,tree,runtime,private=runtime_context();others=other_containers()
     names=discover_databases(tree);require(set(names)==set(before['sqlite']), 'diagnosticLiveDatabaseInventoryUnchanged')
     snapshot_started=datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -882,6 +900,7 @@ def diagnose(target,path):
       'originalFailureAttributed':False,'individuallyConsistentCurrentSQLiteSnapshots':True,'crossDatabaseAtomicSnapshotClaimed':False,
       'snapshotReadStartedAtUtc':snapshot_started,'diagnosticFinishedAtUtc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
       'privateSealVerified':True,'originalPrivateSnapshotsByteSealAndIntegrityVerified':True,
+      'originalSQLiteSnapshotProof':snapshot_proof,
       'exactTypedCellSemanticsMatchOriginalSQLiteAudit':True,'runtimeFilesVerified':runtime_files,
       'sourceCommit':target,'checks':checks,'databases':databases,'businessWritesPerformed':False,
       'businessHttpRequestsPerformed':False,'originalBackupFilesWritten':False,'conflictChoicesSubmitted':False,

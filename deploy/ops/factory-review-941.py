@@ -41,6 +41,12 @@ RESULT_DIRECTORY = None
 FIRST_FAILED_BACKUP = '/opt/rr-portal/deploy/backups/factory-review-pre-941-20261019T023133028210Z'
 FIRST_FAILED_RESULT_SHA256 = '8ab1ca4bc84b60df59b5aaf21ea14119de4fd42ce95ddfb251396a2ee900c91d'
 BACKUP_ATTEMPT = {'number': 1, 'secondAttempt': False, 'priorFailure': None}
+SUPPLEMENT_TARGET = '4932408a0375058b781b9a9c050d4eef65f8728b'
+SUPPLEMENT_BACKUP = '/opt/rr-portal/deploy/backups/factory-review-pre-941-20261019T023455020619Z'
+SUPPLEMENT_FIRST = 'factory-review-verify-941-20261019T023455020619Z'
+SUPPLEMENT_DIRECTORY = 'factory-review-supplement-941-20261019T023455020619Z'
+SUPPLEMENT_FAILURE_SHA256 = '381ce35026b4ad900faa95dc014512126ed3d98b5d475b6d01c9686f248b56e8'
+SUPPLEMENT_PRIOR = None
 
 
 def require(value, label):
@@ -431,8 +437,53 @@ def typed_rows(connection, table):
 
 
 def utc_timestamp(value):
-    require(isinstance(value, str) and bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z', value)), 'validUTCTimestamp')
-    return datetime.datetime.fromisoformat(value.replace(' ', 'T').replace('Z', '+00:00'))
+    match = re.fullmatch(r'(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z', value) if isinstance(value, str) else None
+    require(bool(match), 'validUTCTimestamp')
+    # Python 3.9 rejects Docker's nine fractional digits. Truncate the fractional
+    # second to microseconds explicitly; the discarded precision is <1us.
+    second = datetime.datetime.strptime(match[1].replace(' ', 'T'), '%Y-%m-%dT%H:%M:%S')
+    return second.replace(microsecond=int((match[2] or '').ljust(6, '0')[:6]), tzinfo=datetime.timezone.utc)
+
+
+def supplement_prior(target, path):
+    require(target == SUPPLEMENT_TARGET and path == SUPPLEMENT_BACKUP, 'supplementOnlyExactTargetAndOriginalBackup')
+    directory = BACKUPS / SUPPLEMENT_FIRST
+    require(directory.is_dir() and not directory.is_symlink() and stat.S_IMODE(directory.stat().st_mode) == 0o700, 'supplementPrivateOriginalVerificationDirectory')
+    entries = list(directory.rglob('*'))
+    require(all(not p.is_symlink() and (p.is_file() or p.is_dir()) and p.stat().st_mode & 0o077 == 0 for p in entries), 'supplementOriginalVerificationEntriesPrivate')
+    manifest_file = directory / 'manifest.json'
+    require(manifest_file.stat().st_size <= 4 * 1024 ** 2, 'supplementBoundedOriginalManifest')
+    manifest = json.loads(manifest_file.read_bytes())
+    actual = {str(p.relative_to(directory)) for p in entries if p.is_file() and p != manifest_file}
+    required = {'first-result.json', 'first-attempt.lock', 'factory-review/runtime.private.json', 'factory-review/sqlite-audit.json', 'factory-review/sqlite/data.db', 'factory-review/sqlite/auxiliary.db'}
+    require(set(manifest) == actual and required <= actual, 'supplementCompleteOriginalVerificationSealInventory')
+    require(all(safe_path(n) and isinstance(h, str) and re.fullmatch('[a-f0-9]{64}', h) and file_hash(directory / n) == h for n, h in manifest.items()), 'supplementOriginalVerificationSealIntact')
+    receipt = directory / 'first-result.json'
+    require(file_hash(receipt) == SUPPLEMENT_FAILURE_SHA256, 'supplementExactOriginalFailureReceiptBytes')
+    failed = json.loads(receipt.read_bytes())
+    require(failed.get('mode') == 'verify' and failed.get('failed') is True and failed.get('sourceCommit') == target and failed.get('failedCheck') == 'validUTCTimestamp' and failed.get('strictAllChecksPassed') is False, 'supplementExactOriginalTimeParserFailure')
+    require(json.loads((directory / 'first-attempt.lock').read_bytes()) == {'target': target, 'backup': path}, 'supplementExactOriginalAttemptLock')
+    retained_audit = json.loads((directory / 'factory-review/sqlite-audit.json').read_bytes())
+    require(snapshots(directory / 'factory-review/sqlite', immutable=True) == retained_audit, 'supplementOriginalSnapshotsMatchRetainedFullAudit')
+    private = json.loads((directory / 'factory-review/runtime.private.json').read_bytes())
+    started = private['State']['StartedAt']
+    fraction = re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.(\d{1,9})Z', started) if isinstance(started, str) else None
+    require(bool(fraction), 'supplementRetainedDockerTimestampHasUTCFraction')
+    legacy_failed = False
+    try:
+        datetime.datetime.fromisoformat(started.replace(' ', 'T').replace('Z', '+00:00'))
+    except ValueError:
+        legacy_failed = True
+    require(legacy_failed, 'supplementLegacyParserFailureReproducedFromRetainedActualRuntime')
+    utc_timestamp(started)
+    with contextlib.closing(connect(directory / 'factory-review/sqlite/data.db', True)) as connection:
+        stamps = connection.execute('SELECT created,updated FROM _collections WHERE name IN (?,?)', ('quality_patrols', 'quality_patrol_access')).fetchall()
+        require(len(stamps) == 2 and all(datetime.datetime.fromisoformat(value.replace(' ', 'T').replace('Z', '+00:00')).tzinfo is not None for row in stamps for value in row), 'supplementRetainedPocketBaseTimestampsAcceptedByLegacyParser')
+    return {'resultPath': str(receipt), 'resultSha256': SUPPLEMENT_FAILURE_SHA256, 'failedCheck': 'validUTCTimestamp',
+            'sourceCommit': target, 'originalStrictAllChecksPassed': False, 'manifestSha256': file_hash(manifest_file),
+            'sealedFileInventorySha256': digest(manifest), 'sealedFiles': len(manifest), 'legacyParserFailureReproduced': True,
+            'dockerFractionDigits': len(fraction[1]), 'precision': 'UTC microseconds; excess fractional precision truncated with less than 1us discarded',
+            'retainedPocketBaseTimestampsAcceptedByLegacyParser': True}
 
 
 def migration_comparison(before_path, current_path, before, current, started_at=None):
@@ -607,11 +658,13 @@ def backup(target):
     return result
 
 
-def verify(target, path):
-    global RESULT_DIRECTORY
+def verify(target, path, supplement=False):
+    global RESULT_DIRECTORY, SUPPLEMENT_PRIOR
     original, before = selected_backup(path)
     require(target != BASE, 'verificationRequiresNewDeployment')
-    directory = original.with_name(original.name.replace('pre-941-', 'verify-941-'))
+    if supplement:
+        SUPPLEMENT_PRIOR = supplement_prior(target, path)
+    directory = BACKUPS / SUPPLEMENT_DIRECTORY if supplement else original.with_name(original.name.replace('pre-941-', 'verify-941-'))
     # O_EXCL lock is the immutable first-attempt boundary, even after an exception.
     directory.mkdir(mode=0o700)
     RESULT_DIRECTORY = directory
@@ -657,13 +710,19 @@ def verify(target, path):
     checks['privateContextStableDuringProbe'] = private_context()[0] == context
     checks['sourceStable'] = git() == git('origin/main') == target
     # Full equality must remain false for an expected migration or live logs.
-    result = {'mode': 'verify', 'backup': path, 'resultPath': str(directory / 'first-result.json'), 'sourceCommit': target,
+    if supplement:
+        checks['originalFailedVerificationDirectoryUnchanged'] = supplement_prior(target, path) == SUPPLEMENT_PRIOR
+    result = {'mode': 'supplement' if supplement else 'verify', 'backup': path, 'resultPath': str(directory / 'first-result.json'), 'sourceCommit': target,
               'originalBackupStrictStaticChecksPassed': before['strictStaticChecksPassed'],
-              'strictAllChecksPassed': all(checks.values()), 'deploymentChecksPassed': operational_checks(checks),
+              'strictAllChecksPassed': False if supplement else all(checks.values()), 'currentAllChecksPassed': all(checks.values()),
+              'deploymentChecksPassed': operational_checks(checks),
               'checks': checks, 'services': result_services,
               'otherContainersBefore': before['otherContainers'], 'otherContainersAtVerification': others, 'otherContainersAfter': after_others,
               'businessWritesPerformed': False, 'credentialsChanged': False, 'automaticRecoveryPerformed': False,
               'productionAuthenticatedPermissionsTested': False, 'productionBusinessCrudTested': False}
+    if supplement:
+        result['priorFailure'] = {**SUPPLEMENT_PRIOR, 'preserved': checks['originalFailedVerificationDirectoryUnchanged']}
+        result['originalFailureRemainsFailed'] = True
     private_write(directory / 'first-result.json', encoded(result))
     seal(directory)
     return result
@@ -689,12 +748,12 @@ def main(arguments):
     global PIN
     require(len(arguments) == 5, 'exactFiveArguments')
     mode, before, target, path, pin = arguments
-    require(mode in {'backup', 'verify', 'result'} and before == BASE and bool(re.fullmatch('[a-f0-9]{40}', target)), 'fixedModeAndSourceArguments')
-    require((mode == 'backup' and target == BASE and not path) or (mode in {'verify', 'result'} and bool(re.fullmatch('/opt/rr-portal/deploy/backups/factory-review-pre-941-[0-9]{8}T[0-9]{12}Z', path))), 'modeSpecificBackupArguments')
+    require(mode in {'backup', 'verify', 'result', 'supplement'} and before == BASE and bool(re.fullmatch('[a-f0-9]{40}', target)), 'fixedModeAndSourceArguments')
+    require((mode == 'backup' and target == BASE and not path) or (mode in {'verify', 'result'} and bool(re.fullmatch('/opt/rr-portal/deploy/backups/factory-review-pre-941-[0-9]{8}T[0-9]{12}Z', path))) or (mode == 'supplement' and target == SUPPLEMENT_TARGET and path == SUPPLEMENT_BACKUP), 'modeSpecificBackupArguments')
     PIN = json.loads(pathlib.Path(pin).read_bytes())
     require(PIN.get('finalPinFrozen') is True and PIN.get('addedSchemaObjects') and PIN.get('newCollections') and PIN.get('migrationFiles'), 'finalPinCompleteBeforeAnyProductionRead')
     os.umask(0o077)
-    result = backup(target) if mode == 'backup' else verify(target, path) if mode == 'verify' else retained_result(target, path)
+    result = backup(target) if mode == 'backup' else verify(target, path, mode == 'supplement') if mode in {'verify', 'supplement'} else retained_result(target, path)
     transport(result)
     # An honest full-static false does not invalidate a completed portable backup.
     return 0 if mode in {'backup', 'result'} else (0 if result['deploymentChecksPassed'] else 1)
@@ -704,13 +763,22 @@ if __name__ == '__main__':
     try:
         sys.exit(main(sys.argv[1:]))
     except Exception as error:
-        result = {'mode': sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in {'backup', 'verify', 'result'} else 'invalid',
+        result = {'mode': sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in {'backup', 'verify', 'result', 'supplement'} else 'invalid',
                   'failed': True, 'failedCheck': FAILED, 'errorType': type(error).__name__ if type(error).__name__ in {'RuntimeError', 'ValueError', 'KeyError', 'TypeError', 'FileNotFoundError', 'OperationalError', 'FileExistsError'} else 'Other',
                   'sourceCommit': sys.argv[3] if len(sys.argv) > 3 and re.fullmatch('[a-f0-9]{40}', sys.argv[3]) else None,
-                  'resultPath': str(RESULT_DIRECTORY / ('first-result.json' if len(sys.argv) > 1 and sys.argv[1] == 'verify' else 'backup-first-result.json')) if RESULT_DIRECTORY else '',
+                  'resultPath': str(RESULT_DIRECTORY / ('first-result.json' if len(sys.argv) > 1 and sys.argv[1] in {'verify', 'supplement'} else 'backup-first-result.json')) if RESULT_DIRECTORY else '',
                   'strictAllChecksPassed': False, 'businessWritesPerformed': False, 'automaticRecoveryPerformed': False}
         if result['mode'] == 'backup':
             result['backupAttempt'] = BACKUP_ATTEMPT
+        if result['mode'] == 'supplement':
+            preserved = False
+            if SUPPLEMENT_PRIOR:
+                try:
+                    preserved = supplement_prior(SUPPLEMENT_TARGET, SUPPLEMENT_BACKUP) == SUPPLEMENT_PRIOR
+                except Exception:
+                    pass
+            result['priorFailure'] = {**(SUPPLEMENT_PRIOR or {}), 'preserved': preserved}
+            result['originalFailureRemainsFailed'] = True
         if RESULT_DIRECTORY:
             output = pathlib.Path(result['resultPath'])
             if not output.exists():

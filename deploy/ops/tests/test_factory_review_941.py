@@ -25,11 +25,15 @@ class Contracts(unittest.TestCase):
         self.previous_pin = ops.PIN
         self.previous_backups = ops.BACKUPS
         self.previous_attempt = ops.BACKUP_ATTEMPT
+        self.previous_supplement = ops.SUPPLEMENT_PRIOR
+        self.previous_result_directory = ops.RESULT_DIRECTORY
 
     def tearDown(self):
         ops.PIN = self.previous_pin
         ops.BACKUPS = self.previous_backups
         ops.BACKUP_ATTEMPT = self.previous_attempt
+        ops.SUPPLEMENT_PRIOR = self.previous_supplement
+        ops.RESULT_DIRECTORY = self.previous_result_directory
         self.temporary.cleanup()
 
     def database(self, name='data.db'):
@@ -76,6 +80,105 @@ class Contracts(unittest.TestCase):
         result = self.compare_migration(old, new, started)
         self.assertTrue(result['passed'], result)
         self.assertEqual(result['changedExistingTables'], ['_collections', '_migrations'])
+
+    def test_utc_timestamp_zero_through_nine_fraction_digits_normalize_exact_microseconds(self):
+        for length in range(10):
+            with self.subTest(fractionDigits=length):
+                fraction = '123456789'[:length]
+                value = '2026-10-19T03:01:02' + ('.' + fraction if length else '') + 'Z'
+                expected = datetime.datetime(2026, 10, 19, 3, 1, 2, int(fraction.ljust(6, '0')[:6]), datetime.timezone.utc)
+                self.assertEqual(ops.utc_timestamp(value), expected)
+                self.assertEqual(ops.utc_timestamp(value.replace('T', ' ')), expected)
+        for invalid in ['2026-02-30T03:01:02Z', '2026-13-19T03:01:02Z', '2026-10-19T24:01:02Z',
+                        '2026-10-19T03:01:02.Z', '2026-10-19T03:01:02.1234567890Z',
+                        '2026-10-19T03:01:02+00:00', '2026-10-19T03:01:02.123z']:
+            with self.subTest(invalid=invalid), self.assertRaises((RuntimeError, ValueError)):
+                ops.utc_timestamp(invalid)
+
+    def test_migration_comparison_accepts_actual_docker_nine_digit_started_at(self):
+        old, new, _ = self.migration_fixture()
+        # Actual safe timestamp observed from Docker's first live diagnostic.
+        result = self.compare_migration(old, new, '2026-10-08T01:44:40.315419481Z')
+        self.assertTrue(result['passed'], result)
+
+    def original_time_parser_failure(self, digits=9):
+        ops.BACKUPS = self.root / 'backups'
+        ops.BACKUPS.mkdir(mode=0o700, exist_ok=True)
+        directory = ops.BACKUPS / ops.SUPPLEMENT_FIRST
+        if directory.exists():
+            shutil.rmtree(directory)  # Synthetic fixture only; never production.
+        directory.mkdir(mode=0o700)
+        part = directory / 'factory-review'
+        part.mkdir(mode=0o700)
+        sqlite = part / 'sqlite'
+        sqlite.mkdir(mode=0o700, parents=True)
+        for name in ['data.db', 'auxiliary.db']:
+            with contextlib.closing(sqlite3.connect(sqlite / name)) as connection:
+                connection.execute('CREATE TABLE _collections(name TEXT,created TEXT,updated TEXT)')
+                for collection in ['quality_patrols', 'quality_patrol_access']:
+                    connection.execute('INSERT INTO _collections VALUES(?,?,?)', (collection, '2026-10-19 03:01:02.123Z', '2026-10-19 03:01:02.123Z'))
+                connection.commit()
+            (sqlite / name).chmod(0o600)
+        fraction = '123456789'[:digits]
+        started = '2026-10-19T03:01:02' + ('.' + fraction if digits else '') + 'Z'
+        ops.private_write(part / 'runtime.private.json', ops.encoded({'State': {'StartedAt': started}, 'Config': {'Env': ['PRIVATE_SECRET=must-never-print']}}))
+        ops.private_write(part / 'sqlite-audit.json', ops.encoded(ops.snapshots(sqlite, immutable=True)))
+        result = {'automaticRecoveryPerformed': False, 'businessWritesPerformed': False, 'errorType': 'ValueError', 'failed': True,
+                  'failedCheck': 'validUTCTimestamp', 'mode': 'verify', 'resultPath': '/opt/rr-portal/deploy/backups/' + ops.SUPPLEMENT_FIRST + '/first-result.json',
+                  'sourceCommit': ops.SUPPLEMENT_TARGET, 'strictAllChecksPassed': False}
+        self.assertEqual(ops.sha(ops.encoded(result)), ops.SUPPLEMENT_FAILURE_SHA256)
+        ops.private_write(directory / 'first-result.json', ops.encoded(result))
+        ops.private_write(directory / 'first-attempt.lock', ops.encoded({'target': ops.SUPPLEMENT_TARGET, 'backup': ops.SUPPLEMENT_BACKUP}))
+        ops.seal(directory)
+        return directory
+
+    def test_supplement_reproduces_retained_legacy_failure_for_trimmed_rfc3339nano_and_preserves_bytes(self):
+        for digits in [1, 2, 4, 5, 7, 8, 9]:
+            with self.subTest(digits=digits):
+                directory = self.original_time_parser_failure(digits)
+                before = {str(p): ops.file_hash(p) for p in directory.rglob('*') if p.is_file()}
+                result = ops.supplement_prior(ops.SUPPLEMENT_TARGET, ops.SUPPLEMENT_BACKUP)
+                self.assertTrue(result['legacyParserFailureReproduced'])
+                self.assertEqual(result['dockerFractionDigits'], digits)
+                self.assertNotIn('PRIVATE_SECRET', json.dumps(result))
+                self.assertEqual(before, {str(p): ops.file_hash(p) for p in directory.rglob('*') if p.is_file()})
+        for digits in [0, 3, 6]:
+            with self.subTest(legacyAcceptedDigits=digits):
+                self.original_time_parser_failure(digits)
+                with self.assertRaises(RuntimeError):
+                    ops.supplement_prior(ops.SUPPLEMENT_TARGET, ops.SUPPLEMENT_BACKUP)
+
+    def test_supplement_rejects_modified_original_seal_and_exact_receipt(self):
+        directory = self.original_time_parser_failure()
+        with self.assertRaises(RuntimeError):
+            ops.supplement_prior('0' * 40, ops.SUPPLEMENT_BACKUP)
+        with self.assertRaises(RuntimeError):
+            ops.supplement_prior(ops.SUPPLEMENT_TARGET, '/different/backup')
+        runtime = directory / 'factory-review/runtime.private.json'
+        runtime.write_bytes(runtime.read_bytes() + b' ')
+        with self.assertRaises(RuntimeError):
+            ops.supplement_prior(ops.SUPPLEMENT_TARGET, ops.SUPPLEMENT_BACKUP)
+        directory = self.original_time_parser_failure()
+        receipt = directory / 'first-result.json'
+        receipt.write_bytes(receipt.read_bytes() + b' ')
+        (directory / 'manifest.json').unlink()
+        ops.seal(directory)
+        with self.assertRaises(RuntimeError):
+            ops.supplement_prior(ops.SUPPLEMENT_TARGET, ops.SUPPLEMENT_BACKUP)
+        self.assertEqual(ops.FAILED, 'supplementExactOriginalFailureReceiptBytes')
+
+    def test_supplement_creates_only_fixed_sibling_once_and_never_overwrites_first_attempt(self):
+        directory = self.original_time_parser_failure()
+        before = {str(p): ops.file_hash(p) for p in directory.rglob('*') if p.is_file()}
+        with patch.object(ops, 'selected_backup', return_value=(self.root, {})), patch.object(ops, 'source_guard', side_effect=RuntimeError('synthetic early fresh verification failure')):
+            with self.assertRaises(RuntimeError):
+                ops.verify(ops.SUPPLEMENT_TARGET, ops.SUPPLEMENT_BACKUP, True)
+            sibling = ops.BACKUPS / ops.SUPPLEMENT_DIRECTORY
+            self.assertEqual(ops.RESULT_DIRECTORY, sibling)
+            self.assertTrue((sibling / 'first-attempt.lock').is_file())
+            with self.assertRaises(FileExistsError):
+                ops.verify(ops.SUPPLEMENT_TARGET, ops.SUPPLEMENT_BACKUP, True)
+        self.assertEqual(before, {str(p): ops.file_hash(p) for p in directory.rglob('*') if p.is_file()})
 
     def test_migration_rejects_same_count_permission_changes_and_unauthorized_schema(self):
         mutations = ['UPDATE users SET permissions="changed"',

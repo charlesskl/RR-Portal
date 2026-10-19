@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: backup
-        options: [backup, verify, result]
+        options: [backup, verify, result, supplement]
       before_commit:
         description: 'Exact pre-deployment main SHA'
         type: string
@@ -50,10 +50,12 @@ jobs:
           set -euo pipefail
           [[ "$FR_OPS_BRANCH" = refs/heads/ops/factory-review-941-20261019 ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-          [[ "$FR_OPS_REF" =~ ^[a-f0-9]{40}$ && "$FR_OPS_MODE" =~ ^(backup|verify|result)$ ]] || exit 1
+          [[ "$FR_OPS_REF" =~ ^[a-f0-9]{40}$ && "$FR_OPS_MODE" =~ ^(backup|verify|result|supplement)$ ]] || exit 1
           [[ "$FR_OPS_BEFORE" = 1c295d6418a64a1610b9075acd4da2a38d875328 && "$FR_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
           if [[ "$FR_OPS_MODE" = backup ]]; then
             [[ "$FR_OPS_TARGET" = "$FR_OPS_BEFORE" && -z "$FR_OPS_BACKUP" ]] || exit 1
+          elif [[ "$FR_OPS_MODE" = supplement ]]; then
+            [[ "$FR_OPS_TARGET" = 4932408a0375058b781b9a9c050d4eef65f8728b && "$FR_OPS_BACKUP" = /opt/rr-portal/deploy/backups/factory-review-pre-941-20261019T023455020619Z ]] || exit 1
           else
             [[ "$FR_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/factory-review-pre-941-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
             if [[ "$FR_OPS_MODE" = verify ]]; then [[ "$FR_OPS_TARGET" != "$FR_OPS_BEFORE" ]] || exit 1; fi
@@ -79,10 +81,12 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$FR_OPS_BRANCH" = refs/heads/ops/factory-review-941-20261019 ]] || exit 1
-            [[ "$FR_OPS_REF" =~ ^[a-f0-9]{40}$ && "$FR_OPS_MODE" =~ ^(backup|verify|result)$ ]] || exit 1
+            [[ "$FR_OPS_REF" =~ ^[a-f0-9]{40}$ && "$FR_OPS_MODE" =~ ^(backup|verify|result|supplement)$ ]] || exit 1
             [[ "$FR_OPS_BEFORE" = 1c295d6418a64a1610b9075acd4da2a38d875328 && "$FR_OPS_TARGET" =~ ^[a-f0-9]{40}$ ]] || exit 1
             if [[ "$FR_OPS_MODE" = backup ]]; then
               [[ "$FR_OPS_TARGET" = "$FR_OPS_BEFORE" && -z "$FR_OPS_BACKUP" ]] || exit 1
+            elif [[ "$FR_OPS_MODE" = supplement ]]; then
+              [[ "$FR_OPS_TARGET" = 4932408a0375058b781b9a9c050d4eef65f8728b && "$FR_OPS_BACKUP" = /opt/rr-portal/deploy/backups/factory-review-pre-941-20261019T023455020619Z ]] || exit 1
             else
               [[ "$FR_OPS_BACKUP" =~ ^/opt/rr-portal/deploy/backups/factory-review-pre-941-[0-9]{8}T[0-9]{12}Z$ ]] || exit 1
               if [[ "$FR_OPS_MODE" = verify ]]; then [[ "$FR_OPS_TARGET" != "$FR_OPS_BEFORE" ]] || exit 1; fi

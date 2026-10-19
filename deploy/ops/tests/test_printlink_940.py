@@ -230,7 +230,7 @@ class GuardTests(unittest.TestCase):
     def test_five_protected_services_exclude_target(self):
         self.assertEqual(ops.PROTECTED_SERVICES,['nginx','core','db','redis','internal-quote'])
         self.assertNotIn('printlink',ops.PROTECTED_SERVICES)
-        self.assertEqual(len(ops.GLOBAL_HEALTH),25);self.assertEqual(len(ops.PUBLIC_SAMPLE),14);self.assertEqual(ops.PUBLIC_SAMPLE['/printlink-health'],200)
+        self.assertEqual(len(ops.GLOBAL_HEALTH),25);self.assertEqual(len(ops.PUBLIC_SAMPLE),14);self.assertEqual(ops.PUBLIC_SAMPLE['/printlink-health'],401)
 
     def test_manifest_includes_complete_tested_application_and_exact_changes(self):
         p=ops.APP_PREFIX+'shared/business-sync.cjs'; head='a'*40
@@ -301,6 +301,49 @@ class GuardTests(unittest.TestCase):
             (directory/'verify-first-result.json').write_text('{"strictVerificationPassed":false}')
             with self.assertRaises(RuntimeError):ops.selected_backup(str(directory))
             self.assertEqual(ops.FAILED_CHECK,'firstVerificationAlreadyRetainedDoNotRerun')
+
+    def test_printlink_nginx_location_inherits_server_authentication(self):
+        source=(HELPER.parents[2]/'nginx/nginx.cloud.conf').read_text()
+        self.assertIn('        auth_basic "RR Portal";',source)
+        self.assertIn('        auth_basic_user_file /etc/nginx/.htpasswd;',source)
+        location=source.split('        location = /printlink-health {',1)[1].split('}',1)[0]
+        self.assertNotIn('auth_basic off',location)
+        self.assertIn('proxy_pass http://$ups/api/health;',location)
+        self.assertEqual(ops.PUBLIC_SAMPLE['/printlink-health'],401)
+
+    def assert_read_only_probe_contract(self,nginx_status,direct_status):
+        with tempfile.TemporaryDirectory() as folder:
+            app=pathlib.Path(folder);public=app/'cloud/public';public.mkdir(parents=True)
+            for name in ops.STATIC.values():(public/name).write_bytes(('fixture:'+name).encode())
+            def fake_get(url):
+                local='http://127.0.0.1';cloud=local+':3100'
+                if url==local+'/printlink-health':return nginx_status,b''
+                if url==cloud+'/api/health':return direct_status,b'{"ok":true}'
+                if url.startswith(cloud):
+                    path=url[len(cloud):]
+                    if path in ops.STATIC:return 200,(public/ops.STATIC[path]).read_bytes()
+                    if path in {'/api/me','/api/users','/api/orders','/api/platform/business-sync'}:return 401,b''
+                    raise AssertionError(url)
+                path=url[len(local):]
+                if path in ops.PUBLIC_SAMPLE:return ops.PUBLIC_SAMPLE[path],b''
+                if path in ops.GLOBAL_HEALTH:return 200,b''
+                raise AssertionError(url)
+            with patch.object(ops,'APP',app),patch.object(ops,'get',side_effect=fake_get):return ops.read_only_probes()
+
+    def test_nginx_authentication_401_and_direct_service_health_200_are_separate(self):
+        result=self.assert_read_only_probe_contract(401,200)
+        self.assertTrue(result['passed']);self.assertTrue(result['nginxPrintlinkAuthenticationBoundary'])
+        self.assertTrue(result['cloudHealth']);self.assertNotIn('nginxPrintlinkHealth',result)
+        self.assertEqual(len(result['globalHealth']),25);self.assertEqual(len(result['publicSamples']),14)
+        row=next(row for row in result['publicSamples'] if row['path']=='/printlink-health')
+        self.assertEqual(row,{'path':'/printlink-health','expected':401,'status':401})
+
+    def test_anonymous_nginx_200_or_failed_direct_health_cannot_pass(self):
+        bypass=self.assert_read_only_probe_contract(200,200)
+        self.assertFalse(bypass['passed']);self.assertFalse(bypass['nginxPrintlinkAuthenticationBoundary'])
+        unhealthy=self.assert_read_only_probe_contract(401,503)
+        self.assertFalse(unhealthy['passed']);self.assertTrue(unhealthy['nginxPrintlinkAuthenticationBoundary'])
+        self.assertFalse(unhealthy['cloudHealth'])
 
     def test_source_manifest_freeze_lifecycle_is_explicit(self):
         pin=json.loads(HELPER.with_name('printlink-940-source.json').read_text())

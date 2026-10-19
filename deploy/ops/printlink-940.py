@@ -38,7 +38,7 @@ GLOBAL_HEALTH = ['/nginx-health', '/health', '/hy-schedule/health', '/rr/health'
  '/qc/api/health', '/production-plan/health', '/shipping/health', '/factory-review/health',
  '/indo-shipping/health', '/tomy-paiqi/health', '/zuru-order-system/health', '/zuru-master/health',
  '/voyageplex/api/health', '/erp/health', '/qc-plan/api/health']
-PUBLIC_SAMPLE = {'/printlink-health':200, '/':401, '/nginx-health':200, '/rr/health':200, '/sprayplan/api/health':200,
+PUBLIC_SAMPLE = {'/printlink-health':401, '/':401, '/nginx-health':200, '/rr/health':200, '/sprayplan/api/health':200,
  '/sprayplan-test/api/health':200, '/internal-quote/health':200, '/indo-shipping/health':200,
  '/tomy-paiqi/health':200, '/peise/health':200, '/voyageplex/api/health':200,
  '/internal-quote/api/auth/me':401, '/internal-quote/api/quotes':401, '/internal-quote/api/admin/users':401}
@@ -483,7 +483,7 @@ def read_only_probes():
     global_rows = [{'path':path,'status':get('http://127.0.0.1'+path)[0]} for path in GLOBAL_HEALTH]
     public_rows = [{'path':path,'expected':expected,'status':get('http://127.0.0.1'+path)[0]} for path,expected in PUBLIC_SAMPLE.items()]
     cloud = get('http://127.0.0.1:3100/api/health')
-    nginx_printlink = get('http://127.0.0.1/printlink-health')[0]==200
+    nginx_printlink_auth = get('http://127.0.0.1/printlink-health')[0]==401
     auth = {path:get('http://127.0.0.1:3100'+path)[0] for path in ['/api/me','/api/users','/api/orders','/api/platform/business-sync']}
     static = []
     for url,name in STATIC.items():
@@ -492,11 +492,11 @@ def read_only_probes():
         static.append({'path':url,'sha256':raw_hash(content),'matchesSource':status==200 and content==expected})
     return {'globalHealth':global_rows,'publicSamples':public_rows,
       'cloudHealth':cloud[0]==200 and json.loads(cloud[1]).get('ok') is True,
-      'nginxPrintlinkHealth':nginx_printlink,
+      'nginxPrintlinkAuthenticationBoundary':nginx_printlink_auth,
       'anonymousAppBoundary':auth,'cloudStaticAssets':static,
       'passed':all(row['status']==200 for row in global_rows) and all(row['status']==row['expected'] for row in public_rows)
        and cloud[0]==200 and json.loads(cloud[1]).get('ok') is True and all(v==401 for v in auth.values())
-       and all(row['matchesSource'] for row in static) and nginx_printlink}
+       and all(row['matchesSource'] for row in static) and nginx_printlink_auth}
 
 
 def startup_source_facts():

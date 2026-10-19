@@ -1,4 +1,4 @@
-name: VoyagePlex Read-only Recovery Progress v7
+name: VoyagePlex Read-only Recovery Progress v8
 on:
   workflow_dispatch:
 permissions:
@@ -47,5 +47,5 @@ jobs:
             umask 077
             mailbox_diagnostic_tmp=$(mktemp -d /tmp/maildiag-progress.XXXXXX)
             trap 'rm -rf "$mailbox_diagnostic_tmp"' EXIT
-            git show "$MAILDIAG_REF:deploy/ops/voyageplex-recovery-progress-v7.py" > "$mailbox_diagnostic_tmp/run.py" 2>/dev/null || { echo 'MAILDIAG_FIXED_SCRIPT_READ_FAILED'; exit 1; }
+            git show "$MAILDIAG_REF:deploy/ops/voyageplex-recovery-progress-v8.py" > "$mailbox_diagnostic_tmp/run.py" 2>/dev/null || { echo 'MAILDIAG_FIXED_SCRIPT_READ_FAILED'; exit 1; }
             timeout --signal=TERM --kill-after=2s 45s python3 "$mailbox_diagnostic_tmp/run.py"

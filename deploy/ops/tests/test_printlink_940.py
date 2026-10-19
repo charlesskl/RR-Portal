@@ -1,4 +1,5 @@
 """Offline adversarial tests; no production access or live business operations."""
+import base64
 import contextlib
 import datetime
 import http.server
@@ -975,7 +976,7 @@ class ActiveRoutingTests(unittest.TestCase):
 
     def test_both_workflow_gates_require_active_fixed_backup_and_deployed_target(self):
         workflow=(HELPER.parents[2]/'.github/workflows/indo-diag.yml').read_text()
-        self.assertIn('options: [backup, verify, diagnose, context, verify-active]',workflow)
+        self.assertIn('options: [backup, verify, diagnose, context, verify-active, result]',workflow)
         env={**os.environ,'CLOUD_HOST_FINGERPRINT':'SHA256:'+'A'*43,
           'PRINTLINK_OPS_BRANCH':'refs/heads/ops/printlink-940-20261019','PRINTLINK_OPS_REF':'a'*40,
           'PRINTLINK_OPS_MODE':'verify-active','PRINTLINK_OPS_BEFORE':ops.PRE_DEPLOY_COMMIT,
@@ -993,6 +994,119 @@ class ActiveRoutingTests(unittest.TestCase):
               {'PRINTLINK_OPS_BRANCH':'refs/heads/main'}]:
                 rejected=subprocess.run(['bash','-c',script],env={**env,**changed},capture_output=True)
                 self.assertNotEqual(rejected.returncode,0)
+
+
+class ResultTests(unittest.TestCase):
+    target='1c295d6418a64a1610b9075acd4da2a38d875328'
+
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=pathlib.Path(self.temp.name)
+        self.original=self.root/'printlink-pre-940-20261019T011955726437Z';self.original.mkdir(mode=0o700)
+        self.directory=self.root/ops.ACTIVE_RESULT_NAME;self.directory.mkdir(mode=0o700);self.file=self.directory/'first-result.json'
+        baseline=ops.encoded({'deployment':'PR940','sourceCommit':ops.PRE_DEPLOY_COMMIT,'strictVerificationPassed':False})
+        ops.private_write(self.original/'baseline.json',baseline)
+        ops.private_write(self.original/'manifest.json',ops.encoded({'baseline.json':ops.raw_hash(baseline)}))
+        ops.private_write(self.directory/'runtime.private.json',b'PRIVATE_TOKEN_MUST_NOT_BE_READ')
+        self.value={key:{} for key in ops.RESULT_KEYS}
+        self.value.update({'mode':'verify-active','deployment':'PR940','sourceCommit':self.target,'backup':str(self.original),
+          'resultDirectory':str(self.directory),'baselineNonQuiescent':True,'originalStrictVerificationPassed':False,
+          'strictVerificationPassed':False,'activeVerificationPassed':False,'targetDataPreservationPassed':True,
+          'originalBackupFilesWritten':False,'businessWritesPerformed':False,'conflictChoicesSubmitted':False,
+          'stockOrProductIdsChangedByOperator':False,'automaticRestoreOrRecreatePerformed':False})
+        self.replace(self.value)
+        patcher=patch.multiple(ops,BACKUPS=self.root,DIAGNOSTIC_BACKUP_PATH=str(self.original));patcher.start();self.addCleanup(patcher.stop)
+
+    def replace(self,value):
+        self.file.write_bytes(ops.encoded(value));self.file.chmod(0o600)
+
+    def read(self):
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(ops,'git_commit',return_value=self.target))
+            stack.enter_context(patch.object(ops,'tested_source_guard',return_value={}))
+            for name in ['backup','verify','verify_active','diagnose','context','diagnostic_private_backup',
+              'diagnostic_snapshot_proof','active_read_snapshot','sqlite_audit','runtime_context','other_containers',
+              'actual_runtime_files','read_only_probes','production_readiness','private_write','run']:
+                stack.enter_context(patch.object(ops,name,side_effect=AssertionError('forbidden receipt operation: '+name)))
+            stack.enter_context(patch.object(ops,'stable_file',side_effect=AssertionError('receipt must use its bounded reader')))
+            opened=stack.enter_context(patch.object(ops.os,'open',wraps=ops.os.open))
+            with contextlib.redirect_stdout(io.StringIO()) as output:receipt=ops.read_result(self.target,str(self.original))
+            self.assertEqual({call.args[0] for call in opened.call_args_list},
+              {self.original/'manifest.json',self.original/'baseline.json',self.file})
+            return receipt,[json.loads(line) for line in output.getvalue().splitlines()]
+
+    def test_large_result_reassembles_exact_original_bytes_and_only_reads_three_files(self):
+        self.value['probes']={'syntheticPadding':'x'*100000};self.replace(self.value)
+        before={file:file.read_bytes() for file in [self.file,self.original/'manifest.json',self.original/'baseline.json',self.directory/'runtime.private.json']}
+        receipt,chunks=self.read();self.assertTrue(receipt['resultReceiptComplete'])
+        self.assertFalse(receipt['recordedActiveVerificationPassed']);self.assertTrue(receipt['recordedTargetDataPreservationPassed'])
+        self.assertFalse(receipt['verificationRerun']);self.assertGreater(len(chunks),1)
+        self.assertEqual([part['part'] for part in chunks],list(range(1,len(chunks)+1)))
+        self.assertTrue(all(part['total']==len(chunks) and len(ops.encoded(part))<=6000 for part in chunks))
+        restored=base64.b64decode(''.join(part['data'] for part in chunks));self.assertEqual(restored,before[self.file])
+        self.assertEqual(ops.raw_hash(restored),receipt['originalResultSha256'])
+        self.assertTrue(all(part['fullSha256']==receipt['originalResultSha256'] for part in chunks))
+        self.assertEqual({file:file.read_bytes() for file in before},before)
+
+    def test_exact_path_private_modes_symlinks_and_four_mib_limit_before_read(self):
+        with patch.object(ops.os,'open') as read:
+            with self.assertRaises(RuntimeError):ops.result_private_bytes(self.directory/'runtime.private.json')
+            self.file.write_bytes(b'x'*(ops.RESULT_MAX_BYTES+1))
+            with self.assertRaises(RuntimeError):ops.result_private_bytes(self.file)
+            self.assertEqual(ops.FAILED_CHECK,'resultFileAtMostFourMiBBeforeRead');read.assert_not_called()
+        self.replace(self.value);self.file.chmod(0o640)
+        with self.assertRaises(RuntimeError):ops.result_private_bytes(self.file)
+        self.file.chmod(0o600);self.directory.chmod(0o750)
+        with self.assertRaises(RuntimeError):ops.result_private_bytes(self.file)
+        self.directory.chmod(0o700);self.file.unlink();self.file.symlink_to(self.directory/'runtime.private.json')
+        with self.assertRaises(RuntimeError):ops.result_private_bytes(self.file)
+        self.file.unlink()
+        with self.assertRaises(RuntimeError):ops.result_private_bytes(self.file)
+        self.assertEqual(ops.FAILED_CHECK,'resultFirstOrOriginalFileMissingDoNotRerunVerification')
+
+    def test_recorded_error_and_unreviewed_keys_are_distinct_fail_closed(self):
+        error={'mode':'verify-active','failed':True,'failedCheck':'activeExactDeviceDisplayPayloadFields','errorType':'JSONDecodeError',
+          'strictVerificationPassed':False,'activeVerificationPassed':False,'targetDataPreservationPassed':False,
+          'baselineNonQuiescent':True,'originalBackupFilesWritten':False,'businessWritesPerformed':False}
+        self.replace(error);receipt,chunks=self.read();self.assertTrue(receipt['recordedResultIsError'])
+        self.assertEqual(json.loads(base64.b64decode(''.join(part['data'] for part in chunks))),error)
+        for invalid in [{**self.value,'runtime.private.json':'PRIVATE_TOKEN'}, {**error,'unexpected':'PRIVATE_TOKEN'},
+          {**error,'failedCheck':'contains private token'}, {**error,'errorType':'contains private token'},
+          {**self.value,'sourceCommit':'f'*40}]:
+            self.replace(invalid)
+            with self.assertRaises(RuntimeError):self.read()
+
+    def test_original_baseline_manifest_and_source_changes_stop_receipt(self):
+        (self.original/'baseline.json').write_bytes(b'{}')
+        with self.assertRaises(RuntimeError):self.read()
+        self.assertEqual(ops.FAILED_CHECK,'resultOriginalBaselineMatchesManifest')
+        with patch.object(ops,'git_commit',return_value='f'*40):
+            with self.assertRaises(RuntimeError):ops.read_result(self.target,str(self.original))
+        self.assertEqual(ops.FAILED_CHECK,'resultExactDeployedMain')
+
+    def test_main_receipt_routes_only_result_and_preserves_recorded_false(self):
+        pin=str(HELPER.with_name('printlink-940-source.json'))
+        with patch.object(ops,'read_result',return_value={'resultReceiptComplete':True,'recordedActiveVerificationPassed':False}) as read:
+            for target,path in [(ops.PRE_DEPLOY_COMMIT,str(self.original)),('f'*40,str(self.original)),(self.target,str(self.original)+'x')]:
+                with self.assertRaises(RuntimeError):ops.main(['result',ops.PRE_DEPLOY_COMMIT,target,path,pin])
+            altered=self.root/'pin.json';altered.write_bytes(pathlib.Path(pin).read_bytes()+b'\n')
+            with self.assertRaises(RuntimeError):ops.main(['result',ops.PRE_DEPLOY_COMMIT,self.target,str(self.original),str(altered)])
+            read.assert_not_called()
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(ops.main(['result',ops.PRE_DEPLOY_COMMIT,self.target,str(self.original),pin]),0)
+            self.assertFalse(json.loads(output.getvalue())['recordedActiveVerificationPassed'])
+
+    def test_result_workflow_both_gates_require_fixed_target_path_and_branch(self):
+        workflow=(HELPER.parents[2]/'.github/workflows/indo-diag.yml').read_text()
+        env={**os.environ,'CLOUD_HOST_FINGERPRINT':'SHA256:'+'A'*43,'PRINTLINK_OPS_BRANCH':'refs/heads/ops/printlink-940-20261019',
+          'PRINTLINK_OPS_REF':'a'*40,'PRINTLINK_OPS_MODE':'result','PRINTLINK_OPS_BEFORE':ops.PRE_DEPLOY_COMMIT,
+          'PRINTLINK_OPS_TARGET':self.target,'PRINTLINK_OPS_BACKUP':'/opt/rr-portal/deploy/backups/printlink-pre-940-20261019T011955726437Z'}
+        for label,indent in [('run',10),('script',12)]:
+            match=re.search(r'^\s*'+label+r': \|\n((?:^ {'+str(indent)+r'}.*\n|^\n)+)',workflow,re.M);self.assertIsNotNone(match)
+            script='\n'.join(line[indent:] for line in match[1].splitlines()).split('cd /opt/rr-portal',1)[0]
+            self.assertEqual(subprocess.run(['bash','-c',script],env=env,capture_output=True).returncode,0)
+            for changed in [{'PRINTLINK_OPS_TARGET':'f'*40},{'PRINTLINK_OPS_BACKUP':str(self.original)},
+              {'PRINTLINK_OPS_MODE':'read-result'},{'PRINTLINK_OPS_BEFORE':'d'*40},{'PRINTLINK_OPS_BRANCH':'refs/heads/main'}]:
+                self.assertNotEqual(subprocess.run(['bash','-c',script],env={**env,**changed},capture_output=True).returncode,0)
 
 
 if __name__=='__main__':unittest.main()

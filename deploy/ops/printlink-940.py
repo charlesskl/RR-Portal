@@ -4,6 +4,7 @@ SQLite backup API copies include committed WAL data. Raw DB/WAL/SHM bytes are al
 retained as evidence, but are not used as portable databases or compared as logical
 business data. Every table and every durable non-SQLite file is compared exactly.
 """
+import base64
 import contextlib
 import datetime
 import hashlib
@@ -1184,22 +1185,129 @@ def verify_active(target,path):
         raise
 
 
+RESULT_MAX_BYTES = 4*1024**2
+RESULT_KEYS = {'activeChecks','activeVerificationPassed','automaticRestoreOrRecreatePerformed','backup',
+ 'baselineNonQuiescent','beforeSQLite','businessWritesPerformed','checks','conflictChoicesSubmitted',
+ 'crossDatabaseAtomicSnapshotClaimed','currentSQLite','currentTelemetry','currentTypedDelta','deployment',
+ 'finalSQLite','finalTelemetry','finalTypedDelta','mode','observedStrictChecksPassed','originalBackupFilesWritten',
+ 'originalFailureAttributed','originalSQLiteSnapshotProof','originalStrictVerificationPassed','otherContainerLifecycleDelta',
+ 'otherContainersAfter','otherContainersBefore','printlinkAfter','printlinkBefore','probeTelemetry','probes',
+ 'productionReadiness','resultDirectory','runtimeFilesVerified','sourceCommit','stockOrProductIdsChangedByOperator',
+ 'strictVerificationPassed','targetDataPreservationPassed'}
+RESULT_ERROR_KEYS = {'mode','failed','failedCheck','errorType','strictVerificationPassed','activeVerificationPassed',
+ 'targetDataPreservationPassed','baselineNonQuiescent','originalBackupFilesWritten','businessWritesPerformed'}
+
+
+def result_private_bytes(file):
+    original=pathlib.Path(DIAGNOSTIC_BACKUP_PATH)
+    first=BACKUPS/ACTIVE_RESULT_NAME/'first-result.json'
+    require(file in {original/'manifest.json',original/'baseline.json',first}, 'resultOnlyThreeFixedPrivateFiles')
+    require(BACKUPS.is_dir() and not BACKUPS.is_symlink() and file.parent.is_dir() and not file.parent.is_symlink()
+            and stat.S_IMODE(file.parent.stat().st_mode)==0o700, 'resultExactPrivateDirectory')
+    require(file.exists(), 'resultFirstOrOriginalFileMissingDoNotRerunVerification')
+    metadata=file.lstat()
+    require(not file.is_symlink() and stat.S_ISREG(metadata.st_mode) and stat.S_IMODE(metadata.st_mode)==0o600,
+            'resultPrivateRegularFileNoSymlink')
+    require(metadata.st_size<=RESULT_MAX_BYTES, 'resultFileAtMostFourMiBBeforeRead')
+    fd=os.open(file,os.O_RDONLY|os.O_NOFOLLOW)
+    with os.fdopen(fd,'rb') as stream:
+        opened=os.fstat(stream.fileno())
+        require(stat.S_ISREG(opened.st_mode) and stat.S_IMODE(opened.st_mode)==0o600
+                and opened.st_size<=RESULT_MAX_BYTES, 'resultFileAtMostFourMiBAfterOpenBeforeRead')
+        content=stream.read(RESULT_MAX_BYTES+1)
+        after=os.fstat(stream.fileno())
+        require((opened.st_dev,opened.st_ino,opened.st_size,opened.st_mtime_ns,opened.st_mode)==
+                (after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_mode)
+                and len(content)==opened.st_size, 'resultFileStableDuringBoundedRead')
+    require((metadata.st_dev,metadata.st_ino,metadata.st_size,metadata.st_mtime_ns,metadata.st_mode)==
+            (opened.st_dev,opened.st_ino,opened.st_size,opened.st_mtime_ns,opened.st_mode)
+            and stat.S_IMODE(opened.st_mode)==0o600 and len(content)<=RESULT_MAX_BYTES,
+            'resultExactStablePrivateFileRead')
+    return content
+
+
+def result_json(content):
+    def pairs(items):
+        value={}
+        for key,item in items:
+            require(key not in value, 'resultNoDuplicateJSONKeys')
+            value[key]=item
+        return value
+    def bad_constant(_):require(False, 'resultNoNonfiniteJSONConstants')
+    value=json.loads(content,object_pairs_hook=pairs,parse_constant=bad_constant)
+    require(type(value) is dict, 'resultJSONObjectOnly')
+    return value
+
+
+def result_original_seal():
+    original=pathlib.Path(DIAGNOSTIC_BACKUP_PATH)
+    manifest_bytes=result_private_bytes(original/'manifest.json');baseline_bytes=result_private_bytes(original/'baseline.json')
+    manifest=result_json(manifest_bytes);baseline=result_json(baseline_bytes)
+    require(manifest.get('baseline.json')==raw_hash(baseline_bytes), 'resultOriginalBaselineMatchesManifest')
+    require(baseline.get('deployment')=='PR940' and baseline.get('sourceCommit')==PRE_DEPLOY_COMMIT
+            and baseline.get('strictVerificationPassed') is False, 'resultOriginalStrictFalsePreserved')
+    return {'manifestSha256':raw_hash(manifest_bytes),'baselineSha256':raw_hash(baseline_bytes)}
+
+
+def read_result(target,path):
+    require(target=='1c295d6418a64a1610b9075acd4da2a38d875328' and path==DIAGNOSTIC_BACKUP_PATH,
+            'resultExactTargetAndOriginalBackup')
+    require(git_commit()==git_commit('origin/main')==target, 'resultExactDeployedMain')
+    tested_source_guard(target,True)
+    before=result_original_seal()
+    file=BACKUPS/ACTIVE_RESULT_NAME/'first-result.json';content=result_private_bytes(file);value=result_json(content)
+    error=value.get('failed') is True
+    require(set(value)==(RESULT_ERROR_KEYS if error else RESULT_KEYS), 'resultOnlyReviewedTopLevelKeySet')
+    require(value['mode']=='verify-active' and value['strictVerificationPassed'] is False
+            and value['baselineNonQuiescent'] is True and value['originalBackupFilesWritten'] is False
+            and value['businessWritesPerformed'] is False
+            and all(type(value[key]) is bool for key in ['activeVerificationPassed','targetDataPreservationPassed']),
+            'resultOriginalVerificationStatusTypesAndReadOnlyFacts')
+    if error:
+        require(value['activeVerificationPassed'] is False and value['targetDataPreservationPassed'] is False
+                and isinstance(value['failedCheck'],str) and bool(re.fullmatch('[A-Za-z][A-Za-z0-9]{0,127}',value['failedCheck']))
+                and isinstance(value['errorType'],str) and bool(re.fullmatch('[A-Za-z_][A-Za-z0-9_]{0,63}',value['errorType'])),
+                'resultSafeRecordedFailureOnly')
+    else:
+        require(value['deployment']=='PR940' and value['sourceCommit']==target and value['backup']==path
+                and value['resultDirectory']==str(file.parent) and value['originalStrictVerificationPassed'] is False
+                and all(value[key] is False for key in ['conflictChoicesSubmitted','stockOrProductIdsChangedByOperator',
+                  'automaticRestoreOrRecreatePerformed']), 'resultExactRecordedDeploymentAndPaths')
+    after=result_original_seal()
+    require(after==before, 'originalManifestAndBaselineUnchanged')
+    require(git_commit()==git_commit('origin/main')==target, 'resultSourceStable')
+    full_sha=raw_hash(content);payload=base64.b64encode(content).decode('ascii')
+    chunks=[payload[index:index+5000] for index in range(0,len(payload),5000)]
+    envelopes=[encoded({'mode':'result-part','part':index+1,'total':len(chunks),'fullSha256':full_sha,
+      'encoding':'base64-original-result-bytes','data':chunk}) for index,chunk in enumerate(chunks)]
+    require(all(len(envelope)<=6000 for envelope in envelopes), 'resultEveryTransportLineAtMost6000Bytes')
+    for envelope in envelopes:print(envelope.decode('ascii'),flush=True)
+    return {'mode':'result','resultReceiptComplete':True,'originalResultPath':str(file),'originalResultBytes':len(content),
+      'originalResultSha256':full_sha,'encodedBase64Sha256':raw_hash(payload.encode('ascii')),'totalParts':len(chunks),
+      'originalManifestAndBaselineUnchanged':True,'originalManifestAndBaselineSha256':before,
+      'sourceStable':True,'originalStrictVerificationPassed':False,'recordedResultIsError':error,
+      'recordedActiveVerificationPassed':value['activeVerificationPassed'],
+      'recordedTargetDataPreservationPassed':value['targetDataPreservationPassed'],
+      'businessWritesPerformed':False,'originalBackupFilesWritten':False,'firstResultFilesWritten':False,
+      'verificationRerun':False}
+
+
 def main(argv):
     global TESTED_SOURCE
     require(len(argv)==5, 'exactFiveArguments')
     mode,before,target,path,pin = argv
-    require(mode in {'backup','verify','diagnose','context','verify-active'} and before==PRE_DEPLOY_COMMIT and bool(re.fullmatch('[a-f0-9]{40}',target)), 'exactModeAndCommitArguments')
+    require(mode in {'backup','verify','diagnose','context','verify-active','result'} and before==PRE_DEPLOY_COMMIT and bool(re.fullmatch('[a-f0-9]{40}',target)), 'exactModeAndCommitArguments')
     TESTED_SOURCE = json.loads(pathlib.Path(pin).read_bytes())
     require(TESTED_SOURCE.get('finalPinFrozen') is True, 'finalSourcePinEmptyFailClosed')
     require((mode=='backup' and target==before and not path) or
             (mode=='verify' and target!=before and bool(re.fullmatch('/opt/rr-portal/deploy/backups/printlink-pre-940-[0-9]{8}T[0-9]{12}Z',path))) or
             (mode in {'diagnose','context'} and target==before and path==DIAGNOSTIC_BACKUP_PATH) or
-            (mode=='verify-active' and target=='1c295d6418a64a1610b9075acd4da2a38d875328' and target!=before and path==DIAGNOSTIC_BACKUP_PATH), 'exactModeSpecificArguments')
-    if mode in {'diagnose','context','verify-active'}:require(file_hash(pathlib.Path(pin))==DIAGNOSTIC_PIN_SHA256, 'diagnosticExactReviewedFrozenPinBytes')
+            (mode in {'verify-active','result'} and target=='1c295d6418a64a1610b9075acd4da2a38d875328' and target!=before and path==DIAGNOSTIC_BACKUP_PATH), 'exactModeSpecificArguments')
+    if mode in {'diagnose','context','verify-active','result'}:require(file_hash(pathlib.Path(pin))==DIAGNOSTIC_PIN_SHA256, 'diagnosticExactReviewedFrozenPinBytes')
     os.umask(0o077)
-    result = backup(target) if mode=='backup' else diagnose(target,path) if mode=='diagnose' else context(target,path) if mode=='context' else verify_active(target,path) if mode=='verify-active' else verify(target,path)
+    result = backup(target) if mode=='backup' else diagnose(target,path) if mode=='diagnose' else context(target,path) if mode=='context' else verify_active(target,path) if mode=='verify-active' else read_result(target,path) if mode=='result' else verify(target,path)
     print(json.dumps(result,ensure_ascii=True))
-    return 0 if (result['diagnosticComplete'] if mode=='diagnose' else result['contextComplete'] if mode=='context' else result['activeVerificationPassed'] if mode=='verify-active' else result['strictVerificationPassed']) else 1
+    return 0 if (result['diagnosticComplete'] if mode=='diagnose' else result['contextComplete'] if mode=='context' else result['activeVerificationPassed'] if mode=='verify-active' else result['resultReceiptComplete'] if mode=='result' else result['strictVerificationPassed']) else 1
 
 
 if __name__=='__main__':

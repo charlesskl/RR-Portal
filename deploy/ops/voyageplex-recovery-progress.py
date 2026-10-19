@@ -9,6 +9,7 @@ import select
 import sqlite3
 import subprocess
 import time
+from datetime import datetime, timezone
 
 ROOT = pathlib.Path('/opt/rr-portal')
 EXPECTED_HEAD = '4ec24b7b6d25836ee4ee702b57324764a856b83f'
@@ -290,6 +291,35 @@ def safe_retry_result(value):
     return value
 
 
+def step_timing(path):
+    names = ['before.sqlite3', 'after.sqlite3', 'before-snapshot.private.json', 'after-snapshot.private.json', 'result.json', 'seal.json']
+    files = {name: path / name for name in names}
+    if path.is_symlink() or any(member.is_symlink() for member in files.values()): raise ValueError()
+    def duration(name):
+        member = files[name]
+        if not member.is_file(): return None
+        try:
+            value = json.loads(read(member, 2048))
+            keys = {'startedAtUtc', 'finishedAtUtc', 'method', 'committedWALIncluded', 'transactionConsistentSQLiteSnapshot', 'integrityCheckOK'}
+            if set(value) != keys or value['method'] != 'SQLite-online-backup-API' or any(value[key] is not True for key in keys - {'startedAtUtc', 'finishedAtUtc', 'method'}): return None
+            times = [datetime.fromisoformat(value[key].replace('Z', '+00:00')) for key in ['startedAtUtc', 'finishedAtUtc']]
+            if any(item.utcoffset() != timezone.utc.utcoffset(item) for item in times): return None
+            seconds = (times[1] - times[0]).total_seconds()
+            return round(seconds, 3) if 0 <= seconds <= 86400 else None
+        except (OSError, ValueError, TypeError, AttributeError): return None
+    before, after = files['before.sqlite3'].is_file(), files['after.sqlite3'].is_file()
+    before_seconds, after_seconds = duration('before-snapshot.private.json'), duration('after-snapshot.private.json')
+    stage = ('sealed' if files['seal.json'].is_file() else 'sealing' if files['result.json'].is_file() else
+             'snapshot-after' if after and after_seconds is None else 'snapshot-before' if before and before_seconds is None else
+             'post-or-await' if before_seconds is not None and not after else 'finalizing-result' if after_seconds is not None else 'reserved-or-starting')
+    clock = files['before.sqlite3'] if before else path
+    return {'stage': stage, 'activeAgeSeconds': round(max(0, time.time() - clock.stat().st_mtime), 1),
+            'beforeDatabaseExists': before, 'afterDatabaseExists': after,
+            'beforeDatabaseBytes': files['before.sqlite3'].stat().st_size if before else None,
+            'afterDatabaseBytes': files['after.sqlite3'].stat().st_size if after else None,
+            'beforeSnapshotSeconds': before_seconds, 'afterSnapshotSeconds': after_seconds}
+
+
 def retry_attempts_progress():
     result = {'runId': '39201444781', 'parentSealRequired': False, 'attemptDirectoryPresent': False,
               'sealedVerified': 0, 'passed': 0, 'notPassed': 0, 'pendingUnsealed': 0,
@@ -323,6 +353,9 @@ def retry_attempts_progress():
             break
         if not (path / 'seal.json').exists():
             result['pendingUnsealed'] += 1
+            try: timing = step_timing(path)
+            except (OSError, ValueError): timing = {'stage': 'unavailable'}
+            emit('pendingRetryStepTiming', timing)
             continue
         try:
             # Same SHA semantics as the reviewed helper, with a deadline inside
@@ -353,8 +386,10 @@ def retry_attempts_progress():
             result['invalidSafeSchema'] += 1
             continue
         result['passed' if value['passed'] else 'notPassed'] += 1
-        items.append(value)
-        if len(items) == 8:
+        try: timing = step_timing(path)
+        except (OSError, ValueError): timing = {'stage': 'unavailable'}
+        items.append({**value, 'timing': timing})
+        if len(items) == 6:
             emit('sealedRetryAttempts', {'runId': '39201444781', 'items': items})
             items = []
     if items: emit('sealedRetryAttempts', {'runId': '39201444781', 'items': items})

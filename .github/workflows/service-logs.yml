@@ -1,4 +1,4 @@
-name: VoyagePlex Current Failed Mail Readonly Audit
+name: VoyagePlex Exact Failed Mail IMAP Metadata
 on:
   workflow_dispatch:
 permissions:
@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           [[ "$MAILDIAG_BRANCH" = refs/heads/ops/voyageplex-maildiag-20261019 && "$MAILDIAG_ATTEMPT" = 1 ]] || exit 1
           [[ "$MAILDIAG_REF" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Fixed current failed mail snapshot without application calls
+      - name: Exact UID metadata without BODY or headers
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           MAILDIAG_BRANCH: ${{ github.ref }}
@@ -45,7 +45,7 @@ jobs:
             timeout 5s git fetch origin ops/voyageplex-maildiag-20261019 >/dev/null 2>&1 || { echo 'MAILDIAG_FIXED_SCRIPT_FETCH_FAILED'; exit 1; }
             [[ "$(git rev-parse FETCH_HEAD)" = "$MAILDIAG_REF" ]] || { echo MAILDIAG_FIXED_HEAD_MISMATCH; exit 1; }
             umask 077
-            mailbox_diagnostic_tmp=$(mktemp -d /tmp/maildiag-current-failed.XXXXXX)
+            mailbox_diagnostic_tmp=$(mktemp -d /tmp/maildiag-current-metadata.XXXXXX)
             trap 'rm -rf "$mailbox_diagnostic_tmp"' EXIT
-            git show "$MAILDIAG_REF:deploy/ops/voyageplex-current-failed-audit.py" > "$mailbox_diagnostic_tmp/run.py" 2>/dev/null || { echo 'MAILDIAG_FIXED_SCRIPT_READ_FAILED'; exit 1; }
+            git show "$MAILDIAG_REF:deploy/ops/voyageplex-current-failed-metadata.py" > "$mailbox_diagnostic_tmp/run.py" 2>/dev/null || { echo 'MAILDIAG_FIXED_SCRIPT_READ_FAILED'; exit 1; }
             timeout --signal=TERM --kill-after=3s 110s python3 "$mailbox_diagnostic_tmp/run.py"

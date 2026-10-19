@@ -1,8 +1,8 @@
-name: VoyagePlex 942 Reviewed Controlled Config Diagnostic
+name: VoyagePlex 942 Reviewed Compose Serialization Diagnostic
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [controlled-config-diagnostic]}
+      mode: {type: choice, required: true, options: [compose-serialization-diagnostic]}
 permissions:
   contents: read
 concurrency:
@@ -10,10 +10,10 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_PIN: 'true'
-  VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_SHA256: '18e25ffd448d55867dbd291f919a2b6a0456f02b85d1e675e9946f79ddc88890'
+  VOYAGEPLEX_SERIALIZATION_DIAGNOSTIC_PIN: 'true'
+  VOYAGEPLEX_SERIALIZATION_DIAGNOSTIC_SHA256: '9a80a7a7ca230534e060950be316c8c41e8ca3ea20d502559f3d6c8c59798237'
 jobs:
-  fixed-controlled-config-diagnostic:
+  fixed-compose-serialization-diagnostic:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -27,10 +27,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_PIN" = true && "$VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-942-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = controlled-config-diagnostic ]] || exit 1
+          [[ "$VOYAGEPLEX_SERIALIZATION_DIAGNOSTIC_PIN" = true && "$VOYAGEPLEX_SERIALIZATION_DIAGNOSTIC_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-942-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = compose-serialization-diagnostic ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Diagnose pre-build guards without release or business requests
+      - name: Diagnose Compose serialization without release or business requests
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -44,25 +44,27 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 9m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_PIN,VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_SHA256
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,VOYAGEPLEX_SERIALIZATION_DIAGNOSTIC_PIN,VOYAGEPLEX_SERIALIZATION_DIAGNOSTIC_SHA256
           script: |
             set -euo pipefail
-            [[ "$VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_PIN" = true && "$VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-942-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = controlled-config-diagnostic && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$VOYAGEPLEX_SERIALIZATION_DIAGNOSTIC_PIN" = true && "$VOYAGEPLEX_SERIALIZATION_DIAGNOSTIC_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-942-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = compose-serialization-diagnostic && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 30s git -c core.hooksPath=/dev/null fetch origin ops/voyageplex-942-20261019 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            voyageplex_controlled_tmp=$(mktemp -d /tmp/voyageplex-942-controlled-config-diagnostic.XXXXXX)
-            trap 'rm -rf "$voyageplex_controlled_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-942-controlled-config-diagnostic.py" > "$voyageplex_controlled_tmp/run.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-942-release-v2.py" > "$voyageplex_controlled_tmp/voyageplex-release-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-942-backup-v3.py" > "$voyageplex_controlled_tmp/voyageplex-backup-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$voyageplex_controlled_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$voyageplex_controlled_tmp/release-data-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$voyageplex_controlled_tmp/run.py" | cut -d ' ' -f1)" = "$VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_SHA256" ]] || exit 1
-            [[ "$(sha256sum "$voyageplex_controlled_tmp/voyageplex-release-library.py" | cut -d ' ' -f1)" = 439ee6f0a1754e8a97701c1bff19383508dfb185633c08caa39a5e4f03c18507 ]] || exit 1
-            [[ "$(sha256sum "$voyageplex_controlled_tmp/voyageplex-backup-library.py" | cut -d ' ' -f1)" = 779331f8b03b944d18b96f3e0a6778a290f25fe7f7500cee867b4a3f02c4a660 ]] || exit 1
-            [[ "$(sha256sum "$voyageplex_controlled_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
-            [[ "$(sha256sum "$voyageplex_controlled_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            timeout --signal=TERM --kill-after=10s 8m python3 -B "$voyageplex_controlled_tmp/run.py" controlled-config-diagnostic
+            voyageplex_serialization_tmp=$(mktemp -d /tmp/voyageplex-942-compose-serialization-diagnostic.XXXXXX)
+            trap 'rm -rf "$voyageplex_serialization_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-942-compose-serialization-diagnostic.py" > "$voyageplex_serialization_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-942-controlled-config-diagnostic.py" > "$voyageplex_serialization_tmp/voyageplex-controlled-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-942-release-v2.py" > "$voyageplex_serialization_tmp/voyageplex-release-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-942-backup-v3.py" > "$voyageplex_serialization_tmp/voyageplex-backup-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$voyageplex_serialization_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$voyageplex_serialization_tmp/release-data-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$voyageplex_serialization_tmp/run.py" | cut -d ' ' -f1)" = "$VOYAGEPLEX_SERIALIZATION_DIAGNOSTIC_SHA256" ]] || exit 1
+            [[ "$(sha256sum "$voyageplex_serialization_tmp/voyageplex-controlled-library.py" | cut -d ' ' -f1)" = 18e25ffd448d55867dbd291f919a2b6a0456f02b85d1e675e9946f79ddc88890 ]] || exit 1
+            [[ "$(sha256sum "$voyageplex_serialization_tmp/voyageplex-release-library.py" | cut -d ' ' -f1)" = 439ee6f0a1754e8a97701c1bff19383508dfb185633c08caa39a5e4f03c18507 ]] || exit 1
+            [[ "$(sha256sum "$voyageplex_serialization_tmp/voyageplex-backup-library.py" | cut -d ' ' -f1)" = 779331f8b03b944d18b96f3e0a6778a290f25fe7f7500cee867b4a3f02c4a660 ]] || exit 1
+            [[ "$(sha256sum "$voyageplex_serialization_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
+            [[ "$(sha256sum "$voyageplex_serialization_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            timeout --signal=TERM --kill-after=10s 8m python3 -B "$voyageplex_serialization_tmp/run.py" compose-serialization-diagnostic

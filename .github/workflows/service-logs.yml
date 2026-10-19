@@ -1,8 +1,8 @@
-name: VoyagePlex 942 Reviewed Scoped Release
+name: VoyagePlex 942 Reviewed Controlled Config Diagnostic
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [deploy, verify]}
+      mode: {type: choice, required: true, options: [controlled-config-diagnostic]}
 permissions:
   contents: read
 concurrency:
@@ -10,13 +10,12 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  VOYAGEPLEX_DEPLOY_WORKFLOW_PIN: 'true'
-  VOYAGEPLEX_VERIFY_WORKFLOW_PIN: 'false'
-  VOYAGEPLEX_RELEASE_HELPER_SHA256: '439ee6f0a1754e8a97701c1bff19383508dfb185633c08caa39a5e4f03c18507'
+  VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_PIN: 'true'
+  VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_SHA256: '18e25ffd448d55867dbd291f919a2b6a0456f02b85d1e675e9946f79ddc88890'
 jobs:
-  fixed-voyageplex-release:
+  fixed-controlled-config-diagnostic:
     runs-on: ubuntu-latest
-    timeout-minutes: 94
+    timeout-minutes: 10
     steps:
       - name: Validate fixed source and first attempt
         shell: bash
@@ -28,14 +27,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-942-20261019 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
-          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$VOYAGEPLEX_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-          case "$RELEASE_MODE" in
-            deploy) [[ "$VOYAGEPLEX_DEPLOY_WORKFLOW_PIN" = true ]] || exit 1 ;;
-            verify) [[ "$VOYAGEPLEX_VERIFY_WORKFLOW_PIN" = true ]] || exit 1 ;;
-            *) exit 1 ;;
-          esac
-      - name: Run only the reviewed VoyagePlex operation
+          [[ "$VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_PIN" = true && "$VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-942-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = controlled-config-diagnostic ]] || exit 1
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+      - name: Diagnose pre-build guards without release or business requests
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,32 +43,26 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 92m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,VOYAGEPLEX_DEPLOY_WORKFLOW_PIN,VOYAGEPLEX_VERIFY_WORKFLOW_PIN,VOYAGEPLEX_RELEASE_HELPER_SHA256
+          command_timeout: 9m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_PIN,VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_SHA256
           script: |
             set -euo pipefail
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-942-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$VOYAGEPLEX_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            case "$RELEASE_MODE" in
-              deploy) [[ "$VOYAGEPLEX_DEPLOY_WORKFLOW_PIN" = true ]] || exit 1; voyageplex_release_bound=90m ;;
-              verify) [[ "$VOYAGEPLEX_VERIFY_WORKFLOW_PIN" = true ]] || exit 1; voyageplex_release_bound=18m ;;
-              *) exit 1 ;;
-            esac
+            [[ "$VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_PIN" = true && "$VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-942-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = controlled-config-diagnostic && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
-            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch origin ops/voyageplex-942-20261019 >/dev/null 2>&1 || exit 1
+            timeout --signal=TERM --kill-after=2s 30s git -c core.hooksPath=/dev/null fetch origin ops/voyageplex-942-20261019 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            voyageplex_release_tmp=$(mktemp -d /tmp/voyageplex-942-release.XXXXXX)
-            trap 'rm -rf "$voyageplex_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-942-release-v2.py" > "$voyageplex_release_tmp/run.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-942-backup-v3.py" > "$voyageplex_release_tmp/voyageplex-backup-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$voyageplex_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$voyageplex_release_tmp/release-data-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-template-proof.py" > "$voyageplex_release_tmp/voyageplex-template-proof.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-reviewed-files.json" > "$voyageplex_release_tmp/voyageplex-reviewed-files.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$voyageplex_release_tmp/run.py" | cut -d ' ' -f1)" = "$VOYAGEPLEX_RELEASE_HELPER_SHA256" ]] || exit 1
-            [[ "$(sha256sum "$voyageplex_release_tmp/voyageplex-backup-library.py" | cut -d ' ' -f1)" = 779331f8b03b944d18b96f3e0a6778a290f25fe7f7500cee867b4a3f02c4a660 ]] || exit 1
-            [[ "$(sha256sum "$voyageplex_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
-            [[ "$(sha256sum "$voyageplex_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            [[ "$(sha256sum "$voyageplex_release_tmp/voyageplex-template-proof.py" | cut -d ' ' -f1)" = b40a7a8fbc0aec7efa78a7e7415d35b7c8895e7fc17892efbea59d8ba32b9aed ]] || exit 1
-            [[ "$(sha256sum "$voyageplex_release_tmp/voyageplex-reviewed-files.json" | cut -d ' ' -f1)" = 788d359df27dc5068428a86a90940358b8be14089c66baf180163f79b1d01264 ]] || exit 1
-            timeout --signal=TERM --kill-after=20s "$voyageplex_release_bound" python3 -B "$voyageplex_release_tmp/run.py" "$RELEASE_MODE"
+            voyageplex_controlled_tmp=$(mktemp -d /tmp/voyageplex-942-controlled-config-diagnostic.XXXXXX)
+            trap 'rm -rf "$voyageplex_controlled_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-942-controlled-config-diagnostic.py" > "$voyageplex_controlled_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-942-release-v2.py" > "$voyageplex_controlled_tmp/voyageplex-release-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-942-backup-v3.py" > "$voyageplex_controlled_tmp/voyageplex-backup-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$voyageplex_controlled_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$voyageplex_controlled_tmp/release-data-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$voyageplex_controlled_tmp/run.py" | cut -d ' ' -f1)" = "$VOYAGEPLEX_CONTROLLED_DIAGNOSTIC_SHA256" ]] || exit 1
+            [[ "$(sha256sum "$voyageplex_controlled_tmp/voyageplex-release-library.py" | cut -d ' ' -f1)" = 439ee6f0a1754e8a97701c1bff19383508dfb185633c08caa39a5e4f03c18507 ]] || exit 1
+            [[ "$(sha256sum "$voyageplex_controlled_tmp/voyageplex-backup-library.py" | cut -d ' ' -f1)" = 779331f8b03b944d18b96f3e0a6778a290f25fe7f7500cee867b4a3f02c4a660 ]] || exit 1
+            [[ "$(sha256sum "$voyageplex_controlled_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
+            [[ "$(sha256sum "$voyageplex_controlled_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            timeout --signal=TERM --kill-after=10s 8m python3 -B "$voyageplex_controlled_tmp/run.py" controlled-config-diagnostic

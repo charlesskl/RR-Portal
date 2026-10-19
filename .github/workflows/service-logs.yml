@@ -1,4 +1,4 @@
-name: PrintLink Fast Post Deployment Read Only Preflight
+name: PrintLink Post Deployment Read Only Acceptance
 on:
   workflow_dispatch:
 permissions:
@@ -10,7 +10,7 @@ concurrency:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 8
     steps:
       - name: Validate fixed diagnostic ref and SSH fingerprint
         shell: bash
@@ -35,7 +35,7 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 2m
+          command_timeout: 7m
           envs: PRINTLINK_DIAG_BRANCH,PRINTLINK_DIAG_REF,PRINTLINK_DIAG_ATTEMPT
           script: |
             set -euo pipefail
@@ -49,6 +49,5 @@ jobs:
             trap 'rm -rf "$printlink_diagnostic_tmp"' EXIT
             git show "$PRINTLINK_DIAG_REF:deploy/ops/printlink-runtime-resources.py" > "$printlink_diagnostic_tmp/printlink-runtime-resources.py" 2>/dev/null || { echo PRINTLINK_DIAG_SCRIPT_READ_FAILED; exit 1; }
             git show "$PRINTLINK_DIAG_REF:deploy/ops/printlink-runtime-source-951-pins.json" > "$printlink_diagnostic_tmp/printlink-runtime-source-951-pins.json" 2>/dev/null || { echo PRINTLINK_SOURCE_PINS_READ_FAILED; exit 1; }
-            git show "$PRINTLINK_DIAG_REF:deploy/ops/printlink-post-health-verify.py" > "$printlink_diagnostic_tmp/printlink-post-health-verify.py" 2>/dev/null || { echo PRINTLINK_POST_HEALTH_SCRIPT_READ_FAILED; exit 1; }
-            git show "$PRINTLINK_DIAG_REF:deploy/ops/printlink-post-health-preflight.py" > "$printlink_diagnostic_tmp/run.py" 2>/dev/null || { echo PRINTLINK_PREFLIGHT_SCRIPT_READ_FAILED; exit 1; }
-            timeout --signal=TERM --kill-after=5s 55s python3 "$printlink_diagnostic_tmp/run.py"
+            git show "$PRINTLINK_DIAG_REF:deploy/ops/printlink-post-health-verify.py" > "$printlink_diagnostic_tmp/run.py" 2>/dev/null || { echo PRINTLINK_POST_HEALTH_SCRIPT_READ_FAILED; exit 1; }
+            timeout --signal=TERM --kill-after=5s 380s python3 "$printlink_diagnostic_tmp/run.py"

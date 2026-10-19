@@ -26,7 +26,7 @@ LIB_SHA='47daa655212357c7ba9b22979bf6f5ee86f20afbff20b14bbd3442fbfc20c1e0'
 RESOURCE_SHA='2cc8e166f792ad4e0be0ff6f355351fed8d42d0385e0d413ffc1eca8728b3f5f'
 REVIEWED_HEAD='81744ae9904e39e7c30474ea49f06f5a187567e9'
 MERGE_HEAD='52c090589d6da542fee74ef17c8edd3b0dfe4fe6'
-FINAL_PIN_FROZEN=False
+FINAL_PIN_FROZEN=True
 
 
 def require(value,label):
@@ -89,6 +89,26 @@ def cgroup_safe(value):
         return (int(value['memory.max'])==768*1024**2 and 0<int(value['memory.current'])<=768*1024**2
             and events['oom']==0 and events['oom_kill']==0 and events.get('oom_group_kill',0)==0)
     except (ValueError,KeyError,IndexError):return False
+
+
+def verified_lifecycle(state,inspection):
+    # Bind every observation to the exact container whose source was checked,
+    # including a recreation/restart between that check and the first sample.
+    initial=inspection['State']
+    return (state['id']==inspection['Id']and state['image']==inspection['Image']
+        and state['startedAt']==initial['StartedAt']and state['restartCount']==inspection['RestartCount']
+        and state['health']=='healthy'and state['status']=='running'and not state['oomKilled'])
+
+
+def final_runtime_matches(current,initial):
+    return (current['Id']==initial['Id']and current['Image']==initial['Image']
+        and current['State']['StartedAt']==initial['State']['StartedAt']
+        and current['RestartCount']==initial['RestartCount']
+        and current['Mounts']==initial['Mounts']
+        and sorted(current['Config']['Env'])==sorted(initial['Config']['Env'])
+        and current['Config']['Healthcheck']==initial['Config']['Healthcheck']
+        and current['HostConfig']['Memory']==initial['HostConfig']['Memory']==768*1024**2
+        and current['HostConfig']['MemorySwap']==initial['HostConfig']['MemorySwap']==768*1024**2)
 
 
 def telemetry(m):
@@ -219,16 +239,22 @@ def main():
         result['durableEntryCounts']={'before':len(before_durable),'after':len(after_durable)}
         result['otherContainersAfterUnchanged']=lib['other_containers']()==others
         result['environmentFilePreserved']=lib['file_hash'](ROOT/'.env.cloud.production')==lib['file_hash'](BACKUP/'env.before')
-        end=m.inspection();first=samples[0]['telemetry']['state']
-        stable=lambda s:s['id']==first['id']and s['image']==first['image']and s['startedAt']==first['startedAt']and s['restartCount']==first['restartCount']and s['health']=='healthy'and not s['oomKilled']
-        result['serviceRecoveryVerified']=(all(s['ok']and stable(s['telemetry']['state'])and s['telemetry']['probeCounts']['legacy']==0
-            and s['telemetry']['probeCounts']['direct']<=1 and cgroup_safe(s['telemetry']['cgroup'])for s in samples)and stable(end)
+        end=m.inspection();final_inspection=lib['inspect']('rr-portal-printlink-1')
+        result['finalRuntimeMatchesVerifiedContainer']=final_runtime_matches(final_inspection,inspection)
+        source_verify(lib,m,pins,cid)
+        runtime_bound=(result['finalRuntimeMatchesVerifiedContainer']and verified_lifecycle(end,inspection)
+            and all(verified_lifecycle(s['telemetry']['state'],inspection)for s in samples))
+        result['serviceRecoveryVerified']=(all(s['ok']and verified_lifecycle(s['telemetry']['state'],inspection)and s['telemetry']['probeCounts']['legacy']==0
+            and s['telemetry']['probeCounts']['direct']<=1 and cgroup_safe(s['telemetry']['cgroup'])for s in samples)and verified_lifecycle(end,inspection)
+            and result['finalRuntimeMatchesVerifiedContainer']
             and all(s['matchesReviewedBytes']for s in static)and result['portalAuthenticationBoundary401'])
         result['strictPreservationVerified']=(baseline==audits and result['durableFilesPreserved']and environment_same
-            and result['environmentFilePreserved']and result['otherContainersBeforeUnchanged']and result['otherContainersAfterUnchanged'])
+            and result['environmentFilePreserved']and result['otherContainersBeforeUnchanged']and result['otherContainersAfterUnchanged']
+            and runtime_bound)
         require(lib['git_commit']()==MERGE_HEAD,'FINAL_MAIN_UNCHANGED');backup_verify(lib)
         result['completed']=True;result['stage']='complete'
     except Exception as error:
+        result['serviceRecoveryVerified']=False
         result['strictPreservationVerified']=False
         value=str(error);result['failureCode']=value if re.fullmatch('[A-Z_]{1,80}',value)else type(error).__name__
     finally:

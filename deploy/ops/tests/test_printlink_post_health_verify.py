@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import importlib.util
 import io
 import json
@@ -51,6 +52,33 @@ class PostHealthTests(unittest.TestCase):
         for bad in [{'memory.max':'max'},{'memory.current':str(800*1024**2)},
                     {'memory.events':'oom 0'}, {'memory.events':'oom 1\noom_kill 0'}]:
             self.assertFalse(m.cgroup_safe({**valid,**bad}))
+
+    def runtime_fixture(self):
+        return {'Id':'a'*64,'Image':'sha256:a','RestartCount':0,
+            'State':{'StartedAt':'2026-10-19T06:00:00Z'},'Mounts':[{'Name':'same-volume'}],
+            'Config':{'Env':['FIXTURE=same'],'Healthcheck':{'Test':['CMD','node','ops/healthcheck.mjs']}},
+            'HostConfig':{'Memory':768*1024**2,'MemorySwap':768*1024**2}}
+
+    def test_replacement_before_first_sample_cannot_become_the_new_trusted_baseline(self):
+        verified=self.runtime_fixture()
+        sample={'id':verified['Id'],'image':verified['Image'],'startedAt':verified['State']['StartedAt'],
+            'restartCount':0,'health':'healthy','status':'running','oomKilled':False}
+        self.assertTrue(m.verified_lifecycle(sample,verified))
+        for key,value in [('id','b'*64),('image','sha256:b'),('startedAt','later'),('restartCount',1)]:
+            with self.subTest(key=key):self.assertFalse(m.verified_lifecycle({**sample,key:value},verified))
+
+    def test_final_inspection_rechecks_every_bound_configuration_field(self):
+        verified=self.runtime_fixture()
+        self.assertTrue(m.final_runtime_matches(copy.deepcopy(verified),verified))
+        for path,value in [(('Id',),'other'),(('Image',),'other'),(('RestartCount',),1),
+            (('State','StartedAt'),'later'),(('Mounts',),[{'Name':'empty-volume'}]),
+            (('Config','Env'),['FIXTURE=changed']),
+            (('Config','Healthcheck'),{'Test':['CMD-SHELL','old']}),
+            (('HostConfig','Memory'),512*1024**2),(('HostConfig','MemorySwap'),-1)]:
+            changed=copy.deepcopy(verified);target=changed
+            for key in path[:-1]:target=target[key]
+            target[path[-1]]=value
+            with self.subTest(path=path):self.assertFalse(m.final_runtime_matches(changed,verified))
 
     def test_no_print_login_restart_checkpoint_or_business_sql(self):
         source=SOURCE.read_text()

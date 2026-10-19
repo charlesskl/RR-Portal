@@ -1,15 +1,14 @@
-name: Release Fixed Environment Drift Evidence
+name: Fixed QC Report Environment Evidence
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [env-drift]}
-permissions:
-  contents: read
-concurrency:
-  group: release-read-only-progress
-  cancel-in-progress: false
+      mode: {type: choice, required: true, options: [report-env]}
+permissions: {contents: read}
+concurrency: {group: release-read-only-progress, cancel-in-progress: false}
+env:
+  RELEASE_REPORT_ENV_FROZEN: 'true'
 jobs:
-  progress:
+  report-env:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -20,9 +19,8 @@ jobs:
           RELEASE_MODE: ${{ inputs.mode }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
-          [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = env-drift && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Read fixed container and deployment summaries
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+          [[ "$RELEASE_REPORT_ENV_FROZEN" = true && "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = report-env && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+      - uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_REF: ${{ github.ref }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
@@ -32,63 +30,30 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 120s
-          envs: RELEASE_REF,RELEASE_ATTEMPT,RELEASE_MODE
+          command_timeout: 90s
+          envs: RELEASE_REF,RELEASE_ATTEMPT,RELEASE_MODE,RELEASE_REPORT_ENV_FROZEN
           script: |
             set -euo pipefail
-            [[ "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = env-drift ]] || exit 1
-            umask 077
+            [[ "$RELEASE_REPORT_ENV_FROZEN" = true && "$RELEASE_REF" = refs/heads/ops/release-progress-v4-20261019 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = report-env ]] || exit 1
+            cd /opt/rr-portal
             python3 -B - <<'PY'
-            """Fixed seven-service read-only Env/default/Compose evidence. No value output."""
-            import hashlib,json,os,pathlib,re,subprocess,sys,time
-            R=pathlib.Path('/opt/rr-portal');TARGET='85d2082c273d3df3e51b2e414855634c56c498dd';BASE='52c090589d6da542fee74ef17c8edd3b0dfe4fe6';SOURCE='ce7588d3c181f9ca7d9806541c0dd572d552665c';PIN_FROZEN=True
-            SERVICES=('qc','indo-shipping','internal-quote','factory-review','factory-review-test','qc-report','qc-report-worker')
-            SAFE_STAGE='preflight';SAFE_SERVICE=None;LAST_COMMAND=None;COMMAND_FAILURE=None
-            def need(x):
-             if not x:raise RuntimeError('ENVIRONMENT_DRIFT_PROBE_REJECTED')
-            def sha(x):return hashlib.sha256(x).hexdigest()
-            def enc(x):return json.dumps(x,sort_keys=True,ensure_ascii=True,separators=(',',':'),allow_nan=False).encode()
-            def run(args):
-             global LAST_COMMAND,COMMAND_FAILURE
-             LAST_COMMAND='git-read'if args[0]=='git'else'docker-images'if args[:2]==['docker','image']else'compose-config'if args[:2]==['docker','compose']else'docker-container-list'if args[:2]==['docker','ps']else'docker-container-inspect'if args[:2]==['docker','inspect']else'other-fixed-read'
-             need(time.monotonic()<END)
-             try:p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,cwd=R,timeout=max(.1,min(15,END-time.monotonic())))
-             except subprocess.TimeoutExpired:COMMAND_FAILURE={'category':LAST_COMMAND,'kind':'timeout','returncode':None};raise
-             if p.returncode!=0:COMMAND_FAILURE={'category':LAST_COMMAND,'kind':'returncode','returncode':p.returncode}
-             elif len(p.stdout)>32*1024**2:COMMAND_FAILURE={'category':LAST_COMMAND,'kind':'output-bound','returncode':0}
-             need(p.returncode==0 and len(p.stdout)<=32*1024**2);return p.stdout
-            def key_evidence(old,new,old_image,new_image,explicit):
-             changed=sorted(k for k in old.keys()&new.keys()if old[k]!=new[k]);added=sorted(new.keys()-old.keys());removed=sorted(old.keys()-new.keys());rows=[]
-             for key in sorted(set(changed+added+removed)):
-              rows.append({'key':key,'kind':'changed'if key in changed else'added'if key in added else'removed','explicitlyConfigured':key in explicit,'oldRuntimePresent':key in old,'newRuntimePresent':key in new,'oldImageDefaultPresent':key in old_image,'newImageDefaultPresent':key in new_image,'oldEqualsItsImageDefault':key in old and key in old_image and old[key]==old_image[key],'newEqualsItsImageDefault':key in new and key in new_image and new[key]==new_image[key],'oldEqualsExplicit':key in old and key in explicit and old[key]==explicit[key],'newEqualsExplicit':key in new and key in explicit and new[key]==explicit[key]})
-             return {'changedKeys':changed,'addedKeys':added,'removedKeys':removed,'keyEvidence':rows,'mapsIdentical':old==new}
-            def main():
-             global END,SAFE_STAGE,SAFE_SERVICE
-             need(PIN_FROZEN and os.environ.get('RELEASE_REF')=='refs/heads/ops/release-progress-v4-20261019'and os.environ.get('RELEASE_ATTEMPT')=='1'and os.environ.get('RELEASE_MODE')=='env-drift');END=time.monotonic()+100
-             SAFE_STAGE='source';raw=run(['git','show',SOURCE+':deploy/ops/release-environment-proof.py']);need(sha(raw)=='9ba097453d46298d6e16e8a3ea5051f08dbe1e3cf39711ef4c8f75bc4f257480')
-             SAFE_STAGE='proof-import';proof={'__name__':'read_only_environment_drift'};exec(compile(raw,'reviewed-env-proof','exec'),proof)
-             SAFE_STAGE='old-inspect';old_records=proof['records'](proof['old_inspections']())
-             SAFE_STAGE='baseline';backup=R/'deploy/backups/release-937-943-944-945-946-950-20261019-v2';manifest_raw=proof['private_read'](backup/'manifest.json',1024**2);need(sha(manifest_raw)=='22483bb8f1a2e799ad6bcd14f48c2b60c2913d74ad9a03207c39c8b6f761f93f');manifest=proof['decoded'](manifest_raw);baseline_raw=proof['private_read'](backup/'baseline.private.json',32*1024**2);need(sha(baseline_raw)==manifest['baseline.private.json']);baseline=proof['decoded'](baseline_raw)
-             SAFE_STAGE='head-env'
-             need(run(['git','rev-parse','HEAD']).decode().strip()==TARGET and (R/'docker-compose.cloud.yml').read_bytes()==run(['git','show',BASE+':docker-compose.cloud.yml'])and sha((R/'.env.cloud.production').read_bytes())==baseline['envSHA256'])
-             SAFE_STAGE='current-containers';ids=[]
-             for service in SERVICES:
-              found=run(['docker','ps','-aq','--no-trunc','--filter','label=com.docker.compose.project=rr-portal','--filter','label=com.docker.compose.service='+service]).decode().split();need(len(found)==1 and re.fullmatch('[a-f0-9]{64}',found[0]));ids.append(found[0])
-             current=proof['records'](proof['decoded'](run(['docker','inspect',*ids])));need(set(current)==set(ids));old_by_service={};new_by_service={};image_ids=set()
-             for service,cid in zip(SERVICES,ids):
-              old=old_records[baseline['runtime']['services'][service]['id']];proof['bound_environment'](old,baseline['runtime']['services'][service],service);new=current[cid];proof['bound_environment'](new,{'id':cid,'image':new['Image'],'environmentSHA256':sha(enc(new['Config']['Env']))},service);old_by_service[service]=old;new_by_service[service]=new;image_ids.update([old['Image'],new['Image']])
-             SAFE_STAGE='images';need(all(re.fullmatch('sha256:[a-f0-9]{64}',x)for x in image_ids));images=proof['decoded'](run(['docker','image','inspect',*sorted(image_ids)]));image_map={v['Id']:v for v in images};need(len(image_map)==len(images)and set(image_map)==image_ids)
-             SAFE_STAGE='compose';compose=proof['decoded'](run(['docker','compose','-p','rr-portal','-f',str(R/'docker-compose.cloud.yml'),'--env-file',str(R/'.env.cloud.production'),'config','--format','json']))
-             result={'readOnly':True,'businessWritesPerformed':False,'sourceAndEnvFileFrozen':True,'services':{},'evidenceOnlyNotPermissionToChangeConfiguration':True}
-             for service in SERVICES:
-              SAFE_STAGE='per-service';SAFE_SERVICE=service
-              old,new=old_by_service[service],new_by_service[service];explicit=compose['services'][service].get('environment',{});need(type(explicit)is dict and all(type(k)is str and type(v)is str for k,v in explicit.items()));explicit=proof['environments']([k+'='+v for k,v in explicit.items()])
-              old_env=proof['environments'](old['Config']['Env']);new_env=proof['environments'](new['Config']['Env']);old_default=proof['environments'](image_map[old['Image']]['Config'].get('Env')or[]);new_default=proof['environments'](image_map[new['Image']]['Config'].get('Env')or[])
-              row=key_evidence(old_env,new_env,old_default,new_default,explicit);row.update(currentContainer=new['Id'],oldImageIdentifierSHA256=sha(old['Image'].encode()),newImageIdentifierSHA256=sha(new['Image'].encode()),strictOrderedArrayIdentical=old['Config']['Env']==new['Config']['Env'],healthcheckSame=old['Config'].get('Healthcheck')==new['Config'].get('Healthcheck'),mountsSame=sorted(old.get('Mounts',[]),key=enc)==sorted(new.get('Mounts',[]),key=enc),memorySame=old['HostConfig'].get('Memory')==new['HostConfig'].get('Memory'),swapSame=old['HostConfig'].get('MemorySwap')==new['HostConfig'].get('MemorySwap'),running=new['State']['Running'],health=new['State'].get('Health',{}).get('Status'),oom=new['State']['OOMKilled'],restarts=new['RestartCount']);result['services'][service]=row
-             SAFE_STAGE='final';SAFE_SERVICE=None;need(run(['git','rev-parse','HEAD']).decode().strip()==TARGET and sha((R/'.env.cloud.production').read_bytes())==baseline['envSHA256']and(R/'docker-compose.cloud.yml').read_bytes()==run(['git','show',BASE+':docker-compose.cloud.yml']));print(enc(result).decode(),flush=True)
-            if __name__=='__main__':
-             try:main()
-             except BaseException as error:
-              name=type(error).__name__;allowed={'RuntimeError','EnvironmentEvidenceError','TimeoutExpired','JSONDecodeError','KeyError','TypeError','ValueError','FileNotFoundError','PermissionError','OSError','SystemExit'}
-              print(enc({'safeFailure':'FIXED_ENVIRONMENT_DRIFT_PROBE_FAILED','stage':SAFE_STAGE,'service':SAFE_SERVICE,'exceptionType':name if name in allowed else'OtherError','lastReadCommandCategory':LAST_COMMAND,'commandFailure':COMMAND_FAILURE,'failureKind':'json-shape-or-key'if name in {'JSONDecodeError','KeyError','TypeError'}else'read-or-validation'}).decode(),flush=True);sys.exit(1)
+            import hashlib,json,pathlib,subprocess,sys
+            stage='source-bytes';R=pathlib.Path('/opt/rr-portal');CID='c4a4386e1b79b072d9a86bca5fba024791b7b99682cab04295045a4d4da3ead7'
+            def read(args):
+             p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=15,cwd=R);assert p.returncode==0 and len(p.stdout)<=33554432;return p.stdout
+            try:
+             raw=read(['git','show','ce7588d3c181f9ca7d9806541c0dd572d552665c:deploy/ops/release-environment-proof.py']);assert hashlib.sha256(raw).hexdigest()=='9ba097453d46298d6e16e8a3ea5051f08dbe1e3cf39711ef4c8f75bc4f257480'
+             m={'__name__':'reviewed_readonly_environment','__file__':'reviewed-git-object'};exec(compile(raw,'reviewed-environment-proof','exec'),m)
+             stage='original-baseline';B=R/'deploy/backups/release-937-943-944-945-946-950-20261019-v2';manifest=m['private_read'](B/'manifest.json',1048576);assert m['sha'](manifest)=='22483bb8f1a2e799ad6bcd14f48c2b60c2913d74ad9a03207c39c8b6f761f93f'
+             index=m['decoded'](manifest);baseline=m['private_read'](B/'baseline.private.json',33554432);assert m['sha'](baseline)==index['baseline.private.json'];expected=m['decoded'](baseline)['runtime']['services']['qc-report']
+             stage='old-inspection';old=m['records'](m['old_inspections']())[expected['id']];oldrows,a=m['bound_environment'](old,expected,'qc-report')
+             stage='current-inspection';new=m['records'](m['decoded'](read(['docker','inspect',CID])))[CID];actual={'id':CID,'image':new['Image'],'environmentSHA256':m['sha'](m['encoded'](new['Config']['Env']))};newrows,b=m['bound_environment'](new,actual,'qc-report')
+             changed=sorted(k for k in a.keys()&b.keys()if a[k]!=b[k]);added=sorted(b.keys()-a.keys());removed=sorted(a.keys()-b.keys())
+             print(json.dumps({'success':None,'stage':'runtime-key-delta','changedKeys':changed,'addedKeys':added,'removedKeys':removed,'strictMapEqual':a==b},sort_keys=True),flush=True)
+             stage='two-image-defaults';imageids=sorted({expected['image'],actual['image']});imagerows=m['decoded'](read(['docker','image','inspect',*imageids]));assert type(imagerows)is list and len(imagerows)==len(imageids);images={v['Id']:v for v in imagerows};assert set(images)==set(imageids)
+             oldimage=m['environments'](images[expected['image']]['Config']['Env']);newimage=m['environments'](images[actual['image']]['Config']['Env'])
+             stage='compose-key-presence';compose=m['decoded'](read(['docker','compose','-p','rr-portal','-f',str(R/'docker-compose.cloud.yml'),'--env-file',str(R/'.env.cloud.production'),'config','--format','json']));explicit=compose['services']['qc-report'].get('environment',{});assert type(explicit)is dict
+             proof={k:{'oldMatchesOwnImageDefault':k in a and k in oldimage and a[k]==oldimage[k],'newMatchesOwnImageDefault':k in b and k in newimage and b[k]==newimage[k],'composeExplicitKeyPresent':k in explicit}for k in sorted(set(changed+added+removed))}
+             print(json.dumps({'success':True,'stage':'completed','changedKeys':changed,'addedKeys':added,'removedKeys':removed,'uniqueEnvironmentMapsEqual':a==b,'strictArraySHAEqual':m['sha'](m['encoded'](oldrows))==actual['environmentSHA256'],'imageDefaultProof':proof},sort_keys=True))
+            except Exception as e:print(json.dumps({'success':False,'stage':stage,'exceptionType':type(e).__name__},sort_keys=True));sys.exit(1)
             PY

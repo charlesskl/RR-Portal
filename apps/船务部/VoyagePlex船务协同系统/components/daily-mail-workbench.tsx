@@ -1,6 +1,9 @@
 "use client";
 
+import { hasSpecialCargoDetails } from "@/lib/cargo-extra-details";
+
 import Link from "next/link";
+import { taskMutation } from "@/lib/task-mutation";
 import { CargoExtraDetails, hasLegacyUnitWeights } from "@/components/cargo-extra-details";
 import { ContainerSplitPreview } from "@/components/container-split-preview";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -10,6 +13,7 @@ const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const apiFetch = (path: string, init?: RequestInit) => fetch(`${basePath}${path}`, init);
 import { useEffect, useState } from "react";
 
+const taskFetch=(path:string,init?:RequestInit)=>taskMutation(path,init,apiFetch);
 type WorkCategory = "Unclassified"|"Shipment"|"Change"|"FollowUp"|"Other";
 type Cargo = Record<string,unknown>;
 type WarehouseGroup = {warehouse:string;references:string[];items:Cargo[];container_type?:string};
@@ -51,14 +55,14 @@ export function DailyMailWorkbench({route=""}:{route?:string}){
     async function load(){try{
       const days=await readResponse<Dates>(await apiFetch("/api/mail/dates",{signal:controller.signal,cache:"no-store"}));
       setDates(days);setDate(current=>Number(route.split("/")[2])?current:current<days.startDate?days.startDate:current);
-      const sync=await readResponse<{lastSuccessAt?:string;lastError?:string}>(await apiFetch("/api/imports/email/mailbox",{signal:controller.signal,cache:"no-store"}));
+      const sync=await readResponse<{lastSuccessAt?:string;lastError?:string}>(await taskFetch("/api/imports/email/mailbox",{signal:controller.signal,cache:"no-store"}));
       setSyncText(sync.lastError?`读取异常：${sync.lastError}`:sync.lastSuccessAt?`上次读取 ${new Date(sync.lastSuccessAt).toLocaleString("zh-CN",{timeZone:"Asia/Shanghai"})}`:"等待首次读取");
     }catch(reason){if(!controller.signal.aborted)setError(reason instanceof Error?reason.message:"读取日期失败");}}
     void load();return()=>controller.abort();
   },[refresh,route]);
   useEffect(()=>{
     const controller=new AbortController();const requested=Number(route.split("/")[2]);if(!requested)return()=>controller.abort();
-    void apiFetch(`/api/imports/email/mailbox/items/${requested}`,{signal:controller.signal,cache:"no-store"}).then(readResponse<Detail>).then(item=>{setDate(item.mailReceivedDate||chinaToday());setSelectedId(item.id);setModalOpen(true);}).catch(reason=>{if(!controller.signal.aborted)setError(reason instanceof Error?reason.message:"读取来源邮件失败");});
+    void taskFetch(`/api/imports/email/mailbox/items/${requested}`,{signal:controller.signal,cache:"no-store"}).then(readResponse<Detail>).then(item=>{setDate(item.mailReceivedDate||chinaToday());setSelectedId(item.id);setModalOpen(true);}).catch(reason=>{if(!controller.signal.aborted)setError(reason instanceof Error?reason.message:"读取来源邮件失败");});
     return()=>controller.abort();
   },[route]);
   useEffect(()=>{
@@ -67,14 +71,14 @@ export function DailyMailWorkbench({route=""}:{route?:string}){
     if(filter==="Warehouse"||filter==="Container")params.set("mode",filter);else if(filter!=="All")params.set("category",filter);
     if(handling)params.set("handling",handling);
     if(search)params.set("q",search);
-    void apiFetch(`/api/imports/email/mailbox/items?${params}`,{signal:controller.signal,cache:"no-store"}).then(readResponse<Page>).then(value=>{
+    void taskFetch(`/api/imports/email/mailbox/items?${params}`,{signal:controller.signal,cache:"no-store"}).then(readResponse<Page>).then(value=>{
       setResult(value);
     }).catch(reason=>{if(!controller.signal.aborted){setResult({total:0,page,pageSize:50,items:[]});setSelectedId(undefined);setError(reason instanceof Error?reason.message:"读取邮件失败");}}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
     return()=>controller.abort();
   },[date,filter,handling,page,refresh,route,search]);
   useEffect(()=>{
     const controller=new AbortController();setDetail(undefined);setDirty(false);if(!selectedId){setDetailLoading(false);return()=>controller.abort();}setDetailLoading(true);
-    void apiFetch(`/api/imports/email/mailbox/items/${selectedId}`,{signal:controller.signal,cache:"no-store"}).then(readResponse<Detail>).then(setDetail).catch(reason=>{if(!controller.signal.aborted)setError(reason instanceof Error?reason.message:"读取详情失败");}).finally(()=>{if(!controller.signal.aborted)setDetailLoading(false);});
+    void taskFetch(`/api/imports/email/mailbox/items/${selectedId}`,{signal:controller.signal,cache:"no-store"}).then(readResponse<Detail>).then(setDetail).catch(reason=>{if(!controller.signal.aborted)setError(reason instanceof Error?reason.message:"读取详情失败");}).finally(()=>{if(!controller.signal.aborted)setDetailLoading(false);});
     return()=>controller.abort();
   },[selectedId,refresh]);
   function discardEdits(){return !dirty||window.confirm("当前核对资料尚未保存，是否放弃修改？");}
@@ -85,7 +89,7 @@ export function DailyMailWorkbench({route=""}:{route?:string}){
   function editContainer(index:number,value:string){setDetail(current=>current?{...current,parsed:{...current.parsed,shipment_groups:current.parsed?.shipment_groups?.map((group,i)=>i===index?{...group,capacity_boxes:value}:group)}}:current);setDirty(true);}
   function addCargo(){setDetail(current=>current?{...current,parsed:{...current.parsed,items:[...(current.parsed?.items||[]),{product_code:"",spec:"",quantity:"",pieces:"",customer_po:"",contract_number:""}]}}:current);setDirty(true);}
   async function save(){if(!detail||!dirty)return;setWorking(true);setError("");try{
-    await readResponse(await apiFetch(`/api/mail/candidates/${detail.id}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({fields:detail.parsed?.fields||{},items:detail.parsed?.items||[],warehouseGroups:detail.parsed?.warehouse_groups||[],shipmentGroups:detail.parsed?.shipment_groups||[]})}));
+    await readResponse(await taskFetch(`/api/mail/candidates/${detail.id}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({fields:detail.parsed?.fields||{},items:detail.parsed?.items||[],warehouseGroups:detail.parsed?.warehouse_groups||[],shipmentGroups:detail.parsed?.shipment_groups||[]})}));
     setDirty(false);setNotice("核对资料已保存，可勾选确认。");setRefresh(value=>value+1);
   }catch(reason){setError(reason instanceof Error?reason.message:"保存失败");}finally{setWorking(false);}}
   async function act(action:"confirm"|"acknowledge",ids:number[]){
@@ -93,20 +97,20 @@ export function DailyMailWorkbench({route=""}:{route?:string}){
     if(dirty){setError("请先保存当前核对资料，再确认处理。");return;}
     const chosen=result.items.filter(item=>ids.includes(item.id));
     if(action==="confirm"){
-      let checks:Detail[];try{checks=await Promise.all(ids.map(async id=>readResponse<Detail>(await apiFetch(`/api/imports/email/mailbox/items/${id}`,{cache:"no-store"}))));}catch(reason){setError(reason instanceof Error?reason.message:"检查关联任务失败");return;}
+      let checks:Detail[];try{checks=await Promise.all(ids.map(async id=>readResponse<Detail>(await taskFetch(`/api/imports/email/mailbox/items/${id}`,{cache:"no-store"}))));}catch(reason){setError(reason instanceof Error?reason.message:"检查关联任务失败");return;}
       const duplicateIds=Array.from(new Set(checks.flatMap(item=>item.duplicateTaskIds||[])));
       const duplicateNotice=duplicateIds.length?`\n同一邮件已建立任务 ${duplicateIds.map(id=>`#${id}`).join("、")}，对应邮件将关联已有任务，不重复建立。`:"";
       const creates=chosen.filter(item=>item.workCategory==="Shipment").length;const changes=chosen.filter(item=>item.workCategory==="Change").length;
       if(!window.confirm(`将确认 ${ids.length} 封邮件：${creates} 封新增资料、${changes} 封变更资料。有修改权限的相关任务会更新；未找到任务的变更邮件会提示核对。${duplicateNotice}继续吗？`))return;
     }
     setWorking(true);setError("");setNotice("");try{
-      const value=await readResponse<{processed:number;taskIds:number[]}>(await apiFetch(`/api/mail/candidates/batch/${action}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ids})}));
+      const value=await readResponse<{processed:number;taskIds:number[]}>(await taskFetch(`/api/mail/candidates/batch/${action}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ids})}));
       setNotice(action==="acknowledge"?`${value.processed} 封邮件已确认，无需建任务。`:`已确认 ${value.processed} 封邮件，关联 ${value.taskIds.length} 个走柜任务。`);
       setSelected(new Set());setRefresh(value=>value+1);
     }catch(reason){setError(reason instanceof Error?reason.message:"确认失败");}finally{setWorking(false);}
   }
   async function sync(){if(dirty){setError("请先保存当前核对资料，再读取邮件。");return;}setWorking(true);setError("");try{
-    const value=await readResponse<{configured:boolean;imported:number;waitingUntil?:string}>(await apiFetch("/api/imports/email/mailbox/sync",{method:"POST"}));
+    const value=await readResponse<{configured:boolean;imported:number;waitingUntil?:string}>(await taskFetch("/api/imports/email/mailbox/sync",{method:"POST"}));
     setNotice(value.waitingUntil?`将从 ${value.waitingUntil} 开始读取。`:value.configured?`读取完成，本次新增 ${value.imported} 封；邮件按各自收件日期归档。`:"邮箱尚未配置，请联系管理员。");setRefresh(current=>current+1);
   }catch(reason){setError(reason instanceof Error?reason.message:"读取失败");}finally{setWorking(false);}}
   const pending=result.items.filter(item=>item.handlingStatus==="Pending");const chosen=result.items.filter(item=>selected.has(item.id));
@@ -114,7 +118,7 @@ export function DailyMailWorkbench({route=""}:{route?:string}){
   const summary=dates.days.find(day=>day.date===date);const parsed=detail?.parsed;const editable=!!detail&&canConfirm(detail);
   const visibleCargoLabels=cargoLabels;
   const huadeng=typeof document!=="undefined"&&document.cookie.split("; ").includes("voyageplex_company=Huadeng");
-  const cargoExtras=huadeng||parsed?.fields?.export_template==="sky-castle-multi"||Boolean(parsed?.items?.some(hasLegacyUnitWeights));
+  const cargoExtras=Boolean(parsed?.items?.some(item=>hasSpecialCargoDetails(item,parsed.fields?.export_template==="sky-castle-multi")||hasLegacyUnitWeights(item)));
   const relatedFieldKeys:Record<string,string>={ship_date:"plannedShipDate",container_type:"containerType",cutoff_date:"cutoffDate",si_deadline:"siDeadline",port:"port"};
   return <section className="daily-mail">
     {(error||notice)&&<div className={error?"form-error":"notice"} role={error?"alert":"status"}>{error||notice}</div>}

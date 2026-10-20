@@ -251,8 +251,12 @@ def build_huadeng_workbook(task, base_builder=None):
         write(end_row, 5, last_col, _text(task.get("specialRequirements")))
         ws.row_dimensions[end_row].height = 42
     ws.print_area = f"A1:{get_column_letter(last_col)}{end_row}"
+    if task.get("exportMissingWeights"):
+        from .packing import mark_missing_weights
+        mark_missing_weights(ws, task, rows, col, total)
     out = BytesIO()
     wb.save(out)
     suffix = ("仓务" if warehouse_purpose else "船务") + ("交仓表" if warehouse else "做柜表")
     safe = "".join(char if char.isalnum() or char in "-_" else "_" for char in reference)
-    return out.getvalue(), f"华登_{_text(task.get('customer'))}_{safe}_{suffix}.xlsx"
+    pending = "_待核对" if task.get("exportMissingWeights") else ""
+    return out.getvalue(), f"华登_{_text(task.get('customer'))}_{safe}_{suffix}{pending}.xlsx"

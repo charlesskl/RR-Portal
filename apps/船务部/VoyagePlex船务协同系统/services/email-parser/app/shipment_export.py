@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .factory_mapping import chinese_factory_name
 from .warehouse_truck import warehouse_truck_type
-from .packing import normalized_packing_items, merge_packing_cells, apply_weight_formulas, nonnegative_number, total_pallets
+from .packing import normalized_packing_items, merge_packing_cells, apply_weight_formulas, nonnegative_number, total_pallets, mark_missing_weights
 
 from datetime import date, datetime
 from io import BytesIO
@@ -430,6 +430,10 @@ def build_shipment_workbook(task: dict) -> tuple[bytes, str]:
     suffix = ("仓务" if warehouse_export else "") + ("交仓走货表" if warehouse else "走柜表")
     safe_customer = re.sub(r'[\\/:*?"<>|]', '_', customer_key)
     filename = f"{safe_customer}_{safe_so}_{suffix}.xlsx"
+    if task.get("exportMissingWeights"):
+        mark_missing_weights(ws, task, {index:index+6 for index in range(len(items))},
+            {"gross_weight_per_box":16,"net_weight_per_box":17,"gross_weight":11,"net_weight":12}, total_row)
+        filename = filename.replace(".xlsx", "_待核对.xlsx")
     output = BytesIO()
     wb.save(output)
     return output.getvalue(), filename

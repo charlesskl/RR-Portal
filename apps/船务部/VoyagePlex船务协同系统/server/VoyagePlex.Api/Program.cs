@@ -43,6 +43,7 @@ using (var scope = app.Services.CreateScope())
     var database = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     database.Database.EnsureCreated();
     ExportTemplateEndpoints.EnsureSchema(database);
+    InventoryWritebackEndpoints.EnsureSchema(database);
     FactoryMappingEndpoints.EnsureSchema(database);
     database.Database.ExecuteSqlRaw("""
         CREATE TABLE IF NOT EXISTS MailSyncStates (
@@ -306,7 +307,27 @@ app.Use(async (context, next) =>
             { context.Response.StatusCode = 403; await context.Response.WriteAsJsonAsync(new { error = "主管不能授予管理角色或跨厂区权限" }); return; }
         }
     }
-    await next();
+    if (context.Request.Method is "POST" or "PUT" or "PATCH" && context.Request.ContentType?.StartsWith("application/json", StringComparison.OrdinalIgnoreCase) == true)
+    {
+        context.Request.EnableBuffering();
+        try
+        {
+            var submitted = await JsonNode.ParseAsync(context.Request.Body) as JsonObject;
+            foreach (var entry in submitted?["ownerConfirmations"] as JsonObject ?? new JsonObject())
+                if (long.TryParse(entry.Key, out var taskId) && long.TryParse(entry.Value?.ToString(), out var ownerId)) db.ConfirmedTaskOwners[taskId] = ownerId;
+            var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 3 && parts[1] == "shipments" && long.TryParse(parts[2], out var id) && long.TryParse(submitted?["confirmedOwnerId"]?.ToString(), out var owner))
+                db.ConfirmedTaskOwners[id] = owner;
+        }
+        catch (JsonException) { context.Response.StatusCode = 400; await context.Response.WriteAsJsonAsync(new { error = "提交内容格式无效" }); return; }
+        finally { context.Request.Body.Position = 0; }
+    }
+    try { await next(); }
+    catch (TaskOwnerConfirmationException error)
+    {
+        context.Response.StatusCode = 409;
+        await context.Response.WriteAsJsonAsync(error.Warning);
+    }
 });
 
 app.MapGet("/api/auth/setup-status", async (AppDbContext db, CancellationToken cancellationToken) =>
@@ -1112,6 +1133,12 @@ app.MapPost("/api/imports/email/confirm", async (JsonObject payload, AppDbContex
                 (task.SourceImportItemId == sourceItemId && task.SourceGroupKey == groupKey) ||
                 (string.IsNullOrEmpty(groupKey) && !string.IsNullOrEmpty(incomingSo) && task.SoNumber == incomingSo), cancellationToken);
             var shipmentTask = existingTask ?? new ShipmentTask { SourceImportItemId = sourceItemId, SourceGroupKey = groupKey };
+            if (existingTask is null)
+            {
+                var ownerId = entity.MailOwnerId > 0 ? entity.MailOwnerId : db.CurrentUserId ?? 0;
+                var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(user => user.Id == ownerId, cancellationToken);
+                shipmentTask.ResponsibleUserId = ownerId; shipmentTask.ResponsibleUserName = owner?.DisplayName ?? "";
+            }
             var previousPayload = existingTask is null ? null : await PreviousShipmentPayload(db, existingTask, groupKey, cancellationToken);
             ApplyReviewedEmailToTask(shipmentTask, taskPayload, existingTask is null, previousPayload);
             DailyMailRules.RecordSource(shipmentTask, entity, existingTask is null);
@@ -1184,6 +1211,12 @@ app.MapPost("/api/imports/email/{batchId:long}/confirm", async (long batchId, Js
                 (task.SourceImportItemId == sourceItemId && task.SourceGroupKey == groupKey) ||
                 (string.IsNullOrEmpty(groupKey) && !string.IsNullOrEmpty(incomingSo) && task.SoNumber == incomingSo), cancellationToken);
             var shipmentTask = existingTask ?? new ShipmentTask { SourceImportItemId = sourceItemId, SourceGroupKey = groupKey };
+            if (existingTask is null)
+            {
+                var ownerId = entity.MailOwnerId > 0 ? entity.MailOwnerId : db.CurrentUserId ?? 0;
+                var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(user => user.Id == ownerId, cancellationToken);
+                shipmentTask.ResponsibleUserId = ownerId; shipmentTask.ResponsibleUserName = owner?.DisplayName ?? "";
+            }
             var previousPayload = existingTask is null ? null : await PreviousShipmentPayload(db, existingTask, groupKey, cancellationToken);
             ApplyReviewedEmailToTask(shipmentTask, taskPayload, existingTask is null, previousPayload);
             DailyMailRules.RecordSource(shipmentTask, entity, existingTask is null);
@@ -1475,8 +1508,8 @@ app.MapPost("/api/shipments", async (JsonObject payload, AppDbContext db, Cancel
     }
     var task = new ShipmentTask
     {
-        ResponsibleUserId = db.Company == "Huadeng" ? db.CurrentUserId ?? 0 : 0,
-        ResponsibleUserName = db.Company == "Huadeng" ? (await db.Users.AsNoTracking().FirstAsync(value => value.Id == db.CurrentUserId, cancellationToken)).DisplayName : "",
+        ResponsibleUserId = db.CurrentUserId ?? 0,
+        ResponsibleUserName = (await db.Users.AsNoTracking().FirstAsync(value => value.Id == db.CurrentUserId, cancellationToken)).DisplayName,
         Customer = customer,
         SoNumber = payload["soNumber"]?.ToString().Trim(),
         ContainerType = payload["containerType"]?.ToString().Trim() ?? "",
@@ -1525,6 +1558,8 @@ app.MapDelete("/api/shipments/{id:long}", async (long id, AppDbContext db, Cance
 {
     var task = await db.ShipmentTasks.FirstOrDefaultAsync(value => value.Id == id, cancellationToken);
     if (task is null) return Results.NotFound(new { error = "走柜任务不存在" });
+    if (await db.InventoryWritebacks.AnyAsync(row => row.TaskId == id && row.State != "Completed", cancellationToken))
+        return Results.Conflict(new { error = "任务有未解决的库存回写记录，不能删除" });
 
     await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
     var imports = await db.ImportEmailItems.ToListAsync(cancellationToken);
@@ -1553,7 +1588,7 @@ app.MapDelete("/api/shipments/{id:long}", async (long id, AppDbContext db, Cance
     return Results.Ok(new { deleted_task_id = id, deleted_email_records = relatedImports.Count });
 });
 
-app.MapGet("/api/shipments/{id:long}/export", async (long id, long? templateId, AppDbContext db, EmailParserClient parserClient, CancellationToken cancellationToken) =>
+app.MapGet("/api/shipments/{id:long}/export", async (long id, long? templateId, bool? allowIncomplete, AppDbContext db, EmailParserClient parserClient, CancellationToken cancellationToken) =>
 {
     var task = await db.ShipmentTasks.AsNoTracking().FirstOrDefaultAsync(value => value.Id == id, cancellationToken);
     if (task is null) return Results.NotFound(new { error = "走柜任务不存在" });
@@ -1565,6 +1600,10 @@ app.MapGet("/api/shipments/{id:long}/export", async (long id, long? templateId, 
     if (await ExportTemplateEndpoints.ApplyToExport(payload, db, cancellationToken, templateId) is string templateError)
         return Results.BadRequest(new { error = templateError });
     await EnrichSpecialExportProducts(payload, db, cancellationToken);
+    var missingWeights = TaskSafetyRules.MissingWeights(payload);
+    if (missingWeights.Count > 0 && allowIncomplete != true)
+        return Results.Json(new { code = "MissingWeights", error = "每箱重量未填写完整，请补齐或确认带缺项导出", missing = missingWeights }, statusCode: 422);
+    if (missingWeights.Count > 0) payload["exportMissingWeights"] = missingWeights;
     ShipmentOrderTotals.Apply(payload, relatedTasks);
     payload["factoryMappings"] = JsonSerializer.SerializeToNode(await db.FactoryMappings.AsNoTracking().ToListAsync(cancellationToken), new JsonSerializerOptions(JsonSerializerDefaults.Web));
     var exported = await parserClient.ExportShipmentAsync(payload, cancellationToken);
@@ -1573,7 +1612,7 @@ app.MapGet("/api/shipments/{id:long}/export", async (long id, long? templateId, 
     return Results.File(exported.Body, exported.ContentType, exported.FileName);
 });
 
-app.MapGet("/api/shipments/{id:long}/export/warehouse", async (long id, long? templateId, AppDbContext db, EmailParserClient parserClient, CancellationToken cancellationToken) =>
+app.MapGet("/api/shipments/{id:long}/export/warehouse", async (long id, long? templateId, bool? allowIncomplete, AppDbContext db, EmailParserClient parserClient, CancellationToken cancellationToken) =>
 {
     var task = await db.ShipmentTasks.AsNoTracking().FirstOrDefaultAsync(value => value.Id == id, cancellationToken);
     if (task is null) return Results.NotFound(new { error = "走柜任务不存在" });
@@ -1588,6 +1627,10 @@ app.MapGet("/api/shipments/{id:long}/export/warehouse", async (long id, long? te
     if (await ExportTemplateEndpoints.ApplyToExport(payload, db, cancellationToken, templateId) is string templateError)
         return Results.BadRequest(new { error = templateError });
     await EnrichSpecialExportProducts(payload, db, cancellationToken);
+    var missingWeights = TaskSafetyRules.MissingWeights(payload);
+    if (missingWeights.Count > 0 && allowIncomplete != true)
+        return Results.Json(new { code = "MissingWeights", error = "每箱重量未填写完整，请补齐或确认带缺项导出", missing = missingWeights }, statusCode: 422);
+    if (missingWeights.Count > 0) payload["exportMissingWeights"] = missingWeights;
     ShipmentOrderTotals.Apply(payload, relatedTasks);
     payload["factoryMappings"] = JsonSerializer.SerializeToNode(await db.FactoryMappings.AsNoTracking().ToListAsync(cancellationToken), new JsonSerializerOptions(JsonSerializerDefaults.Web));
     var exported = await parserClient.ExportShipmentAsync(payload, cancellationToken);
@@ -1683,13 +1726,17 @@ app.MapPatch("/api/shipments/{id:long}", async (long id, JsonObject payload, Htt
     var currentUser = (AppUser)context.Items["CurrentUser"]!;
     if (currentUser.Role == "warehouse")
     {
-        var allowedFields = new[] { "items", "status", "transportReference" };
+        var allowedFields = new[] { "items", "status", "transportReference", "confirmedOwnerId" };
         if (payload.Any(value => !allowedFields.Contains(value.Key))) return Results.Json(new { error = "仓库文员只能更新仓务明细和完成状态" }, statusCode: StatusCodes.Status403Forbidden);
         if (payload["status"] is JsonValue warehouseStatus && warehouseStatus.TryGetValue<string>(out var requestedStatus) && requestedStatus != "Completed")
             return Results.Json(new { error = "仓库文员只能将任务标记为已完成" }, statusCode: StatusCodes.Status403Forbidden);
         if (task.Status != "PendingShipment")
             return Results.Json(new { error = "只有待走货任务可以由仓务修改或完成" }, statusCode: StatusCodes.Status403Forbidden);
     }
+    if (TaskSafetyRules.OwnerWarning(task, currentUser, payload) is object ownerWarning)
+        return Results.Json(ownerWarning, statusCode: 409);
+    if (await db.InventoryWritebacks.AnyAsync(row => row.TaskId == id && row.State != "Completed", cancellationToken))
+        return Results.Conflict(new { error = "任务正在库存回写或等待恢复，请先处理回写记录" });
     if (payload["plannedShipDate"] is JsonValue dateNode && dateNode.TryGetValue<string>(out var dateText))
         task.PlannedShipDate = string.IsNullOrWhiteSpace(dateText) ? null : DateOnly.Parse(dateText, CultureInfo.InvariantCulture);
     if (payload["customer"] is JsonValue customerNode && customerNode.TryGetValue<string>(out var customer)) task.Customer = customer.Trim();
@@ -1721,14 +1768,22 @@ app.MapPatch("/api/shipments/{id:long}", async (long id, JsonObject payload, Htt
         task.CompletedDate = nextStatus == "Completed" ? DateOnly.FromDateTime(DateTime.Today) : null;
     }
     if (task.Status == "WaitingNotification") task.PlannedShipDate = null;
+    InventoryWritebackEndpoints.RecordEdit(db, task, currentUser, "TaskSaved");
     task.UpdatedAt = DateTime.UtcNow;
     await db.SaveChangesAsync(cancellationToken);
     return Results.Ok(ToShipmentResponse(task, db));
 });
 
 app.MapExportTemplates();
+app.MapInventoryWritebacks();
 app.MapFactoryMappings();
 app.Run();
+
+static DateTime? LastTaskEditTime(long id, AppDbContext db)
+{
+    var value = db.TaskEditAudits.AsNoTracking().Where(value => value.TaskId == id).OrderByDescending(value => value.Id).Select(value => (DateTime?)value.CreatedAt).FirstOrDefault();
+    return value.HasValue ? UtcDateTime.Normalize(value.Value) : null;
+}
 
 static string? ValidateProductInfo(ProductInfo value) => string.IsNullOrWhiteSpace(value.ProductCode) ? "货号不能为空" : value.QuantityPerBox is <= 0 ? "每箱个数必须大于0" : value.GrossWeightPerBox is <= 0 || value.NetWeightPerBox is <= 0 || value.NetNetWeightPerBox is <= 0 ? "毛重和净重必须大于0" : null;
 static Task<bool> ProductInfoExists(AppDbContext db, string productCode, int? quantityPerBox, long? excludedId, CancellationToken cancellationToken)
@@ -1763,6 +1818,8 @@ static object ToShipmentResponse(ShipmentTask task, AppDbContext db)
         CreatedAt = UtcDateTime.Normalize(task.CreatedAt),
         UpdatedAt = UtcDateTime.Normalize(task.UpdatedAt),
         WarehouseGroups = ParseJson(task.WarehouseGroupsJson, "[]"),
+        LastEditedBy = db.TaskEditAudits.AsNoTracking().Where(value => value.TaskId == task.Id).OrderByDescending(value => value.Id).Select(value => value.ActorName).FirstOrDefault(),
+        LastEditedAt = LastTaskEditTime(task.Id, db),
         ExportDetails = ParseJson(task.ExportDetailsJson, "{}"),
         Items = ParseJson(task.ItemsJson, "[]"),
         SourceEmails = task.Company == "Huadeng" ? new JsonArray() : ParseJson(task.SourceEmailsJson, "[]"),
@@ -1841,10 +1898,11 @@ static async Task<long[]> ConfirmMailboxCandidate(ImportEmailItem entity, AppDbC
         if (existing is not null && entity.WorkCategory == "Change") DailyMailRules.ApplyConfirmedChanges(task, taskPayload);
         if (db.Company == "Huadeng" && task.ExportDetailsJson == "{}")
             task.ExportDetailsJson = new JsonObject { ["shipmentMode"] = entity.ShipmentMode == "Warehouse" ? "Warehouse" : "Container" }.ToJsonString();
-        if (db.Company == "Huadeng" && existing is null)
+        if (existing is null)
         {
-            var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(value => value.Id == entity.MailOwnerId, cancellationToken);
-            task.ResponsibleUserId = entity.MailOwnerId;
+            var ownerId = entity.MailOwnerId > 0 ? entity.MailOwnerId : db.CurrentUserId ?? 0;
+            var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(value => value.Id == ownerId, cancellationToken);
+            task.ResponsibleUserId = ownerId;
             task.ResponsibleUserName = owner?.DisplayName ?? "";
             task.SourceMailboxAddress = owner?.MailboxAddress ?? "";
         }

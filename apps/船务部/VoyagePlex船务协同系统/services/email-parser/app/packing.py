@@ -94,3 +94,29 @@ def total_pallets(items):
     if any(not count.is_integer() for count in counts):
         raise ValueError("卡板数须为非负整数")
     return int(sum(counts)) if counts else None
+
+
+def mark_missing_weights(ws, task, rows, columns, total_row):
+    from openpyxl.styles import PatternFill, Font
+    from openpyxl.comments import Comment
+    from openpyxl.cell.cell import MergedCell
+    totals = set()
+    for missing in task.get("exportMissingWeights") or []:
+        index = missing["itemIndex"]
+        if index not in rows:
+            continue
+        row = rows[index]
+        for key in (missing["field"], missing["totalField"]):
+            if key not in columns:
+                continue
+            cell = ws.cell(row, columns[key])
+            if isinstance(cell, MergedCell):
+                continue
+            cell.value = "待核对"
+            cell.fill = PatternFill("solid", fgColor="FFF200")
+            cell.font = Font(color="C00000", bold=True)
+            cell.comment = Comment("每箱重量缺失；此文件带缺项导出，不能作为完整重量合计使用。", "VoyagePlex")
+        totals.add(missing["totalField"])
+    for key in totals:
+        if key in columns:
+            ws.cell(total_row, columns[key], "待核对")

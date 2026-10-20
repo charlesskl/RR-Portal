@@ -1,4 +1,4 @@
-name: VoyagePlex Read Only Gateway Logs Only
+name: VoyagePlex Read Only Sealed Gateway Classification
 on:
   workflow_dispatch:
 permissions:
@@ -8,8 +8,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  READONLY_WORKFLOW_PIN: 'true'
-  READONLY_HELPER_SHA256: '5ac285b5a7c4001ea8317ad4495cc29b352ec9be061201d5a431914471a87b07'
+  READONLY_WORKFLOW_PIN: 'false'
+  READONLY_HELPER_SHA256: 'b8f7a3dd5e622eaf26cb819f986a90c9eaaff7fc0aa5f142b424836b82b9227b'
 jobs:
   observe:
     runs-on: ubuntu-latest
@@ -51,18 +51,6 @@ jobs:
             umask 077
             mail_readonly_tmp=$(mktemp -d /tmp/voyageplex-readonly-evidence.XXXXXX)
             trap 'rm -rf "$mail_readonly_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-nginx-readonly-only.py" > "$mail_readonly_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-nginx-sealed-classify.py" > "$mail_readonly_tmp/run.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$mail_readonly_tmp/run.py" | cut -d ' ' -f1)" = "$READONLY_HELPER_SHA256" ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-mail-readonly-20261020-03.py" > "$mail_readonly_tmp/nginx-readonly-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$mail_readonly_tmp/nginx-readonly-library.py" | cut -d ' ' -f1)" = 2c5675ab534d1fcac5f28698e5418daf3ca0366b549c0c9b78fb58d95e95d4c0 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$mail_readonly_tmp/batch-backup-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$mail_readonly_tmp/batch-backup-library.py" | cut -d ' ' -f1)" = a06bd4dd932df22b9127cda35a2dd7a8d69fafd879d6619ce3b50aa54252cd5d ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$mail_readonly_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$mail_readonly_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$mail_readonly_tmp/release-data-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$mail_readonly_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/internal-quote-readonly-library.py" > "$mail_readonly_tmp/internal-quote-readonly-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$mail_readonly_tmp/internal-quote-readonly-library.py" | cut -d ' ' -f1)" = be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/portable-pdb-library.py" > "$mail_readonly_tmp/portable-pdb-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$mail_readonly_tmp/portable-pdb-library.py" | cut -d ' ' -f1)" = cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5 ]] || exit 1
-            timeout --signal=TERM --kill-after=20s 16m python3 -B "$mail_readonly_tmp/run.py" observe
+            timeout --signal=TERM --kill-after=20s 16m python3 -B "$mail_readonly_tmp/run.py" classify

@@ -8,8 +8,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  READONLY_WORKFLOW_PIN: 'false'
-  READONLY_HELPER_SHA256: 'ccf59e04f75eb9785983932a3c3b7200c17bd7535854d235b2b4f3285d28615c'
+  READONLY_WORKFLOW_PIN: 'true'
+  READONLY_HELPER_SHA256: '5ac285b5a7c4001ea8317ad4495cc29b352ec9be061201d5a431914471a87b07'
 jobs:
   observe:
     runs-on: ubuntu-latest

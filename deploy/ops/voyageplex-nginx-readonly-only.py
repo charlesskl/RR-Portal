@@ -1,6 +1,6 @@
 """Read only the already identified gateway logs; never call mailbox, DB or deploy functions."""
 import datetime,hashlib,importlib.util,json,os,pathlib,re,sys,traceback
-PIN=False
+PIN=True
 BRANCH='refs/heads/ops/mail-readonly-20261020'
 OUT=pathlib.Path('/opt/rr-portal/deploy/backups/voyageplex-mail-readonly-20261020-04')
 PRIOR=pathlib.Path('/opt/rr-portal/deploy/backups/voyageplex-mail-readonly-20261020-03')

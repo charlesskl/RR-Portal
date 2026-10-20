@@ -16,7 +16,7 @@ SOURCE_MANIFEST_SHA = 'c6a2c4b7ea1e5866ed351d1fcef54f2d27f44d099e50879a95bfd535a
 COMPARATOR_SHA = '24358a17941d5ed2aa2d983c6f39e2066a1cccf932db59b214e2f688428f84db'
 BACKUP = ROOT / 'deploy/backups/batch-961-965-20261020-backup'
 DEPLOY = BACKUP.with_name('batch-961-965-20261020-deploy-06')
-OUT = BACKUP.with_name('batch-961-965-20261020-verify-06')
+OUT = BACKUP.with_name('batch-961-965-20261020-verify-07')
 BACKUP_MANIFEST = 'a18052ed05e4fea60d0073f71aa5a809f395739c89ce63eddf5dfc9ac0ef8924'; BACKUP_RESULT = '3928baa1a0e10249f22ef26e19d7a4a1be018aefa03b557bcb6c65cfc66aec3e'; DEPLOY_MANIFEST = '04203afb18be0a93be77b9aa61a9891f7405d376bcf2784927bc121df35ea5ff'; DEPLOY_RESULT = '448c5d875d3418343bb186835e903ecce152bbed9a31c23966b1943284c1779f'
 ORDER = ('factory-review','factory-review-test','internal-quote','zuru-order-system','qc-plan-api','qc-plan-web','printlink')
 ZURU_OLD_COMMAND = ['gunicorn','--bind','0.0.0.0:5005','--workers','2','--threads','4','--timeout','300','app:app']
@@ -77,7 +77,7 @@ def readonly_command(args):
     if args[:2]==['docker','exec'] and len(args)>3 and re.fullmatch('[a-f0-9]{64}',args[2]):
         rest=args[3:]
         if rest==['cat','/proc/1/environ']: return True
-        if len(rest)>5 and rest[0:2]==['tar','-C'] and rest[2] in {'/app','/pb','/app/.next'} and rest[3:5]==['-cf','-']:
+        if len(rest)>5 and rest[0:2]==['tar','-C'] and rest[2] in {'/app','/pb','/app/.next-build'} and rest[3:5]==['-cf','-']:
             return all(CORE.OPS.L.safe_path(name) and not name.startswith('-') for name in rest[5:])
         return False
     if args[0]=='git' and len(args)>1 and args[1] in {'rev-parse','symbolic-ref','diff','show','ls-tree'}:
@@ -243,7 +243,7 @@ def public_observations(current):
     need(0<len(refs)<=100 and all(not urllib.parse.urlsplit(ref).scheme and not urllib.parse.urlsplit(ref).fragment for ref in refs))
     ref_files={ref:urllib.parse.unquote(urllib.parse.urlsplit(ref).path[len('/qc-plan/_next/'):]) for ref in refs}
     names=sorted(set(ref_files.values()))
-    actual=CORE.container_files(current['targets']['qc-plan-web']['id'],'/app/.next',names)
+    actual=CORE.container_files(current['targets']['qc-plan-web']['id'],'/app/.next-build',names)
     OBSERVED['publicAssetContainerFiles']['qc-plan-web']={name:{'sha256':sha(body),'bytes':len(body)} for name,body in actual.items()}
     for ref,name in ref_files.items(): probe('http://127.0.0.1'+ref,checksum=sha(actual[name]))
     for path in ('/api/auth/me','/api/quotes','/api/admin/users'):

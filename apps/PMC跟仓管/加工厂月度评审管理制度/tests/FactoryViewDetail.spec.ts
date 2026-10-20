@@ -13,7 +13,7 @@ vi.mock('vue-router', () => ({
 vi.mock('../src/stores/factories', () => ({ useFactoriesStore: () => ({
   get: vi.fn(async () => ({ id: 'factory-1', name: '测试工厂', ip_control: '旧档案内容' })),
 }) }))
-vi.mock('../src/pb', () => ({ pb: { collection: (name: string) => ({
+vi.mock('../src/pb', () => ({ pb: { authStore: { record: null, onChange: () => () => {} }, collection: (name: string) => ({
   getFullList: async (options: unknown) => {
     if (name !== 'quality_5s_checks') return []
     state.getChecks(options)

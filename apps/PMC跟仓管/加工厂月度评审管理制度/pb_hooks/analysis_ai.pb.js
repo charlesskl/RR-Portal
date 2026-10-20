@@ -33,6 +33,11 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
   if(!factories.length)throw new BadRequestError('没有可分析的工厂')
   const aliases={};factories.forEach((f,i)=>aliases[f.id]='F'+(i+1))
   const evidence=[],refs=[],coverage=[],checked=[]
+  function valueOf(record,src,key){
+    // Optional patrol counts are JSON fields: JSVM exposes their JSONRaw bytes.
+    if(src.collection==='quality_patrols'&&['staff','lines','area'].includes(key))return JSON.parse(record.getString(key)||'null')
+    return record.get(key)
+  }
   const params={};const factoryClause=factories.map((f,i)=>{params['f'+i]=f.id;return 'factory = {:f'+i+'}'}).join(' || ')
   for(const src of helpers.sources){
     if(!scope.modules.includes(src.module)){coverage.push({source:src.label,status:'未授权，未读取',count:0});continue}
@@ -46,11 +51,11 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
       const f=factoryMap[r.getString('factory')],region=src.collection==='orders'?(r.getString('region')||f.getString('region')||'dongguan'):(f.getString('region')||'dongguan')
       if(!scope.regions.includes(region)||!e.app.canAccessRecord(r,info,r.collection().viewRule))continue
       const fields={};let shortened=false
-      src.fields.forEach(key=>{let value=r.get(key);if(typeof value==='string'&&value.length>800){value=value.slice(0,800);shortened=true}fields[key]=value})
+      src.fields.forEach(key=>{let value=valueOf(r,src,key);if(typeof value==='string'&&value.length>800){value=value.slice(0,800);shortened=true}fields[key]=value})
       const id=src.collection+':'+r.id
       evidence.push({id,factory:aliases[f.id],type:src.label,fields,shortened})
       refs.push({id,factoryCode:aliases[f.id],factoryId:f.id,factoryName:f.getString('name'),source:src.collection,recordId:r.id,date:r.getString(src.date).slice(0,10),craft:f.getString('craft'),region})
-      checked.push({collection:src.collection,id:r.id,factory:f.id,keys:src.fields,snapshot:JSON.stringify(src.fields.map(key=>r.get(key)))});count++
+      checked.push({collection:src.collection,id:r.id,factory:f.id,source:src,region:r.getString('region'),snapshot:JSON.stringify(src.fields.map(key=>valueOf(r,src,key)))});count++
       if(evidence.length>500)throw new BadRequestError('分析明细超过500条，请缩短时间或选择工厂；系统不会截取部分数据冒充全局结论')
     }
     coverage.push({source:src.label,status:count?'已读取':'范围内无可见记录',count})
@@ -63,7 +68,7 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
     if(authSnapshot(latest)!==originalAuth)throw new ForbiddenError('账号权限已变化，请重新分析')
     for(const item of checked){
       const r=e.app.findRecordById(item.collection,item.id),f=e.app.findRecordById('factories',item.factory)
-      if(r.getString('factory')!==item.factory||JSON.stringify(item.keys.map(key=>r.get(key)))!==item.snapshot||f.getString('craft')!==factoryMap[f.id].getString('craft')||f.getString('region')!==factoryMap[f.id].getString('region')||!e.app.canAccessRecord(r,info,r.collection().viewRule)||!e.app.canAccessRecord(f,info,f.collection().viewRule))throw new ForbiddenError('数据或访问权限已变化，请重新分析')
+      if(r.getString('factory')!==item.factory||r.getString('region')!==item.region||JSON.stringify(item.source.fields.map(key=>valueOf(r,item.source,key)))!==item.snapshot||f.getString('craft')!==factoryMap[f.id].getString('craft')||f.getString('region')!==factoryMap[f.id].getString('region')||!e.app.canAccessRecord(r,info,r.collection().viewRule)||!e.app.canAccessRecord(f,info,f.collection().viewRule))throw new ForbiddenError('数据或访问权限已变化，请重新分析')
     }
   }
   stillAuthorized()

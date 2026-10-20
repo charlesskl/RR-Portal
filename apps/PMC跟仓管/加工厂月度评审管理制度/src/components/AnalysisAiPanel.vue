@@ -14,9 +14,9 @@ const question=ref('哪些工厂需要优先跟进？请结合巡查、品质、
 interface Evidence {id:string;factoryCode:string;factoryId:string;factoryName:string;source:string;recordId:string;date:string;craft:string;region:string}
 interface Report { report:{summary:string;limitations:string[];findings:{title:string;risk:string;analysis:string;actions:string[];evidence_ids:string[]}[]}; evidence:Evidence[]; coverage:{source:string;status:string;count:number}[]; model:string; generatedAt:string; start:string; end:string }
 const result=ref<Report|null>(null)
-let generation=0,controller:AbortController|null=null
+let generation=0,configGeneration=0,disposed=false,controller:AbortController|null=null
 function clear(){generation++;controller?.abort();controller=null;result.value=null;busy.value=false;error.value=''}
-async function loadConfig(){const current=++generation;try{const c=await pb.send('/api/factory-review/analysis-ai/config',{method:'GET'});if(current===generation)config.value=c}catch{if(current===generation){config.value=null;error.value='AI配置状态读取失败，请重试'}}}
+async function loadConfig(){const current=++configGeneration;try{const c=await pb.send('/api/factory-review/analysis-ai/config',{method:'GET'});if(!disposed&&current===configGeneration)config.value=c}catch{if(!disposed&&current===configGeneration){config.value=null;error.value='AI配置状态读取失败，请重试'}}}
 async function generate(){
   if(!config.value?.enabled||busy.value)return
   clear();const current=generation;busy.value=true;controller=new AbortController()
@@ -26,8 +26,8 @@ async function generate(){
 }
 watch([start,end,factory,question],()=>clear())
 watch(()=>props.factoryId,id=>{factory.value=id||'';clear()})
-const stop=pb.authStore.onChange(()=>{clear();config.value=null;if(pb.authStore.record)void loadConfig()})
-onMounted(loadConfig);onScopeDispose(()=>{clear();stop()})
+const stop=pb.authStore.onChange(()=>{clear();configGeneration++;config.value=null;if(pb.authStore.record)void loadConfig()})
+onMounted(loadConfig);onScopeDispose(()=>{disposed=true;configGeneration++;clear();stop()})
 function target(e:Evidence){
   if(e.source==='quality_patrols')return {path:'/quality-patrol',query:{region:e.region,factory:e.factoryId,date:e.date}}
   if(e.source==='orders')return `/orders/dept/${e.craft}/${e.recordId}`

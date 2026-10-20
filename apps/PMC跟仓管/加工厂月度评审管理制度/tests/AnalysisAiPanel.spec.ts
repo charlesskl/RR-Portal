@@ -18,6 +18,12 @@ describe('AI analysis interaction',()=>{
     expect(mocks.send.mock.calls[1]![1].body).not.toHaveProperty('records')
     await w.find('textarea').setValue('其他分析问题');expect(w.find('.result').exists()).toBe(false);w.unmount()
   })
+  it('keeps configuration loading independent from edits to the analysis question',async()=>{
+    let resolve!:(value:any)=>void;mocks.send.mockImplementation(()=>new Promise(r=>resolve=r))
+    const w=mountPanel();await w.find('textarea').setValue('正在输入分析问题')
+    resolve({enabled:true,model:'test-model'});await flushPromises()
+    expect(w.find('button.primary').attributes('disabled')).toBeUndefined();expect(mocks.send).toHaveBeenCalledTimes(1);w.unmount()
+  })
   it('shows server failures and never substitutes a fake AI conclusion',async()=>{
     mocks.send.mockImplementation(async(path:string)=>{if(path.endsWith('/config'))return {enabled:true};throw {response:{message:'AI服务暂不可用'}}})
     const w=mountPanel();await flushPromises();await w.find('button.primary').trigger('click');await flushPromises();expect(w.find('[role=alert]').text()).toContain('AI服务暂不可用');expect(w.find('.result').exists()).toBe(false);w.unmount()

@@ -350,9 +350,9 @@
     "schedule_name": "恐龙系列"
   },
   "71181": {
-    "cn_name": "变色蜥蜴",
+    "cn_name": "发光蜥蜴",
     "workshop": "兴信A",
-    "schedule_name": "变色蜥蜴"
+    "schedule_name": "发光蜥蜴"
   },
   "7794": {
     "cn_name": "惊喜球",
@@ -1001,7 +1001,7 @@
   },
   "9577": {
     "cn_name": "电动卡皮巴拉",
-    "workshop": "兴信A",
+    "workshop": "华登",
     "schedule_name": "电动卡皮巴拉"
   },
   "9548": {
@@ -1151,7 +1151,7 @@
   },
   "157145": {
     "cn_name": "牙齿怪兽",
-    "workshop": "A-华嘉",
+    "workshop": "兴信A",
     "schedule_name": "牙齿怪兽"
   },
   "157128": {
@@ -1481,7 +1481,7 @@
   },
   "77907": {
     "cn_name": "双色龙",
-    "workshop": "兴信B",
+    "workshop": "华登",
     "schedule_name": "双色龙"
   },
   "77425": {
@@ -1936,7 +1936,7 @@
   },
   "MSLD191": {
     "cn_name": "混装15783+15788+15790+15789",
-    "workshop": "华登",
+    "workshop": "兴信B",
     "schedule_name": "牙齿怪兽"
   },
   "157112": {
@@ -2562,6 +2562,101 @@
   "15759": {
     "cn_name": "牙齿怪兽",
     "workshop": "C-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MUQ87": {
+    "cn_name": "混装（7127+71152+71126）",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "77913": {
+    "cn_name": "迷你房子减价版",
+    "workshop": "兴信A",
+    "schedule_name": "迷你房子"
+  },
+  "MEC515": {
+    "cn_name": "混装157128+157131",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC498": {
+    "cn_name": "混装157130",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MB221": {
+    "cn_name": "15752+15785+15749+15727混装",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "77940": {
+    "cn_name": "二代冰箱",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱"
+  },
+  "77939": {
+    "cn_name": "二代冰箱球",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱小产品"
+  },
+  "77912": {
+    "cn_name": "4代迷你小手袋减价版",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "MQ06": {
+    "cn_name": "77772+77794混装",
+    "workshop": "兴信B",
+    "schedule_name": "迷你唱片球"
+  },
+  "77927": {
+    "cn_name": "2PK双色龙",
+    "workshop": "华登",
+    "schedule_name": "双色龙"
+  },
+  "MB233": {
+    "cn_name": "15714+15750混装",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC517": {
+    "cn_name": "15760+15774+15759+157131混装",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15778": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信B-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "77923": {
+    "cn_name": "迷你行李箱2PK",
+    "workshop": "兴信B",
+    "schedule_name": "迷你行李箱"
+  },
+  "157150": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MTQ99": {
+    "cn_name": "混装（9279+9298）",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MB226": {
+    "cn_name": "92152混装",
+    "workshop": "华登",
+    "schedule_name": "卡皮巴拉蛋"
+  },
+  "157151": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "A-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MSLD224": {
+    "cn_name": "15774混装",
+    "workshop": "B-华嘉",
     "schedule_name": "牙齿怪兽"
   }
 }

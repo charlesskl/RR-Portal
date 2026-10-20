@@ -64,13 +64,37 @@ def is_revision(filename):
 
 
 # === 取消单识别 ===
-# 取消单特征：PO 上盖有"订单取消"大字覆盖层（内嵌透明 PNG 章图）
-_CANCEL_NAME_RE = re.compile(r'取消|cancel', re.I)
+# 取消单特征（按序检查）：
+# 1) 文件名含"取消/cancel/作废"
+# 2) 浮动形状/文本框水印文字（大字水印不在单元格里，在 xl/drawings/*.xml）
+# 3) 单元格短文本章（如某单元格直接写"订单取消"，在 sharedStrings 里）
+# 4) 内嵌"订单取消"图片章（已知样 SHA-1 + 透明横幅 PNG 启发式）
+_CANCEL_NAME_RE = re.compile(r'取消|cancel|作废', re.I)
 
 # 已知取消章图片的 SHA-1（对内嵌图片字节级匹配；发现新章样可追加）
 _CANCEL_STAMP_SHA1 = {
     '70d73f3af75d74cc5df55a1aaa024b3787fa2f91',  # 订单取消.png 1432x346 透明横幅（2026-08-11 PO-4500218205）
 }
+
+# 形状/文本框水印关键词：形状文字基本是章/水印，直接包含匹配
+# （排期系统生产验证过的做法；单元格长文本如"Cancel Date"字段不会出现在形状里）
+_CANCEL_SHAPE_KW = ('取消', '取 消', '作废', 'CANCEL', 'VOID')
+
+# 单元格短文本章：去掉全部空白后整体比对（大写）。
+# 必须整体匹配，防止误伤 "Cancel Date" 字段、修订记录 "Line 10 cancelled" 这类正常内容
+_CANCEL_CELL_EXACT = {
+    '取消', '订单取消', '此单取消', '此单作废', '作废', '已取消',
+    'CANCELLED', 'CANCELED', 'VOID',
+    'ORDERCANCELLED', 'POCANCELLED', 'CANCELLEDORDER',
+    'THISORDERISCANCELLED', 'THISPOISCANCELLED',
+}
+_CANCEL_CELL_MAXLEN = 40
+
+
+def _xml_text(s):
+    """去掉XML标签并反转义实体"""
+    import html
+    return html.unescape(re.sub(r'<[^>]+>', '', s))
 
 
 def _png_banner_hint(data):
@@ -84,13 +108,44 @@ def _png_banner_hint(data):
 
 
 def is_cancelled(filepath, filename=None):
-    """判断是否为取消单：文件名含"取消/cancel"，或内嵌"订单取消"覆盖章图片"""
+    """判断是否为取消单：文件名、形状水印文字、单元格短文本章、图片章"""
     name = filename or os.path.basename(filepath)
     if _CANCEL_NAME_RE.search(name):
         return True
     try:
         with zipfile.ZipFile(filepath) as z:
-            for n in z.namelist():
+            names = z.namelist()
+
+            # 形状/文本框水印（大字取消章常以文本框/艺术字盖在PO上）
+            for n in names:
+                if n.startswith('xl/drawings/') and n.endswith('.xml'):
+                    xml = z.read(n).decode('utf-8', errors='ignore')
+                    texts = re.findall(r'<a:t[^>]*>([^<]*)</a:t>', xml)
+                    combined = re.sub(r'\s+', ' ', _xml_text(''.join(texts))).upper()
+                    if any(kw.upper() in combined for kw in _CANCEL_SHAPE_KW):
+                        return True
+
+            # 单元格短文本章（sharedStrings + 工作表内联字符串）
+            blocks = []
+            for n in names:
+                if n == 'xl/sharedStrings.xml':
+                    xml = z.read(n).decode('utf-8', errors='ignore')
+                    blocks += re.findall(r'<si>(.*?)</si>', xml, re.S)
+                elif n.startswith('xl/worksheets/') and n.endswith('.xml'):
+                    xml = z.read(n).decode('utf-8', errors='ignore')
+                    blocks += re.findall(r'<is>(.*?)</is>', xml, re.S)
+            for blk in blocks:
+                compact = re.sub(r'\s+', '', _xml_text(blk))
+                if not compact or len(compact) > _CANCEL_CELL_MAXLEN:
+                    continue
+                if compact.upper() in _CANCEL_CELL_EXACT:
+                    return True
+                if len(compact) <= 20 and any(
+                        k in compact for k in ('订单取消', '此单取消', '已取消')):
+                    return True
+
+            # 图片章
+            for n in names:
                 if not n.startswith('xl/media/'):
                     continue
                 data = z.read(n)
@@ -129,7 +184,7 @@ def _parse_date(v):
     if not s:
         return None
     # 尝试多种格式
-    for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%m-%d-%Y', '%m/%d/%Y',
+    for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%Y.%m.%d', '%m-%d-%Y', '%m/%d/%Y',
                 '%d-%m-%Y', '%d/%m/%Y', '%Y-%m-%d %H:%M:%S'):
         try:
             return datetime.strptime(s[:10], fmt)
@@ -220,11 +275,13 @@ def _find_header_value(ws, row, keywords, max_col=35):
         v = ws.cell(row, c).value
         if v is None:
             continue
-        s = str(v).strip()
+        # 标签空白归一：PDF转Excel的标签常带双空格（如 "Customer  Name:"），
+        # 不归一的话单空格关键词 "Customer Name" 匹配不上
+        s = re.sub(r'\s+', ' ', str(v).strip())
         for kw in keywords:
             if kw.lower() in s.lower():
-                # 取右侧最近的非空值
-                for cc in range(c + 1, min(c + 6, max_col)):
+                # 取右侧最近的非空值（宽版布局标签和值可隔到10列，如 PO-4500224166 值在第7列）
+                for cc in range(c + 1, min(c + 11, max_col)):
                     vv = ws.cell(row, cc).value
                     if vv is not None and str(vv).strip():
                         return vv
@@ -308,7 +365,8 @@ def parse(filepath):
     if po_raw is not None:
         result['po_number'] = _clean(po_raw).replace('.0', '')
     if not result['po_number']:
-        m = re.search(r'PO[- ]?(\d{10})', os.path.basename(filepath))
+        # 文件名兜底：兼容 "PO- 4500224166"（短横后有空格/不间断空格）等写法
+        m = re.search(r'PO[\s\-]*(\d{10})', os.path.basename(filepath))
         if m:
             result['po_number'] = m.group(1)
 
@@ -322,16 +380,22 @@ def parse(filepath):
     # 供应商（Date行+4）
     result['supplier'] = _clean(_find_cell_value(ws, date_row + 4, ['Supplier']))
 
-    # 目的国（Date行+4~6范围搜索）
+    # 目的国（先按Date行+4~6窄范围找；找不到再扫整个头部区域，
+    # 兼容标签位置偏外（如第21列的"Destination  Country:"）的版式）
     dest = None
     for r in range(date_row + 4, date_row + 7):
         dest = _find_cell_value(ws, r, ['Destination'])
         if dest:
             break
+    if not dest:
+        for r in range(1, date_row + 9):
+            dest = _find_cell_value(ws, r, ['Destination'], max_col=60)
+            if dest:
+                break
     result['destination'] = _clean(dest) if dest else ''
-    # 清理重复（如"USA,USA"）
+    # 清理重复（如"USA,USA"）；各段内的多个连续空格归一（PDF转Excel常产生 "Hong  Kong" 双空格）
     if result['destination'] and ',' in result['destination']:
-        parts = [p.strip() for p in result['destination'].split(',') if p.strip()]
+        parts = [re.sub(r'\s+', ' ', p.strip()) for p in result['destination'].split(',') if p.strip()]
         seen = []
         for p in parts:
             if p not in seen:

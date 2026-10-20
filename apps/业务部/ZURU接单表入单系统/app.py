@@ -4,6 +4,7 @@ PO Excel → 解析 → 生成新Excel下载
 """
 import os
 import re
+import sys
 import json
 import time
 import uuid
@@ -24,7 +25,9 @@ import po_parser
 
 # LOCAL_MODE 控制：本地（桌面上 Win/Mac 直接跑）= 1，cloud 部署 = 0
 # 影响 /api/browse 和 /api/check_path /api/config 的任意路径访问
-LOCAL_MODE = os.environ.get('LOCAL_MODE', '0') == '1'
+# 打包成 exe（桌面单机用）时默认 1
+LOCAL_MODE = os.environ.get(
+    'LOCAL_MODE', '1' if getattr(sys, 'frozen', False) else '0') == '1'
 
 # Flask debug：仅当显式设置时启用，避免 RCE 风险
 FLASK_DEBUG = os.environ.get('FLASK_DEBUG', '0') == '1'
@@ -48,9 +51,15 @@ def _safe_filename(name):
     return f'{uuid.uuid4().hex[:8]}_{base}'
 
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-# DATA_PATH: Docker部署时挂载卷，本地运行默认APP_DIR
-DATA_PATH = os.environ.get('DATA_PATH', APP_DIR)
+if getattr(sys, 'frozen', False):
+    # 打包成 exe 运行：模板/静态文件/映射表在 PyInstaller 临时目录（只读），
+    # 可写数据（上传、导出、配置、日志）放 exe 旁边
+    APP_DIR = sys._MEIPASS
+    DATA_PATH = os.environ.get('DATA_PATH', os.path.dirname(sys.executable))
+else:
+    APP_DIR = os.path.dirname(os.path.abspath(__file__))
+    # DATA_PATH: Docker部署时挂载卷，本地运行默认APP_DIR
+    DATA_PATH = os.environ.get('DATA_PATH', APP_DIR)
 
 app = Flask(__name__, template_folder=os.path.join(APP_DIR, 'templates'),
             static_folder=os.path.join(APP_DIR, 'static'))
@@ -90,10 +99,74 @@ COUNTRY_MAP = _load_json('country_map.json')
 COUNTRY_MAP.update({k: '美国' for k in
                     ('USA', 'United States', 'US', 'U.S.', 'U.S.A.',
                      'United States of America', 'America')})
-ITEM_MAP = _load_json('item_map.json')
+
+# 货号映射：可写副本（DATA_FOLDER/item_map.json，"更新货号"功能的落盘位置）优先，
+# 没有则用打包内置的（exe 内置数据只读，更新必须写 exe 旁边的 data/）
+_item_map_lock = threading.Lock()
+
+
+def _load_item_map():
+    writable = os.path.join(app.config['DATA_FOLDER'], 'item_map.json')
+    if os.path.exists(writable):
+        try:
+            with open(writable, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict) and data:
+                return data, False
+        except (OSError, ValueError) as e:
+            logging.error(f'读取可写货号映射失败，回退内置: {writable} - {e}')
+    return _load_json('item_map.json'), True
+
+
+ITEM_MAP, _ITEM_MAP_BUILTIN = _load_item_map()
+
+
+def _item_map_meta():
+    with _item_map_lock:
+        count = len(ITEM_MAP)
+    writable = os.path.join(app.config['DATA_FOLDER'], 'item_map.json')
+    if os.path.exists(writable):
+        ts = datetime.fromtimestamp(
+            os.path.getmtime(writable)).strftime('%Y-%m-%d %H:%M')
+        return {'count': count, 'builtin': False, 'updated': ts}
+    return {'count': count, 'builtin': True, 'updated': ''}
 # 黑名单货号（河源等独立排期，不入总排期接单表）
 _ignore_data = _load_json('ignore_items.json')
 IGNORE_ITEMS = set(_ignore_data.get('ignore_items', []) if isinstance(_ignore_data, dict) else [])
+
+
+# === 取消PO名单（用户手动维护，存 DATA_FOLDER 可写目录）===
+def _norm_po(po):
+    """PO号归一化：去空白、大写（兼容 "PO- 4500224166" 这类带空格写法）"""
+    return re.sub(r'\s+', '', str(po or '')).upper()
+
+
+_cancel_pos_lock = threading.Lock()
+
+
+def _cancel_pos_file():
+    return os.path.join(app.config['DATA_FOLDER'], 'cancelled_pos.json')
+
+
+def _load_cancelled_pos():
+    p = _cancel_pos_file()
+    if os.path.exists(p):
+        try:
+            with open(p, 'r', encoding='utf-8') as f:
+                d = json.load(f)
+            items = d.get('cancelled_pos', []) if isinstance(d, dict) else []
+            return {_norm_po(x) for x in items if _norm_po(x)}
+        except (OSError, ValueError) as e:
+            logging.error(f'读取取消PO名单失败: {p} - {e}')
+    return set()
+
+
+def _save_cancelled_pos(pos):
+    with open(_cancel_pos_file(), 'w', encoding='utf-8') as f:
+        json.dump({'cancelled_pos': sorted(pos)}, f, ensure_ascii=False, indent=2)
+
+
+CANCELLED_POS = _load_cancelled_pos()
 
 # 任务管理：每个 process 请求一个 task_id，避免并发互相覆盖
 _tasks = {}
@@ -182,6 +255,42 @@ def _read_existing_pos(filepath):
     return pos
 
 
+def _read_items_from_table(filepath):
+    """从接单表「货号」sheet 读取货号映射。
+    重复货号取第一行（与接单表 VLOOKUP 行为一致），重复记录进 dupes。
+    Returns: (items: dict, dupes: list)"""
+    wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+    sheet = next((n for n in wb.sheetnames if str(n).strip() == '货号'), None)
+    if not sheet:
+        wb.close()
+        raise ValueError('找不到「货号」工作表，请确认选择的是接单表文件')
+    items, dupes = {}, []
+    first_row = True
+    for row in wb[sheet].iter_rows(values_only=True):
+        code = row[0] if row else None
+        if first_row:
+            first_row = False
+            # 跳过表头行（货号/中文名称/生产车间/排期名）
+            if code is not None and str(code).strip() == '货号':
+                continue
+        if code is None or str(code).strip() == '':
+            continue
+        key = str(code).strip()
+        if key.endswith('.0'):  # Excel 数字货号读出来可能带 .0
+            key = key[:-2]
+        entry = {
+            'cn_name': str(row[1]).strip() if len(row) > 1 and row[1] else '',
+            'workshop': str(row[2]).strip() if len(row) > 2 and row[2] else '',
+            'schedule_name': str(row[3]).strip() if len(row) > 3 and row[3] else '',
+        }
+        if key in items:
+            dupes.append(key)
+            continue
+        items[key] = entry
+    wb.close()
+    return items, dupes
+
+
 def _list_dir(path):
     """列出目录内容，返回文件夹和xlsx文件"""
     items = []
@@ -198,35 +307,71 @@ def _list_dir(path):
 
 
 def _translate_country(en_name):
-    """英文国家名 → 中文（含洲）
-
-    先整串匹配（官方名常带逗号，如 "Virgin Islands, British"、
-    "Congo, The Democratic Republic of the"，必须先整串试，否则会被逗号拆开）；
-    再按逗号拆分多国写法（如 "Taiwan, Hong Kong"），逐段翻译后拼接。
-    匹配顺序：精确 → 忽略大小写 → 保留原文。
-    """
+    """英文国家名 → 中文（含洲）"""
     if not en_name:
         return ''
-    s = str(en_name).strip()
-    if not s:
-        return ''
+    # PDF转Excel常产生双空格（如 "Hong  Kong"），先归一再查表
+    key = re.sub(r'\s+', ' ', str(en_name).strip())
+    cn = COUNTRY_MAP.get(key)
+    if cn:
+        return cn
+    for k, v in COUNTRY_MAP.items():
+        if k.lower() == key.lower():
+            return v
+    return key
 
-    def _lookup(key):
-        hit = COUNTRY_MAP.get(key)
-        if hit:
-            return hit
-        for k, v in COUNTRY_MAP.items():
-            if k.lower() == key.lower():
-                return v
+
+def _norm_customer(s):
+    """客户名归一化：空白归一 + 大写（与 data/customer_country.json 的键一致）"""
+    return re.sub(r'\s+', ' ', str(s or '')).strip().upper()
+
+
+# 客户名 → 目的国（英文）：PO缺Destination字段时按客户推断
+CUSTOMER_COUNTRY = {
+    _norm_customer(k): v
+    for k, v in _load_json('customer_country.json').get('map', {}).items()
+}
+
+
+def _country_from_customer(customer):
+    """按客户名推断目的国（精确匹配 → 前缀匹配，如
+    DOLGENCORP, LLC ↔ DOLGENCORP, LLC - POPSHELF），匹配不到返回''"""
+    key = _norm_customer(customer)
+    if not key:
+        return ''
+    if key in CUSTOMER_COUNTRY:
+        return CUSTOMER_COUNTRY[key]
+    best = ''
+    for k in CUSTOMER_COUNTRY:
+        if len(k) >= 8 and (key.startswith(k) or k.startswith(key)):
+            if len(k) > len(best):
+                best = k
+    return CUSTOMER_COUNTRY.get(best, '') if best else ''
+
+
+# 行级客户PO后缀 → 国家英文名（多国家PO分行用，如 AG260316-HK → 香港）
+_CUST_PO_SUFFIX_COUNTRY = {
+    'HK': 'Hong Kong', 'TW': 'Taiwan', 'AU': 'Australia', 'NZ': 'New Zealand',
+    'UK': 'United Kingdom', 'US': 'USA', 'DE': 'Germany', 'FR': 'France',
+    'ES': 'Spain', 'JP': 'Japan', 'CA': 'Canada', 'IT': 'Italy', 'CN': 'China',
+}
+
+
+def _country_for_line(customer_po, dest_parts):
+    """多国家PO按行级客户PO后缀（-HK/-TW等）确定该行国家，匹配不到返回None"""
+    if not customer_po:
         return None
-
-    whole = _lookup(s)
-    if whole:
-        return whole
-    parts = [p.strip() for p in s.split(',') if p.strip()]
-    if not parts:
-        return ''
-    return ', '.join(_lookup(p) or p for p in parts)
+    m = re.search(r'[-\s]([A-Za-z]{2})\s*$', str(customer_po).strip())
+    if not m:
+        return None
+    en = _CUST_PO_SUFFIX_COUNTRY.get(m.group(1).upper())
+    if not en:
+        return None
+    # 后缀国家必须在PO的目的国列表里，避免把无关后缀误判为国家
+    if dest_parts and not any(
+            en.lower() == re.sub(r'\s+', ' ', p).strip().lower() for p in dest_parts):
+        return None
+    return _translate_country(en)
 
 
 def _date_serial(dt):
@@ -291,15 +436,35 @@ def _generate_excel(parsed_orders, custom_date=None):
     for order in parsed_orders:
         po = order['po_number']
         po_date_serial = _date_serial(custom_date or order['po_date'])
-        country_cn = _translate_country(order['destination'])
+        # 目的国缺失（部分版式PO没有Destination字段）→ 按客户名推断；
+        # 推断不出也要警告，不能无声留空
+        destination = order['destination']
+        if not destination:
+            destination = _country_from_customer(order.get('customer', ''))
+            if destination:
+                warnings.append(
+                    f'PO {po}: 目的国字段为空，已按客户"{order.get("customer", "")}"'
+                    f'推断为{_translate_country(destination)}，请核对')
+            else:
+                warnings.append(
+                    f'PO {po}: 未识别到目的国，出货国家已留空，请人工填写')
+        # 多个国家（如 "Taiwan, Hong Kong"）：逐段翻译；行级再按客户PO后缀细分
+        dest_parts = [p.strip() for p in destination.split(',') if p.strip()] \
+            if destination else []
+        multi_country = len(dest_parts) > 1
+        if multi_country:
+            country_cn = '、'.join(_translate_country(p) for p in dest_parts)
+        else:
+            country_cn = _translate_country(destination)
+        multi_warned = False
         lines = order['lines']
 
         if not lines:
             warnings.append(f'PO {po}: 无数据行，跳过')
             continue
 
-        if country_cn == order['destination'] and order['destination']:
-            warnings.append(f'PO {po}: 国家"{order["destination"]}"未找到中文翻译，原样写入')
+        if country_cn == destination and destination:
+            warnings.append(f'PO {po}: 国家"{destination}"未找到中文翻译，原样写入')
 
         first_line = True
         skipped_items = []
@@ -339,12 +504,22 @@ def _generate_excel(parsed_orders, custom_date=None):
                 except (ValueError, TypeError):
                     ws.cell(r, 3, simple_no)
 
-            # D 货号：含SLB的卡板货号统一写 简货号+SLB，普通格式取第一个-前
+            # D 货号：含SLB的卡板货号统一写 简货号+SLB；
+            # STDPRODUCT 是套件子件拆分标记（如 9574-STDPRODUCT，实为
+            # "9574-STD\nPRODUCT" 两段富文本），不是货号后缀，货号写本体；
+            # 普通格式取第一个-前，但第二段是纯字母后缀（如 125160A-PLB-S007 的 PLB）需拼接保留
             raw_item = ln['sku_spec'] or ln['sku'] or ''
             if 'SLB' in raw_item and simple_no:
                 ws.cell(r, 4, simple_no + 'SLB')
             else:
-                ws.cell(r, 4, raw_item.split('-')[0] if '-' in raw_item else raw_item)
+                _parts = raw_item.split('-')
+                _suffix = _parts[1].upper() if len(_parts) > 1 else ''
+                if _suffix.startswith('STDPRODUCT') or _suffix == 'PRODUCT':
+                    ws.cell(r, 4, _parts[0])
+                elif len(_parts) > 1 and _parts[1].isalpha():
+                    ws.cell(r, 4, _parts[0] + _parts[1])
+                else:
+                    ws.cell(r, 4, _parts[0])
 
             # E 走货期
             delivery_serial = _date_serial(ln['delivery'])
@@ -365,9 +540,19 @@ def _generate_excel(parsed_orders, custom_date=None):
             # I 金额HK = H*7.75
             ws.cell(r, 9).value = f'=H{r}*7.75'
 
-            # K 出货国家
-            if country_cn:
-                ws.cell(r, 11, country_cn)
+            # K 出货国家（多国家PO优先按行级客户PO后缀细分到行，分不出则合并写入并警告）
+            line_country = country_cn
+            if multi_country:
+                per_line = _country_for_line(ln.get('customer_po', ''), dest_parts)
+                if per_line:
+                    line_country = per_line
+                elif not multi_warned:
+                    warnings.append(
+                        f'PO {po}: 多个国家"{order["destination"]}"未能按客户PO后缀区分到行，'
+                        f'已合并写入（{country_cn}），请人工核对')
+                    multi_warned = True
+            if line_country:
+                ws.cell(r, 11, line_country)
 
             # 全列引用 (A:C / A:D)：避免硬编码行数限制货号表增长
             ws.cell(r, 12).value = f'=VLOOKUP(C{r},货号!A:C,3,0)'
@@ -434,31 +619,6 @@ def health():
     return jsonify({'status': 'ok'})
 
 
-@app.route('/api/translate')
-def translate_api():
-    """只读自检：英文国家名 → 中文（含洲）。
-
-    用于部署后在线核对 country_map 是否已被进程加载（本模块的 COUNTRY_MAP
-    在启动时读入内存，数据文件更新必须重启才生效）。不写任何数据。
-    """
-    name = (request.args.get('name') or '').strip()
-    if not name:
-        return jsonify({'ok': False, 'error': '缺少 name 参数',
-                        'map_size': len(COUNTRY_MAP)}), 400
-    out = _translate_country(name)
-    # 输出段含中文字符才算翻译成功；原样保留的英文段即为未翻译
-    untranslated = [seg for seg in out.split(', ')
-                    if seg and not re.search(r'[一-鿿]', seg)]
-    return jsonify({
-        'ok': True,
-        'input': name,
-        'output': out,
-        'fully_translated': not untranslated,
-        'untranslated': untranslated,
-        'map_size': len(COUNTRY_MAP),
-    })
-
-
 @app.route('/')
 def index():
     return render_template('index.html', local_mode=LOCAL_MODE)
@@ -468,7 +628,9 @@ def index():
 def config_api():
     """获取/保存配置（接单表路径）— 仅 LOCAL_MODE 下允许设置任意路径"""
     if request.method == 'GET':
-        return jsonify(_load_config())
+        cfg = _load_config()
+        cfg['items'] = _item_map_meta()
+        return jsonify(cfg)
     if not LOCAL_MODE:
         return jsonify({'ok': False, 'error': '仅本机模式可设置接单表路径，请用上传'}), 403
     data = request.get_json(force=True)
@@ -544,6 +706,102 @@ def upload_table():
     return jsonify({'ok': True, 'count': len(pos), 'filename': f.filename})
 
 
+@app.route('/api/update_items', methods=['POST'])
+def update_items():
+    """从接单表「货号」sheet 更新货号映射（只新增/变更，不删除）。
+
+    两种来源：上传接单表文件（file 字段），或不带文件时用已设置的接单表路径。
+    结果保存到 DATA_FOLDER/item_map.json（exe 旁可写目录），重启后仍生效。
+    """
+    f = request.files.get('file')
+    tmp_path = None
+    if f and f.filename:
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext not in ('.xlsx', '.xlsm'):
+            return jsonify({'ok': False, 'error': '仅支持 .xlsx 格式接单表'}), 400
+        tmp_path = os.path.join(app.config['UPLOAD_FOLDER'],
+                                _safe_filename(f.filename))
+        f.save(tmp_path)
+        filepath = tmp_path
+    else:
+        cfg = _load_config()
+        filepath = cfg.get('order_table_path', '')
+        if not filepath or not os.path.isfile(filepath):
+            return jsonify(
+                {'ok': False, 'error': '请上传接单表文件，或先设置接单表路径'}), 400
+
+    try:
+        new_items, dupes = _read_items_from_table(filepath)
+    except Exception as e:
+        return jsonify({'ok': False,
+                        'error': f'读取货号失败: {str(e)[:120]}'}), 400
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+    if not new_items:
+        return jsonify({'ok': False,
+                        'error': '「货号」表里没有读到货号数据'}), 400
+
+    global ITEM_MAP
+    with _item_map_lock:
+        merged = dict(ITEM_MAP)
+        added, changed = [], []
+        for k, v in new_items.items():
+            if k not in merged:
+                merged[k] = v
+                added.append(k)
+            elif any(merged[k].get(fld, '') != v[fld]
+                     for fld in ('cn_name', 'workshop', 'schedule_name')):
+                merged[k] = v
+                changed.append(k)
+        save_to = os.path.join(app.config['DATA_FOLDER'], 'item_map.json')
+        try:
+            with open(save_to, 'w', encoding='utf-8') as fp:
+                json.dump(merged, fp, ensure_ascii=False, indent=2)
+        except OSError as e:
+            return jsonify({'ok': False, 'error': f'保存失败: {e}'}), 500
+        ITEM_MAP = merged
+
+    logging.info(f'货号更新: 新增{len(added)} 变更{len(changed)} '
+                 f'总数{len(merged)} 来源={filepath}')
+    meta = _item_map_meta()
+    return jsonify({'ok': True, 'added': sorted(added),
+                    'changed': sorted(changed),
+                    'dupes': sorted(set(dupes)), 'total': len(merged),
+                    'builtin': meta['builtin'], 'updated': meta['updated']})
+
+
+@app.route('/api/cancelled_pos', methods=['GET', 'POST'])
+def cancelled_pos_api():
+    """取消PO名单：GET 查看；POST {add:[...], remove:[...]} 维护。
+    名单里的PO在上传时会被识别为取消单直接跳过。"""
+    global CANCELLED_POS
+    if request.method == 'GET':
+        with _cancel_pos_lock:
+            return jsonify({'ok': True, 'cancelled_pos': sorted(CANCELLED_POS)})
+    data = request.get_json(force=True)
+    add = [_norm_po(x) for x in data.get('add') or []]
+    remove = [_norm_po(x) for x in data.get('remove') or []]
+    add = [x for x in add if x]
+    remove = [x for x in remove if x]
+    if not add and not remove:
+        return jsonify({'ok': False, 'error': '没有要添加/移除的PO号'}), 400
+    with _cancel_pos_lock:
+        CANCELLED_POS |= set(add)
+        CANCELLED_POS -= set(remove)
+        try:
+            _save_cancelled_pos(CANCELLED_POS)
+        except OSError as e:
+            return jsonify({'ok': False, 'error': f'保存失败: {e}'}), 500
+        logging.info(f'取消PO名单更新: +{add} -{remove} 现有{len(CANCELLED_POS)}个')
+        return jsonify({'ok': True, 'cancelled_pos': sorted(CANCELLED_POS),
+                        'added': add, 'removed': remove})
+
+
 @app.route('/api/classify', methods=['POST'])
 def classify():
     """根据接单表比对，分类上传的PO文件为新单/修改单"""
@@ -579,6 +837,16 @@ def classify():
                 continue
             data = po_parser.parse(path)
             po = data['po_number']
+            # 取消PO名单（用户手动维护）：名单里的PO按取消单处理
+            with _cancel_pos_lock:
+                in_cancel_list = _norm_po(po) in CANCELLED_POS
+            if in_cancel_list:
+                results.append({
+                    'filename': fname, 'po': po,
+                    'is_revision': False, 'cancelled': True,
+                    'missing_items': []
+                })
+                continue
             is_rev = po in existing_pos
             missing = []
             for ln in data['lines']:
@@ -661,6 +929,13 @@ def process():
             data['filename'] = fname
             po = data['po_number']
 
+            # 取消PO名单（用户手动维护）：名单里的PO直接跳过
+            with _cancel_pos_lock:
+                in_cancel_list = _norm_po(po) in CANCELLED_POS
+            if in_cancel_list:
+                cancelled_orders.append(fname)
+                continue
+
             if existing_pos:
                 is_rev = po in existing_pos
             else:
@@ -700,7 +975,7 @@ def process():
 
     # 取消单提示排在警告最前，确保用户能看到
     if cancelled_orders:
-        cancel_warns = [f'{n}: 检测到"订单取消"覆盖标记，已按取消单跳过，未入单'
+        cancel_warns = [f'{n}: 识别为取消单（取消标记/取消名单），已跳过未入单'
                         for n in cancelled_orders]
         result['warnings'] = cancel_warns + result['warnings']
 
@@ -768,10 +1043,45 @@ def download(filename):
     return send_file(filepath, as_attachment=True, download_name=filename)
 
 
+def _open_browser(url):
+    """优先用谷歌浏览器打开（Windows 上按注册表/安装路径找 Chrome），
+    找不到再用系统默认浏览器"""
+    import webbrowser
+    if os.name == 'nt':
+        try:
+            webbrowser.get('chrome').open(url)
+            return
+        except Exception:
+            pass
+        for env in ('PROGRAMFILES', 'PROGRAMFILES(X86)', 'LOCALAPPDATA'):
+            base = os.environ.get(env)
+            if not base:
+                continue
+            exe = os.path.join(base, 'Google', 'Chrome', 'Application', 'chrome.exe')
+            if os.path.isfile(exe):
+                try:
+                    webbrowser.register('chrome_path', None,
+                                        webbrowser.BackgroundBrowser(exe))
+                    webbrowser.get('chrome_path').open(url)
+                    return
+                except Exception:
+                    pass
+    webbrowser.open(url)
+
+
 if __name__ == '__main__':
+    # Windows 控制台默认编码可能是 cp437/cp936，打印中文前先改为 utf-8 防崩溃
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
     port = 5005
     print('=' * 50)
     print('  ZURU 接单表入单系统')
     print(f'  http://localhost:{port}')
     print('=' * 50)
+    if getattr(sys, 'frozen', False):
+        # 打包成 exe 运行时自动打开浏览器（优先谷歌）
+        threading.Timer(1.5, lambda: _open_browser(f'http://127.0.0.1:{port}')).start()
     app.run(host='0.0.0.0', port=port, debug=FLASK_DEBUG, use_reloader=False, threaded=True)

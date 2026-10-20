@@ -1,6 +1,6 @@
 """Classify only sealed phase04 Nginx inspect bytes; no live services or business calls."""
 import collections,hashlib,json,os,pathlib,re,sys
-PIN=False
+PIN=True
 BRANCH='refs/heads/ops/mail-readonly-20261020'
 PRIOR=pathlib.Path('/opt/rr-portal/deploy/backups/voyageplex-mail-readonly-20261020-04')
 OUT=pathlib.Path('/opt/rr-portal/deploy/backups/voyageplex-mail-readonly-20261020-05')

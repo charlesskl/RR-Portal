@@ -2,6 +2,7 @@ namespace VoyagePlex.Api.Entities;
 
 public sealed class ProductWorkbookRow
 {
+    public string SheetName { get; set; } = "";
     public string Filename { get; set; } = string.Empty;
     public int RowNumber { get; set; }
     public string Customer { get; set; } = string.Empty;

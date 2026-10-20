@@ -17,6 +17,8 @@ public static class ExportTemplateRules
         if (value.Company != "Huadeng" && (value.WeightRule == "DisplayInteger" || value.LayoutKey is "CustomerItem" or "CartonMarks")) return "该公式或客户特殊版式仅适用于华登";
         if (value.LayoutKey == "CartonMarks" && value.ShipmentMode != "Warehouse") return "箱唛尺寸特殊表仅适用于交仓任务";
         if (value.LayoutKey == "SkyCastle" && value.ShipmentMode != "Container") return "多柜特殊表仅适用于做柜任务";
+        if (value.Company == "Huadeng" && !((value.LayoutKey == "Standard" && value.WeightRule == "DisplayInteger") || (value.LayoutKey == "SkyCastle" && value.WeightRule == "Template"))) return "华登仅使用普通走柜、普通交仓及SKY分柜特殊表";
+        if (value.Company == "Huadeng" && !value.IsEnabled) return "华登三种固定模板不能停用";
         if (value.IsDefault && !value.IsEnabled) return "停用模板不能设为默认";
         return null;
     }

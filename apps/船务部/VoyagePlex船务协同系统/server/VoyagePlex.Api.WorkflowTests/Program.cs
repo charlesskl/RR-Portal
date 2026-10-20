@@ -500,11 +500,15 @@ if(ExportTemplateRules.Validate(huadengDisplay) is not null)throw new Exception(
 huadengDisplay.Company="Xingxin";
 if(ExportTemplateRules.Validate(huadengDisplay) is null)throw new Exception("华登新增模板公式不得扩散到兴信");
 huadengDisplay.Company="Huadeng";huadengDisplay.LayoutKey="CustomerItem";
-if(ExportTemplateRules.Validate(huadengDisplay) is not null)throw new Exception("华登客户ITEM版应允许");
+if(ExportTemplateRules.Validate(huadengDisplay) is null)throw new Exception("华登客户ITEM不得作为独立模板");
 huadengDisplay.LayoutKey="CartonMarks";
 if(ExportTemplateRules.Validate(huadengDisplay) is null)throw new Exception("箱唛尺寸版仅限交仓");
 huadengDisplay.ShipmentMode="Warehouse";
-if(ExportTemplateRules.Validate(huadengDisplay) is not null)throw new Exception("华登箱唛交仓版应允许");
+if(ExportTemplateRules.Validate(huadengDisplay) is null)throw new Exception("华登箱唛交仓版不得作为独立模板");
+huadengDisplay.LayoutKey="Standard";huadengDisplay.WeightRule="Truncate";
+if(ExportTemplateRules.Validate(huadengDisplay) is null)throw new Exception("华登INT不得作为独立模板");
+huadengDisplay.LayoutKey="SkyCastle";huadengDisplay.WeightRule="Template";huadengDisplay.ShipmentMode="Container";
+if(ExportTemplateRules.Validate(huadengDisplay) is not null)throw new Exception("SKY分柜特殊表必须保留");
 Console.WriteLine("Huadeng layout and formula-version isolation tests passed.");
 
 var sparsePackingTrip = JsonNode.Parse("""
@@ -593,16 +597,20 @@ using (var schemaConnection = new SqliteConnection("Data Source=:memory:"))
     ExportTemplateEndpoints.EnsureSchema(schemaDb);
     var migrated = schemaDb.ExportTemplates.IgnoreQueryFilters().AsNoTracking().OrderBy(t => t.Id).ToArray();
     var untouchedDefault = migrated.Single(t => t.Id == 1);
-    if (untouchedDefault.Version != "2.0" || untouchedDefault.WeightRule != "DisplayInteger" || untouchedDefault.Name != "华登普通做柜船务表")
+    if (untouchedDefault.Version != "2.0" || untouchedDefault.WeightRule != "DisplayInteger" || untouchedDefault.Name != "普通走柜表")
         throw new Exception("未改过的华登默认模板应升级显示整数公式");
     foreach (var id in new long[] { 2, 3, 4 })
     {
         var template = migrated.Single(t => t.Id == id);
         var expectedName = id == 2 ? "华登柜仓务表" : id == 3 ? "华登车（交仓）船务表" : "人工名称";
         if (template.Name != expectedName || template.Version != (id == 4 ? "custom" : "1.0") || template.Notes != (id == 4 ? "人工说明" : "") ||
-            template.WeightRule != "Template" || template.LayoutKey != "Standard" || template.IsDefault != (id == 4) || template.IsEnabled != (id != 2))
-            throw new Exception("人工停用、取消默认或修改内容的模板必须保留原配置");
+            template.WeightRule != "Template" || template.LayoutKey != "Standard" || template.IsDefault || template.IsEnabled)
+            throw new Exception("旧版本须保留历史内容但停用，不能混入三种模板选项");
     }
+    var activeCatalog = migrated.Where(t => t.Company == "Huadeng" && t.IsEnabled).ToArray();
+    foreach (var purpose in new[] { "Shipping", "Warehouse" })
+        if (!activeCatalog.Where(t => t.Purpose == purpose).Select(t => t.Name).Order().SequenceEqual(new[] { "SKY分柜特殊表", "普通交仓表", "普通走柜表" }.Order()))
+            throw new Exception("任何历史配置下均须补齐每个用途的三种模板");
     var typedBeforeRestart = System.Text.Json.JsonSerializer.Serialize(migrated);
     ExportTemplateEndpoints.EnsureSchema(schemaDb);
     if (System.Text.Json.JsonSerializer.Serialize(schemaDb.ExportTemplates.IgnoreQueryFilters().AsNoTracking().OrderBy(t => t.Id).ToArray()) != typedBeforeRestart)

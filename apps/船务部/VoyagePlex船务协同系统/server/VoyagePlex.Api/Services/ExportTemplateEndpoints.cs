@@ -43,24 +43,40 @@ public static class ExportTemplateEndpoints
             WHERE Company='Huadeng' AND IsEnabled=1 AND IsDefault=1 AND LayoutKey='Standard' AND WeightRule='Template' AND Version='1.0' AND Notes=''
                 AND Name IN ('华登柜船务表','华登柜仓务表','华登车（交仓）船务表','华登车（交仓）仓务表');
             """);
+        // 历史任务可能仅有人工作过的旧版本，仍需为每种用途补齐普通表。
         foreach (var mode in new[] { "Container", "Warehouse" })
         foreach (var purpose in new[] { "Shipping", "Warehouse" })
-        foreach (var variant in new[] { (Layout: "Standard", Rule: "Truncate", Label: "INT取整版"), (Layout: "CustomerItem", Rule: "DisplayInteger", Label: "客户ITEM版"), (Layout: "CartonMarks", Rule: "DisplayInteger", Label: "箱唛尺寸版") })
-        {
-            if (variant.Layout == "CartonMarks" && mode != "Warehouse") continue;
-            var name = $"华登{(mode == "Container" ? "做柜" : "交仓")}{(purpose == "Shipping" ? "船务" : "仓务")}表 · {variant.Label}";
             db.Database.ExecuteSqlInterpolated($"""
                 INSERT INTO ExportTemplates (Company, Name, ShipmentMode, Purpose, Version, Notes, WeightRule, LayoutKey, IsEnabled, IsDefault, UpdatedAt)
-                SELECT 'Huadeng', {name}, {mode}, {purpose}, '2.0', '导出前人工核对版式与公式版本。', {variant.Rule}, {variant.Layout}, 1, 0, {DateTime.UtcNow}
-                WHERE NOT EXISTS (SELECT 1 FROM ExportTemplates WHERE Company='Huadeng' AND ShipmentMode={mode} AND Purpose={purpose} AND LayoutKey={variant.Layout} AND WeightRule={variant.Rule})
+                SELECT 'Huadeng', '普通表', {mode}, {purpose}, '2.0', 'RR版式；红字品牌。', 'DisplayInteger', 'Standard', 1, 0, {DateTime.UtcNow}
+                WHERE NOT EXISTS (SELECT 1 FROM ExportTemplates WHERE Company='Huadeng' AND ShipmentMode={mode} AND Purpose={purpose} AND LayoutKey='Standard' AND WeightRule='DisplayInteger')
                 """);
-        }
         foreach (var purpose in new[] { "Shipping", "Warehouse" })
             db.Database.ExecuteSqlInterpolated($"""
                 INSERT INTO ExportTemplates (Company, Name, ShipmentMode, Purpose, Version, Notes, WeightRule, LayoutKey, IsEnabled, IsDefault, UpdatedAt)
                 SELECT 'Huadeng', '华登多柜特殊表', 'Container', {purpose}, '1.0', '', 'Template', 'SkyCastle', 1, 0, {DateTime.UtcNow}
                 WHERE NOT EXISTS (SELECT 1 FROM ExportTemplates WHERE Company='Huadeng' AND LayoutKey='SkyCastle' AND Purpose={purpose})
                 """);
+        // 华登仅保留普通走柜、普通交仓和 SKY 分柜特殊表；旧配置停用，不删除历史记录。
+        db.Database.ExecuteSqlRaw("""
+            UPDATE ExportTemplates SET IsDefault=0 WHERE Company='Huadeng';
+            UPDATE ExportTemplates SET IsEnabled=0, IsDefault=0
+            WHERE Company='Huadeng' AND Id NOT IN (
+                SELECT MIN(Id) FROM ExportTemplates WHERE Company='Huadeng' AND
+                    ((LayoutKey='Standard' AND WeightRule='DisplayInteger') OR
+                     (LayoutKey='SkyCastle' AND ShipmentMode='Container' AND WeightRule='Template'))
+                GROUP BY ShipmentMode, Purpose, LayoutKey
+            );
+            UPDATE ExportTemplates SET IsEnabled=1, IsDefault=CASE WHEN LayoutKey='Standard' THEN 1 ELSE 0 END,
+                Name=CASE WHEN LayoutKey='SkyCastle' THEN 'SKY分柜特殊表'
+                          WHEN ShipmentMode='Container' THEN '普通走柜表' ELSE '普通交仓表' END
+            WHERE Company='Huadeng' AND Id IN (
+                SELECT MIN(Id) FROM ExportTemplates WHERE Company='Huadeng' AND
+                    ((LayoutKey='Standard' AND WeightRule='DisplayInteger') OR
+                     (LayoutKey='SkyCastle' AND ShipmentMode='Container' AND WeightRule='Template'))
+                GROUP BY ShipmentMode, Purpose, LayoutKey
+            );
+            """);
     }
 
     public static async Task<string?> ApplyToExport(JsonObject payload, AppDbContext db, CancellationToken cancellationToken, long? templateId = null)
@@ -104,7 +120,7 @@ public static class ExportTemplateEndpoints
         app.MapGet("/api/export-templates", async (HttpContext context, AppDbContext db, CancellationToken cancellationToken) =>
         {
             if (!ExportTemplateRules.CanManage(((AppUser)context.Items["CurrentUser"]!).Role)) return Results.Json(new { error = "只有管理员、主管和船务员可以管理导出模板" }, statusCode: 403);
-            return Results.Ok(await db.ExportTemplates.AsNoTracking().OrderBy(value => value.ShipmentMode)
+            return Results.Ok(await db.ExportTemplates.AsNoTracking().Where(value => value.Company != "Huadeng" || value.IsEnabled).OrderBy(value => value.ShipmentMode)
                 .ThenBy(value => value.Purpose).ThenByDescending(value => value.IsDefault).ThenBy(value => value.Name).ToListAsync(cancellationToken));
         });
         app.MapPut("/api/export-templates", async (ExportTemplate input, HttpContext context, AppDbContext db, CancellationToken cancellationToken) =>
@@ -115,10 +131,13 @@ public static class ExportTemplateEndpoints
             input.Notes = input.Notes?.Trim() ?? "";
             if (input.Id < 0) return Results.BadRequest(new { error = "模板编号无效" });
             input.Company = db.Company;
+            if (db.Company == "Huadeng" && input.Id == 0) return Results.BadRequest(new { error = "华登使用固定的三种模板，请编辑已有配置" });
             if (ExportTemplateRules.Validate(input) is string error) return Results.BadRequest(new { error });
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             var entity = input.Id == 0 ? new ExportTemplate() : await db.ExportTemplates.SingleOrDefaultAsync(value => value.Id == input.Id, cancellationToken);
             if (entity is null) return Results.NotFound(new { error = "模板不存在或属于其他公司" });
+            if (db.Company == "Huadeng" && (!entity.IsEnabled || input.LayoutKey != entity.LayoutKey || input.ShipmentMode != entity.ShipmentMode || input.Purpose != entity.Purpose || input.WeightRule != entity.WeightRule))
+                return Results.BadRequest(new { error = "华登仅使用普通走柜、普通交仓、SKY分柜特殊表，不新增版式或公式版本" });
             // Clear the previous default before saving the new one; the unique index also
             // protects each company/mode/purpose combination from concurrent defaults.
             if (input.IsDefault)

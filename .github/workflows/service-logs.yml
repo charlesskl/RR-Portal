@@ -1,13 +1,6 @@
-name: VoyagePlex Parser Size Fix Scoped Release and Verification
+name: VoyagePlex Xingxin Read Only Production Fetch Evidence
 on:
   workflow_dispatch:
-    inputs:
-      mode:
-        description: Scoped parser release or read-only verification
-        required: true
-        default: verify
-        type: choice
-        options: [verify, release]
 permissions:
   contents: read
 concurrency:
@@ -15,66 +8,53 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  RELEASE_WORKFLOW_PIN: 'true'
-  VERIFY_WORKFLOW_PIN: 'false'
-  HELPER_SHA256: 'ddefc7385bd0a4058b4dda99e5acc6353cc48d68d02d3f20045ce98c27366455'
+  READONLY_WORKFLOW_PIN: 'false'
+  READONLY_HELPER_SHA256: '72d918154d84832010f8ad7277040b7c6256644560efaad4eb654138210a5b30'
 jobs:
-  parser:
+  observe:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 12
     steps:
-      - name: Validate fixed branch first attempt mode and pinned host
+      - name: Validate fixed branch first attempt and pinned host
         shell: bash
         env:
           RELEASE_BRANCH: ${{ github.ref }}
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
-          RELEASE_MODE: ${{ inputs.mode }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ ( "$RELEASE_MODE" = release && "$RELEASE_WORKFLOW_PIN" = true ) || ( "$RELEASE_MODE" = verify && "$VERIFY_WORKFLOW_PIN" = true ) ]] || exit 1
-          [[ "$HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-size-fix-20261020 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
+          [[ "$READONLY_WORKFLOW_PIN" = true && "$READONLY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-size-fix-20261020 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only the reviewed parser release or read-only verification
+      - name: Collect only sealed logs current cursor and one bounded shared mailbox fetch
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
-          RELEASE_RUN_ID: ${{ github.run_id }}
-          RELEASE_MODE: ${{ inputs.mode }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 55m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_RUN_ID,RELEASE_MODE,RELEASE_WORKFLOW_PIN,VERIFY_WORKFLOW_PIN,HELPER_SHA256
+          command_timeout: 10m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,READONLY_WORKFLOW_PIN,READONLY_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ ( "$RELEASE_MODE" = release && "$RELEASE_WORKFLOW_PIN" = true ) || ( "$RELEASE_MODE" = verify && "$VERIFY_WORKFLOW_PIN" = true ) ]] || exit 1
-            [[ "$HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-size-fix-20261020 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
-            [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_RUN_ID" =~ ^[0-9]{1,20}$ ]] || exit 1
+            [[ "$READONLY_WORKFLOW_PIN" = true && "$READONLY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-size-fix-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/voyageplex-size-fix-20261020:refs/remotes/origin/ops/voyageplex-size-fix-20261020 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/voyageplex-size-fix-20261020)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            parser_fix_tmp=$(mktemp -d /tmp/voyageplex-parser-size-fix.XXXXXX)
-            trap 'rm -rf "$parser_fix_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-size-fix-release.py" > "$parser_fix_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$parser_fix_tmp/run.py" | cut -d ' ' -f1)" = "$HELPER_SHA256" ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-mail-readonly-20261020-03.py" > "$parser_fix_tmp/mail-observation-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$parser_fix_tmp/mail-observation-library.py" | cut -d ' ' -f1)" = 2c5675ab534d1fcac5f28698e5418daf3ca0366b549c0c9b78fb58d95e95d4c0 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$parser_fix_tmp/batch-backup-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$parser_fix_tmp/batch-backup-library.py" | cut -d ' ' -f1)" = a06bd4dd932df22b9127cda35a2dd7a8d69fafd879d6619ce3b50aa54252cd5d ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$parser_fix_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$parser_fix_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$parser_fix_tmp/release-data-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$parser_fix_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/internal-quote-readonly-library.py" > "$parser_fix_tmp/internal-quote-readonly-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$parser_fix_tmp/internal-quote-readonly-library.py" | cut -d ' ' -f1)" = be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/portable-pdb-library.py" > "$parser_fix_tmp/portable-pdb-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$parser_fix_tmp/portable-pdb-library.py" | cut -d ' ' -f1)" = cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5 ]] || exit 1
-            timeout --signal=TERM --kill-after=20s 50m python3 -B "$parser_fix_tmp/run.py" "$RELEASE_MODE"
+            xingxin_probe_tmp=$(mktemp -d /tmp/voyageplex-xingxin-readonly.XXXXXX)
+            trap 'rm -rf "$xingxin_probe_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-xingxin-sealed-log-probe.py" > "$xingxin_probe_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$xingxin_probe_tmp/run.py" | cut -d ' ' -f1)" = "$READONLY_HELPER_SHA256" ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-mail-readonly-20261020-03.py" > "$xingxin_probe_tmp/mail-observation-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$xingxin_probe_tmp/mail-observation-library.py" | cut -d ' ' -f1)" = 2c5675ab534d1fcac5f28698e5418daf3ca0366b549c0c9b78fb58d95e95d4c0 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-xingxin-production-fetch-probe.py" > "$xingxin_probe_tmp/voyageplex-xingxin-production-fetch-probe.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$xingxin_probe_tmp/voyageplex-xingxin-production-fetch-probe.py" | cut -d ' ' -f1)" = fa3499ae0701671d4ea29796308d7b04671b69ddb8926fd2cd92734b83021c5a ]] || exit 1
+            timeout --signal=TERM --kill-after=20s 8m python3 -B "$xingxin_probe_tmp/run.py" observe

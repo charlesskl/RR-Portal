@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
+const { buildMonthlyWorkbook, monthlyFilename, contentDisposition } = require('./monthly');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -493,6 +494,42 @@ function updateAssemblyStatus(req, res) {
 }
 
 // 报价仅更新现有明细的价格/完成日期，与进入主管审核同次保存，禁止全量 PUT 覆盖工程资料。
+// ── 夹具月结表导出（只读）────────────────────────────────────────────────────
+// 口径：已报价且未驳回/未取消（待审核/待经理审核/待生产/生产中/已完成）的夹具单明细，
+// 按明细 completion_time 所在月份归集（空则用订单 date 兜底），按 workshop 分 sheet。
+app.get('/api/assembly-monthly', async (req, res) => {
+  const month = String(req.query.month || '');
+  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: '请传入 month=YYYY-MM' });
+  const data = loadData();
+  const STATUSES = ['待审核', '待经理审核', '待生产', '生产中', '已完成'];
+  const rows = [];
+  for (const o of data.assembly_orders) {
+    if (!STATUSES.includes(o.status)) continue;
+    for (const it of data.assembly_items.filter(i => i.order_id === o.id)) {
+      const when = (it.completion_time && String(it.completion_time).trim()) || o.date || '';
+      if (!String(when).startsWith(month)) continue;
+      rows.push({
+        order_number: o.order_number, product_name: o.product_name, workshop: o.workshop,
+        date: o.date, reason: o.reason,
+        item_name: it.product_name, quantity: it.quantity, unit: it.unit,
+        price: it.price, completion_time: it.completion_time,
+      });
+    }
+  }
+  rows.sort((a, b) => String(a.completion_time || a.date || '').localeCompare(String(b.completion_time || b.date || '')));
+  if (!rows.length) return res.status(404).json({ error: `${month} 没有可导出的夹具单明细` });
+  try {
+    const rate = +data.exchange_rate_rmb_to_hkd > 0 ? +data.exchange_rate_rmb_to_hkd : 0.86; // 读不到用 0.86（样表口径）
+    const wb = await buildMonthlyWorkbook(rows, month, rate);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', contentDisposition(monthlyFilename(month)));
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (e) {
+    res.status(500).json({ error: '导出失败：' + e.message });
+  }
+});
+
 app.post('/api/assembly/:id/quote', (req, res) => {
   if (decodeURIComponent(req.headers['x-user'] || '') !== '夹具部') return res.status(403).json({ error: '请在夹具部提交报价' });
   const data = loadData();

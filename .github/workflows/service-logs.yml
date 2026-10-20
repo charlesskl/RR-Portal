@@ -1,4 +1,4 @@
-name: VoyagePlex Read Only Cloud Mail Evidence
+name: VoyagePlex Read Only Cloud Mail Follow-up Evidence
 on:
   workflow_dispatch:
 permissions:
@@ -8,9 +8,9 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  READONLY_WORKFLOW_PIN: 'true'
-  READONLY_HELPER_SHA256: '39d0c9a62fdf3053ee7feb6523f107421bffd46edec819daa9f66b1e9271af58'
-  READONLY_CHILD_SHA256: 'abb430f80f782d2c6279b478789f45c748b25eba8757505581942e249c3e0415'
+  READONLY_WORKFLOW_PIN: 'false'
+  READONLY_HELPER_SHA256: '4322d79d0856a372d07baa44b4d5f83d296f17c2f895c0a5b136271df9d54939'
+  READONLY_CHILD_SHA256: 'ff0c9cd58e4b96fba90d5c1b64bc6df5676149850cceb8aa3f27f65a1ec0b222'
 jobs:
   observe:
     runs-on: ubuntu-latest
@@ -52,9 +52,9 @@ jobs:
             umask 077
             mail_readonly_tmp=$(mktemp -d /tmp/voyageplex-readonly-evidence.XXXXXX)
             trap 'rm -rf "$mail_readonly_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-mail-readonly-20261020.py" > "$mail_readonly_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-mail-readonly-20261020-02.py" > "$mail_readonly_tmp/run.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$mail_readonly_tmp/run.py" | cut -d ' ' -f1)" = "$READONLY_HELPER_SHA256" ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-imap-readonly-child.py" > "$mail_readonly_tmp/voyageplex-imap-readonly-child.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-imap-readonly-child-02.py" > "$mail_readonly_tmp/voyageplex-imap-readonly-child.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$mail_readonly_tmp/voyageplex-imap-readonly-child.py" | cut -d ' ' -f1)" = "$READONLY_CHILD_SHA256" ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$mail_readonly_tmp/batch-backup-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$mail_readonly_tmp/batch-backup-library.py" | cut -d ' ' -f1)" = a06bd4dd932df22b9127cda35a2dd7a8d69fafd879d6619ce3b50aa54252cd5d ]] || exit 1

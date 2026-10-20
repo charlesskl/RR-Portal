@@ -2,7 +2,7 @@
 No database opens, data/environment reads, application writes or service signals.
 """
 import hashlib,json,os,pathlib,re,stat,subprocess,sys
-PROBE_PIN=False
+PROBE_PIN=True
 BRANCH='refs/heads/ops/batch-960-966-967-968-20261020'
 ROOT=pathlib.Path('/opt/rr-portal');BASE='4f1f64cac098caa6b202eb27cae9ab8fad9109dd'
 FAILED=ROOT/'deploy/backups/batch-960-966-967-968-20261020-backup-04'

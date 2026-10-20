@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SOURCE_PROBE_WORKFLOW_PIN: 'false'
-  SOURCE_PROBE_HELPER_SHA256: '7c796cff2b70c8d5bf36841c2f051c6538877bfd317b517dee0117ae4baf18c9'
+  SOURCE_PROBE_WORKFLOW_PIN: 'true'
+  SOURCE_PROBE_HELPER_SHA256: '7b2c59494b7de22028bd9c8d57821adc71b99ea893be824fe71b118a36ab1a4c'
 jobs:
   fixed-read-only-source-probe04:
     runs-on: ubuntu-latest

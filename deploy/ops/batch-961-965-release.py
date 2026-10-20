@@ -7,7 +7,7 @@ ROOT=pathlib.Path('/opt/rr-portal');BASE='9a62c7059600c12d4781b94f69098e37a32d90
 BRANCH='refs/heads/ops/batch-961-965-20261020';DEPLOY_PIN=True;VERIFY_PIN=False
 CORE_SHA='4259dcbba7cbdc78809e286c3b20829644104e4a30b284bea84cc6b20f0c24b5';SOURCE_MANIFEST_SHA='c6a2c4b7ea1e5866ed351d1fcef54f2d27f44d099e50879a95bfd535a38e2ab6';EXPECTED_CHANGED_FILES=83
 BACKUP=ROOT/'deploy/backups/batch-961-965-20261020-backup';BACKUP_MANIFEST='a18052ed05e4fea60d0073f71aa5a809f395739c89ce63eddf5dfc9ac0ef8924';BACKUP_RESULT='3928baa1a0e10249f22ef26e19d7a4a1be018aefa03b557bcb6c65cfc66aec3e'
-DEPLOY=BACKUP.with_name('batch-961-965-20261020-deploy-04');VERIFY=BACKUP.with_name('batch-961-965-20261020-verify-04');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+DEPLOY=BACKUP.with_name('batch-961-965-20261020-deploy-05');VERIFY=BACKUP.with_name('batch-961-965-20261020-verify-05');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 ORDER=('factory-review','factory-review-test','internal-quote','zuru-order-system','qc-plan-api','qc-plan-web','printlink')
 AI_ADDITIONS={'FACTORY_REVIEW_AI_ENABLED':'false','FACTORY_REVIEW_AI_API_KEY':'','FACTORY_REVIEW_AI_MODEL':'','FACTORY_REVIEW_AI_BASE_URL':'https://api.openai.com/v1'}
 
@@ -30,6 +30,9 @@ FAILED_THIRD_MANIFEST='6255d1978b12ac49b8ee92cd6b2afec1609428493af34c53c8ad6035f
 CANDIDATE_DIAGNOSIS_MANIFEST='c9fdbc36e2bbb2b77a49be3346d3534deab999e378722397936eecd3bf7e0b93';CANDIDATE_DIAGNOSIS_RESULT='e2681a9ca81db3d0783f198d77d14850ba64f93c5832a9ee152460e4b5ead491'
 REUSED_IMAGES={'factory-review':'sha256:fec30b798833324d9dda79141e25f2ebfb790e202ac383c8c92346cfcdb8a01f','factory-review-test':'sha256:76665e7c49a25992580e34a633550e13878197dc51b05dbd9791061d45e77d00','internal-quote':'sha256:b80be2a626e5ee9fbd64530fa1429d04f550cec41c4790f25aa952e4790bd3da'}
 REJECTED_ZURU_IMAGE='sha256:b4d3baa9b72f3a6b976c4331410e17704f464ebee572e70fc9512f070f4b2220'
+FAILED_FOURTH=BACKUP.with_name('batch-961-965-20261020-deploy-04');REGISTRY_DIAGNOSIS=BACKUP.with_name('batch-961-965-20261020-registry-diagnosis-04-01')
+FAILED_FOURTH_MANIFEST='86224078873d37331447df5d1d2b99073a34429eb4979949403b2e43a7bf4790';FAILED_FOURTH_RESULT='f05beadfc42b37d54764c3d36db1febaf79ecdd2874b736ea0191f7e76f41ccf'
+REGISTRY_DIAGNOSIS_MANIFEST='24a0167da1e5f69dcb47e181fdc959e6a89030811bf9c42c4f631aa06de25a14';REGISTRY_DIAGNOSIS_RESULT='c6b589d93e789ef03a0cb01e7cf615ed1fae9ab7789f8907c4e453b8d55fd270'
 ZURU_GIT_RECIPE_SHA='0d85ba58982b4222611868395b886f0575f6c54c3a0242f1e42b9a82e87acd58';ZURU_VERSION_ONLY_RECIPE_SHA='18570817978023a8201db96ccf7bf25b2c7fcfdb2504b7b05130e9ec809865c6'
 STAGE='entrypoint';CORE=None;OUT=None;ENV=None
 COMPOSE=['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production')]
@@ -249,14 +252,33 @@ def resolve_python_base(index):
     return choices[0]['digest']
 
 
-def exact_zuru_recipe(original,digest):
-    need(type(original)is bytes and sha(original)==ZURU_GIT_RECIPE_SHA and original.count(b'FROM python:3.12-slim\n')==1 and original.startswith(b'FROM python:3.12-slim\n')and re.fullmatch('sha256:[a-f0-9]{64}',digest))
-    version_only=original.replace(b'FROM python:3.12-slim\n',b'FROM python:3.12.13-slim\n',1)
-    need(sha(version_only)==ZURU_VERSION_ONLY_RECIPE_SHA)
-    first=('FROM python:3.12.13-slim@'+digest+'\n').encode()
-    actual=first+original.split(b'\n',1)[1]
-    need(actual.replace(first,b'FROM python:3.12-slim\n',1)==original)
+def exact_zuru_recipe(original):
+    need(type(original)is bytes and sha(original)==ZURU_GIT_RECIPE_SHA and original.count(b'FROM python:3.12-slim\n')==1 and original.startswith(b'FROM python:3.12-slim\n'))
+    actual=original.replace(b'FROM python:3.12-slim\n',b'FROM python:3.12.13-slim\n',1)
+    need(sha(actual)==ZURU_VERSION_ONLY_RECIPE_SHA and actual.replace(b'FROM python:3.12.13-slim\n',b'FROM python:3.12-slim\n',1)==original)
     return actual
+
+
+def recovery05_evidence(before):
+    previous=recovery04_evidence(before);failed=archive(FAILED_FOURTH,FAILED_FOURTH_MANIFEST,FAILED_FOURTH_RESULT,False);diagnosis=archive(REGISTRY_DIAGNOSIS,REGISTRY_DIAGNOSIS_MANIFEST,REGISTRY_DIAGNOSIS_RESULT)
+    need(failed.get('failedStage')=='zuru-resolve-python-3-12-13-manifest-descriptor'and failed.get('target')==TARGET and diagnosis.get('mode')=='registry-diagnosis-04'and diagnosis.get('executedHelperSHA256')=='e9c9007d196bbcc2ba332eab5519b4278a97b45cf400a04e040d1f1bcee4d3d9'and diagnosis.get('failedReleaseArchiveRetainedAndValid')is True and diagnosis.get('observationsStableDuringDiagnosis')is True and diagnosis.get('liveRegistryHTTPOrLoginRequestsPerformed')is False and diagnosis.get('buildsOrServiceSwitchesPerformed')is False)
+    for key in('beforeReadOnlyObservations','afterReadOnlyObservations'):
+        facts=diagnosis[key];need(facts.get('head')==TARGET and all(facts.get(name)is True for name in('all83SourceBytesAndModesIncludingTwoExact0666MapsMatchReviewedTarget','allMaintenanceFlagsUnchanged','allOtherContainersUnchanged','allSevenOldContainerIDsAndConfigurationsUnchanged','environmentBytesUnchanged','headMatchesReviewedTarget','preexistingFourDirtyExactlyUnchanged')))
+    facts=diagnosis['sealedRegistryFacts'];need(facts.get('stdoutBytes')==0 and facts.get('stdoutSHA256')==sha(b'')and facts.get('stderrBytes')==164 and facts.get('stderrSHA256')=='350f9e280154810df10555f08a28ad27ccf2bd32b8b21753a82c322877ba4ad7'and facts.get('jsonParsed')is False and facts.get('reviewedDescriptorParserAccepted')is False and facts.get('returnCodeWasNotPersistedByOriginalCapture')is True and facts.get('rawLogValuesOrMessagesPrinted')is False)
+    errors=facts['fixedErrorIndicators'];need(errors.get('networkOrDNSFailure')is True and all(errors.get(name)is False for name in('buildxPluginUnavailable','tagOrManifestNotFound','registryAuthenticationRejected','registryRateLimited','tlsVerificationFailure','unsupportedOrInvalidRegistryResponse')))
+    return {'previousRecoverySealedEvidence':previous,'fourthFailureAndReadOnlyRegistryDiagnosisSealsValidated':True,'directRegistryNetworkFailureClassifiedWithoutClaimingOriginalExitCode':True,'noLiveRegistryPreResolutionRetryInRecovery05':True}
+
+
+def build_log_base_evidence(content):
+    need(type(content)is bytes)
+    pattern=rb'(?:FROM |resolve )(?:docker\.io/library/)?python:3\.12\.13-slim@(sha256:[a-f0-9]{64})(?=[\s\x1b]|$)'
+    digests=sorted(set(match.decode()for match in re.findall(pattern,content)))
+    return {'status':'capturedFromBuildLog'if len(digests)==1 else'notCaptured','resolvedBaseDigest':digests[0]if len(digests)==1 else None,'matchingDistinctDigestCount':len(digests),'buildLogSHA256':sha(content),'preBuildManifestDigestPinned':False,'reportedDigestIsNotAnAdditionalAcceptanceGuard':True}
+
+
+def optional_build_log_evidence(path):
+    try:result=build_log_base_evidence(CORE.stable_environment_bytes(path));result['buildLogReadStatus']='read';return result
+    except (OSError,RuntimeError):return {'status':'notCaptured','resolvedBaseDigest':None,'matchingDistinctDigestCount':None,'buildLogSHA256':None,'preBuildManifestDigestPinned':False,'reportedDigestIsNotAnAdditionalAcceptanceGuard':True,'buildLogReadStatus':'unavailable'}
 
 
 def prepare_zuru_build_recipe(before,files):
@@ -266,9 +288,7 @@ def prepare_zuru_build_recipe(before,files):
     name=CORE.ZURU+'/Dockerfile';original=CORE.run(['git','show',TARGET+':'+name]);need(files[name]==ZURU_GIT_RECIPE_SHA and CORE.stable_environment_bytes(ROOT/name)==original)
     oldimage=json.loads((BACKUP/'zuru-order-system-image.private.json').read_bytes());need(oldimage['Id']==before['runtime']['targets']['zuru-order-system']['image']and oldimage.get('Architecture')=='amd64'and oldimage.get('Os')=='linux')
     actual,literal=before_maps('zuru-order-system',before);oldenv=CORE.envmap(oldimage['Config'].get('Env')or[]);need(actual['PYTHON_VERSION']==oldenv['PYTHON_VERSION']=='3.12.13'and actual['PYTHON_SHA256']==oldenv['PYTHON_SHA256']and not{'PYTHON_VERSION','PYTHON_SHA256'}&set(literal))
-    STAGE='zuru-resolve-python-3-12-13-manifest-descriptor'
-    raw=private_capture(['docker','buildx','imagetools','inspect','--raw','docker.io/library/python:3.12.13-slim'],'python-3-12-13-registry-index',180)
-    need(len(raw)<=4*1024**2);digest=resolve_python_base(json.loads(raw));STAGE='zuru-derive-exact-one-line-build-recipe';recipe=exact_zuru_recipe(original,digest)
+    STAGE='zuru-derive-exact-version-only-build-recipe';recipe=exact_zuru_recipe(original)
     CORE.OPS.L.private_write(OUT/'zuru-git-Dockerfile.private',original);CORE.OPS.L.private_write(OUT/'zuru-actual-Dockerfile.private',recipe)
     delta=''.join(difflib.unified_diff(original.decode().splitlines(True),recipe.decode().splitlines(True),fromfile='Git-Dockerfile',tofile='Actual-build-only-Dockerfile'))
     CORE.OPS.L.private_write(OUT/'zuru-exact-FROM-diff.private',delta.encode())
@@ -280,7 +300,7 @@ def prepare_zuru_build_recipe(before,files):
     overlay=OUT/'zuru-build-only-compose.private.yml';CORE.OPS.L.private_write(overlay,('services:\n  zuru-order-system:\n    build: !override '+json.dumps(encoded,ensure_ascii=True,separators=(',',':'))+'\n').encode())
     STAGE='zuru-validate-exact-compose-build-only-difference'
     build_compose=[*COMPOSE,'-f',str(overlay)];observed=json.loads(private_capture([*build_compose,'config','--format','json'],'zuru-build-only-compose-config',90));expected=copy.deepcopy(base);expected['services']['zuru-order-system']['build']=replacement;need(observed==expected)
-    proof={'gitRecipeSHA256':sha(original),'actualRecipeSHA256':sha(recipe),'actualRecipeEqualsGitRecipe':False,'onlyFirstFROMLineChanged':True,'oldPythonRuntimeVersionPreserved':'3.12.13','resolvedLinuxAmd64ManifestDigest':digest,'registryResponseSHA256ForEvidenceOnly':sha(raw),'baseDigestTakenFromDescriptorNotCLIByteHash':True,'onlyZuruBuildDescriptionChangedInFullComposeJSON':True,'runtimeSwitchUsesOriginalBaseComposeOnly':True,'hostGitDockerfileComposeAndEnvironmentUnmodified':True}
+    proof={'gitRecipeSHA256':sha(original),'actualRecipeSHA256':sha(recipe),'actualRecipeEqualsGitRecipe':False,'onlyFirstFROMLineChanged':True,'oldPythonRuntimeVersionPreserved':'3.12.13','baseImageReference':'python:3.12.13-slim','preBuildManifestDigestPinned':False,'liveRegistryPreResolutionPerformed':False,'onlyZuruBuildDescriptionChangedInFullComposeJSON':True,'runtimeSwitchUsesOriginalBaseComposeOnly':True,'hostGitDockerfileComposeAndEnvironmentUnmodified':True}
     CORE.OPS.L.private_write(OUT/'zuru-build-recipe-proof.private.json',enc(proof))
     return build_compose,proof
 
@@ -288,7 +308,7 @@ def deploy(result,before,files):
  global STAGE
  STAGE='initial-reviewed-source-old-runtime-and-maintenance';current,raw=CORE.runtime();need(current==before['runtime']and CORE.maintenance_inventory()==before['maintenanceInventory']);checked_source(TARGET,before,files,True)
  for service in ORDER:maintenance('require_maintenance_cleared',service)
- STAGE='sealed-recovery04-evidence';result.update(recovery04_evidence(before));STAGE='old-factory-process-and-seven-sealed-user-identities-before-build';result['prebuildIdentityEvidence']=prebuild_identity_evidence(before,raw);STAGE='fetch-exact-main-without-checkout';CORE.run(['git','-c','core.hooksPath=/dev/null','fetch','origin','main']);need(CORE.run(['git','rev-parse','FETCH_HEAD']).decode().strip()==TARGET);checked_source(TARGET,before,files,True);result.update(sourceAlreadyAtReviewedTargetNoCheckoutOrModeRepair=True);result.update(compose_preflight(before,True));STAGE='prepare-private-zuru-build-only-pinned-python-recipe';zuru_build_compose,recipe_proof=prepare_zuru_build_recipe(before,files);result['zuruBuildRecipeProof']=recipe_proof;built={};result['candidateConfigurationChecks']={};result['reusedSealedImages']={}
+ STAGE='sealed-recovery05-evidence';result.update(recovery05_evidence(before));STAGE='old-factory-process-and-seven-sealed-user-identities-before-build';result['prebuildIdentityEvidence']=prebuild_identity_evidence(before,raw);STAGE='fetch-exact-main-without-checkout';CORE.run(['git','-c','core.hooksPath=/dev/null','fetch','origin','main']);need(CORE.run(['git','rev-parse','FETCH_HEAD']).decode().strip()==TARGET);checked_source(TARGET,before,files,True);result.update(sourceAlreadyAtReviewedTargetNoCheckoutOrModeRepair=True);result.update(compose_preflight(before,True));STAGE='prepare-private-zuru-build-only-version-pinned-python-recipe';zuru_build_compose,recipe_proof=prepare_zuru_build_recipe(before,files);result['zuruBuildRecipeProof']=recipe_proof;built={};result['candidateConfigurationChecks']={};result['reusedSealedImages']={}
  # Reuse the three exact sealed good images. The four required builds
  # all finish before the first target enters maintenance.
  for service in ORDER:
@@ -298,8 +318,9 @@ def deploy(result,before,files):
    if service in{'factory-review','factory-review-test'}:need((candidate[0]['Config'].get('Labels')or{}).get('org.opencontainers.image.revision')==TARGET)
    result['reusedSealedImages'][service]=REUSED_IMAGES[service]
   else:
-   need(old[0]['Id']==(REJECTED_ZURU_IMAGE if service=='zuru-order-system'else current['targets'][service]['image']));STAGE=service+'-build-only-target-image';operation([*(zuru_build_compose if service=='zuru-order-system'else COMPOSE),'build',service],1800);candidate=json.loads(CORE.run(['docker','image','inspect',tag]))
-   if service=='zuru-order-system':need(len(candidate)==1 and candidate[0]['Id']!=REJECTED_ZURU_IMAGE and candidate[0].get('Architecture')=='amd64'and candidate[0].get('Os')=='linux')
+   need(old[0]['Id']==(REJECTED_ZURU_IMAGE if service=='zuru-order-system'else current['targets'][service]['image']));STAGE=service+'-build-only-target-image';operation([*(zuru_build_compose if service=='zuru-order-system'else COMPOSE),'build',service],1800);build_log=OUT/('%04d-%s.private.log'%(CORE.COUNTER,STAGE));candidate=json.loads(CORE.run(['docker','image','inspect',tag]))
+   if service=='zuru-order-system':
+    need(len(candidate)==1 and candidate[0]['Id']!=REJECTED_ZURU_IMAGE and candidate[0].get('Architecture')=='amd64'and candidate[0].get('Os')=='linux');result['zuruBuildRecipeProof']['actualBaseResolutionEvidence']=optional_build_log_evidence(build_log)
   STAGE=service+'-candidate-config-validation';need(len(candidate)==1 and re.fullmatch('sha256:[a-f0-9]{64}',candidate[0]['Id'])and candidate[0]['Id']!=current['targets'][service]['image']);result['candidateConfigurationChecks'][service]=candidate_config_compatible(service,candidate[0],raw[service],before);built[service]=candidate[0]['Id'];checked_source(TARGET,before,files,True)
  expected=current;proofs={};public={};allflags=flags()
  for service in ORDER:

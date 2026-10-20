@@ -1,25 +1,28 @@
-name: PR 961-965 Reviewed Seven Service Verification
+name: PR 961-965 Read Only Bounded Sealed Acceptance Receipt
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [verify]}
+      mode: {type: choice, required: true, options: [diagnose]}
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: deploy-cloud
   queue: max
   cancel-in-progress: false
 env:
-  BATCH_VERIFY_WORKFLOW_PIN: 'true'
-  BATCH_VERIFY_HELPER_SHA256: 'b5b8aabd069f636508dbaf029d59c0fd107f66aec62664ed3c67f1b2d34a29b6'
+  BATCH_RELEASE_WORKFLOW_PIN: 'true'
+  BATCH_RELEASE_HELPER_SHA256: '0ad8a8a8644d9dcbd86c93661a2d77ed2861e66d36694dc4f6b7dbd22862d972'
 jobs:
-  fixed-seven-service-verification:
+  read-only-sealed-acceptance-receipt:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 12
     steps:
       - name: Validate exact ops source and first attempt
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_BRANCH: ${{ github.ref }}
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
@@ -27,10 +30,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$BATCH_VERIFY_WORKFLOW_PIN" = true && "$BATCH_VERIFY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-961-965-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify ]] || exit 1
+          [[ "$BATCH_RELEASE_WORKFLOW_PIN" = true && "$BATCH_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-961-965-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^diagnose$ ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Capture retained GET and closed snapshot evidence then compare
+      - name: Read only failed acceptance check flags and bounded metadata
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -43,34 +46,33 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 28m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,BATCH_VERIFY_WORKFLOW_PIN,BATCH_VERIFY_HELPER_SHA256
+          command_timeout: 8m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,BATCH_RELEASE_WORKFLOW_PIN,BATCH_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$BATCH_VERIFY_WORKFLOW_PIN" = true && "$BATCH_VERIFY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-961-965-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$BATCH_RELEASE_WORKFLOW_PIN" = true && "$BATCH_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-961-965-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^diagnose$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch origin ops/batch-961-965-20261020 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            batch_verify_tmp=$(mktemp -d /tmp/batch-961-965-verify.XXXXXX)
-            trap 'rm -rf "$batch_verify_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch-961-965-verify.py" > "$batch_verify_tmp/run.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$batch_verify_tmp/batch-backup-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$batch_verify_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$batch_verify_tmp/release-data-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/internal-quote-readonly-library.py" > "$batch_verify_tmp/internal-quote-readonly-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/portable-pdb-library.py" > "$batch_verify_tmp/portable-pdb-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-reviewed-files.json" > "$batch_verify_tmp/batch-reviewed-files.json" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-961-965-data-compare.py" > "$batch_verify_tmp/batch-961-965-data-compare.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-qc-sqlite-compat.py" > "$batch_verify_tmp/batch-qc-sqlite-compat.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_verify_tmp/run.py" | cut -d ' ' -f1)" = "$BATCH_VERIFY_HELPER_SHA256" ]] || exit 1
-            [[ "$(sha256sum "$batch_verify_tmp/batch-backup-library.py" | cut -d ' ' -f1)" = 4259dcbba7cbdc78809e286c3b20829644104e4a30b284bea84cc6b20f0c24b5 ]] || exit 1
-            [[ "$(sha256sum "$batch_verify_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
-            [[ "$(sha256sum "$batch_verify_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            [[ "$(sha256sum "$batch_verify_tmp/internal-quote-readonly-library.py" | cut -d ' ' -f1)" = be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69 ]] || exit 1
-            [[ "$(sha256sum "$batch_verify_tmp/portable-pdb-library.py" | cut -d ' ' -f1)" = cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5 ]] || exit 1
-            [[ "$(sha256sum "$batch_verify_tmp/batch-reviewed-files.json" | cut -d ' ' -f1)" = c6a2c4b7ea1e5866ed351d1fcef54f2d27f44d099e50879a95bfd535a38e2ab6 ]] || exit 1
-            [[ "$(sha256sum "$batch_verify_tmp/batch-961-965-data-compare.py" | cut -d ' ' -f1)" = 24358a17941d5ed2aa2d983c6f39e2066a1cccf932db59b214e2f688428f84db ]] || exit 1
-            [[ "$(sha256sum "$batch_verify_tmp/batch-qc-sqlite-compat.py" | cut -d ' ' -f1)" = 5e77b0a75c11f166cbe2151dc9c1fc19a3f589673f2a49dc1c7aa5f046c49d89 ]] || exit 1
-            timeout --signal=TERM --kill-after=20s 26m python3 -B "$batch_verify_tmp/run.py" verify
+            batch_release_tmp=$(mktemp -d /tmp/batch-961-965-diagnosis.XXXXXX)
+            trap 'rm -rf "$batch_release_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/batch-961-965-acceptance-receipt-read.py" > "$batch_release_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-961-965-release.py" > "$batch_release_tmp/batch-961-965-release.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$batch_release_tmp/batch-backup-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$batch_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$batch_release_tmp/release-data-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/internal-quote-readonly-library.py" > "$batch_release_tmp/internal-quote-readonly-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/portable-pdb-library.py" > "$batch_release_tmp/portable-pdb-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-reviewed-files.json" > "$batch_release_tmp/batch-reviewed-files.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_release_tmp/run.py" | cut -d ' ' -f1)" = "$BATCH_RELEASE_HELPER_SHA256" ]] || exit 1
+            [[ "$(sha256sum "$batch_release_tmp/batch-961-965-release.py" | cut -d ' ' -f1)" = f4f1ae32881efbdd35aa9bb36096d28c65e8f624bed0cd37f9099dd0c613a545 ]] || exit 1
+            [[ "$(sha256sum "$batch_release_tmp/batch-backup-library.py" | cut -d ' ' -f1)" = 4259dcbba7cbdc78809e286c3b20829644104e4a30b284bea84cc6b20f0c24b5 ]] || exit 1
+            [[ "$(sha256sum "$batch_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
+            [[ "$(sha256sum "$batch_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            [[ "$(sha256sum "$batch_release_tmp/internal-quote-readonly-library.py" | cut -d ' ' -f1)" = be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69 ]] || exit 1
+            [[ "$(sha256sum "$batch_release_tmp/portable-pdb-library.py" | cut -d ' ' -f1)" = cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5 ]] || exit 1
+            [[ "$(sha256sum "$batch_release_tmp/batch-reviewed-files.json" | cut -d ' ' -f1)" = c6a2c4b7ea1e5866ed351d1fcef54f2d27f44d099e50879a95bfd535a38e2ab6 ]] || exit 1
+            batch_release_limit=6m
+            timeout --signal=TERM --kill-after=30s "$batch_release_limit" python3 -B "$batch_release_tmp/run.py" "$RELEASE_MODE"

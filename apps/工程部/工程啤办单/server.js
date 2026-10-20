@@ -636,7 +636,7 @@ app.post('/api/assembly/:id/quote', (req, res) => {
         if (!['未报价', '已驳回'].includes(order.status)) return res.status(403).json({ error: '已报价单据请先审核驳回，再修改并重新报价' });
         const error = validateAssemblyOrder({ ...order, ...header }, items === undefined ? getOrderById(type, order.id).items : items);
         if (error) return res.status(400).json({ error });
-        if (header.status && header.status !== order.status && !(order.status === '已驳回' && header.status === '未报价')) {
+        if (Object.prototype.hasOwnProperty.call(header, 'status') && header.status !== order.status && !(order.status === '已驳回' && header.status === '未报价')) {
           return res.status(403).json({ error: '请通过审核或报价操作变更夹具单状态' });
         }
         // 不接受从客户端回传的系统字段，明细图片仍走现有保存通道。

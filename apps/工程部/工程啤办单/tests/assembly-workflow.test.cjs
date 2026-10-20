@@ -227,6 +227,7 @@ test('assembly workflow uses isolated real HTTP storage', async t => {
     });
     await t.test('unquoted edits strip quote/system ownership fields and cancellation remains available', async () => {
       const order = await create();
+      for (const status of [null, false, 0, '']) assert.equal((await request(`/api/assembly/${order.id}`, 'PUT', { status }, '合成工程师')).code, 403);
       const changed = await request(`/api/assembly/${order.id}`, 'PUT', {
         items: order.items.map(it => ({ ...it, id: 999999, order_id: 88888, price: 123, completion_time: '2026-10-23', unit: '套', category: '设备' }))
       }, '合成工程师');

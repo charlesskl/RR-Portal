@@ -5,6 +5,7 @@ namespace QcInspection.Api.Data;
 
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
+    public DbSet<InspectionImportBatch> InspectionImportBatches => Set<InspectionImportBatch>();
     public DbSet<User> Users => Set<User>();
     public DbSet<InspectionRecord> InspectionRecords => Set<InspectionRecord>();
     public DbSet<ZuruScheduleRecord> ZuruScheduleRecords => Set<ZuruScheduleRecord>();

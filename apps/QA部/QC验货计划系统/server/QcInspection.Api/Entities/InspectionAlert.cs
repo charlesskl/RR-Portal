@@ -3,6 +3,7 @@ namespace QcInspection.Api.Entities;
 public sealed class InspectionAlert
 {
     public long Id { get; set; }
+    public bool IsRead { get; set; }
     public long InspectionRecordId { get; set; }
     public string Site { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;

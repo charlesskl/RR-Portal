@@ -3,6 +3,7 @@ namespace QcInspection.Api.Entities;
 public sealed class InspectionResultApproval
 {
     public long Id { get; set; }
+    public bool IsRead { get; set; }
     public long InspectionRecordId { get; set; }
     public string Site { get; set; } = string.Empty;
     public string PreviousInternalResult { get; set; } = string.Empty;

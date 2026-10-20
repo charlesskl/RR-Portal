@@ -359,7 +359,13 @@
             </select>
           </div>
           <div class="col-md-3"><label class="form-label fw-bold">跟进工程师</label><input class="form-control" id="asm-engineer" placeholder="请输入姓名"></div>
-          <div class="col-md-6"><label class="form-label fw-bold">原因/备注</label><input class="form-control" id="asm-reason" placeholder="备注信息"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">车间 <span class="text-muted fw-normal small">（选填）</span></label>
+            <select class="form-select" id="asm-workshop">
+              <option value="">请选择车间</option>
+              <option>A车间</option><option>B车间</option><option>兴信车间</option><option>华登车间</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">原因/备注</label><input class="form-control" id="asm-reason" placeholder="备注信息"></div>
         </div>
         <div class="d-flex justify-content-between align-items-center mb-2">
           <strong>夹具明细</strong>
@@ -1305,6 +1311,7 @@ function editAsmOrder(id) {
       document.getElementById('asm-supervisor').value = order.supervisor || '';
       document.getElementById('asm-engineer').value = order.eng_name || '';
       document.getElementById('asm-reason').value = order.reason || '';
+      document.getElementById('asm-workshop').value = order.workshop || '';
       document.getElementById('asm-status').value = (order.status === '已驳回') ? '待审核' : order.status;
       const tbody = document.getElementById('asmItemsBody');
       tbody.innerHTML = '';
@@ -1364,6 +1371,7 @@ function saveAsmOrder() {
     supervisor: document.getElementById('asm-supervisor').value || null,
     eng_name: document.getElementById('asm-engineer').value || null,
     reason: document.getElementById('asm-reason').value || null,
+    workshop: document.getElementById('asm-workshop').value || null,
     status: document.getElementById('asm-status').value,
     items: items,
   };
@@ -2409,6 +2417,7 @@ function openNewAsmModal() {
   document.getElementById('asm-supervisor').value = '';
   document.getElementById('asm-engineer').value = '';
   document.getElementById('asm-reason').value = '';
+  document.getElementById('asm-workshop').value = '';
   document.getElementById('asm-status').value = '未报价';
   document.getElementById('asmItemsBody').innerHTML = '';
   _asmRowSeq = 0;

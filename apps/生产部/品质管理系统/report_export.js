@@ -1564,13 +1564,17 @@ function _buildIQCCanvas(r) {
     return items;
   }
 
-  /* ── 判定（measurements 有 FAIL 时强制 REJ）── */
-  const resultRaw   = (r.result || '').toUpperCase();
+  /* 报告与录入使用同一最终判定；人工 COND/HOLD 保留，测量 FAIL 明细仍如实显示。 */
+  const resultRaw = String(r.result || '').trim().toUpperCase();
   const hasMeasFail = Array.isArray(r.measurements) &&
     r.measurements.some(m => String(m.result || '').toUpperCase() === 'FAIL');
-  const _isP = !hasMeasFail && (resultRaw === 'PASS' || resultRaw === 'OK');
-  const _isR = hasMeasFail || resultRaw === 'REJ' || resultRaw === 'FAIL' || resultRaw === 'NG';
-  const _isC = !hasMeasFail && resultRaw === 'COND';
+  const finalResult = typeof getFinalRecordResult === 'function'
+    ? getFinalRecordResult(resultRaw, r.defects, r.measurements, Number(r.qty) || 0)
+    : (resultRaw === 'COND' || resultRaw === 'HOLD' ? resultRaw : hasMeasFail ? 'REJ' : resultRaw);
+  const _isP = finalResult === 'PASS' || finalResult === 'OK';
+  const _isR = finalResult === 'REJ' || finalResult === 'FAIL' || finalResult === 'NG';
+  const _isC = finalResult === 'COND';
+  const _isH = finalResult === 'HOLD';
 
   /* ── 解析不良 ── */
   const defectItems = _isP ? [] : parseDefectItems(r.defect);
@@ -1820,7 +1824,7 @@ function _buildIQCCanvas(r) {
           <div style="display:flex;flex-direction:column;justify-content:center;gap:8px">
             <div style="text-align:center;font-size:11px;white-space:nowrap;font-weight:${_isP?'900':'600'};${_isP?'background:#000;color:#fff;padding:5px 4px':'color:#4b5563;padding:5px 4px'}">合格</div>
             <div style="text-align:center;font-size:11px;white-space:nowrap;font-weight:${_isR?'900':'600'};${_isR?'background:#000;color:#fff;padding:5px 4px':'color:#4b5563;padding:5px 4px'}">不合格</div>
-            <div style="text-align:center;font-size:11px;white-space:nowrap;font-weight:${_isC?'900':'600'};${_isC?'background:#000;color:#fff;padding:5px 4px':'color:#4b5563;padding:5px 4px'}">AOD</div>
+            <div style="text-align:center;font-size:11px;white-space:nowrap;font-weight:${_isC||_isH?'900':'600'};${_isC||_isH?'background:#000;color:#fff;padding:5px 4px':'color:#4b5563;padding:5px 4px'}">${_isH?'待定':'AOD'}</div>
           </div>
         </td>
       </tr>

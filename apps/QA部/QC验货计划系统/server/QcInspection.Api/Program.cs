@@ -722,7 +722,7 @@ app.MapPost("/api/legacy-inspections/import", async (HttpRequest request, string
             alert.Status = "已处理"; alert.HandledBy = principal.Identity?.Name ?? "Excel导入";
             alert.HandledAt = DateTime.UtcNow;
         }
-        activity.Add((current, "变更", string.Join("；", changes), !Equals(before, after)));
+        activity.Add((current, "变更", changes.Length > 0 ? string.Join("；", changes) : "以Excel验货表为准，旧结果修改申请已撤回", !Equals(before, after)));
         updated++;
     }
     InspectionImportBatch? importBatch = null;
@@ -756,10 +756,11 @@ app.MapGet("/api/inspection-imports/{id:long}", async (long id, string site, str
     if (batch is null) return Results.NotFound(new { error = "该厂区的导入批次不存在" });
     var all = JsonSerializer.Deserialize<List<InspectionImportItem>>(batch.ItemsJson) ?? [];
     var filtered = all.Where(item => string.IsNullOrEmpty(kind) || item.Kind == kind || kind == "结果变更" && item.ResultChanged).ToArray();
-    var pageNumber = Math.Max(page ?? 1, 1);
+    var totalPages = Math.Max(1, (int)Math.Ceiling(filtered.Length / 100d));
+    var pageNumber = Math.Clamp(page ?? 1, 1, totalPages);
     return Results.Ok(new { batch.Id, batch.Site, batch.FileName, batch.CreatedAt, batch.Inserted, batch.Updated,
         batch.ResultChanged, batch.Unchanged, batch.PendingReviewCount, total = filtered.Length, page = pageNumber,
-        totalPages = Math.Max(1, (int)Math.Ceiling(filtered.Length / 100d)), items = filtered.Skip((pageNumber - 1) * 100).Take(100),
+        totalPages, items = filtered.Skip((pageNumber - 1) * 100).Take(100),
         issues = JsonSerializer.Deserialize<List<LegacyImportIssue>>(batch.IssuesJson) });
 }).RequireAuthorization("QcRead");
 

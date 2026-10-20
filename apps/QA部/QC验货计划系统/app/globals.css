@@ -36,3 +36,5 @@
 .import-issues-dialog{width:min(1100px,94vw)}.import-issues-dialog .tablewrap{max-height:60vh;overflow:auto;margin:0 20px}.import-issues-dialog table{min-width:850px}.import-issues-dialog .import-issue-reason{white-space:normal;min-width:300px;line-height:1.6}.import-issues-dialog .dialog-head small{display:block;max-width:950px;line-height:1.6}
 
 .inspection-status-banner{align-items:flex-start}.inspection-status-content{flex:1;min-width:0}.inspection-status-row{display:flex;align-items:center;flex-wrap:wrap;gap:10px;min-height:26px}.inspection-status-row+.inspection-status-row{border-top:1px solid #f0dfbb;margin-top:8px;padding-top:8px}.inspection-status-row>span:first-child{font-weight:600}.inspection-status-row em{margin-left:auto}.import-activity-summary{white-space:normal!important;min-width:300px;max-width:600px;overflow-wrap:anywhere;line-height:1.6}
+
+.import-detail-tabs{overflow-x:auto}.import-detail-tabs button{flex:none;white-space:nowrap}.import-details-back{flex:none;white-space:nowrap}

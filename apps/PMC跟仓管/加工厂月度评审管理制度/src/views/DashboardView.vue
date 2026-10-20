@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DynamicAnalysisPanel from '../components/DynamicAnalysisPanel.vue'
 import { ref, onMounted, computed, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
@@ -55,6 +56,7 @@ const roleLabel = computed(() => (auth.role ? ROLE_LABELS[auth.role] : ''))
 <template>
   <AppLayout>
     <div class="dash">
+      <DynamicAnalysisPanel compact />
       <!-- 欢迎横幅 -->
       <section class="hero">
         <div class="hero-text">

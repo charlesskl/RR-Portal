@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DynamicAnalysisPanel from '../components/DynamicAnalysisPanel.vue'
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
@@ -115,6 +116,7 @@ async function approveStatus() {
 </script>
 <template>
   <AppLayout>
+    <DynamicAnalysisPanel v-if="factory.id" compact :factory-id="factory.id" />
     <div class="page detail">
     <h2>{{ isNew ? '新增工厂' : factory.name }}</h2>
     <section class="card info-row">

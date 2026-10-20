@@ -6,6 +6,7 @@ import type { Craft, Region } from '../constants/roles'
 const routes: RouteRecordRaw[] = [
   { path: '/login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
   { path: '/', redirect: '/dashboard' },
+  { path: '/analysis', component: () => import('../views/DynamicAnalysisView.vue') },
   { path: '/dashboard', component: () => import('../views/DashboardView.vue') },
   { path: '/grade/:month/:grade', component: () => import('../views/GradeDetailView.vue') },
   { path: '/factories', component: () => import('../views/FactoryListView.vue') },

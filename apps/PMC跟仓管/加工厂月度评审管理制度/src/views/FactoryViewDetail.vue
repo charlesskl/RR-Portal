@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DynamicAnalysisPanel from '../components/DynamicAnalysisPanel.vue'
 import { ref, onMounted } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
@@ -34,6 +35,7 @@ onMounted(async () => {
 </script>
 <template>
   <AppLayout>
+    <DynamicAnalysisPanel v-if="factory.id" compact :factory-id="factory.id" />
     <div class="page detail">
       <div class="toolbar">
         <RouterLink to="/factory-view" class="back">← 加工厂管理</RouterLink>

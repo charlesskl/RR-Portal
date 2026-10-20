@@ -90,6 +90,7 @@ export const canViewKpi = (role: Role) => role !== 'gm'
 
 // 路由守卫：路径前缀 → 所需视图权限
 const PATH_CAPS: [string, (r: Role) => boolean][] = [
+  ['/analysis', r => canViewQuality(r) || canViewOrders(r)],
   ['/factory-view', canViewFactoryAdmin],
   ['/factories', canViewFactories],
   ['/orders', canViewOrders],

@@ -52,7 +52,7 @@ let disposed = false
 const factoryName = (id: string) => factories.items.find(f => f.id === id)?.name || '未知工厂'
 const scopedRecords = computed(() => records.value.filter(r => availableFactories.value.some(f => f.id === r.factory)))
 const dates = computed(() => [...new Set(scopedRecords.value.map(r => String(r.check_date).slice(0, 10)))].sort().reverse())
-const rows = computed(() => scopedRecords.value.filter(r => (!date.value || r.check_date.slice(0, 10) === date.value) && (!grade.value || r.grade === grade.value) && factoryName(r.factory).includes(search.value.trim())))
+const rows = computed(() => scopedRecords.value.filter(r => (!route.query.factory || r.factory === route.query.factory) && (!date.value || r.check_date.slice(0, 10) === date.value) && (!grade.value || r.grade === grade.value) && factoryName(r.factory).includes(search.value.trim())))
 const stats = computed(() => patrolSummary(rows.value.map(r => ({ factory: r.factory, grade: r.grade, staff: r.staff }))))
 const display = (r: Record<string, any>, field: typeof PATROL_FIELDS[number]) => field.type === 'date' ? (r[field.key]?.slice(0, 10) || '—') : (r[field.key] === '' || r[field.key] == null ? '—' : r[field.key])
 const photoUrl = (r: RecordModel, name: string) => pb.files.getURL(r, name, { token: fileToken.value })
@@ -119,7 +119,7 @@ async function load() {
   try {
     await factories.fetchAll()
     records.value = await pb.collection('quality_patrols').getFullList({ sort: '-check_date,factory' })
-    if (!dateInitialized || (date.value && !dates.value.includes(date.value))) date.value = dates.value[0] || ''
+    if (!dateInitialized || (date.value && !dates.value.includes(date.value))) date.value = (typeof route.query.date === 'string' && dates.value.includes(route.query.date) ? route.query.date : dates.value[0]) || ''
     dateInitialized = true
     void refreshPhotoAccess()
   } catch { error.value = '巡查记录加载失败，请确认服务已更新并重试。' }
@@ -214,7 +214,7 @@ async function remove(r: RecordModel) {
 <template>
   <AppLayout>
     <div class="page patrol-page">
-      <div class="toolbar"><div><RouterLink to="/quality">← 品质管理</RouterLink><h2>巡查现场</h2></div><div class="actions"><button :disabled="loading" @click="compareOpen = true">多次巡查对比</button><button v-if="editable" :disabled="loading || saving" @click="importOpen = true">导入 Excel</button><button v-if="editable" ref="addButton" class="primary" :disabled="loading || saving" @click="openForm()">新增巡查</button></div></div>
+      <div class="toolbar"><div><RouterLink to="/quality">← 品质管理</RouterLink><h2>巡查现场</h2><p v-if="route.query.factory">当前定位：{{ factoryName(String(route.query.factory)) }} <RouterLink :to="{ path: '/quality-patrol', query: { region } }">查看全部工厂</RouterLink></p></div><div class="actions"><button :disabled="loading" @click="compareOpen = true">多次巡查对比</button><button v-if="editable" :disabled="loading || saving" @click="importOpen = true">导入 Excel</button><button v-if="editable" ref="addButton" class="primary" :disabled="loading || saving" @click="openForm()">新增巡查</button></div></div>
       <div class="filters">
         <label>厂区<select v-model="region"><option value="">全部授权厂区</option><option v-for="r in regions" :key="r" :value="r">{{ REGION_LABELS[r] }}</option></select></label>
         <label>检查日期<select v-model="date"><option value="">全部日期</option><option v-for="d in dates" :key="d">{{ d }}</option></select></label>

@@ -8,6 +8,7 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:analysis-backend": "node --test tests/analysisBackend.integration.mjs",
     "test:backend": "node --test tests/qualityPatrolBackend.integration.mjs",
     "test:watch": "vitest"
   },

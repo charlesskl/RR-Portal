@@ -22,6 +22,7 @@ const auth = useAuthStore()
       <aside>
         <nav>
           <RouterLink to="/dashboard">首页</RouterLink>
+          <RouterLink v-if="auth.role && (canViewQuality(auth.role) || canViewOrders(auth.role))" to="/analysis">动态分析中心</RouterLink>
           <RouterLink v-if="auth.role && canViewFactories(auth.role)" to="/factories">工厂信息管理</RouterLink>
           <RouterLink v-if="auth.role && canViewFactoryAdmin(auth.role)" to="/factory-view">加工厂管理</RouterLink>
           <RouterLink v-if="auth.role && canViewOrders(auth.role)" to="/orders">货期管理</RouterLink>

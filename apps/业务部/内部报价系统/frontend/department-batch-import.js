@@ -70,7 +70,7 @@
     }
     return {next, count:grouped.size};
   }
-  function attach(host, {dept,root,config,totalCode,onChange,onApplied,buildElectronic}) {
+  function attach(host, {dept,root,config,getConfig = () => config,totalCode,onChange,onApplied,buildElectronic}) {
     if (!labels[dept]) return;
     const label = labels[dept];
     host.innerHTML = `<h3>批量导入混装${label}报价</h3><p class="muted">可一次选择多份 Excel，按表内正式货号匹配；未填写货号时参考产品名称和文件名。总货号归入共有费用。应用前逐项核对，只替换选中货号的本部门明细，完成后保存草稿。</p>
@@ -78,7 +78,8 @@
       <label class="mixed-upload-button">选择${label}报价单（可多选）<input type="file" multiple accept=".xlsx,.xls" aria-label="批量选择${label}报价单"></label><div data-batch-preview role="status" aria-live="polite"></div>`;
     const input = host.querySelector('input'), preview = host.querySelector('[data-batch-preview]');
     let sequence = 0;
-    const fingerprint = () => JSON.stringify({products:root.mixed_products,shared:root.mixed_shared,config});
+    const fingerprint = () => JSON.stringify({products:root.mixed_products,shared:root.mixed_shared,config:getConfig()});
+    const current = request => request === sequence && host.isConnected !== false;
     input.onchange = async () => {
       const request = ++sequence, files = [...input.files];
       if (!files.length) {preview.textContent='';return;}
@@ -88,17 +89,19 @@
       input.disabled = true;
       try {
         for (const [i,file] of files.entries()) {
-          if (request !== sequence) return;
+          if (!current(request)) return;
           preview.textContent = `正在解析 ${i+1}/${files.length}：${file.name}`;
           try {
             const body = new FormData();body.append('file',file);
             const response = await fetch(`/api/uploads/${endpoint}`,{method:'POST',credentials:'include',body});
-            const data = await response.json();
-            if (!response.ok || data.error) throw Error(data.error || '解析失败');
+            let data;
+            try { data = await response.json(); }
+            catch { throw Error(`读取失败（HTTP ${response.status}），请重试`); }
+            if (!response.ok || data.error) throw Error(data.error || `读取失败（HTTP ${response.status}），请重试`);
             parsed.push({name:file.name,data});
           } catch (error) {failures.push(`${file.name}：${error.message}`);}
         }
-        if (request !== sequence) return;
+        if (!current(request)) return;
         if (failures.length) {
           preview.textContent = `${failures.length} 份未成功，本批尚未应用任何资料。请修正后重新选择：${failures.join('；')}`;
           return;
@@ -106,8 +109,9 @@
         const entries = entriesFor(dept,parsed,config,totalCode);
         const targets = [...config.products,{id:'__shared__',code:totalCode,name:'每包装共有费用'}];
         preview.innerHTML = `<p>已解析 ${files.length} 份文件、${entries.length} 项报价。请核对货号；无法唯一匹配的项目须手动选择。</p><div class="mixed-scroll"><table class="wb-table"><thead><tr><th>来源文件</th><th>产品 / 项目</th><th>明细数</th><th>对应正式货号</th>${dept==='electronic'?'<th>币种</th>':''}</tr></thead><tbody>${entries.map((entry,i)=>`<tr><td>${escape(entry.file)}</td><td>${escape(entry.name)}${entry.explicit?`<br><small>表内货号：${escape(entry.explicit)}</small>`:''}</td><td>${entry.count}</td><td><select data-batch-target="${i}" aria-label="第${i+1}项对应货号"><option value="">请选择对应货号</option>${targets.map(p=>`<option value="${escape(p.id)}" ${p.id===entry.target?'selected':''}>${escape(p.code)} · ${escape(p.name)}</option>`).join('')}</select></td>${dept==='electronic'?`<td><select data-batch-currency="${i}" aria-label="第${i+1}项币种">${['RMB','USD','HKD'].map(c=>`<option ${c===(entry.data.source_currency||'RMB')?'selected':''}>${c}</option>`).join('')}</select>${entry.data.validation?.ok===false?'<strong>金额校验不一致，请核对原表</strong>':''}</td>`:''}</tr>`).join('')}</tbody></table></div><button data-batch-apply type="button">应用到对应产品</button> <button data-batch-cancel type="button" class="mini">取消预览</button><p data-batch-message></p>`;
-        preview.querySelector('[data-batch-cancel]').onclick=()=>{sequence++;preview.textContent='';input.value='';};
+        preview.querySelector('[data-batch-cancel]').onclick=()=>{sequence++;preview.textContent='';input.value='';input.disabled=false;};
         preview.querySelector('[data-batch-apply]').onclick=()=>{
+          if (!current(request)) return;
           const message=preview.querySelector('[data-batch-message]');
           try {
             if (fingerprint()!==original) throw Error('本部门资料或产品配置已变化，请重新选择文件预览，避免覆盖新修改');
@@ -115,14 +119,16 @@
             preview.querySelectorAll('[data-batch-currency]').forEach(select=>{entries[Number(select.dataset.batchCurrency)].data.source_currency=select.value;});
             const result=apply(root,dept,entries,config,buildElectronic);
             if (!confirm(`将更新 ${result.count} 个货号的${label}明细，已选货号的原明细会替换；确认应用？`)) return;
+            if (!current(request) || fingerprint() !== original) throw Error('本部门资料或产品配置已变化，请重新预览');
+            sequence++;
             root.mixed_products=result.next.mixed_products;root.mixed_shared=result.next.mixed_shared;
             onChange();onApplied();input.value='';preview.textContent=`已应用 ${result.count} 个货号的${label}报价，请保存本部门草稿。`;
           } catch(error) {message.textContent=error.message;}
         };
       } catch(error) {if(request===sequence)preview.textContent=error.message;}
-      finally {input.disabled=false;}
+      finally {if(request===sequence)input.disabled=false;}
     };
-    host.querySelector('[data-batch-format]')?.addEventListener('change',()=>{sequence++;preview.textContent='';input.value='';});
+    host.querySelector('[data-batch-format]')?.addEventListener('change',()=>{sequence++;preview.textContent='';input.value='';input.disabled=false;});
   }
   return {match,entriesFor,apply,attach};
 });

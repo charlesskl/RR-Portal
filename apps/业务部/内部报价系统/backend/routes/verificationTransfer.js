@@ -3,16 +3,17 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{ran
 const db=require('../db');
 const {requireAuth}=require('../middleware/auth');
 const {planFile,applyFile}=require('../services/verificationTransferStream');
+const {VERIFICATION_UPLOAD_BYTES,handleVerificationUpload}=require('../services/verificationUpload');
 const router=express.Router();
 const tempDirectory=fs.mkdtempSync(path.join(os.tmpdir(),'verification-transfer-'));
 fs.chmodSync(tempDirectory,0o700);
 const upload=multer({storage:multer.diskStorage({
  destination:(_req,_file,done)=>done(null,tempDirectory),
  filename:(_req,_file,done)=>done(null,'verification-transfer-'+randomUUID()+'.tmp'),
-}),limits:{fileSize:60*1024*1024}});
+}),limits:{fileSize:VERIFICATION_UPLOAD_BYTES,fields:4,fieldSize:1024,files:1,parts:6}});
 router.use(requireAuth,(req,res,next)=>req.user.perms?.['账号管理']?.can_admin
  ?next():res.status(403).json({error:'只有系统管理员可以导入客户核价资料'}));
-router.post('/',upload.single('file'),async(req,res)=>{
+router.post('/',handleVerificationUpload(upload.single('file')),async(req,res)=>{
  try{
   if(!req.file)return res.status(400).json({error:'请选择核价导入包'});
   // Only files created by this upload middleware are read; never accept a path from the client.

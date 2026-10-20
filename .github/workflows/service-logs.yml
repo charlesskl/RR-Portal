@@ -1,28 +1,25 @@
-name: PR 961-965 Fixed Seven Service Recovery 06
+name: PR 961-965 Reviewed Seven Service Verification
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [deploy]}
+      mode: {type: choice, required: true, options: [verify]}
 permissions:
   contents: read
-  actions: read
 concurrency:
   group: deploy-cloud
   queue: max
   cancel-in-progress: false
 env:
-  BATCH_RELEASE_WORKFLOW_PIN: 'true'
-  BATCH_RELEASE_HELPER_SHA256: 'f4f1ae32881efbdd35aa9bb36096d28c65e8f624bed0cd37f9099dd0c613a545'
+  BATCH_VERIFY_WORKFLOW_PIN: 'true'
+  BATCH_VERIFY_HELPER_SHA256: '571940225e88e46c8b10c7e219dc3f534524267ec91d305ea5fd803ab50e6e07'
 jobs:
-  fixed-seven-service-release:
+  fixed-seven-service-verification:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 30
     steps:
       - name: Validate exact ops source and first attempt
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           RELEASE_BRANCH: ${{ github.ref }}
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
@@ -30,18 +27,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$BATCH_RELEASE_WORKFLOW_PIN" = true && "$BATCH_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-961-965-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^deploy$ ]] || exit 1
+          [[ "$BATCH_VERIFY_WORKFLOW_PIN" = true && "$BATCH_VERIFY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-961-965-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-          if [[ "$RELEASE_MODE" = deploy ]]; then
-            gh api "repos/$GH_REPO/actions/workflows/deploy.yml" > "$RUNNER_TEMP/batch-standard-workflow.json"
-            python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["state"]=="disabled_manually"' "$RUNNER_TEMP/batch-standard-workflow.json"
-            for state in queued in_progress waiting requested pending; do
-              gh api --method GET "repos/$GH_REPO/actions/workflows/deploy.yml/runs" -f status="$state" -f per_page=1 > "$RUNNER_TEMP/batch-standard-runs.json"
-              python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["total_count"]==0' "$RUNNER_TEMP/batch-standard-runs.json"
-            done
-          fi
-      - name: Switch only the seven reviewed target services using sealed prebuilt images
+      - name: Capture retained GET and closed snapshot evidence then compare
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -54,37 +43,34 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 50m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,BATCH_RELEASE_WORKFLOW_PIN,BATCH_RELEASE_HELPER_SHA256
+          command_timeout: 28m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,BATCH_VERIFY_WORKFLOW_PIN,BATCH_VERIFY_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$BATCH_RELEASE_WORKFLOW_PIN" = true && "$BATCH_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-961-965-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^deploy$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$BATCH_VERIFY_WORKFLOW_PIN" = true && "$BATCH_VERIFY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-961-965-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch origin ops/batch-961-965-20261020 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            batch_release_tmp=$(mktemp -d /tmp/batch-961-965-release.XXXXXX)
-            trap 'rm -rf "$batch_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch-961-965-release.py" > "$batch_release_tmp/run.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$batch_release_tmp/batch-backup-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$batch_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$batch_release_tmp/release-data-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/internal-quote-readonly-library.py" > "$batch_release_tmp/internal-quote-readonly-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/portable-pdb-library.py" > "$batch_release_tmp/portable-pdb-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-reviewed-files.json" > "$batch_release_tmp/batch-reviewed-files.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_release_tmp/run.py" | cut -d ' ' -f1)" = "$BATCH_RELEASE_HELPER_SHA256" ]] || exit 1
-            [[ "$(sha256sum "$batch_release_tmp/batch-backup-library.py" | cut -d ' ' -f1)" = 4259dcbba7cbdc78809e286c3b20829644104e4a30b284bea84cc6b20f0c24b5 ]] || exit 1
-            [[ "$(sha256sum "$batch_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
-            [[ "$(sha256sum "$batch_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            [[ "$(sha256sum "$batch_release_tmp/internal-quote-readonly-library.py" | cut -d ' ' -f1)" = be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69 ]] || exit 1
-            [[ "$(sha256sum "$batch_release_tmp/portable-pdb-library.py" | cut -d ' ' -f1)" = cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5 ]] || exit 1
-            [[ "$(sha256sum "$batch_release_tmp/batch-reviewed-files.json" | cut -d ' ' -f1)" = c6a2c4b7ea1e5866ed351d1fcef54f2d27f44d099e50879a95bfd535a38e2ab6 ]] || exit 1
-            batch_release_limit=18m
-            [[ "$RELEASE_MODE" != deploy ]] || batch_release_limit=45m
-            timeout --signal=TERM --kill-after=30s "$batch_release_limit" python3 -B "$batch_release_tmp/run.py" "$RELEASE_MODE"
-      - name: Report regular deployment restoration obligation
-        if: always()
-        shell: bash
-        run: |
-          echo 'MANUAL_ATTENTION: The release owner must restore deploy.yml to its saved original state and verify it. This read-only-token workflow does not change that setting.'
+            batch_verify_tmp=$(mktemp -d /tmp/batch-961-965-verify.XXXXXX)
+            trap 'rm -rf "$batch_verify_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/batch-961-965-verify.py" > "$batch_verify_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$batch_verify_tmp/batch-backup-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$batch_verify_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$batch_verify_tmp/release-data-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/internal-quote-readonly-library.py" > "$batch_verify_tmp/internal-quote-readonly-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/portable-pdb-library.py" > "$batch_verify_tmp/portable-pdb-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-reviewed-files.json" > "$batch_verify_tmp/batch-reviewed-files.json" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-961-965-data-compare.py" > "$batch_verify_tmp/batch-961-965-data-compare.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-qc-sqlite-compat.py" > "$batch_verify_tmp/batch-qc-sqlite-compat.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_verify_tmp/run.py" | cut -d ' ' -f1)" = "$BATCH_VERIFY_HELPER_SHA256" ]] || exit 1
+            [[ "$(sha256sum "$batch_verify_tmp/batch-backup-library.py" | cut -d ' ' -f1)" = 4259dcbba7cbdc78809e286c3b20829644104e4a30b284bea84cc6b20f0c24b5 ]] || exit 1
+            [[ "$(sha256sum "$batch_verify_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
+            [[ "$(sha256sum "$batch_verify_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            [[ "$(sha256sum "$batch_verify_tmp/internal-quote-readonly-library.py" | cut -d ' ' -f1)" = be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69 ]] || exit 1
+            [[ "$(sha256sum "$batch_verify_tmp/portable-pdb-library.py" | cut -d ' ' -f1)" = cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5 ]] || exit 1
+            [[ "$(sha256sum "$batch_verify_tmp/batch-reviewed-files.json" | cut -d ' ' -f1)" = c6a2c4b7ea1e5866ed351d1fcef54f2d27f44d099e50879a95bfd535a38e2ab6 ]] || exit 1
+            [[ "$(sha256sum "$batch_verify_tmp/batch-961-965-data-compare.py" | cut -d ' ' -f1)" = 24358a17941d5ed2aa2d983c6f39e2066a1cccf932db59b214e2f688428f84db ]] || exit 1
+            [[ "$(sha256sum "$batch_verify_tmp/batch-qc-sqlite-compat.py" | cut -d ' ' -f1)" = 5e77b0a75c11f166cbe2151dc9c1fc19a3f589673f2a49dc1c7aa5f046c49d89 ]] || exit 1
+            timeout --signal=TERM --kill-after=20s 26m python3 -B "$batch_verify_tmp/run.py" verify

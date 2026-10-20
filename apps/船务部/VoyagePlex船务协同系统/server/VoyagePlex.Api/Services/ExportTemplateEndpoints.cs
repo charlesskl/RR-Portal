@@ -66,7 +66,7 @@ public static class ExportTemplateEndpoints
             db.Database.ExecuteSqlInterpolated($"""
                 INSERT INTO ExportTemplates (Company, Name, ShipmentMode, Purpose, Version, Notes, WeightRule, LayoutKey, IsEnabled, IsDefault, UpdatedAt)
                 SELECT 'Huadeng', '华登多柜特殊表', 'Container', {purpose}, '1.0', '', 'Template', 'SkyCastle', 1, 0, {DateTime.UtcNow}
-                WHERE NOT EXISTS (SELECT 1 FROM ExportTemplates WHERE Company='Huadeng' AND LayoutKey='SkyCastle' AND Purpose={purpose})
+                WHERE NOT EXISTS (SELECT 1 FROM ExportTemplates WHERE Company='Huadeng' AND LayoutKey='SkyCastle' AND ShipmentMode='Container' AND WeightRule='Template' AND Purpose={purpose})
                 """);
         // 华登仅保留普通走柜、普通交仓和 SKY 分柜特殊表；旧配置停用，不删除历史记录。
         db.Database.ExecuteSqlRaw("""

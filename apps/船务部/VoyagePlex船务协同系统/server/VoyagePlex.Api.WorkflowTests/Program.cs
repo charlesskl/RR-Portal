@@ -620,3 +620,27 @@ using (var schemaConnection = new SqliteConnection("Data Source=:memory:"))
         throw new Exception("再次启动模板迁移须逐字段幂等，不得覆盖人工设置或更新已有时间戳");
 }
 Console.WriteLine("Export-template actual SQLite schema upgrade, manual disabled/default preservation and restart idempotence passed.");
+
+using (var legacySkyConnection = new SqliteConnection("Data Source=:memory:"))
+{
+    legacySkyConnection.Open();
+    using var legacySkyDb = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(legacySkyConnection).Options);
+    legacySkyDb.Database.EnsureCreated();
+    legacySkyDb.Database.ExecuteSqlRaw("""
+        INSERT INTO ExportTemplates (Id, Company, Name, ShipmentMode, Purpose, Version, Notes, WeightRule, LayoutKey, IsEnabled, IsDefault, UpdatedAt)
+        VALUES (1, 'Huadeng', '历史自定义 SKY', 'Container', 'Shipping', 'custom', '历史公式保留', 'Exact', 'SkyCastle', 1, 0, '2026-01-01T00:00:00Z');
+        """);
+    ExportTemplateEndpoints.EnsureSchema(legacySkyDb);
+    var oldSky = legacySkyDb.ExportTemplates.IgnoreQueryFilters().AsNoTracking().Single(value => value.Id == 1);
+    if (oldSky.Name != "历史自定义 SKY" || oldSky.WeightRule != "Exact" || oldSky.Notes != "历史公式保留" || oldSky.IsEnabled || oldSky.IsDefault)
+        throw new Exception("历史 SKY 自定义公式须保留记录并停用");
+    var catalog = legacySkyDb.ExportTemplates.IgnoreQueryFilters().AsNoTracking().Where(value => value.Company == "Huadeng" && value.IsEnabled).ToArray();
+    foreach (var purpose in new[] { "Shipping", "Warehouse" })
+        if (!catalog.Where(value => value.Purpose == purpose).Select(value => value.Name).Order().SequenceEqual(new[] { "SKY分柜特殊表", "普通交仓表", "普通走柜表" }.Order()))
+            throw new Exception("历史自定义 SKY 公式不能阻止标准 SKY 补齐");
+    var typed = System.Text.Json.JsonSerializer.Serialize(legacySkyDb.ExportTemplates.IgnoreQueryFilters().AsNoTracking().OrderBy(value => value.Id).ToArray());
+    ExportTemplateEndpoints.EnsureSchema(legacySkyDb);
+    if (typed != System.Text.Json.JsonSerializer.Serialize(legacySkyDb.ExportTemplates.IgnoreQueryFilters().AsNoTracking().OrderBy(value => value.Id).ToArray()))
+        throw new Exception("历史 SKY 补齐迁移再次启动须幂等");
+}
+Console.WriteLine("Legacy custom SKY preservation, canonical catalog completion and restart idempotence passed.");

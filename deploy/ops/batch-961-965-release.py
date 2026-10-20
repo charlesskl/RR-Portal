@@ -2,12 +2,12 @@
 Draft: both gates and all target/archive/source facts must be frozen before use.
 Strict verification deliberately has no startup-migration exemptions yet.
 """
-import contextlib,hashlib,html.parser,importlib.util,json,os,pathlib,re,signal,sqlite3,stat,subprocess,sys,time,urllib.error,urllib.parse,urllib.request
+import contextlib,copy,difflib,hashlib,html.parser,importlib.util,json,os,pathlib,re,signal,sqlite3,stat,subprocess,sys,time,urllib.error,urllib.parse,urllib.request
 ROOT=pathlib.Path('/opt/rr-portal');BASE='9a62c7059600c12d4781b94f69098e37a32d901d';TARGET='4f1f64cac098caa6b202eb27cae9ab8fad9109dd';TREE='f062e722bb9a16d51856e494f41a58d3e3670dd2'
 BRANCH='refs/heads/ops/batch-961-965-20261020';DEPLOY_PIN=True;VERIFY_PIN=False
 CORE_SHA='4259dcbba7cbdc78809e286c3b20829644104e4a30b284bea84cc6b20f0c24b5';SOURCE_MANIFEST_SHA='c6a2c4b7ea1e5866ed351d1fcef54f2d27f44d099e50879a95bfd535a38e2ab6';EXPECTED_CHANGED_FILES=83
 BACKUP=ROOT/'deploy/backups/batch-961-965-20261020-backup';BACKUP_MANIFEST='a18052ed05e4fea60d0073f71aa5a809f395739c89ce63eddf5dfc9ac0ef8924';BACKUP_RESULT='3928baa1a0e10249f22ef26e19d7a4a1be018aefa03b557bcb6c65cfc66aec3e'
-DEPLOY=BACKUP.with_name('batch-961-965-20261020-deploy-03');VERIFY=BACKUP.with_name('batch-961-965-20261020-verify-03');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+DEPLOY=BACKUP.with_name('batch-961-965-20261020-deploy-04');VERIFY=BACKUP.with_name('batch-961-965-20261020-verify-04');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 ORDER=('factory-review','factory-review-test','internal-quote','zuru-order-system','qc-plan-api','qc-plan-web','printlink')
 AI_ADDITIONS={'FACTORY_REVIEW_AI_ENABLED':'false','FACTORY_REVIEW_AI_API_KEY':'','FACTORY_REVIEW_AI_MODEL':'','FACTORY_REVIEW_AI_BASE_URL':'https://api.openai.com/v1'}
 
@@ -25,6 +25,12 @@ BUILD_DIAGNOSIS_MANIFEST='f35be3a22d00bb41515b243735703b2d1709f497483a4b44f3e028
 USER_FAILED_MANIFEST='d7c641a7e8c07242a1e1d26c9b01fbf6e0ae4976699559522c86d31cbb6fafb6';USER_FAILED_RESULT='68602e41196426c0726e0e8603d1ec126d880beda3d4779083a6d42e16edd801'
 USER_DIAGNOSIS_MANIFEST='e87d63dc7933067f755bbb44b1cc6dd18dc8e34f270ec361cb158df71b6c92e6';USER_DIAGNOSIS_RESULT='8a24b3e7531ee172d247dca4c239e4757689e39d75dac295dfcb587bd8c4f324';USER_EXECUTED_HELPER='f07fccaeaed480c71c5691d215aa8c73edcafbecc487e1e18f1c6d864678cd7a'
 REUSED_FACTORY_IMAGE='sha256:fec30b798833324d9dda79141e25f2ebfb790e202ac383c8c92346cfcdb8a01f'
+FAILED_THIRD=BACKUP.with_name('batch-961-965-20261020-deploy-03');CANDIDATE_DIAGNOSIS=BACKUP.with_name('batch-961-965-20261020-candidate-diagnosis-03-01')
+FAILED_THIRD_MANIFEST='6255d1978b12ac49b8ee92cd6b2afec1609428493af34c53c8ad6035fe9f0327';FAILED_THIRD_RESULT='ae7e007348436ab81b8f6be3e00383dd58377273472c719c01226b7018c71dc3'
+CANDIDATE_DIAGNOSIS_MANIFEST='c9fdbc36e2bbb2b77a49be3346d3534deab999e378722397936eecd3bf7e0b93';CANDIDATE_DIAGNOSIS_RESULT='e2681a9ca81db3d0783f198d77d14850ba64f93c5832a9ee152460e4b5ead491'
+REUSED_IMAGES={'factory-review':'sha256:fec30b798833324d9dda79141e25f2ebfb790e202ac383c8c92346cfcdb8a01f','factory-review-test':'sha256:76665e7c49a25992580e34a633550e13878197dc51b05dbd9791061d45e77d00','internal-quote':'sha256:b80be2a626e5ee9fbd64530fa1429d04f550cec41c4790f25aa952e4790bd3da'}
+REJECTED_ZURU_IMAGE='sha256:b4d3baa9b72f3a6b976c4331410e17704f464ebee572e70fc9512f070f4b2220'
+ZURU_GIT_RECIPE_SHA='0d85ba58982b4222611868395b886f0575f6c54c3a0242f1e42b9a82e87acd58';ZURU_VERSION_ONLY_RECIPE_SHA='18570817978023a8201db96ccf7bf25b2c7fcfdb2504b7b05130e9ec809865c6'
 STAGE='entrypoint';CORE=None;OUT=None;ENV=None
 COMPOSE=['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production')]
 
@@ -211,19 +217,89 @@ def candidate_config_compatible(service,candidate,raw,before):
  if service in{'factory-review','factory-review-test'}:need((candidate['Config'].get('Labels')or{}).get('org.opencontainers.image.revision')==TARGET)
  return {'candidateUserRawExact':user_exact,'missingNullEmptyDefaultSerializationOnly':not user_exact and default_only,'oldImageAndOldContainerAndNewCandidateDefaultsValidated':default_only,'nonemptyUserNamesUIDsAndGroupsNeverNormalized':True}
 
+def recovery04_evidence(before):
+    previous=recovery03_evidence(before)
+    failed=archive(FAILED_THIRD,FAILED_THIRD_MANIFEST,FAILED_THIRD_RESULT,False)
+    diagnosis=archive(CANDIDATE_DIAGNOSIS,CANDIDATE_DIAGNOSIS_MANIFEST,CANDIDATE_DIAGNOSIS_RESULT)
+    need(failed.get('failedStage')=='zuru-order-system-candidate-config-validation' and failed.get('target')==TARGET and diagnosis.get('mode')=='candidate-diagnosis-03' and diagnosis.get('executedHelperSHA256')=='88d2baa9ec9da67493cd0fa1c9f4ea1334cbc36c71de7dd254fe56b97fca1629' and diagnosis.get('observationsStableDuringDiagnosis')is True and set(diagnosis['tags'])==set(ORDER))
+    for key in('beforeReadOnlyObservations','afterReadOnlyObservations'):
+        facts=diagnosis[key];need(set(facts)=={'head','all83SourceBytesAndModesIncludingTwoExact0666MapsMatchReviewedTarget','allMaintenanceFlagsUnchanged','allOtherContainersUnchanged','allSevenOldContainerIDsAndConfigurationsUnchanged','environmentBytesUnchanged','headMatchesReviewedTarget','preexistingFourDirtyExactlyUnchanged'} and facts['head']==TARGET and all(value is True for name,value in facts.items()if name!='head'))
+    expected=dict(REUSED_IMAGES,**{'zuru-order-system':REJECTED_ZURU_IMAGE})
+    for service,row in diagnosis['tags'].items():
+        old=before['runtime']['targets'][service]['image'];need(row['oldRunningImageID']==old)
+        if service in expected:need(row['currentImageID']==expected[service] and row['currentImageIDBoundToSealedBuildEvidence']is True and row['tagStillOldRunningImage']is False)
+        else:need(row['currentImageID']==old and row['tagStillOldRunningImage']is True)
+    zuru=diagnosis['tags']['zuru-order-system'];need(zuru['changedAllowedEnvironmentKeyNames']==['PYTHON_SHA256','PYTHON_VERSION'] and zuru['changedOtherEnvironmentKeyCount']==0 and zuru['totalChangedEnvironmentKeyCount']==2 and zuru['publicRuntimeVersions']=={'PYTHON_VERSION':{'old':'3.12.13','candidate':'3.12.15'}} and zuru['guards']['candidateEnvironmentExactlyMatchesPreservedLiteralValues']is False and all(value is True for key,value in zuru['guards'].items()if key not in{'candidateEnvironmentExactlyMatchesPreservedLiteralValues','candidateUserRawExact'}))
+    return {'previousRecoverySealedEvidence':previous,'thirdFailureAndSevenTagDiagnosisSealsValidated':True,'onlyKnownZuruPythonPatchDriftRejected':True,'threeReusableImageIDsAndOneRejectedZuruImageBoundToSealedBuilds':True}
+
+
+def private_capture(args,name,timeout=180):
+    need(re.fullmatch('[a-z0-9-]+',name))
+    output=OUT/(name+'.private.json')
+    with output.open('xb')as stream,(OUT/(name+'-stderr.private')).open('xb')as errors:
+        completed=subprocess.run(args,stdout=stream,stderr=errors,timeout=timeout,cwd=ROOT,env=ENV)
+    need(completed.returncode==0 and output.stat().st_size<=32*1024**2)
+    return output.read_bytes()
+
+
+def resolve_python_base(index):
+    need(type(index)is dict and index.get('schemaVersion')==2 and index.get('mediaType')in{'application/vnd.oci.image.index.v1+json','application/vnd.docker.distribution.manifest.list.v2+json'} and type(index.get('manifests'))is list and 0<len(index['manifests'])<=64)
+    choices=[row for row in index['manifests']if type(row)is dict and type(row.get('platform'))is dict and row['platform'].get('os')=='linux'and row['platform'].get('architecture')=='amd64'and row['platform'].get('variant')in(None,'')]
+    need(len(choices)==1 and re.fullmatch('sha256:[a-f0-9]{64}',choices[0].get('digest',''))and choices[0].get('mediaType')in{'application/vnd.oci.image.manifest.v1+json','application/vnd.docker.distribution.manifest.v2+json'})
+    return choices[0]['digest']
+
+
+def exact_zuru_recipe(original,digest):
+    need(type(original)is bytes and sha(original)==ZURU_GIT_RECIPE_SHA and original.count(b'FROM python:3.12-slim\n')==1 and original.startswith(b'FROM python:3.12-slim\n')and re.fullmatch('sha256:[a-f0-9]{64}',digest))
+    version_only=original.replace(b'FROM python:3.12-slim\n',b'FROM python:3.12.13-slim\n',1)
+    need(sha(version_only)==ZURU_VERSION_ONLY_RECIPE_SHA)
+    first=('FROM python:3.12.13-slim@'+digest+'\n').encode()
+    actual=first+original.split(b'\n',1)[1]
+    need(actual.replace(first,b'FROM python:3.12-slim\n',1)==original)
+    return actual
+
+
+def prepare_zuru_build_recipe(before,files):
+    global STAGE
+    STAGE='zuru-verify-compose-version-and-Git-recipe'
+    need(CORE.run(['docker','compose','version','--short']).decode().strip()=='5.1.0')
+    name=CORE.ZURU+'/Dockerfile';original=CORE.run(['git','show',TARGET+':'+name]);need(files[name]==ZURU_GIT_RECIPE_SHA and CORE.stable_environment_bytes(ROOT/name)==original)
+    oldimage=json.loads((BACKUP/'zuru-order-system-image.private.json').read_bytes());need(oldimage['Id']==before['runtime']['targets']['zuru-order-system']['image']and oldimage.get('Architecture')=='amd64'and oldimage.get('Os')=='linux')
+    actual,literal=before_maps('zuru-order-system',before);oldenv=CORE.envmap(oldimage['Config'].get('Env')or[]);need(actual['PYTHON_VERSION']==oldenv['PYTHON_VERSION']=='3.12.13'and actual['PYTHON_SHA256']==oldenv['PYTHON_SHA256']and not{'PYTHON_VERSION','PYTHON_SHA256'}&set(literal))
+    STAGE='zuru-resolve-python-3-12-13-manifest-descriptor'
+    raw=private_capture(['docker','buildx','imagetools','inspect','--raw','docker.io/library/python:3.12.13-slim'],'python-3-12-13-registry-index',180)
+    need(len(raw)<=4*1024**2);digest=resolve_python_base(json.loads(raw));STAGE='zuru-derive-exact-one-line-build-recipe';recipe=exact_zuru_recipe(original,digest)
+    CORE.OPS.L.private_write(OUT/'zuru-git-Dockerfile.private',original);CORE.OPS.L.private_write(OUT/'zuru-actual-Dockerfile.private',recipe)
+    delta=''.join(difflib.unified_diff(original.decode().splitlines(True),recipe.decode().splitlines(True),fromfile='Git-Dockerfile',tofile='Actual-build-only-Dockerfile'))
+    CORE.OPS.L.private_write(OUT/'zuru-exact-FROM-diff.private',delta.encode())
+    STAGE='zuru-capture-original-full-compose-configuration'
+    base=json.loads(private_capture([*COMPOSE,'config','--format','json'],'zuru-original-compose-config',90));build=base['services']['zuru-order-system']['build'];need(type(build)is dict and build.get('context')==str(ROOT/CORE.ZURU)and build.get('dockerfile')=='Dockerfile'and'dockerfile_inline'not in build)
+    replacement=copy.deepcopy(build);del replacement['dockerfile'];replacement['dockerfile_inline']=recipe.decode()
+    encoded=copy.deepcopy(replacement);encoded['dockerfile_inline']=encoded['dockerfile_inline'].replace('$','$$')
+    STAGE='zuru-write-private-build-only-overlay'
+    overlay=OUT/'zuru-build-only-compose.private.yml';CORE.OPS.L.private_write(overlay,('services:\n  zuru-order-system:\n    build: !override '+json.dumps(encoded,ensure_ascii=True,separators=(',',':'))+'\n').encode())
+    STAGE='zuru-validate-exact-compose-build-only-difference'
+    build_compose=[*COMPOSE,'-f',str(overlay)];observed=json.loads(private_capture([*build_compose,'config','--format','json'],'zuru-build-only-compose-config',90));expected=copy.deepcopy(base);expected['services']['zuru-order-system']['build']=replacement;need(observed==expected)
+    proof={'gitRecipeSHA256':sha(original),'actualRecipeSHA256':sha(recipe),'actualRecipeEqualsGitRecipe':False,'onlyFirstFROMLineChanged':True,'oldPythonRuntimeVersionPreserved':'3.12.13','resolvedLinuxAmd64ManifestDigest':digest,'registryResponseSHA256ForEvidenceOnly':sha(raw),'baseDigestTakenFromDescriptorNotCLIByteHash':True,'onlyZuruBuildDescriptionChangedInFullComposeJSON':True,'runtimeSwitchUsesOriginalBaseComposeOnly':True,'hostGitDockerfileComposeAndEnvironmentUnmodified':True}
+    CORE.OPS.L.private_write(OUT/'zuru-build-recipe-proof.private.json',enc(proof))
+    return build_compose,proof
+
 def deploy(result,before,files):
  global STAGE
  STAGE='initial-reviewed-source-old-runtime-and-maintenance';current,raw=CORE.runtime();need(current==before['runtime']and CORE.maintenance_inventory()==before['maintenanceInventory']);checked_source(TARGET,before,files,True)
  for service in ORDER:maintenance('require_maintenance_cleared',service)
- STAGE='sealed-recovery03-evidence';result.update(recovery03_evidence(before));STAGE='old-factory-process-and-seven-sealed-user-identities-before-build';result['prebuildIdentityEvidence']=prebuild_identity_evidence(before,raw);STAGE='fetch-exact-main-without-checkout';CORE.run(['git','-c','core.hooksPath=/dev/null','fetch','origin','main']);need(CORE.run(['git','rev-parse','FETCH_HEAD']).decode().strip()==TARGET);checked_source(TARGET,before,files,True);result.update(sourceAlreadyAtReviewedTargetNoCheckoutOrModeRepair=True);result.update(compose_preflight(before,True));built={};result['candidateConfigurationChecks']={}
- # Reuse only the exact sealed factory image. Every other expensive build
- # still finishes before the first target enters maintenance.
+ STAGE='sealed-recovery04-evidence';result.update(recovery04_evidence(before));STAGE='old-factory-process-and-seven-sealed-user-identities-before-build';result['prebuildIdentityEvidence']=prebuild_identity_evidence(before,raw);STAGE='fetch-exact-main-without-checkout';CORE.run(['git','-c','core.hooksPath=/dev/null','fetch','origin','main']);need(CORE.run(['git','rev-parse','FETCH_HEAD']).decode().strip()==TARGET);checked_source(TARGET,before,files,True);result.update(sourceAlreadyAtReviewedTargetNoCheckoutOrModeRepair=True);result.update(compose_preflight(before,True));STAGE='prepare-private-zuru-build-only-pinned-python-recipe';zuru_build_compose,recipe_proof=prepare_zuru_build_recipe(before,files);result['zuruBuildRecipeProof']=recipe_proof;built={};result['candidateConfigurationChecks']={};result['reusedSealedImages']={}
+ # Reuse the three exact sealed good images. The four required builds
+ # all finish before the first target enters maintenance.
  for service in ORDER:
   STAGE=service+'-pre-build-image-binding';need(CORE.runtime()[0]==current);tag=raw[service]['Config']['Image'];need(tag.removesuffix(':latest')=='rr-portal-'+service);old=json.loads(CORE.run(['docker','image','inspect',tag]));need(len(old)==1)
-  if service=='factory-review':
-   need(old[0]['Id']==REUSED_FACTORY_IMAGE);STAGE=service+'-reuse-sealed-built-image';candidate=old;checked_source(TARGET,before,files,True);need((candidate[0]['Config'].get('Labels')or{}).get('org.opencontainers.image.revision')==TARGET);result['exactPreviouslyBuiltFactoryImageReusedWithoutRebuilding']=True
+  if service in REUSED_IMAGES:
+   need(old[0]['Id']==REUSED_IMAGES[service]);STAGE=service+'-reuse-sealed-built-image';candidate=old;checked_source(TARGET,before,files,True)
+   if service in{'factory-review','factory-review-test'}:need((candidate[0]['Config'].get('Labels')or{}).get('org.opencontainers.image.revision')==TARGET)
+   result['reusedSealedImages'][service]=REUSED_IMAGES[service]
   else:
-   need(old[0]['Id']==current['targets'][service]['image']);STAGE=service+'-build-only-target-image';operation([*COMPOSE,'build',service],1800);candidate=json.loads(CORE.run(['docker','image','inspect',tag]))
+   need(old[0]['Id']==(REJECTED_ZURU_IMAGE if service=='zuru-order-system'else current['targets'][service]['image']));STAGE=service+'-build-only-target-image';operation([*(zuru_build_compose if service=='zuru-order-system'else COMPOSE),'build',service],1800);candidate=json.loads(CORE.run(['docker','image','inspect',tag]))
+   if service=='zuru-order-system':need(len(candidate)==1 and candidate[0]['Id']!=REJECTED_ZURU_IMAGE and candidate[0].get('Architecture')=='amd64'and candidate[0].get('Os')=='linux')
   STAGE=service+'-candidate-config-validation';need(len(candidate)==1 and re.fullmatch('sha256:[a-f0-9]{64}',candidate[0]['Id'])and candidate[0]['Id']!=current['targets'][service]['image']);result['candidateConfigurationChecks'][service]=candidate_config_compatible(service,candidate[0],raw[service],before);built[service]=candidate[0]['Id'];checked_source(TARGET,before,files,True)
  expected=current;proofs={};public={};allflags=flags()
  for service in ORDER:

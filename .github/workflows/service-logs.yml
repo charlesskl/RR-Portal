@@ -1,4 +1,4 @@
-name: PR 961-965 Read Only Build Diagnosis
+name: PR 961-965 Read Only Build User Diagnosis
 on:
   workflow_dispatch:
     inputs:
@@ -12,9 +12,9 @@ concurrency:
   cancel-in-progress: false
 env:
   BATCH_RELEASE_WORKFLOW_PIN: 'true'
-  BATCH_RELEASE_HELPER_SHA256: '6848be8a321b6355edb82e33690c7da267e5aacdc900cc501e318cf353962196'
+  BATCH_RELEASE_HELPER_SHA256: '674015b7b89d67ce06a5a38ee6f65d6b5509fa8b95ced84c73d7caa5872b636f'
 jobs:
-  read-only-build-diagnosis:
+  read-only-build-user-diagnosis:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -33,7 +33,7 @@ jobs:
           [[ "$BATCH_RELEASE_WORKFLOW_PIN" = true && "$BATCH_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-961-965-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^diagnose$ ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Diagnose only sealed build failure and candidate guards
+      - name: Classify only candidate user guards without container creation
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -58,7 +58,7 @@ jobs:
             umask 077
             batch_release_tmp=$(mktemp -d /tmp/batch-961-965-diagnosis.XXXXXX)
             trap 'rm -rf "$batch_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch-961-965-build-diagnose.py" > "$batch_release_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-961-965-build-user-diagnose.py" > "$batch_release_tmp/run.py" 2>/dev/null || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-961-965-release.py" > "$batch_release_tmp/batch-961-965-release.py" 2>/dev/null || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$batch_release_tmp/batch-backup-library.py" 2>/dev/null || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$batch_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1

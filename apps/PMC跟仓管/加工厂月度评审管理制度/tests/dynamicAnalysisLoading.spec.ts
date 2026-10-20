@@ -14,6 +14,7 @@ describe('analysis data loading', () => {
     const s = setup(); await flushPromises()
     expect(mocks.get.mock.calls.map(c => c[0])).not.toContain('quality_patrols')
     expect(s.data.result.value.issues).toEqual([])
+    expect(s.data.factories.value).toEqual([])
     expect(s.data.errors.value.join('')).toContain('无品质查看权限'); s.wrapper.unmount()
   })
   it('shows source failures rather than declaring all sources safe', async () => {

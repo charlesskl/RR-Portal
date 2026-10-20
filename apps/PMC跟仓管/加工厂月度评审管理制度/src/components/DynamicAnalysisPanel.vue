@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AnalysisAiPanel from './AnalysisAiPanel.vue'
 import { computed, onMounted, onScopeDispose, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { RecordModel } from 'pocketbase'
@@ -57,8 +58,9 @@ const target = computed(() => ({ path: '/analysis', query: props.factoryId ? { f
     <div class="metrics"><strong>当前风险 {{ scoped.length }} 项</strong><span>重点关注 {{ scoped.filter(i => i.level === 'high').length }} 项</span><span>涉及 {{ new Set(scoped.map(i => i.factory)).size }} 家工厂</span></div>
     <template v-if="compact"><p>巡查整改、最近评级下降、未交付订单逾期。{{ errors.length ? '部分数据不可用，结果可能不完整。' : '' }}</p><RouterLink :to="target">查看问题依据与跟进 →</RouterLink></template>
     <template v-else>
+      <AnalysisAiPanel :factories="factories" :factory-id="factoryId" />
       <details><summary>分析规则与数据缺口</summary><p>整改有描述且计划日期早于今天、未登记有效完成日期时提示；最近两次巡查评级由A向D下降时提示；订单交期早于今天且未登记交付时提示（排除已交付、已取消、已退回订单）。逾期至少7天或评级降至D列为重点关注。日期按北京时间计算，评级变化不会推断为质量不合格。</p><p>授权范围内：{{ result.missingPatrolDates }} 条未完成整改缺少有效计划日期，{{ result.missingOrderDates }} 条未交付订单缺少有效交期，无法判断是否逾期。源数据错误请进入原始记录修正。</p></details>
-      <p>跟进状态仅当前账号可见。“已解决”代表个人跟进标记；源数据仍触发规则时，预警继续保留。此处提供规则分析，尚未接入AI推理。</p>
+      <p>跟进状态仅当前账号可见。“已解决”代表个人跟进标记；源数据仍触发规则时，预警继续保留。下方为规则预警；上方AI分析需配置服务后主动生成。</p>
       <p v-if="statusError" class="error" role="alert">{{ statusError }} <button @click="loadStates">刷新跟进状态</button></p>
       <div class="filters">
         <label v-if="!factoryId">工厂<select v-model="factoryFilter"><option value="">全部有预警工厂</option><option v-for="id in [...new Set(scoped.map(i => i.factory))]" :key="id" :value="id">{{ name(id) }}</option></select></label>

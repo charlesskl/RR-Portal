@@ -47,6 +47,8 @@ export function useDynamicAnalysis() {
     const byId = new Map(factories.value.map(f => [f.id, f]))
     patrols.value = ps.status === 'fulfilled' ? ps.value.filter(p => { const f = byId.get(p.factory); return f && regions.includes(regionOf(f)) }) : []
     orders.value = os.status === 'fulfilled' ? os.value.filter(o => byId.has(o.factory) && regions.includes(orderRegion(o))) : []
+    const orderFactories = new Set(orders.value.map(o => o.factory))
+    factories.value = factories.value.filter(f => regions.includes(regionOf(f)) || orderFactories.has(f.id))
     if (ps.status === 'rejected') errors.value.push('巡查数据读取失败，巡查预警暂不可用。')
     if (os.status === 'rejected') errors.value.push('订单数据读取失败，交期预警暂不可用。')
     if (!quality) errors.value.push('当前账号无品质查看权限，未分析巡查数据。')

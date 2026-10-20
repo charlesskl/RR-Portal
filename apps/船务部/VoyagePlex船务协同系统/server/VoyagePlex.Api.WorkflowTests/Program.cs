@@ -611,7 +611,10 @@ using (var schemaConnection = new SqliteConnection("Data Source=:memory:"))
     foreach (var purpose in new[] { "Shipping", "Warehouse" })
         if (!activeCatalog.Where(t => t.Purpose == purpose).Select(t => t.Name).Order().SequenceEqual(new[] { "SKY分柜特殊表", "普通交仓表", "普通走柜表" }.Order()))
             throw new Exception("任何历史配置下均须补齐每个用途的三种模板");
-    var typedBeforeRestart = System.Text.Json.JsonSerializer.Serialize(migrated);
+    // A later operator choice must survive restart, including SKY as default.
+    schemaDb.Database.ExecuteSqlRaw("UPDATE ExportTemplates SET IsDefault=0 WHERE Company='Huadeng' AND ShipmentMode='Container' AND Purpose='Shipping'");
+    schemaDb.Database.ExecuteSqlRaw("UPDATE ExportTemplates SET Name='人工 SKY 名称', Notes='人工保留说明', IsDefault=1 WHERE Company='Huadeng' AND LayoutKey='SkyCastle' AND Purpose='Shipping'");
+    var typedBeforeRestart = System.Text.Json.JsonSerializer.Serialize(schemaDb.ExportTemplates.IgnoreQueryFilters().AsNoTracking().OrderBy(t => t.Id).ToArray());
     ExportTemplateEndpoints.EnsureSchema(schemaDb);
     if (System.Text.Json.JsonSerializer.Serialize(schemaDb.ExportTemplates.IgnoreQueryFilters().AsNoTracking().OrderBy(t => t.Id).ToArray()) != typedBeforeRestart)
         throw new Exception("再次启动模板迁移须逐字段幂等，不得覆盖人工设置或更新已有时间戳");

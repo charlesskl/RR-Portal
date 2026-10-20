@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Nodes;
 using VoyagePlex.Api.Entities;
 
@@ -9,9 +10,12 @@ public static class TaskSafetyRules
     {
         if (task.ResponsibleUserId <= 0 || task.ResponsibleUserId == actor.Id ||
             payload["confirmedOwnerId"]?.ToString() == task.ResponsibleUserId.ToString()) return null;
-        return new { code = "OtherTaskOwner", error = $"此任务由【{task.ResponsibleUserName}】账号建立，继续保存将覆盖其任务资料。是否继续？",
+        return new { code = "OtherTaskOwner", error = $"此任务由【{task.ResponsibleUserName}】账号建立，继续操作将修改或删除其任务资料。是否继续？",
             taskId = task.Id, ownerId = task.ResponsibleUserId, ownerName = task.ResponsibleUserName };
     }
+
+    private static bool PositiveWeight(JsonNode? value) =>
+        decimal.TryParse(value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var weight) && weight > 0;
 
     public static JsonArray MissingWeights(JsonObject payload)
     {
@@ -27,9 +31,9 @@ public static class TaskSafetyRules
                 ("gross_weight_per_box", "每箱毛重", "gross_weight"),
                 (layout == "CartonMarks" ? "net_net_weight_per_box" : "net_weight_per_box", layout == "CartonMarks" ? "每箱净净重" : "每箱净重", "net_weight") })
             {
-                if (!string.IsNullOrWhiteSpace(item?[key]?.ToString())) continue;
+                if (PositiveWeight(item?[key])) continue;
                 // Existing confirmed mixed groups may have reviewed total weights.
-                if (group != "" && !string.IsNullOrWhiteSpace(item?[total]?.ToString())) continue;
+                if (group != "" && PositiveWeight(item?[total])) continue;
                 if (group != "" && total == "gross_weight" && items.Take(index).Any(previous =>
                     previous?["packing_group"]?.ToString() == group && previous?["source_file"]?.ToString() == item?["source_file"]?.ToString())) continue;
                 missing.Add(new JsonObject { ["itemIndex"] = index, ["productCode"] = item?["product_code"]?.ToString() ?? "", ["field"] = key, ["label"] = label, ["totalField"] = total });
@@ -43,3 +47,5 @@ public sealed class TaskOwnerConfirmationException(object warning) : Exception("
 {
     public object Warning { get; } = warning;
 }
+
+public sealed class TaskWritebackConflictException() : Exception("任务有未解决的库存回写记录，请先处理回写恢复");

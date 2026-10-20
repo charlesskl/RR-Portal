@@ -99,9 +99,9 @@ public static class InventoryWritebackEndpoints
                         var name = file?["filename"]?.ToString() ?? "";
                         if (name.Length == 0 || name != Path.GetFileName(name) || !ValidHash(file?["beforeHash"]) || !ValidHash(file?["afterHash"]))
                             throw new InvalidOperationException("回写文件记录无效");
-                        if (await db.InventoryFileClaims.AnyAsync(claim => claim.Filename == name, ct))
+                        if (await db.InventoryFileClaims.AnyAsync(claim => claim.Filename == name.ToUpperInvariant(), ct))
                             return Results.Conflict(new { error = $"库存文件 {name} 正在其他回写中，请先处理待恢复记录" });
-                        db.InventoryFileClaims.Add(new InventoryFileClaim { Filename = name, OperationId = operationId });
+                        db.InventoryFileClaims.Add(new InventoryFileClaim { Filename = name.ToUpperInvariant(), OperationId = operationId });
                     }
                     foreach (var row in rows) { row.State = "Prepared"; row.ResultJson = result.ToJsonString(); }
                 }

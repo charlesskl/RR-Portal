@@ -43,6 +43,17 @@ public static class ExportTemplateEndpoints
             WHERE Company='Huadeng' AND IsEnabled=1 AND IsDefault=1 AND LayoutKey='Standard' AND WeightRule='Template' AND Version='1.0' AND Notes=''
                 AND Name IN ('华登柜船务表','华登柜仓务表','华登车（交仓）船务表','华登车（交仓）仓务表');
             """);
+        // Apply the catalog conversion once, atomically. Later restarts must preserve
+        // operator edits, including a SKY default, names and enablement choices.
+        db.Database.ExecuteSqlRaw("""
+            CREATE TABLE IF NOT EXISTS VoyagePlexSchemaChanges (
+                Name TEXT PRIMARY KEY NOT NULL, AppliedAt TEXT NOT NULL);
+            """);
+        using var catalogTransaction = db.Database.BeginTransaction();
+        const string catalogChange = "HuadengThreeTemplateCatalogV1";
+        var alreadyApplied = db.Database.SqlQueryRaw<string>(
+            "SELECT Name AS Value FROM VoyagePlexSchemaChanges WHERE Name='HuadengThreeTemplateCatalogV1'").Any();
+        if (alreadyApplied) { catalogTransaction.Commit(); return; }
         // 历史任务可能仅有人工作过的旧版本，仍需为每种用途补齐普通表。
         foreach (var mode in new[] { "Container", "Warehouse" })
         foreach (var purpose in new[] { "Shipping", "Warehouse" })
@@ -77,6 +88,8 @@ public static class ExportTemplateEndpoints
                 GROUP BY ShipmentMode, Purpose, LayoutKey
             );
             """);
+        db.Database.ExecuteSqlInterpolated($"INSERT INTO VoyagePlexSchemaChanges (Name, AppliedAt) VALUES ({catalogChange}, {DateTime.UtcNow})");
+        catalogTransaction.Commit();
     }
 
     public static async Task<string?> ApplyToExport(JsonObject payload, AppDbContext db, CancellationToken cancellationToken, long? templateId = null)

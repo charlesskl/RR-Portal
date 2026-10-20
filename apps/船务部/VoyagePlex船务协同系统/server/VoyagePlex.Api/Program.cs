@@ -307,7 +307,7 @@ app.Use(async (context, next) =>
             { context.Response.StatusCode = 403; await context.Response.WriteAsJsonAsync(new { error = "主管不能授予管理角色或跨厂区权限" }); return; }
         }
     }
-    if (context.Request.Method is "POST" or "PUT" or "PATCH" && context.Request.ContentType?.StartsWith("application/json", StringComparison.OrdinalIgnoreCase) == true)
+    if (context.Request.Method is "POST" or "PUT" or "PATCH" or "DELETE" && context.Request.ContentType?.StartsWith("application/json", StringComparison.OrdinalIgnoreCase) == true)
     {
         context.Request.EnableBuffering();
         try
@@ -323,6 +323,11 @@ app.Use(async (context, next) =>
         finally { context.Request.Body.Position = 0; }
     }
     try { await next(); }
+    catch (TaskWritebackConflictException error)
+    {
+        context.Response.StatusCode = 409;
+        await context.Response.WriteAsJsonAsync(new { error = error.Message });
+    }
     catch (TaskOwnerConfirmationException error)
     {
         context.Response.StatusCode = 409;
@@ -1726,7 +1731,7 @@ app.MapPatch("/api/shipments/{id:long}", async (long id, JsonObject payload, Htt
     var currentUser = (AppUser)context.Items["CurrentUser"]!;
     if (currentUser.Role == "warehouse")
     {
-        var allowedFields = new[] { "items", "status", "transportReference", "confirmedOwnerId" };
+        var allowedFields = new[] { "items", "status", "transportReference", "confirmedOwnerId", "ownerConfirmations" };
         if (payload.Any(value => !allowedFields.Contains(value.Key))) return Results.Json(new { error = "仓库文员只能更新仓务明细和完成状态" }, statusCode: StatusCodes.Status403Forbidden);
         if (payload["status"] is JsonValue warehouseStatus && warehouseStatus.TryGetValue<string>(out var requestedStatus) && requestedStatus != "Completed")
             return Results.Json(new { error = "仓库文员只能将任务标记为已完成" }, statusCode: StatusCodes.Status403Forbidden);

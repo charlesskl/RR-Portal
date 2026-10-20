@@ -42,14 +42,22 @@ def run():
    if log:log.close()
   try:
    start();req('/api/auth/setup',{'username':'admin','displayName':'Owner','password':password},status=201);req('/api/auth/login',{'username':'admin','password':password})
-   owner=req('/api/auth/me')['id'];other=req('/api/users',{'username':'operator','displayName':'Operator','role':'admin','companyAccess':'Both','password':password},status=201)['id']
+   owner=req('/api/auth/me')['id'];warehouse=req('/api/users',{'username':'warehouse','displayName':'Warehouse','role':'warehouse','companyAccess':'Xingxin','password':password},status=201)['id'];other=req('/api/users',{'username':'operator','displayName':'Operator','role':'admin','companyAccess':'Both','password':password},status=201)['id']
    def task():
     row=req('/api/shipments',{'customer':'ZURU','plannedShipDate':datetime.date.today().isoformat()},status=201)
     assert row['responsibleUserId']==owner
     return req(f"/api/shipments/{row['id']}",{'items':[{'product_code':'ITEM','contract_number':'C1','quantity':12,'pieces':1,'gross_weight_per_box':2}],'status':'PendingShipment'},method='PATCH')['id']
    first,second,third=task(),task(),task()
    missing=req(f'/api/shipments/{first}/export',status=422);assert missing['code']=='MissingWeights' and missing['missing'][0]['label']=='每箱净重'
+   req(f'/api/shipments/{first}',{'items':[{'product_code':'ITEM','contract_number':'C1','quantity':12,'pieces':1,'gross_weight_per_box':'not-a-weight','net_weight_per_box':0}]},method='PATCH')
+   invalid=req(f'/api/shipments/{first}/export',status=422);assert len(invalid['missing'])==2
    export=req(f'/api/shipments/{first}/export?allowIncomplete=true')['exportPayload'];assert export['exportMissingWeights'][0]['itemIndex']==0
+   req('/api/auth/login',{'username':'warehouse','password':password})
+   req(f'/api/shipments/{first}',{'transportReference':'warehouse'},status=409,method='PATCH')
+   req(f'/api/shipments/{first}',{'transportReference':'warehouse','confirmedOwnerId':owner,'ownerConfirmations':{str(first):owner}},method='PATCH')
+   req(f'/api/shipments/{first}',{'customer':'forbidden','confirmedOwnerId':owner,'ownerConfirmations':{str(first):owner}},status=403,method='PATCH')
+   req('/api/auth/login',{'username':'admin','password':password})
+   req(f'/api/shipments/{first}',{'transportReference':''},method='PATCH')
    req('/api/auth/login',{'username':'operator','password':password})
    warning=req(f'/api/shipments/{first}',{'transportReference':'9车'},status=409,method='PATCH');assert warning['code']=='OtherTaskOwner' and warning['ownerId']==owner
    assert req(f'/api/shipments/{first}')['transportReference']==''
@@ -64,7 +72,8 @@ def run():
    result={'files':[{'filename':'stock.xlsx','beforeHash':'a'*64,'afterHash':'b'*64}],'outbound_date':datetime.date.today().isoformat(),'allocations':[{'item_index':0,'quantity':12},{'item_index':1,'quantity':12}]}
    req('/api/inventory/writebacks/prepared',{**base_body,'result':result})
    op2=req('/api/inventory/writebacks/begin',{'taskIds':[third],'ownerConfirmations':ack})['operationId']
-   req('/api/inventory/writebacks/prepared',{'operationId':op2,'ownerConfirmations':ack,'result':result},status=409)
+   case_result={**result,'files':[{'filename':'STOCK.xlsx','beforeHash':'a'*64,'afterHash':'b'*64}]}
+   req('/api/inventory/writebacks/prepared',{'operationId':op2,'ownerConfirmations':ack,'result':case_result},status=409)
    req('/api/inventory/writebacks/cancel',{'operationId':op2,'ownerConfirmations':ack})
    req('/api/inventory/writebacks/writing',base_body)
    req('/api/inventory/writebacks/writing',base_body,status=409)
@@ -95,6 +104,11 @@ def run():
    assert req(f'/api/shipments/{third}')['status']=='PendingShipment'
    retry=req('/api/inventory/writebacks/begin',{'taskIds':[third],'ownerConfirmations':ack})['operationId']
    req('/api/inventory/writebacks/cancel',{'operationId':retry,'ownerConfirmations':ack})
+   req('/api/auth/login',{'username':'admin','password':password})
+   fourth=task()
+   req('/api/auth/login',{'username':'operator','password':password})
+   req(f'/api/shipments/{fourth}',method='DELETE',status=409)
+   req(f'/api/shipments/{fourth}',{'ownerConfirmations':{str(fourth):owner}},method='DELETE')
    print('Task safety API passed: missing-weight acknowledgement, owner warning/audit, duplicate and batch locks, file claims, restart recovery, hash mismatch rejection and idempotent completion.')
   finally:stop();stub.shutdown()
 if __name__=='__main__':run()

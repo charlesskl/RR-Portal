@@ -442,7 +442,9 @@ def run():
             stop(); start()
             assert request(f"/api/shipments/{private_task}")["responsibleUserId"]==owner_a
             request("/api/auth/login", {"username":"华登乙","password":password})
-            request(f"/api/shipments/{private_task}",method="DELETE")
+            warning=request(f"/api/shipments/{private_task}",method="DELETE",expected=409)
+            assert warning["code"]=="OtherTaskOwner" and warning["ownerId"]==owner_a
+            request(f"/api/shipments/{private_task}",{"ownerConfirmations":{str(private_task):owner_a}},method="DELETE")
             request(f"/api/shipments/{private_task}",expected=404)
             request("/api/auth/login", {"username":"mailtest","password":password})
             supervisors={}

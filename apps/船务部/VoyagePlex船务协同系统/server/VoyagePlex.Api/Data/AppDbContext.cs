@@ -58,7 +58,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     private async Task<int> SaveWithTaskOwnership(bool accept, CancellationToken ct)
     {
-        var changed = ChangeTracker.Entries<ShipmentTask>().Where(entry => entry.State == EntityState.Modified).Select(entry => entry.Entity).ToArray();
+        var changed = ChangeTracker.Entries<ShipmentTask>().Where(entry => entry.State is EntityState.Modified or EntityState.Deleted).Select(entry => entry.Entity).ToArray();
+        // SQLite's immediate transaction serializes the reservation check and the
+        // task write. Without it a writeback can begin between the check and save.
+        await using var taskTransaction = CurrentUserId > 0 && changed.Length > 0 && Database.CurrentTransaction is null
+            ? await Database.BeginTransactionAsync(ct) : null;
         if (CurrentUserId > 0 && changed.Length > 0)
         {
             var actor = await Users.AsNoTracking().SingleAsync(value => value.Id == CurrentUserId, ct);
@@ -66,15 +70,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             {
                 if (!InventoryWritebacks.Local.Any(row => row.TaskId == task.Id && row.State == "Completed") &&
                     await InventoryWritebacks.AnyAsync(row => row.TaskId == task.Id && row.State != "Completed", ct))
-                    throw new InvalidOperationException("任务有未解决的库存回写记录，请先处理回写恢复");
+                    throw new TaskWritebackConflictException();
                 var confirmation = new JsonObject();
                 if (ConfirmedTaskOwners.TryGetValue(task.Id, out var owner)) confirmation["confirmedOwnerId"] = owner;
                 if (TaskSafetyRules.OwnerWarning(task, actor, confirmation) is object warning) throw new TaskOwnerConfirmationException(warning);
                 if (!TaskEditAudits.Local.Any(value => value.TaskId == task.Id && value.ActorId == actor.Id))
-                    InventoryWritebackEndpoints.RecordEdit(this, task, actor, "TaskSaved");
+                    InventoryWritebackEndpoints.RecordEdit(this, task, actor, Entry(task).State == EntityState.Deleted ? "TaskDeleted" : "TaskSaved");
             }
         }
-        return await base.SaveChangesAsync(accept, ct);
+        var written = await base.SaveChangesAsync(accept, ct);
+        if (taskTransaction is not null) await taskTransaction.CommitAsync(ct);
+        return written;
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

@@ -4,9 +4,9 @@ Only the explicitly reviewed IMAP child may contact mail servers, via stdin secr
 """
 import collections,contextlib,datetime,hashlib,importlib.util,json,os,pathlib,re,select,signal,sqlite3,stat,subprocess,sys,time,traceback,urllib.parse
 ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/voyageplex-mail-readonly-20261020-02'
-BRANCH='refs/heads/ops/mail-readonly-20261020';DIAG_PIN=False;IMAP_BODY_PROBE=False
+BRANCH='refs/heads/ops/mail-readonly-20261020';DIAG_PIN=True;IMAP_BODY_PROBE=True
 EXPECTED_HEAD='b30a803e74641e0e18150597e0114f6cb99b2e9c';EXPECTED_TREE='60936186cae64d44ee728ac80ec3033779e9a676'
-CORE_SHA='a06bd4dd932df22b9127cda35a2dd7a8d69fafd879d6619ce3b50aa54252cd5d';IMAP_CHILD_SHA='ff0c9cd58e4b96fba90d5c1b64bc6df5676149850cceb8aa3f27f65a1ec0b222'
+CORE_SHA='a06bd4dd932df22b9127cda35a2dd7a8d69fafd879d6619ce3b50aa54252cd5d';IMAP_CHILD_SHA='65ade032ff26f572fbc9941438cd924131e20e924eef336581c97aa4f3030194'
 SERVICES=('voyageplex-web','voyageplex-api','voyageplex-parser');VOY='apps/船务部/VoyagePlex船务协同系统';DB=ROOT/VOY/'data-runtime/voyageplex.db';KEY='VOYAGEPLEX_HUADENG_MAILBOXES_JSON'
 EXPECTED_IMAGES={'voyageplex-api':'sha256:a2384da1fe8f0a920de18ca6a22f292babb0b8f2cd6a58829d7ff90c8bb55987','voyageplex-parser':'sha256:fac9deb5e681966ab30e9192cd421ff144a82c5e1c64677adce87bcf01307d32','voyageplex-web':'sha256:f25b1e36eb9a73c60ecffd4f270c07d2a3596eca0c73afb2b9b9c232330235b4'}
 WEB_COMPILED_SHA='f525cccdbb7dc5a772325f092eccbe4b203a127b6232f0d86caa6302db94a5d6';WEB_BUILD_ID_SHA='11b2d8759d16872161aad66e96d640eb9ef2311ff5372e3315559b3c593e2838'

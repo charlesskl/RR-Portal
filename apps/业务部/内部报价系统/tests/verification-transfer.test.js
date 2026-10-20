@@ -58,3 +58,37 @@ test('a mid-batch database failure rolls back quotes, versions, and audit togeth
   } finally {db.close();}
 });
 module.exports={database,bundle};
+
+test('streaming GZIP import preserves rows, skips a replay, and rolls back on late failure',async()=>{
+ const {gzipSync}=require('node:zlib'),os=require('node:os');
+ const {planFile,applyFile}=require('../backend/services/verificationTransferStream');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'verification-stream-'));
+ const file={path:path.join(dir,'package.gz'),originalname:'package.jsonl.gz'};
+ const data=bundle(),second=bundle('TEST-2').records[0];
+ const text=[JSON.stringify({format:'rr-verification-transfer-jsonl-v1'}),...data.records.concat(second).map(r=>JSON.stringify(r))].join('\n');
+ fs.writeFileSync(file.path,gzipSync(text));
+ const db=database();try{
+   const plan=await planFile(db,file,'qingxi');assert.equal(plan.new_count,2);
+   db.exec("CREATE TRIGGER test_stream_fail BEFORE INSERT ON quotes WHEN NEW.quote_no='TEST-2' BEGIN SELECT RAISE(ABORT,'late failure'); END");
+   await assert.rejects(applyFile(db,file,{factoryCode:'qingxi',actor:'tester',expectedToken:plan.token}),/late failure/);
+   assert.equal(db.prepare('SELECT COUNT(*) n FROM quotes').get().n,0);
+   db.exec('DROP TRIGGER test_stream_fail');
+   const result=await applyFile(db,file,{factoryCode:'qingxi',actor:'tester',expectedToken:plan.token});
+   assert.equal(result.count,2);assert.equal((await planFile(db,file,'qingxi')).existing_count,2);
+   fs.writeFileSync(file.path,gzipSync(text+'\n'+JSON.stringify(data.records[0])));
+   await assert.rejects(planFile(db,file,'qingxi'),/货号重复/);
+ }finally{db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('streaming transfer rejects malformed GZIP and records before any write',async()=>{
+ const {gzipSync}=require('node:zlib'),os=require('node:os');
+ const {planFile}=require('../backend/services/verificationTransferStream');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'verification-stream-invalid-'));
+ const file={path:path.join(dir,'package.gz'),originalname:'package.jsonl.gz'},db=database();
+ try{
+  fs.writeFileSync(file.path,'invalid gzip');await assert.rejects(planFile(db,file,'qingxi'));
+  fs.writeFileSync(file.path,gzipSync('{"format":"rr-verification-transfer-jsonl-v1"}\n{"quote":{}}'));
+  await assert.rejects(planFile(db,file,'qingxi'),/缺失或重复/);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM quotes').get().n,0);
+ }finally{db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});

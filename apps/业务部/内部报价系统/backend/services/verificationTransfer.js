@@ -37,7 +37,13 @@ async function applyTransfer(db,bundle,{factoryCode,actor,expectedToken}){
   const plan=await planTransfer(db,bundle,factoryCode);if(plan.token!==expectedToken)fail('导入预览已变化，请重新预览');
   for(let i=0;i<bundle.records.length;i++){
    if(plan.items[i].status!=='new')continue;
-   const record=bundle.records[i],q=record.quote;
+   await insertRecord(db,bundle.records[i],{factoryCode,actor,hash:plan.items[i].hash});
+  }
+  return {ok:true,count:plan.new_count,already_imported:plan.existing_count};
+ })();
+}
+async function insertRecord(db,record,{factoryCode,actor,hash}){
+   const q=record.quote;
    const inserted=await db.prepare(`INSERT INTO quotes(quote_no,product_name,version,customer,qty,factory_code,status,created_by_name) VALUES (?,?,?,?,?,?,'drafting',?) RETURNING id`).get(q.quote_no,q.product_name,q.version||'V1',q.customer,q.qty??0,factoryCode,actor);
    const id=Number(inserted.id),baseline=structuredClone(record.baseline);baseline.quote={...baseline.quote,id,factory_code:factoryCode};
    for(const s of baseline.sections)await db.prepare("INSERT INTO quote_sections(quote_id,dept,payload_json,status) VALUES (?,?,?,'approved')").run(id,s.dept,JSON.stringify(s.payload||{}));
@@ -49,9 +55,6 @@ async function applyTransfer(db,bundle,{factoryCode,actor,expectedToken}){
     ids.set(v.version_no,Number(saved.id));
     for(const s of v.sections)await db.prepare(`INSERT INTO quote_verification_sections(version_id,dept,payload_json,status,filled_by,filled_at,reviewed_by,reviewed_at,review_comment) VALUES (?,?,?,?,?,?,?,?,?)`).run(Number(saved.id),s.dept,JSON.stringify(s.payload),s.status,s.filled_by||actor,s.filled_at||null,s.reviewed_by||null,s.reviewed_at||null,s.review_comment||null);
    }
-   await db.prepare("INSERT INTO audit_log(quote_id,actor,action,detail) VALUES (?,?,'verification_transfer_import',?)").run(id,actor,JSON.stringify({factory:factoryCode,hash:plan.items[i].hash}));
-  }
-  return {ok:true,count:plan.new_count,already_imported:plan.existing_count};
- })();
+   await db.prepare("INSERT INTO audit_log(quote_id,actor,action,detail) VALUES (?,?,'verification_transfer_import',?)").run(id,actor,JSON.stringify({factory:factoryCode,hash:hash}));
 }
-module.exports={validateBundle,planTransfer,applyTransfer,digest};
+module.exports={validateBundle,planTransfer,applyTransfer,digest,insertRecord};

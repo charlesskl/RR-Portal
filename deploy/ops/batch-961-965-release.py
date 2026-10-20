@@ -7,7 +7,7 @@ ROOT=pathlib.Path('/opt/rr-portal');BASE='9a62c7059600c12d4781b94f69098e37a32d90
 BRANCH='refs/heads/ops/batch-961-965-20261020';DEPLOY_PIN=True;VERIFY_PIN=False
 CORE_SHA='4259dcbba7cbdc78809e286c3b20829644104e4a30b284bea84cc6b20f0c24b5';SOURCE_MANIFEST_SHA='c6a2c4b7ea1e5866ed351d1fcef54f2d27f44d099e50879a95bfd535a38e2ab6';EXPECTED_CHANGED_FILES=83
 BACKUP=ROOT/'deploy/backups/batch-961-965-20261020-backup';BACKUP_MANIFEST='a18052ed05e4fea60d0073f71aa5a809f395739c89ce63eddf5dfc9ac0ef8924';BACKUP_RESULT='3928baa1a0e10249f22ef26e19d7a4a1be018aefa03b557bcb6c65cfc66aec3e'
-DEPLOY=BACKUP.with_name('batch-961-965-20261020-deploy-05');VERIFY=BACKUP.with_name('batch-961-965-20261020-verify-05');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+DEPLOY=BACKUP.with_name('batch-961-965-20261020-deploy-06');VERIFY=BACKUP.with_name('batch-961-965-20261020-verify-06');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 ORDER=('factory-review','factory-review-test','internal-quote','zuru-order-system','qc-plan-api','qc-plan-web','printlink')
 AI_ADDITIONS={'FACTORY_REVIEW_AI_ENABLED':'false','FACTORY_REVIEW_AI_API_KEY':'','FACTORY_REVIEW_AI_MODEL':'','FACTORY_REVIEW_AI_BASE_URL':'https://api.openai.com/v1'}
 
@@ -33,6 +33,11 @@ REJECTED_ZURU_IMAGE='sha256:b4d3baa9b72f3a6b976c4331410e17704f464ebee572e70fc951
 FAILED_FOURTH=BACKUP.with_name('batch-961-965-20261020-deploy-04');REGISTRY_DIAGNOSIS=BACKUP.with_name('batch-961-965-20261020-registry-diagnosis-04-01')
 FAILED_FOURTH_MANIFEST='86224078873d37331447df5d1d2b99073a34429eb4979949403b2e43a7bf4790';FAILED_FOURTH_RESULT='f05beadfc42b37d54764c3d36db1febaf79ecdd2874b736ea0191f7e76f41ccf'
 REGISTRY_DIAGNOSIS_MANIFEST='24a0167da1e5f69dcb47e181fdc959e6a89030811bf9c42c4f631aa06de25a14';REGISTRY_DIAGNOSIS_RESULT='c6b589d93e789ef03a0cb01e7cf615ed1fae9ab7789f8907c4e453b8d55fd270'
+FAILED_FIFTH=BACKUP.with_name('batch-961-965-20261020-deploy-05');DIAGNOSIS_FIFTH=BACKUP.with_name('batch-961-965-20261020-candidate-diagnosis-05-01');PREPARATION=BACKUP.with_name('batch-961-965-20261020-build-preparation-01')
+FAILED_FIFTH_MANIFEST='a43adca4f12a5d9e59e46bcede71e4b5a94c4a7082724a369105554f605719d6';FAILED_FIFTH_RESULT='99b0d275ef57e52840dd1977784886b973cd8daa610dc142dce3e4a9f2648541'
+DIAGNOSIS_FIFTH_MANIFEST='8133b4d8f4142f305012655affd653bc54f24196604acdd319a2ddba2de00458';DIAGNOSIS_FIFTH_RESULT='71ce887c833b695a83da2dae4341e67b96b23c2f9abd4a05977d2d7b10214986';PREPARATION_MANIFEST='975e3f215eab46c96aa435d2d343fda0f4e13ea32f240acb5c9f5ca1bf2acd30';PREPARATION_RESULT='fc1e6666102206b731aac259326eb1e2bd0c1d93645097a987c94e43785ec51d'
+QC_VENDOR_PATCH_SERVICE='qc-plan-api';QC_VENDOR_PATCH_IMAGE='sha256:124e9738867f2ad7d4261bd8bfc5134863a5f5db8e7938e71eceefd7df128e24';QC_VENDOR_PATCH_KEYS=('DOTNET_VERSION','ASPNET_VERSION');QC_VENDOR_PATCH_OLD='8.0.31';QC_VENDOR_PATCH_NEW='8.0.32'
+SEALED_IMAGES={**REUSED_IMAGES,'zuru-order-system':'sha256:46140168b2a10082ea6ac102a472411eaabd34e5164857523ba1618e336412fa','qc-plan-api':QC_VENDOR_PATCH_IMAGE,'qc-plan-web':'sha256:0c92225af88f5997114bc7c41aca7fa4584ea27091d19b76ec08c70aea9d2217','printlink':'sha256:5d48e2e4e4557988e56fb3e27d28c38eab98410244783e31d169466b0fb476f4'}
 ZURU_GIT_RECIPE_SHA='0d85ba58982b4222611868395b886f0575f6c54c3a0242f1e42b9a82e87acd58';ZURU_VERSION_ONLY_RECIPE_SHA='18570817978023a8201db96ccf7bf25b2c7fcfdb2504b7b05130e9ec809865c6'
 STAGE='entrypoint';CORE=None;OUT=None;ENV=None
 COMPOSE=['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production')]
@@ -106,6 +111,9 @@ def before_maps(service,before):
 
 def expected_maps(service,before):
  actual,literal=before_maps(service,before)
+ if service==QC_VENDOR_PATCH_SERVICE:
+  oldimage=json.loads((BACKUP/(service+'-image.private.json')).read_bytes());need(oldimage['Id']==before['runtime']['targets'][service]['image']);imageenv=CORE.envmap(oldimage['Config'].get('Env')or[])
+  for key in QC_VENDOR_PATCH_KEYS:need(key not in literal and actual.get(key)==imageenv.get(key)==QC_VENDOR_PATCH_OLD);actual[key]=QC_VENDOR_PATCH_NEW
  if service in{'factory-review','factory-review-test'}:
   need(not set(actual)&set(AI_ADDITIONS)and not set(literal)&set(AI_ADDITIONS));actual.update(AI_ADDITIONS);literal.update(AI_ADDITIONS)
  return actual,literal
@@ -125,10 +133,15 @@ def config_same(service,old,new,raw,before):
  elif old['command']!=new['command']:return False
  expected,_=expected_maps(service,before)
  if CORE.envmap(raw['Config']['Env'])!=expected:return False
+ if service==QC_VENDOR_PATCH_SERVICE and new['image']!=QC_VENDOR_PATCH_IMAGE:return False
  proc=CORE.run(['docker','exec',new['id'],'cat','/proc/1/environ']);need(proc.endswith(b'\0'));current=CORE.envmap([v.decode()for v in proc.split(b'\0')if v]);need(current.pop('HOSTNAME',None)==new['id'][:12])
  if service in{'factory-review','factory-review-test'}:
   for key,value in AI_ADDITIONS.items():
    if current.pop(key,None)!=value:return False
+ if service==QC_VENDOR_PATCH_SERVICE:
+  for key in QC_VENDOR_PATCH_KEYS:
+   if current.get(key)!=QC_VENDOR_PATCH_NEW:return False
+   current[key]=QC_VENDOR_PATCH_OLD
  return sha(enc(current))==old['processEnvironmentWithoutAutomaticHostnameSHA256']
 
 def flags(except_service=None):
@@ -215,6 +228,7 @@ def prebuild_identity_evidence(before,raw):
 
 def candidate_config_compatible(service,candidate,raw,before):
  old=json.loads((BACKUP/(service+'-image.private.json')).read_bytes());need(old['Id']==raw['Image']);old_user=raw['Config'].get('User');new_user=candidate['Config'].get('User');image_user=old['Config'].get('User');need(all(value is None or type(value)is str for value in(old_user,new_user,image_user)));user_exact=new_user==old_user;default_only=all(value in(None,'')for value in(old_user,new_user,image_user));need(user_exact or default_only);expected_command=ZURU_COMMAND_AFTER if service=='zuru-order-system'else raw['Config'].get('Cmd');need(candidate['Config'].get('Cmd')==expected_command and all(candidate['Config'].get(key)==raw['Config'].get(key)for key in('Entrypoint','WorkingDir')))
+ if service==QC_VENDOR_PATCH_SERVICE:need(candidate.get('Id')==QC_VENDOR_PATCH_IMAGE)
  actual,literal=expected_maps(service,before);defaults=CORE.envmap(candidate['Config'].get('Env')or[]);need(dict(defaults,**literal)==actual)
  if service=='zuru-order-system':need(raw['Config'].get('Cmd')==ZURU_COMMAND_BEFORE)
  if service in{'factory-review','factory-review-test'}:need((candidate['Config'].get('Labels')or{}).get('org.opencontainers.image.revision')==TARGET)
@@ -304,35 +318,48 @@ def prepare_zuru_build_recipe(before,files):
     CORE.OPS.L.private_write(OUT/'zuru-build-recipe-proof.private.json',enc(proof))
     return build_compose,proof
 
+def recovery06_evidence(before):
+ previous=recovery05_evidence(before);failed=archive(FAILED_FIFTH,FAILED_FIFTH_MANIFEST,FAILED_FIFTH_RESULT,False);diagnosis=archive(DIAGNOSIS_FIFTH,DIAGNOSIS_FIFTH_MANIFEST,DIAGNOSIS_FIFTH_RESULT);prep=archive(PREPARATION,PREPARATION_MANIFEST,PREPARATION_RESULT)
+ need(failed.get('failedStage')=='qc-plan-api-candidate-config-validation'and failed.get('target')==TARGET and diagnosis.get('mode')=='candidate-diagnosis-05'and diagnosis.get('executedHelperSHA256')=='18abccb09c4d1955645470190d8dc8c9edc44d1ddbab5fdc2c3fe8dcba2e817a'and prep.get('mode')=='build-preparation-01'and prep.get('executedHelperSHA256')=='46bb698d00ea3bf42bd71ea7b1f283a3177fd04c07bfe0a679c85c9dcd646bb5'and prep.get('loadedReleaseHelperSHA256')=='9c92f4cd77ca8c57c2a34c6d9d05fd3865e0d8afd8bad15e546241bb06f16e55')
+ for value,keys in((diagnosis,('beforeReadOnlyObservations','afterReadOnlyObservations')),(prep,('beforeBuildObservations','afterBuildObservations'))):
+  need(value.get('observationsStableDuringDiagnosis'if value is diagnosis else'observationsStableDuringPreparation')is True)
+  for key in keys:
+   facts=value[key];need(facts.get('head')==TARGET and all(facts.get(name)is True for name in('all83SourceBytesAndModesIncludingTwoExact0666MapsMatchReviewedTarget','allMaintenanceFlagsUnchanged','allOtherContainersUnchanged','allSevenOldContainerIDsAndConfigurationsUnchanged','environmentBytesUnchanged','headMatchesReviewedTarget','preexistingFourDirtyExactlyUnchanged')))
+ need(diagnosis.get('failedReleaseArchiveRetainedAndValid')is True and all(diagnosis.get(key)is False for key in('businessSourceEnvironmentOrModeWritesPerformed','buildsOrServiceSwitchesPerformed','liveHTTPOrLoginRequestsPerformed'))and all(prep.get(key)is True for key in('bothOriginalComposeBuildsCompleted','onlyTwoImageTagsBuilt','allSevenCandidateGuardsRecordedWithoutServiceSwitch','originalBaselineAndFailed05AndSuccessfulDiagnostic05SealsValidated'))and all(prep.get(key)is False for key in('sourceEnvironmentOrModeWritesPerformed','maintenanceOrServiceSwitchesPerformed','liveRegistryPreResolutionOrHTTPProbesPerformed')))
+ need(set(SEALED_IMAGES)==set(ORDER)and all(re.fullmatch('sha256:[a-f0-9]{64}',value)for value in SEALED_IMAGES.values())and set(prep['tags'])==set(ORDER)and set(prep['builds'])=={'qc-plan-web','printlink'})
+ for service in ORDER:
+  row=prep['tags'][service];need(row['currentImageID']==SEALED_IMAGES[service]and row['oldRunningImageID']==before['runtime']['targets'][service]['image']and row['tagStillOldRunningImage']is False and row['architectureClassification']=='amd64'and row['osClassification']=='linux'and row['candidateRawImageMetadataRetainedPrivately']is True)
+  image=json.loads((PREPARATION/(service+'-candidate-image.private.json')).read_bytes());need(image['Id']==SEALED_IMAGES[service]and image.get('Architecture')=='amd64'and image.get('Os')=='linux')
+  if service not in{'qc-plan-web','printlink'}:need(diagnosis['tags'][service]['currentImageID']==SEALED_IMAGES[service]and diagnosis['tags'][service]['currentImageIDBoundToSealedBuildEvidence']is True)
+  else:
+   record=prep['builds'][service];need(record['attempted']is True and record['completed']is True and record['originalComposeUsed']is True and record['candidateImageIDChangedAfterOwnBuild']is True and record['newCandidateImageID']==SEALED_IMAGES[service]and record['oldTagImageID']==before['runtime']['targets'][service]['image']and record['imageIDPresentInSealedBuildLog']is True)
+ q=diagnosis['tags'][QC_VENDOR_PATCH_SERVICE];need(q['changedAllowedEnvironmentKeyNames']==sorted(QC_VENDOR_PATCH_KEYS)and q['changedOtherEnvironmentKeyCount']==0 and q['totalChangedEnvironmentKeyCount']==2 and q['publicRuntimeVersions']=={key:{'old':QC_VENDOR_PATCH_OLD,'candidate':QC_VENDOR_PATCH_NEW}for key in QC_VENDOR_PATCH_KEYS})
+ old,literal=before_maps(QC_VENDOR_PATCH_SERVICE,before);candidate=json.loads((DIAGNOSIS_FIFTH/(QC_VENDOR_PATCH_SERVICE+'-candidate-image.private.json')).read_bytes());need(candidate['Id']==QC_VENDOR_PATCH_IMAGE and not set(QC_VENDOR_PATCH_KEYS)&set(literal));proposed=dict(CORE.envmap(candidate['Config'].get('Env')or[]),**literal);expected=dict(old)
+ for key in QC_VENDOR_PATCH_KEYS:need(old.get(key)==QC_VENDOR_PATCH_OLD and proposed.get(key)==QC_VENDOR_PATCH_NEW);expected[key]=QC_VENDOR_PATCH_NEW
+ need(proposed==expected)
+ recipe=failed['zuruBuildRecipeProof'];need(recipe.get('actualRecipeSHA256')==ZURU_VERSION_ONLY_RECIPE_SHA and recipe.get('gitRecipeSHA256')==ZURU_GIT_RECIPE_SHA and recipe.get('baseImageReference')=='python:3.12.13-slim'and recipe.get('preBuildManifestDigestPinned')is False and recipe.get('liveRegistryPreResolutionPerformed')is False and all(recipe.get(key)is True for key in('hostGitDockerfileComposeAndEnvironmentUnmodified','onlyFirstFROMLineChanged','onlyZuruBuildDescriptionChangedInFullComposeJSON','runtimeSwitchUsesOriginalBaseComposeOnly'))and sha((FAILED_FIFTH/'zuru-actual-Dockerfile.private').read_bytes())==ZURU_VERSION_ONLY_RECIPE_SHA)
+ return {'previousRecoverySealedEvidence':previous,'successfulBuildPreparationAndAllSevenImageProvenanceSealsValidated':True,'onlyExactQcApiPublicVendorPatchReviewed':{'service':QC_VENDOR_PATCH_SERVICE,'imageID':QC_VENDOR_PATCH_IMAGE,'keys':list(QC_VENDOR_PATCH_KEYS),'old':QC_VENDOR_PATCH_OLD,'new':QC_VENDOR_PATCH_NEW},'zuruImageBuildProvenanceFromSealedRecovery05':recipe}
+
+
 def deploy(result,before,files):
  global STAGE
  STAGE='initial-reviewed-source-old-runtime-and-maintenance';current,raw=CORE.runtime();need(current==before['runtime']and CORE.maintenance_inventory()==before['maintenanceInventory']);checked_source(TARGET,before,files,True)
  for service in ORDER:maintenance('require_maintenance_cleared',service)
- STAGE='sealed-recovery05-evidence';result.update(recovery05_evidence(before));STAGE='old-factory-process-and-seven-sealed-user-identities-before-build';result['prebuildIdentityEvidence']=prebuild_identity_evidence(before,raw);STAGE='fetch-exact-main-without-checkout';CORE.run(['git','-c','core.hooksPath=/dev/null','fetch','origin','main']);need(CORE.run(['git','rev-parse','FETCH_HEAD']).decode().strip()==TARGET);checked_source(TARGET,before,files,True);result.update(sourceAlreadyAtReviewedTargetNoCheckoutOrModeRepair=True);result.update(compose_preflight(before,True));STAGE='prepare-private-zuru-build-only-version-pinned-python-recipe';zuru_build_compose,recipe_proof=prepare_zuru_build_recipe(before,files);result['zuruBuildRecipeProof']=recipe_proof;built={};result['candidateConfigurationChecks']={};result['reusedSealedImages']={}
- # Reuse the three exact sealed good images. The four required builds
- # all finish before the first target enters maintenance.
+ STAGE='sealed-recovery06-seven-prebuilt-image-evidence';result.update(recovery06_evidence(before));STAGE='old-factory-process-and-seven-sealed-user-identities-before-switch';result['prebuildIdentityEvidence']=prebuild_identity_evidence(before,raw);STAGE='fetch-exact-main-without-checkout';CORE.run(['git','-c','core.hooksPath=/dev/null','fetch','origin','main']);need(CORE.run(['git','rev-parse','FETCH_HEAD']).decode().strip()==TARGET);checked_source(TARGET,before,files,True);result.update(sourceAlreadyAtReviewedTargetNoCheckoutOrModeRepair=True,imageBuildsPerformedInThisRun=False);result.update(compose_preflight(before,True));built={};result['candidateConfigurationChecks']={};result['reusedSealedImages']={}
+ # Validate every immutable prebuilt candidate before the first maintenance flag.
  for service in ORDER:
-  STAGE=service+'-pre-build-image-binding';need(CORE.runtime()[0]==current);tag=raw[service]['Config']['Image'];need(tag.removesuffix(':latest')=='rr-portal-'+service);old=json.loads(CORE.run(['docker','image','inspect',tag]));need(len(old)==1)
-  if service in REUSED_IMAGES:
-   need(old[0]['Id']==REUSED_IMAGES[service]);STAGE=service+'-reuse-sealed-built-image';candidate=old;checked_source(TARGET,before,files,True)
-   if service in{'factory-review','factory-review-test'}:need((candidate[0]['Config'].get('Labels')or{}).get('org.opencontainers.image.revision')==TARGET)
-   result['reusedSealedImages'][service]=REUSED_IMAGES[service]
-  else:
-   need(old[0]['Id']==(REJECTED_ZURU_IMAGE if service=='zuru-order-system'else current['targets'][service]['image']));STAGE=service+'-build-only-target-image';operation([*(zuru_build_compose if service=='zuru-order-system'else COMPOSE),'build',service],1800);build_log=OUT/('%04d-%s.private.log'%(CORE.COUNTER,STAGE));candidate=json.loads(CORE.run(['docker','image','inspect',tag]))
-   if service=='zuru-order-system':
-    need(len(candidate)==1 and candidate[0]['Id']!=REJECTED_ZURU_IMAGE and candidate[0].get('Architecture')=='amd64'and candidate[0].get('Os')=='linux');result['zuruBuildRecipeProof']['actualBaseResolutionEvidence']=optional_build_log_evidence(build_log)
-  STAGE=service+'-candidate-config-validation';need(len(candidate)==1 and re.fullmatch('sha256:[a-f0-9]{64}',candidate[0]['Id'])and candidate[0]['Id']!=current['targets'][service]['image']);result['candidateConfigurationChecks'][service]=candidate_config_compatible(service,candidate[0],raw[service],before);built[service]=candidate[0]['Id'];checked_source(TARGET,before,files,True)
+  STAGE=service+'-sealed-prebuilt-candidate-validation';need(CORE.runtime()[0]==current);tag=raw[service]['Config']['Image'];need(tag.removesuffix(':latest')=='rr-portal-'+service);candidate=json.loads(CORE.run(['docker','image','inspect',tag]));need(len(candidate)==1 and candidate[0]['Id']==SEALED_IMAGES[service]and candidate[0]['Id']!=current['targets'][service]['image']);result['candidateConfigurationChecks'][service]=candidate_config_compatible(service,candidate[0],raw[service],before);built[service]=candidate[0]['Id'];result['reusedSealedImages'][service]=candidate[0]['Id'];checked_source(TARGET,before,files,True)
  expected=current;proofs={};public={};allflags=flags()
  for service in ORDER:
-  STAGE=service+'-pre-switch-guards';observed,inspects=CORE.runtime();need(observed==expected);maintenance('require_maintenance_cleared',service);closed_preswitch_startup_guard(service,inspects[service],result);result.update(compose_preflight(before,True));previousflags=flags(service);STAGE=service+'-scoped-switch';maintenance('maintenance_on',service);switched=time.monotonic();operation([*COMPOSE,'up','-d','--no-build','--no-deps',service],180);maintenance('wait_service_ready',service);STAGE=service+'-actual-runtime-source';after,inspects=CORE.runtime();need(after['others']==expected['others']and all(after['targets'][name]==expected['targets'][name]for name in ORDER if name!=service));row=after['targets'][service];need(row['id']!=expected['targets'][service]['id']and row['image']==built[service]and row['restarts']==0 and config_same(service,before['runtime']['targets'][service],row,inspects[service],before));proofs[service]=service_proof(service,after);time.sleep(max(0,10-(time.monotonic()-switched)));need(CORE.runtime()[0]==after and flags(service)==previousflags);checked_source(TARGET,before,files,True);STAGE=service+'-clear-own-maintenance';maintenance('maintenance_off',service);maintenance('require_maintenance_cleared',service);need(flags()==allflags)
+  STAGE=service+'-pre-switch-guards';observed,inspects=CORE.runtime();need(observed==expected);maintenance('require_maintenance_cleared',service);closed_preswitch_startup_guard(service,inspects[service],result);result.update(compose_preflight(before,True));previousflags=flags(service);candidate=json.loads(CORE.run(['docker','image','inspect',inspects[service]['Config']['Image']]));need(len(candidate)==1 and candidate[0]['Id']==built[service]);STAGE=service+'-scoped-switch';maintenance('maintenance_on',service);switched=time.monotonic();operation([*COMPOSE,'up','-d','--no-build','--no-deps',service],180);maintenance('wait_service_ready',service);STAGE=service+'-actual-runtime-source';after,inspects=CORE.runtime();need(after['others']==expected['others']and all(after['targets'][name]==expected['targets'][name]for name in ORDER if name!=service));row=after['targets'][service];need(row['id']!=expected['targets'][service]['id']and row['image']==built[service]and row['restarts']==0 and config_same(service,before['runtime']['targets'][service],row,inspects[service],before));proofs[service]=service_proof(service,after);time.sleep(max(0,10-(time.monotonic()-switched)));need(CORE.runtime()[0]==after and flags(service)==previousflags);checked_source(TARGET,before,files,True);STAGE=service+'-clear-own-maintenance';maintenance('maintenance_off',service);maintenance('require_maintenance_cleared',service);need(flags()==allflags)
   try:public[service]=public_probe(service,proofs[service])
   except BaseException:maintenance('maintenance_on',service);raise
   expected=after
- STAGE='final-source-config-runtime-seals';original();checked_source(TARGET,before,files,True);need(CORE.runtime()[0]==expected and CORE.maintenance_inventory()==before['maintenanceInventory']);result.update(success=True,onlySevenTargetServicesRebuilt=True,allOtherContainersUnchanged=True,privateEnvironmentFileUnchanged=True,allPriorConfigurationMapsPreserved=True,onlyDisabledEmptyFactoryAIKeysAdded=True,onlyExactReviewedZuruWorkerCommandAndMappingChanges=True,fourExistingTrackedChangesPreserved=True,scopedMaintenanceOnly=True,runtimeAfter=expected,sourceProof=proofs,publicProbes=public)
+ STAGE='final-source-config-runtime-seals';original();checked_source(TARGET,before,files,True);need(CORE.runtime()[0]==expected and CORE.maintenance_inventory()==before['maintenanceInventory']);result.update(success=True,imageBuildsPerformedInThisRun=False,allSevenTargetServicesUseSealedReviewedBuiltImages=True,allOtherContainersUnchanged=True,privateEnvironmentFileUnchanged=True,allPriorLiteralBusinessEnvironmentValuesPreserved=True,allOtherInheritedEnvironmentValuesPreservedExceptExactQcVendorPatch=True,onlyDisabledEmptyFactoryAIKeysAdded=True,onlyExactReviewedZuruWorkerCommandAndMappingChanges=True,fourExistingTrackedChangesPreserved=True,scopedMaintenanceOnly=True,runtimeAfter=expected,sourceProof=proofs,publicProbes=public)
 
 def verify(result,before,files):
  global STAGE
- STAGE='deployed-sealed-receipt';receipt=archive(DEPLOY,DEPLOY_MANIFEST,DEPLOY_RESULT);need(receipt.get('target')==TARGET and receipt.get('onlySevenTargetServicesRebuilt')is True);current,raw=CORE.runtime();need(current==receipt['runtimeAfter']and current['others']==before['runtime']['others']);checked_source(TARGET,before,files,True);need(CORE.maintenance_inventory()==before['maintenanceInventory']);result.update(compose_preflight(before,True));roots,mounts=CORE.storage_roots(raw);need(mounts==before['storageMounts']);captured={};checks={};proofs={}
+ STAGE='deployed-sealed-receipt';receipt=archive(DEPLOY,DEPLOY_MANIFEST,DEPLOY_RESULT);need(receipt.get('target')==TARGET and receipt.get('allSevenTargetServicesUseSealedReviewedBuiltImages')is True and receipt.get('imageBuildsPerformedInThisRun')is False);current,raw=CORE.runtime();need(current==receipt['runtimeAfter']and current['others']==before['runtime']['others']);checked_source(TARGET,before,files,True);need(CORE.maintenance_inventory()==before['maintenanceInventory']);result.update(compose_preflight(before,True));roots,mounts=CORE.storage_roots(raw);need(mounts==before['storageMounts']);captured={};checks={};proofs={}
  for key,path in roots.items():
   STAGE=key+'-closed-readonly-snapshot';captured[key]=CORE.OPS.sqlite_capture(key,path,OUT/key);old=before['storage'][key];checks[key+'AllFullTypedRowsAndSchemaStrictlyIdentical']=old['sqlite']==captured[key]['sqlite'];checks[key+'FileBytesAndPermissionsStrictlyIdentical']=old['files']==captured[key]['files']
   if key=='quote-legacy':checks[key+'RawSQLiteBytesAndPermissionsStrictlyIdentical']=CORE.OPS.L.non_database_inventory(path,[])==old['completeRawFileInventory']

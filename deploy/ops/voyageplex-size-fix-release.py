@@ -64,7 +64,7 @@ def guarded_source(revision,dirty):
 def overlay(base,oldenv,image=None):
  value=CORE.serialized_environment(oldenv);text='services:\n  voyageplex-parser:\n    environment: !override '+json.dumps(value,separators=(',',':'))+'\n'
  if image:text+='    image: '+image+'\n    pull_policy: never\n'
- path=OUT/('parser-image.private.yml'if image else'parser-build.private.yml');CORE.OPS.L.private_write(path,text.encode());args=[*COMPOSE,'-f',str(path)];observed=json.loads(capture([*args,'config','--format','json'],'parser-compose-config'));expected=copy.deepcopy(base);expected['services'][SERVICE]['environment']=value
+ path=OUT/('parser-image.private.yml'if image and image.startswith('sha256:')else'parser-build.private.yml');CORE.OPS.L.private_write(path,text.encode());args=[*COMPOSE,'-f',str(path)];observed=json.loads(capture([*args,'config','--format','json'],'parser-compose-config'));expected=copy.deepcopy(base);expected['services'][SERVICE]['environment']=value
  if image:expected['services'][SERVICE].update(image=image,pull_policy='never')
  need(observed==expected,'compose-overlay-only-parser-image-and-literal-env');return args
 def image_source(image):

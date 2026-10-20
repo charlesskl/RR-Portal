@@ -17,7 +17,7 @@ concurrency:
 env:
   RELEASE_WORKFLOW_PIN: 'false'
   VERIFY_WORKFLOW_PIN: 'false'
-  HELPER_SHA256: 'b64dcf8ccab90cc18a4ea77306f96be2023d5b2b4e77df3614e3b6263dd2d53a'
+  HELPER_SHA256: '64f28d58f13bc415443111384d905b80cd2dd91d713c478f344efd4a55eea6a4'
 jobs:
   parser:
     runs-on: ubuntu-latest

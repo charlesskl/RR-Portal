@@ -5,7 +5,7 @@ Root alone may activate the gate after source/runtime/state pins and peer review
 import base64,hashlib,importlib.util,ipaddress,json,os,pathlib,re,resource,signal,sys,threading,time,types
 from urllib.parse import quote,quote_plus
 from datetime import datetime,timezone
-RUN_PIN=False
+RUN_PIN=True
 SCOPE='ops/voyageplex-size-fix-20261020'
 SOURCE_SHA='c6246781845d4cd40439d7286c9f3afcfae0dcafc4b106de780bd715e3b201a9'
 UID=1545369828;UID_VALIDITY=1;AFTER_UID=1545369827;START_DATE='2026-10-08'

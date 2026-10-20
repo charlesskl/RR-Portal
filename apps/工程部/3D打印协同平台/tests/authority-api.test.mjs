@@ -16,7 +16,7 @@ test('authority HTTP API gates cutover, blocks old writes and only exposes confi
   assert.equal((await exchange()).data.mode,'migration');
   const login=await request('/api/login',{data:{username:'admin',password:'sync-test-password'}});
   const headers={Cookie:login.headers.get('set-cookie').split(';')[0],'X-CSRF-Token':login.data.csrf};
-  const enable={action:'authority-enable',expected:core.fingerprint(remote)};
+  const enable={action:'authority-enable',expected:core.fingerprint(remote),backupConfirmed:true};
   assert.equal((await request('/api/platform/authority',{headers:{Cookie:headers.Cookie},data:enable})).status,403);
   assert.equal((await request('/api/platform/authority',{headers,data:enable})).status,200);
   assert.equal((await request('/api/production/data',{headers,data:source})).status,409);
@@ -26,7 +26,7 @@ test('authority HTTP API gates cutover, blocks old writes and only exposes confi
   assert.equal((await request('/api/production/data',{headers})).data.inventory.PETG.stockG,1000);
   const pending=await exchange();assert.equal(pending.data.commands[0].id,command.id);
   remote.inventory.PETG.stockG=939;
-  const receipt={id:command.id,request:core.fingerprint(command),status:'applied',result:{key:'PETG'}};
+  const receipt={id:command.id,request:core.fingerprint(pending.data.commands[0]),status:'applied',result:{key:'PETG'}};
   assert.equal((await exchange({receipts:[receipt]})).data.commands.length,0);
   assert.equal((await request('/api/production/data',{headers})).data.inventory.PETG.stockG,939);
   const status=(await request('/api/platform/authority',{headers})).data;assert.equal(status.enabled,true);assert.equal(status.commands[0].status,'applied');

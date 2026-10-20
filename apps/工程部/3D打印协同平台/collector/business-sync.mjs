@@ -18,7 +18,7 @@ export function startBusinessSync({config,db,call,autoStart=true}){
    const exchange=await call('/api/collector/business-sync',{authority:1,clientId,remote:remote.data,receipts:remote.receipts||[]});
    if(exchange.mode==='authority'){
     mode='authority';
-    if(!remote.authorityEnabled)await local({action:'authority-enable'});
+    if(!remote.authorityEnabled)await local({action:'authority-enable',expected:exchange.hash,station:exchange.station,clientId});
     for(const raw of exchange.commands||[]){
      const command=structuredClone(raw);
      if(command.operation==='task'){

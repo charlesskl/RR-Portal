@@ -25,6 +25,7 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
    db.exec('COMMIT');
   }catch(e){db.exec('ROLLBACK');throw e;}
  }
+ if(!db.prepare('PRAGMA table_info(production_jobs)').all().some(c=>c.name==='authority_revision'))db.exec('ALTER TABLE production_jobs ADD COLUMN authority_revision INTEGER NOT NULL DEFAULT 0');
  function refreshOrderStage(id){
   const o=db.prepare('SELECT * FROM orders WHERE id=?').get(id),payload=JSON.parse(o.payload||'{}');
   if(orderItems(payload).length<=1)return;
@@ -48,7 +49,7 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
  db.exec('BEGIN IMMEDIATE');
  try{
   for(const j of db.prepare("SELECT j.id,j.order_id FROM production_jobs j JOIN orders o ON o.id=j.order_id WHERE j.status='待质检' AND o.status IN ('打印中','待交付')").all()){
-   db.prepare("UPDATE production_jobs SET status='待交付',synced=0 WHERE id=?").run(j.id);
+   db.prepare("UPDATE production_jobs SET status='待交付',synced=0,authority_revision=authority_revision+1 WHERE id=?").run(j.id);
    db.prepare("UPDATE orders SET status='待交付',updated=? WHERE id=?").run(stamp(),j.order_id);
    refreshOrderStage(j.order_id);recordEvent(j.order_id,'生产平台','已取消独立质检步骤，打印完成任务直接进入待交付');
   }
@@ -58,11 +59,11 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
  function collectorAuth(req){const found=stations.find(s=>s.token&&timingSafeEqual(digest(req.headers.authorization||''),digest('Bearer '+s.token)));if(!found)fail(401,'采集站凭据无效');return found;}
  async function sync(j){
   const p=JSON.parse(j.payload), o=db.prepare('SELECT * FROM orders WHERE id=?').get(j.order_id), op=JSON.parse(o.payload);
-  try {const r=await fetch(`http://127.0.0.1:${process.env.PRODUCTION_PORT||3102}/bridge/jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-Internal-Token':process.env.INTERNAL_TOKEN},body:JSON.stringify({cloudJobId:j.id,revision:j.sequence,orderId:o.id,orderNumber:o.number,date:p.date,productName:p.productionProduct||op.product,customer:op.customer,material:p.productionMaterial||op.material,completion:p.quality||null,attempt:p.attempt||1,weight:p.weight,qty:p.quantity??op.quantity,machine:p.machineNumber,priority:'normal',status:({待打印:'pending',打印中:'printing',待质检:'printing',异常:'printing',待交付:'done',已取消:'cancelled'})[j.status],remark:`关联订单 ${o.number} · ${o.factory} · ${j.status}；请在生产协同页操作`}),signal:AbortSignal.timeout(3000)}); if(!r.ok){const result=await r.json();throw Error(result.error||'生产业务同步失败');}const receipt=await r.json();if(receipt.pending)throw Error('生产任务已排队，等待现场确认');db.prepare("UPDATE production_jobs SET synced=1,sync_error='' WHERE id=? AND status=? AND payload=? AND sequence=?").run(j.id,j.status,j.payload,j.sequence);}catch(e){db.prepare('UPDATE production_jobs SET synced=0,sync_error=? WHERE id=?').run(e.message||'生产业务暂时不可用',j.id);}
+  try {const r=await fetch(`http://127.0.0.1:${process.env.PRODUCTION_PORT||3102}/bridge/jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-Internal-Token':process.env.INTERNAL_TOKEN},body:JSON.stringify({cloudJobId:j.id,revision:j.authority_revision,station:j.station,orderId:o.id,orderNumber:o.number,date:p.date,productName:p.productionProduct||op.product,customer:op.customer,material:p.productionMaterial||op.material,completion:p.quality||null,attempt:p.attempt||1,weight:p.weight,qty:p.quantity??op.quantity,machine:p.machineNumber,priority:'normal',status:({待打印:'pending',打印中:'printing',待质检:'printing',异常:'printing',待交付:'done',已取消:'cancelled'})[j.status],remark:`关联订单 ${o.number} · ${o.factory} · ${j.status}；请在生产协同页操作`}),signal:AbortSignal.timeout(3000)}); if(!r.ok){const result=await r.json();throw Error(result.error||'生产业务同步失败');}const receipt=await r.json();if(receipt.pending)throw Error('生产任务已排队，等待现场确认');db.prepare("UPDATE production_jobs SET synced=1,sync_error='' WHERE id=? AND status=? AND payload=? AND authority_revision=?").run(j.id,j.status,j.payload,j.authority_revision);}catch(e){db.prepare('UPDATE production_jobs SET synced=0,sync_error=? WHERE id=?').run(e.message||'生产业务暂时不可用',j.id);}
  }
  let syncing=false;
  const timer=setInterval(async()=>{if(syncing)return;syncing=true;try{for(const j of db.prepare('SELECT * FROM production_jobs WHERE synced=0').all())await sync(j);}finally{syncing=false;}},5000); timer.unref();
- function transition(j,status,text){db.prepare('UPDATE production_jobs SET status=?,synced=0 WHERE id=?').run(status,j.id);recordEvent(j.order_id,'生产平台',text);}
+ function transition(j,status,text){db.prepare('UPDATE production_jobs SET status=?,synced=0,authority_revision=authority_revision+1 WHERE id=?').run(status,j.id);recordEvent(j.order_id,'生产平台',text);}
  return async function handle(req,res,route,u){
   if(route.startsWith('/api/collector/')){
    const authorizedStation=collectorAuth(req),station=authorizedStation.id;
@@ -121,7 +122,7 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
    const query=new URL(req.url,'http://localhost').searchParams;
    const input=req.method==='GET'?(query.has('collection')?{action:'authority-view',collection:query.get('collection'),query:query.get('q')}:{action:'authority-status'}):await body(req);
    if(!['authority-status','authority-view','authority-enable','authority-submit'].includes(input.action))fail(400,'不支持的统一记账操作');
-   return json(res,200,await exchangeBusiness(input)),true;
+   return json(res,200,await exchangeBusiness({...input,actor:{id:u.id,username:u.username}})),true;
   }
   if(route==='/api/platform/business-sync'&&['GET','POST'].includes(req.method)){
    return json(res,200,await exchangeBusiness(req.method==='GET'?{action:'status'}:{action:'resolve',choices:(await body(req)).choices})),true;
@@ -195,19 +196,19 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
    }
    if(p.action==='simulate'){
     if(!DEMO)fail(403,'生产环境禁用模拟');if(!['待打印','打印中'].includes(j.status)||!['RUNNING','FINISH','FAILED'].includes(p.state))fail(400,'此任务不可模拟');
-    db.prepare('UPDATE production_jobs SET payload=? WHERE id=?').run(JSON.stringify({...JSON.parse(j.payload),requestedState:p.state}),j.id);
+    db.prepare('UPDATE production_jobs SET payload=?,authority_revision=authority_revision+1,synced=0 WHERE id=?').run(JSON.stringify({...JSON.parse(j.payload),requestedState:p.state}),j.id);
    }else{
     db.exec('BEGIN IMMEDIATE');try{
      if(p.action==='quality'&&['待质检','待交付'].includes(j.status)&&!JSON.parse(j.payload).quality){
       const fresh=db.prepare('SELECT status,payload FROM production_jobs WHERE id=?').get(j.id);
       const order=db.prepare('SELECT status FROM orders WHERE id=?').get(j.order_id);
       if(fresh.status!==j.status||fresh.payload!==j.payload||!['打印中','待交付'].includes(order?.status))fail(409,'任务或订单已被其他人处理，请刷新');
-      db.prepare('UPDATE production_jobs SET payload=? WHERE id=?').run(JSON.stringify({...JSON.parse(j.payload),quality}),j.id);
+      db.prepare('UPDATE production_jobs SET payload=?,authority_revision=authority_revision+1,synced=0 WHERE id=?').run(JSON.stringify({...JSON.parse(j.payload),quality}),j.id);
       transition(j,'待交付','管理员 '+u.name+' 确认质检合格');db.prepare("UPDATE orders SET status='待交付',updated=? WHERE id=?").run(stamp(),j.order_id);
      }else if(p.action==='retry'&&['异常','待质检','待交付'].includes(j.status)){
       if(db.prepare('SELECT status FROM orders WHERE id=?').get(j.order_id)?.status==='已完成')fail(409,'已交付订单不能重打');
       if(db.prepare("SELECT id FROM production_jobs WHERE station=? AND machine=? AND id<>? AND status IN ('待打印','打印中','待质检','异常')").get(j.station,j.machine,j.id))fail(409,'机台已有其他任务，请先处理');
-      transition(j,'待打印','管理员 '+u.name+' 确认重新打印');db.prepare('UPDATE production_jobs SET payload=? WHERE id=?').run(JSON.stringify({...JSON.parse(j.payload),quality:undefined,attempt:(JSON.parse(j.payload).attempt||1)+1,attemptStarted:stamp(),requestedState:'IDLE'}),j.id);
+      transition(j,'待打印','管理员 '+u.name+' 确认重新打印');db.prepare('UPDATE production_jobs SET payload=?,authority_revision=authority_revision+1,synced=0 WHERE id=?').run(JSON.stringify({...JSON.parse(j.payload),quality:undefined,attempt:(JSON.parse(j.payload).attempt||1)+1,attemptStarted:stamp(),requestedState:'IDLE'}),j.id);
       db.prepare("UPDATE orders SET status='待排产',updated=? WHERE id=?").run(stamp(),j.order_id);
      }else if(p.action==='cancel'&&j.status==='待打印'){
       transition(j,'已取消','管理员 '+u.name+' 取消未开始任务');if(orderItems(JSON.parse(db.prepare('SELECT payload FROM orders WHERE id=?').get(j.order_id).payload)).length===1)db.prepare("UPDATE orders SET status='已取消',updated=? WHERE id=?").run(stamp(),j.order_id);

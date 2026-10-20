@@ -1,21 +1,28 @@
 let core;try{core=require('./business-sync.cjs');}catch(e){if(e.code!=='MODULE_NOT_FOUND')throw e;core=require('./business-sync-core.cjs');}
+const {createHash}=require('node:crypto');
+const canonical=x=>Array.isArray(x)?x.map(canonical):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,canonical(x[k])])):x;
+const requestHash=x=>createHash('sha256').update(JSON.stringify(canonical(x))).digest('hex');
 const collections=['products','materials','records','schedules','maintenance','miscExpenses','inventory','settings','days'];
 const safe=k=>typeof k==='string'&&k.length>0&&k.length<256&&!['__proto__','prototype','constructor'].includes(k);
 const hash=x=>core.fingerprint({value:x??null});
 function validate(c){
  if(!c||!safe(c.id)||!collections.includes(c.collection)||!['set','create','delete','stock','task'].includes(c.operation))throw Error('不支持的修改申请');
+ if(Object.keys(c).some(k=>!['id','operation','collection','key','expected','reason','value','delta','existingKey','existingHash','binding'].includes(k)))throw Error('修改申请包含不支持的参数');
+ if(c.binding&&(!safe(c.binding.station)||!safe(c.binding.clientId)||!safe(c.binding.actor)||Object.keys(c.binding).some(k=>!['station','clientId','actor'].includes(k))))throw Error('申请归属无效');
  if(!safe(c.key)||!safe(c.reason)||!c.expected)throw Error('修改申请缺少对象、原因或版本');
- if(c.operation==='task'&&(c.collection!=='schedules'||!safe(c.value?.externalJobId)))throw Error('生产任务参数无效');
+ if(c.operation==='task'&&(c.collection!=='schedules'||!safe(c.value?.externalJobId)||!Number.isSafeInteger(c.value?.revision)||c.value.revision<0))throw Error('生产任务参数无效');
  if(c.operation==='stock'&&(c.collection!=='inventory'||!Number.isFinite(c.delta)||c.delta===0))throw Error('库存变动量无效');
  if(c.collection==='settings'&&c.key!=='business')throw Error('设置对象无效');
  if(c.operation==='create'&&!['products','materials','records','schedules','maintenance','miscExpenses'].includes(c.collection))throw Error('该资料不支持新增');
  if(c.operation==='delete'&&['inventory','settings','days'].includes(c.collection))throw Error('库存和设置不可直接删除');
  if(c.operation==='set'&&c.collection==='inventory')throw Error('库存请使用出入库或盘点申请');
  const allowed={products:['name','material','customer','weight','qty','time','price','process','image','remark'],materials:['name','priceKg','density','remark'],records:['date','machine','status','productName','material','weight','qty','time','designFee','price','customer','remark'],schedules:['date','machine','productName','material','qty','weight','status','remark','priority','externalJobId','revision'],maintenance:['date','machine','cost','remark','type'],miscExpenses:['date','cost','remark','type','name'],days:['off'],settings:['machines','elecPerMachine','laborPerDay','resinQuotePerGram','resinElecPerDay','resinLaborPerDay','lossRate','profitRate']};
+ if(c.operation!=='task'&&c.value&&('externalJobId' in c.value||'revision' in c.value))throw Error('任务身份及版本仅由生产任务流更新');
  if(c.value!==undefined){
   if(!c.value||typeof c.value!=='object'||Array.isArray(c.value))throw Error('修改内容无效');if(!allowed[c.collection]||Object.keys(c.value).some(k=>!allowed[c.collection].includes(k)))throw Error('修改包含未支持的字段');
   for(const k of Object.keys(c.value))if(!safe(k)||/password|token|secret|accesscode|credential/i.test(k)||['id','_id','_uid','sourceRecordId','cloudJobId'].includes(k))throw Error('不允许修改身份或凭据字段');
   if(c.collection==='settings'&&Object.values(c.value).some(v=>!Number.isFinite(v)||v<0))throw Error('设置必须为非负数字');
+  for(const [k,v]of Object.entries(c.value)){if(k==='off'?typeof v!=='boolean':!['weight','qty','time','price','priceKg','density','revision','designFee','cost','machines','elecPerMachine','laborPerDay','resinQuotePerGram','resinElecPerDay','resinLaborPerDay','lossRate','profitRate','machine'].includes(k)&&typeof v!=='string')throw Error(k+' 格式无效');}
   for(const [k,v]of Object.entries(c.value))if(['weight','qty','time','price','priceKg','density','revision','designFee','cost','stockG','minStockG','amountG'].includes(k)&&(!Number.isFinite(v)||v<0))throw Error(k+' 必须是非负数');
  }
  return c;
@@ -30,6 +37,7 @@ function apply(original,command){
  if(c.operation==='task'){
   let existing=Object.entries(doc.schedules).find(([,r])=>r.externalJobId===c.value.externalJobId);
   if(!existing&&c.existingKey){const row=doc.schedules[c.existingKey];if(!row||hash(row)!==c.existingHash)throw Error('原排期已变化，请核对任务关联');existing=[c.existingKey,row];}
+  if(existing&&Number(existing[1].revision||0)===c.value.revision&&existing[1].externalJobId===c.value.externalJobId&&Object.entries(c.value).some(([k,v])=>existing[1][k]!==v))throw Error('相同任务版本内容不一致');
   if(existing&&Number(existing[1].revision||0)>Number(c.value.revision||0))return {data:original,result:{key:existing[0],operation:'task',superseded:true,at:stamp}};
   const id=existing?existing[1].id:Math.max(0,...Object.values(doc.schedules).map(x=>Number(x.id)||0))+1;
   key=String(id);doc.schedules[key]={...existing?.[1],...c.value,id,_uid:existing?.[1]._uid||c.id};
@@ -51,6 +59,9 @@ function apply(original,command){
    if(c.collection==='records'){key=c.id;row={...row,_id:c.id};}
    else{const id=Math.max(0,...Object.values(doc[c.collection]).map(x=>Number(x.id)||0))+1;key=String(id);row={...row,id,_uid:c.id};}
   }
+  if(['records','schedules','maintenance','miscExpenses'].includes(c.collection)&&(!/^\d{4}-\d{2}-\d{2}$/.test(row.date)||!Number.isFinite(Date.parse(row.date))||new Date(row.date).toISOString().slice(0,10)!==row.date))throw Error('日期无效');
+  if(c.collection==='days'&&typeof row.off!=='boolean')throw Error('休息日状态无效');
+  if(['records','schedules','maintenance'].includes(c.collection)&&(!Number.isInteger(row.machine)||row.machine<1||row.machine>50))throw Error('现场机台无效');
   if(c.collection==='records'){
    if(!/^\d{4}-\d{2}-\d{2}$/.test(row.date)||!Number.isInteger(row.machine)||row.machine<1||row.machine>50||!Number.isInteger(row.qty)||row.qty<1)throw Error('记录日期、现场机台或数量无效');
    doc.days[row.date]||={off:false};
@@ -64,4 +75,4 @@ function apply(original,command){
  }
  return {data:core.apply(original,doc),result:{key,operation:c.operation,collection:c.collection,at:stamp}};
 }
-module.exports={validate,apply,hash,objectAt,collections};
+module.exports={validate,apply,hash,requestHash,objectAt,collections};

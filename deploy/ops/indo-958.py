@@ -1,7 +1,7 @@
 """Fixed indo-shipping backup first. Draft; no deployment or live business API."""
 import hashlib,importlib.util,json,os,pathlib,re,shutil,signal,sqlite3,stat,subprocess,sys,urllib.parse
 ROOT=pathlib.Path('/opt/rr-portal');APP=ROOT/'apps/印尼小组/印尼走货明细';BASE='6eece9ec6802533c077dd53d46e89902ffb4e90f'
-BRANCH='refs/heads/ops/indo-shipping-958-20261020';BACKUP_PIN=True;DEPLOY_PIN=False;VERIFY_PIN=False;TARGET='';TARGET_TREE='';REVIEWED_FILES={}
+BRANCH='refs/heads/ops/indo-shipping-958-20261020';BACKUP_PIN=False;DEPLOY_PIN=False;VERIFY_PIN=False;TARGET='';TARGET_TREE='';REVIEWED_FILES={}
 OUT=ROOT/'deploy/backups/indo-shipping-958-20261020-backup'
 DEPENDENCIES={'release-data-library.py':'d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9','indo-958-readonly.py':'b95338017bb0ae5d4ff18dc758b0c395796e0b6165f5868b0e7900b50ff933d3','indo-pdb-library.py':'cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5'}
 STAGE='preflight';COUNTER=0;L=None;READONLY=None

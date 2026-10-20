@@ -1,25 +1,28 @@
-name: Indo Shipping 958 Reviewed Backup
+name: Indo Shipping 958 Fixed Single Service Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [backup]}
+      mode: {type: choice, required: true, options: [deploy, verify]}
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: deploy-cloud
   queue: max
   cancel-in-progress: false
 env:
-  INDO_BACKUP_WORKFLOW_PIN: 'true'
-  INDO_BACKUP_HELPER_SHA256: 'dc51c0506f6add2438dfc40ad1d0c165e13fe3bf3339b5f87cf0f7ab29f6263b'
+  INDO_RELEASE_WORKFLOW_PIN: 'true'
+  INDO_RELEASE_HELPER_SHA256: '20a584a7275f6330d06d594c18c0587b4d1855e0067b0a8850d6a3de668bc3fb'
 jobs:
-  fixed-indo-shipping-backup:
+  fixed-indo-shipping-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 23
+    timeout-minutes: 43
     steps:
-      - name: Validate fixed source and first attempt
+      - name: Validate exact ops source and first attempt
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_BRANCH: ${{ github.ref }}
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
@@ -27,10 +30,18 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$INDO_BACKUP_WORKFLOW_PIN" = true && "$INDO_BACKUP_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/indo-shipping-958-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = backup ]] || exit 1
+          [[ "$INDO_RELEASE_WORKFLOW_PIN" = true && "$INDO_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/indo-shipping-958-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(deploy|verify)$ ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Capture only indo_shipping and its persistent files
+          if [[ "$RELEASE_MODE" = deploy ]]; then
+            gh api "repos/$GH_REPO/actions/workflows/deploy.yml" > "$RUNNER_TEMP/indo-standard-workflow.json"
+            python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["state"]=="disabled_manually"' "$RUNNER_TEMP/indo-standard-workflow.json"
+            for state in queued in_progress waiting requested pending; do
+              gh api --method GET "repos/$GH_REPO/actions/workflows/deploy.yml/runs" -f status="$state" -f per_page=1 > "$RUNNER_TEMP/indo-standard-runs.json"
+              python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["total_count"]==0' "$RUNNER_TEMP/indo-standard-runs.json"
+            done
+          fi
+      - name: Run fixed indo-shipping release or read-only verification
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -43,24 +54,35 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 21m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,INDO_BACKUP_WORKFLOW_PIN,INDO_BACKUP_HELPER_SHA256
+          command_timeout: 40m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,INDO_RELEASE_WORKFLOW_PIN,INDO_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$INDO_BACKUP_WORKFLOW_PIN" = true && "$INDO_BACKUP_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/indo-shipping-958-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = backup && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$INDO_RELEASE_WORKFLOW_PIN" = true && "$INDO_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/indo-shipping-958-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(deploy|verify)$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch origin ops/indo-shipping-958-20261020 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            indo_backup_tmp=$(mktemp -d /tmp/indo-958-backup.XXXXXX)
-            trap 'rm -rf "$indo_backup_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/indo-958.py" > "$indo_backup_tmp/run.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$indo_backup_tmp/release-data-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/indo-958-readonly.py" > "$indo_backup_tmp/indo-958-readonly.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/indo-pdb-library.py" > "$indo_backup_tmp/indo-pdb-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$indo_backup_tmp/indo-pdb-library.py" | cut -d ' ' -f1)" = cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5 ]] || exit 1
-            [[ "$(sha256sum "$indo_backup_tmp/run.py" | cut -d ' ' -f1)" = "$INDO_BACKUP_HELPER_SHA256" ]] || exit 1
-            [[ "$(sha256sum "$indo_backup_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            [[ "$(sha256sum "$indo_backup_tmp/indo-958-readonly.py" | cut -d ' ' -f1)" = b95338017bb0ae5d4ff18dc758b0c395796e0b6165f5868b0e7900b50ff933d3 ]] || exit 1
-            timeout --signal=TERM --kill-after=20s 18m python3 -B "$indo_backup_tmp/run.py" backup
+            indo_release_tmp=$(mktemp -d /tmp/indo-958-release.XXXXXX)
+            trap 'rm -rf "$indo_release_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/indo-958-release.py" > "$indo_release_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/indo-958.py" > "$indo_release_tmp/indo-958-backup-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$indo_release_tmp/release-data-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/indo-958-readonly.py" > "$indo_release_tmp/indo-958-readonly.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/indo-958-source-pin.json" > "$indo_release_tmp/indo-958-source-pin.json" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/indo-pdb-library.py" > "$indo_release_tmp/indo-pdb-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$indo_release_tmp/indo-pdb-library.py" | cut -d ' ' -f1)" = cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5 ]] || exit 1
+            [[ "$(sha256sum "$indo_release_tmp/run.py" | cut -d ' ' -f1)" = "$INDO_RELEASE_HELPER_SHA256" ]] || exit 1
+            [[ "$(sha256sum "$indo_release_tmp/indo-958-backup-library.py" | cut -d ' ' -f1)" = 5631d65725bc871cee1e2be992723a03a437028b4b7c07632ed565ad904a42a6 ]] || exit 1
+            [[ "$(sha256sum "$indo_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            [[ "$(sha256sum "$indo_release_tmp/indo-958-readonly.py" | cut -d ' ' -f1)" = b95338017bb0ae5d4ff18dc758b0c395796e0b6165f5868b0e7900b50ff933d3 ]] || exit 1
+            [[ "$(sha256sum "$indo_release_tmp/indo-958-source-pin.json" | cut -d ' ' -f1)" = 2f7d43445bffd4f8c5d465657913bf29639ca5553da36ef70f1dc211d4ff301d ]] || exit 1
+            indo_release_limit=18m
+            [[ "$RELEASE_MODE" != deploy ]] || indo_release_limit=35m
+            timeout --signal=TERM --kill-after=30s "$indo_release_limit" python3 -B "$indo_release_tmp/run.py" "$RELEASE_MODE"
+      - name: Report regular deployment restoration obligation
+        if: always()
+        shell: bash
+        run: |
+          echo 'MANUAL_ATTENTION: The release owner must restore deploy.yml to its saved original state and verify it. This read-only-token workflow does not change that setting.'

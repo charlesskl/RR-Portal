@@ -4767,8 +4767,13 @@ function hasMeasurementFail(measurements) {
     measurements.some(m => String(m.result || '').toUpperCase() === 'FAIL');
 }
 
-/* 最终判定：measurements FAIL 优先，其次 defects 超 AQL，最后用原始 result */
+/* 最终判定：用户显式选择的 COND（有条件接收/AOD）/ HOLD 优先，
+   其次 measurements FAIL → REJ，再其次 defects 超 AQL → REJ，最后用原始 result */
 function getFinalRecordResult(baseResult, defects, measurements, lotQty) {
+  /* 0. 有条件接收/待定是人工特批判定，不被自动规则覆盖（否则报告/列表会错显示成 REJ） */
+  const b = String(baseResult || '').toUpperCase();
+  if (b === 'COND' || b === 'HOLD') return b;
+
   /* 1. 测量 FAIL → 强制 REJ */
   if (hasMeasurementFail(measurements)) return 'REJ';
 
@@ -5734,9 +5739,8 @@ function _backupDoImport(incoming, mode) {
     }));
 
     if (mode === 'replace') {
-      window.__QC_FORCE_REPLACE = (window.__QC_FORCE_REPLACE || 0) + 1;
       state.records = normalized;
-      state.nextId  = Math.max(state.nextId || 1, normalized.length + 1);
+      state.nextId  = normalized.length + 1;
     } else {
       state.records.push(...normalized);
     }
@@ -5796,9 +5800,9 @@ function backupClearAll() {
     confirmClass: 'btn-secondary',   /* 不用 btn-primary，减少误操作 */
     onConfirm:   () => {
       const count = recs().length;
-      window.__QC_FORCE_REPLACE = (window.__QC_FORCE_REPLACE || 0) + 1;   /* 整库清空走 /api/records/replace */
+      window.__QC_FORCE_REPLACE = true;   /* 整库清空走 /api/records/replace */
       state.records = [];
-      state.nextId  = Math.max(1, state.nextId || 1);
+      state.nextId  = 1;
       persist();
       showToast(`已清空全部 ${count} 条记录`, 'info');
       _backupLog(`清空数据 ${count} 条记录`, 'warn');
@@ -5821,9 +5825,9 @@ function backupRestoreSeed() {
     confirmLabel: '确认恢复',
     confirmClass: 'btn-primary',
     onConfirm:   () => {
-      window.__QC_FORCE_REPLACE = (window.__QC_FORCE_REPLACE || 0) + 1;   /* 整库覆盖走 /api/records/replace */
+      window.__QC_FORCE_REPLACE = true;   /* 整库覆盖走 /api/records/replace */
       state.records = SEED_RECORDS.map(r => Object.assign({}, r));
-      state.nextId  = Math.max(state.nextId || 1, SEED_RECORDS.length + 1);
+      state.nextId  = SEED_RECORDS.length + 1;
       persist();
       showToast(`✓ 已恢复 ${SEED_RECORDS.length} 条示例数据`, 'success');
       _backupLog(`恢复示例数据 ${SEED_RECORDS.length} 条`, 'ok');
@@ -6667,9 +6671,9 @@ function executeImportConfirm() {
 
   try {
     if (plan.mode === 'replace') {
-      window.__QC_FORCE_REPLACE = (window.__QC_FORCE_REPLACE || 0) + 1;   /* 替换模式导入走 /api/records/replace */
+      window.__QC_FORCE_REPLACE = true;   /* 替换模式导入走 /api/records/replace */
       state.records = plan.records;
-      state.nextId  = Math.max(state.nextId || 1, plan.records.length + 1);
+      state.nextId  = plan.records.length + 1;
     } else {
       state.records.push(...plan.records);
       state.nextId = plan.nextId;

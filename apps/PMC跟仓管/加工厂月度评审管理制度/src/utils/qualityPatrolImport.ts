@@ -128,8 +128,11 @@ export function parsePatrolWorkbook(data: ArrayBuffer): PatrolImportResult {
   const col = (...aliases: string[]) => labels.findIndex(h => aliases.some(a => norm(a) === h))
   const gradeCols = labels.map((v, i) => /评级$/.test(v) ? i : -1).filter(i => i >= 0)
   if (gradeCols.length !== 1) throw new Error('模板须仅包含一次巡查评级，请将不同日期的巡查分别导入')
+  const feeCols = labels.map((v, i) => /加工费\(万(?:元)?\)$/.test(v) ? i : -1).filter(i => i >= 0)
+  if (feeCols.length > 1) throw new Error('加工费列不唯一，请保留一次统计期间的加工费')
   const cols: Record<string, number> = {
     factory: col('厂名'), staff: col('员工人数'), lines: col('拉线'), area: col('场地面积（平方）'), grade: gradeCols[0]!,
+    responsibility_scope: col('责任范围'), responsible_supervisor: col('责任主管'), processing_fee: feeCols[0] ?? -1,
     evaluation: col('评价', '本次评价'), correction: col('整改描述', '本次整改描述'), planned_date: col('计划完成时间', '计划完成日期', '整改计划完成时间'),
     completed_date: col('整改完成时间', '整改完成日期'), production_type: col('符合类型', '符合生产类型'), notes: col('备注'),
   }
@@ -167,10 +170,19 @@ export function parsePatrolWorkbook(data: ArrayBuffer): PatrolImportResult {
       if (key === 'factory') continue
       const value = c >= 0 ? cell(r, c)?.v : undefined
       try {
-        values[key] = ['staff', 'lines', 'area'].includes(key) ? numeric(value, key !== 'area')
+        // Completion cells can contain several item-specific dates or prose.
+        // Keep that text verbatim without claiming a single completion date.
+        if (key === 'completed_date' && typeof value === 'string' && text(value) && !/^\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?$/.test(text(value))) {
+          values.completion_details = text(value)
+          values.completed_date = ''
+          continue
+        }
+        values[key] = ['staff', 'lines', 'area', 'processing_fee'].includes(key) ? numeric(value, ['staff', 'lines'].includes(key))
           : key.endsWith('_date') ? dateText(value, !!wb.Workbook?.WBProps?.date1904) : text(value)
       } catch (e) { errors.push(`${labels[c] || fieldLabels[key]}：${(e as Error).message}`) }
     }
+    values.completion_details ??= ''
+    values.processing_fee_period = feeCols.length ? labels[feeCols[0]!]!.replace(/加工费\(万(?:元)?\)$/, '') : ''
     values.grade = text(values.grade).toUpperCase().replace(/级$/, '')
     if (values.grade && !PATROL_GRADES.includes(values.grade as typeof PATROL_GRADES[number])) errors.push('评级须为 A、B、C、D 或留空')
     const fill = (c: number) => String(cell(r, c)?.s?.fgColor?.rgb || '').slice(-6).toUpperCase()

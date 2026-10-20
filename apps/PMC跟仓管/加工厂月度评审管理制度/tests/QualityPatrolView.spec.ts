@@ -26,6 +26,21 @@ beforeEach(() => {
   ])
 })
 describe('巡查现场', () => {
+  it('uses template 02 column order, period labels and completion prose while preserving legacy fields on edit', async () => {
+    mocks.list.mockResolvedValue([{ id:'1', factory:'hn', check_date:'2026-10-16', responsibility_scope:'责任人甲', responsible_supervisor:'主管乙', processing_fee_period:'1月-9月份', processing_fee:12.75, completion_details:'1:10/21完成\n2:10/26完成', planned_date:'2026-10-25' }])
+    const w = mountView(); await flushPromises()
+    const headers = w.findAll('.patrol-table thead th').map(h => h.text())
+    expect(headers.slice(2, 9)).toEqual(['员工人数','拉线','场地面积（平方）','责任范围','责任主管','1月-9月份\n加工费（万）','本次评级'])
+    expect(headers).not.toContain('计划完成时间')
+    expect(w.find('.sheet-heading').text()).toContain('2026-10-16')
+    expect(w.find('td.field-completed_date').text()).toBe('1:10/21完成\n2:10/26完成')
+    await w.find('.patrol-table .actions button').trigger('click')
+    await w.find('form').trigger('submit'); await flushPromises()
+    const body = mocks.update.mock.calls[0]![1] as FormData
+    expect(body.get('processing_fee')).toBe('12.75')
+    expect(body.get('planned_date')).toBe('2026-10-25')
+    expect(body.get('completion_details')).toBe('1:10/21完成\n2:10/26完成')
+  })
   it('defaults to latest date and separates region and historical statistics', async () => {
     const w = mountView(); await flushPromises()
     expect(w.find('.patrol-table tbody').text()).toContain('湖南工厂')
@@ -35,6 +50,16 @@ describe('巡查现场', () => {
     expect(w.find('.patrol-table thead').text()).not.toContain('上次')
     await w.findAll('.filters select')[1]!.setValue('2026-09-18')
     expect(w.find('.patrol-table tbody').text()).toContain('35')
+  })
+  it('keeps different processing fee periods attached to their own records', async () => {
+    mocks.list.mockResolvedValue([
+      {id:'1', factory:'hn', check_date:'2026-10-16', processing_fee:0, processing_fee_period:'1月-9月份'},
+      {id:'2', factory:'hn', check_date:'2026-09-18', processing_fee:20.5, processing_fee_period:'1月-8月份'},
+    ])
+    const w = mountView(); await flushPromises()
+    await w.findAll('.filters select')[1]!.setValue('')
+    expect(w.find('th.field-processing_fee').text()).toBe('加工费（万）')
+    expect(w.findAll('td.field-processing_fee').map(c => c.text())).toEqual(['01月-9月份','20.51月-8月份'])
   })
   it('blocks duplicate factory/date and preserves photos when editing', async () => {
     const w = mountView(); await flushPromises()

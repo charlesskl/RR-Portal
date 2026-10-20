@@ -11,6 +11,31 @@ function workbook(rows: unknown[][], title = '2026年9月18日湖南加工厂检
 }
 const row = [1, '华宏', 90, 3, 1200, 'A', '整洁', '增加隔离墙', 46310, 'IP管控加包装', '', '', '停产']
 describe('single-visit Excel parser', () => {
+  it('imports template 02 responsibilities, decimal fees, period and verbatim completion details', () => {
+    const headers = ['序号', '厂名', '员工人数', '拉线', '场地面积（平方）', '责任范围', '责任主管', '1月-9月份\n加工费（万）', '10/16评级', '评价', '整改描述', '整改完\n成时间', '符合生产类型', '现场照片', '', '备注']
+    const book = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([
+      ['2026年10月16日湖南加工厂检查总结'], headers,
+      [1, '甲厂', 30, 2, 100, '责任人甲', '主管乙', 12.75, 'A', '整洁', '分项整改', '1:10/21完成\n2:10/26完成', '包装'],
+      [2, '乙厂', 0, 0, 0, '', '', 0, 'B', '', '', 46317, ''],
+      [3, '丙厂', '', '', '', '', '', '', '', '', '', '已完成', ''],
+    ]), '总结')
+    const result = parsePatrolWorkbook(XLSX.write(book, {type:'array', bookType:'xlsx'}))
+    expect(result.rows.flatMap(r => r.errors)).toEqual([])
+    expect(result.rows[0]?.values).toMatchObject({ responsibility_scope: '责任人甲', responsible_supervisor: '主管乙', processing_fee: 12.75, processing_fee_period: '1月-9月份', completed_date: '', completion_details: '1:10/21完成\n2:10/26完成' })
+    expect(result.rows[1]?.values).toMatchObject({ processing_fee: 0, completed_date: '2026-10-22', completion_details: '' })
+    expect(result.rows[2]?.values).toMatchObject({ processing_fee: null, completed_date: '', completion_details: '已完成' })
+  })
+  it.runIf(!!process.env.PATROL_TEMPLATE02_XLSX)('reads all rows, photos and new columns from the supplied template 02', () => {
+    const bytes = fs.readFileSync(process.env.PATROL_TEMPLATE02_XLSX!)
+    const result = parsePatrolWorkbook(new Uint8Array(bytes).buffer)
+    expect(result.checkDate).toBe('2026-10-16')
+    expect(result.rows).toHaveLength(39)
+    expect(result.rows.flatMap(r => r.photos)).toHaveLength(77)
+    expect(result.rows.flatMap(r => r.errors)).toEqual([])
+    expect(result.rows[0]?.values).toMatchObject({ processing_fee: 338, processing_fee_period: '1月-9月份', completion_details: '10/21全部整改好', completed_date: '' })
+    expect(result.rows[1]?.values.completed_date).toBe('2026-10-22')
+  })
   it('reads merged remarks, title date and detail rows without importing summaries', () => {
     const result = parsePatrolWorkbook(workbook([row]))
     expect(result.checkDate).toBe('2026-09-18'); expect(result.region).toBe('hunan'); expect(result.rows).toHaveLength(1)

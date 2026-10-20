@@ -10,6 +10,18 @@ const records = [
 ] as any
 const props = { records, factories, photoUrl: () => '/photo?token=protected', photoReady: true, photoError: '' }
 describe('multi-visit comparison', () => {
+  it('compares responsibilities, fee periods and completion prose without losing older visits', () => {
+    const w = mount(QualityPatrolCompare, {props:{...props,records:[
+      {id:'1',factory:'a',check_date:'2026-09-18',planned_date:'2026-10-01'},
+      {id:'2',factory:'a',check_date:'2026-10-16',responsibility_scope:'责任人甲',responsible_supervisor:'主管乙',processing_fee_period:'1月-9月份',processing_fee:338,completion_details:'1:10/21完成\n2:10/26完成'},
+    ] as any}})
+    const row = (label:string) => w.findAll('tbody tr').find(r=>r.find('th').text()===label)!
+    expect(row('责任范围').findAll('td').map(c=>c.text())).toEqual(['—','责任人甲'])
+    expect(row('加工费统计期间').findAll('td').map(c=>c.text())).toEqual(['—','1月-9月份'])
+    expect(row('整改完成说明（原文）').findAll('td')[1]!.text()).toBe('1:10/21完成\n2:10/26完成')
+    expect(row('计划完成时间').findAll('td')[0]!.text()).toBe('2026-10-01')
+    w.unmount()
+  })
   it('compares three actual visits chronologically, highlights changes and isolates factories', async () => {
     const w = mount(QualityPatrolCompare, { props })
     expect(w.findAll('thead th').map(el => el.text())).toEqual(['巡查项目', '2026-08-18', '2026-09-18', '2026-10-16'])

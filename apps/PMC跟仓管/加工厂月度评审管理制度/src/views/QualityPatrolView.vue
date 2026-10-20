@@ -8,13 +8,14 @@ import { useAuthStore } from '../stores/auth'
 import { useFactoriesStore } from '../stores/factories'
 import { allowedRegions, canEditQuality, canViewCraft } from '../utils/permissions'
 import { REGION_LABELS, regionOf, type Region } from '../constants/roles'
-import { PATROL_FIELDS, PATROL_GRADES, PATROL_GUIDANCE, patrolSummary } from '../utils/qualityPatrol'
+import { PATROL_FIELDS, PATROL_TABLE_FIELDS, PATROL_GRADES, PATROL_GUIDANCE, patrolSummary, patrolDisplayValue } from '../utils/qualityPatrol'
 
 const QualityPatrolImport = defineAsyncComponent(() => import('../components/QualityPatrolImport.vue'))
 const QualityPatrolCompare = defineAsyncComponent(() => import('../components/QualityPatrolCompare.vue'))
 const importOpen = ref(false)
 const compareOpen = ref(false)
-const tableFields = PATROL_FIELDS.filter(f => f.key !== 'notes')
+const tableFields = PATROL_TABLE_FIELDS
+const columnCount = computed(() => tableFields.length + 4 + (editable.value ? 1 : 0))
 const auth = useAuthStore()
 const factories = useFactoriesStore()
 const route = useRoute()
@@ -54,7 +55,11 @@ const scopedRecords = computed(() => records.value.filter(r => availableFactorie
 const dates = computed(() => [...new Set(scopedRecords.value.map(r => String(r.check_date).slice(0, 10)))].sort().reverse())
 const rows = computed(() => scopedRecords.value.filter(r => (!route.query.factory || r.factory === route.query.factory) && (!date.value || r.check_date.slice(0, 10) === date.value) && (!grade.value || r.grade === grade.value) && factoryName(r.factory).includes(search.value.trim())))
 const stats = computed(() => patrolSummary(rows.value.map(r => ({ factory: r.factory, grade: r.grade, staff: r.staff }))))
-const display = (r: Record<string, any>, field: typeof PATROL_FIELDS[number]) => field.type === 'date' ? (r[field.key]?.slice(0, 10) || '—') : (r[field.key] === '' || r[field.key] == null ? '—' : r[field.key])
+const display = (r: Record<string, any>, field: typeof PATROL_FIELDS[number]) => patrolDisplayValue(r, field.key)
+const feePeriods = computed(() => [...new Set(rows.value.filter(r => r.processing_fee_period || (r.processing_fee != null && r.processing_fee !== '')).map(r => String(r.processing_fee_period || '').trim()))])
+const feeLabel = computed(() => feePeriods.value.length === 1 && feePeriods.value[0] ? `${feePeriods.value[0]}\n加工费（万）` : '加工费（万）')
+const headerLabel = (field: typeof PATROL_FIELDS[number]) => field.key === 'processing_fee' ? feeLabel.value : field.label
+
 const photoUrl = (r: RecordModel, name: string) => pb.files.getURL(r, name, { token: fileToken.value })
 
 function stopPhotoAccess() {
@@ -226,19 +231,20 @@ async function remove(r: RecordModel) {
       <div v-if="photoError" role="alert" class="error">{{ photoError }} <button @click="refreshPhotoAccess">刷新照片</button></div>
       <p v-if="loading" role="status">正在加载巡查记录…</p>
       <template v-else-if="!error">
+        <div class="sheet-heading">{{ date || '各期' }} {{ region ? REGION_LABELS[region] : '' }}加工厂检查总结</div>
         <div class="sheet-scroll">
           <table class="patrol-table">
-            <thead><tr><th :colspan="PATROL_FIELDS.length + 3" class="sheet-title">{{ date || '各期' }} {{ region ? REGION_LABELS[region] : '' }}加工厂检查总结</th><th v-if="editable" rowspan="2">操作</th></tr><tr><th>序号</th><th>厂名</th><th v-for="f in tableFields" :key="f.key" :class="{ narrative: f.type === 'text' }">{{ f.label }}</th><th>现场照片</th><th>备注</th></tr></thead>
+            <thead><tr><th scope="col">序号</th><th scope="col">厂名</th><th v-for="f in tableFields" :key="f.key" scope="col" :class="['field-' + f.key, { narrative: f.type === 'text' }]">{{ headerLabel(f) }}</th><th scope="col">现场照片</th><th scope="col">备注</th><th v-if="editable" scope="col">操作</th></tr></thead>
             <tbody>
               <tr v-for="(r, i) in rows" :key="r.id">
                 <td>{{ i + 1 }}</td><td class="factory-cell" :class="{ visitor: r.visitor_ready }"><strong>{{ factoryName(r.factory) }}</strong><small>{{ r.check_date.slice(0, 10) }}</small></td>
-                <td v-for="f in tableFields" :key="f.key" :class="{ narrative: f.type === 'text', 'grade-cell': f.type === 'grade', warning: f.key === 'staff' && r.below_standard }">{{ display(r, f) }}</td>
+                <td v-for="f in tableFields" :key="f.key" :class="['field-' + f.key, { narrative: f.type === 'text', 'grade-cell': f.type === 'grade', warning: f.key === 'staff' && r.below_standard }]">{{ display(r, f) }}<small v-if="f.key === 'processing_fee' && feePeriods.length !== 1 && r.processing_fee_period">{{ r.processing_fee_period }}</small></td>
                 <td class="photo-cell"><template v-if="fileToken"><a v-for="name in r.photos || []" :key="name" :href="photoUrl(r, name)" target="_blank" rel="noopener noreferrer"><img :src="photoUrl(r, name)" alt="现场照片" loading="lazy" referrerpolicy="no-referrer" @error="photoFailed" /></a></template><span v-if="r.photos?.length && !fileToken">照片暂不可用</span><span v-if="!r.photos?.length">—</span></td><td class="narrative">{{ r.notes || '—' }}</td>
                 <td v-if="editable"><div class="actions"><button :disabled="saving" @click="openForm(r)">编辑</button><button :disabled="saving" @click="remove(r)">删除</button></div></td>
               </tr>
-              <tr v-if="!rows.length"><td :colspan="PATROL_FIELDS.length + 3 + (editable ? 1 : 0)" class="empty">暂无匹配的巡查记录{{ editable ? '，可点击“新增巡查”登记。' : '。' }}</td></tr>
+              <tr v-if="!rows.length"><td :colspan="columnCount" class="empty">暂无匹配的巡查记录{{ editable ? '，可点击“新增巡查”登记。' : '。' }}</td></tr>
             </tbody>
-            <tfoot v-if="rows.length"><tr><th colspan="2">合计</th><td>{{ stats.staff }}</td><td :colspan="PATROL_FIELDS.length + (editable ? 1 : 0)">员工人数合计（仅计算已填写数据）</td></tr></tfoot>
+            <tfoot v-if="rows.length"><tr><th colspan="2">合计</th><td>{{ stats.staff }}</td><td :colspan="columnCount - 3">员工人数合计（仅计算已填写数据）</td></tr></tfoot>
           </table>
         </div>
         <section class="summary"><div><h3>{{ date || '所选范围' }}巡查汇总，加工厂共 {{ stats.factories }} 家</h3><p v-if="!date">共 {{ rows.length }} 条巡查记录；跨日期人数和评级按记录统计，同一工厂可能重复计入。</p><table class="grade-summary"><thead><tr><th>等级</th><th>数量</th><th>占比</th></tr></thead><tbody><tr v-for="g in stats.grades" :key="g.grade"><th>{{ g.grade }}级</th><td>{{ g.count }}</td><td>{{ g.percent }}</td></tr><tr v-if="stats.unrated"><th>未评级</th><td>{{ stats.unrated }}</td><td>—</td></tr></tbody></table></div>
@@ -251,7 +257,8 @@ async function remove(r: RecordModel) {
       <div v-if="editing" class="patrol-overlay"><section ref="dialog" role="dialog" aria-modal="true" aria-labelledby="patrol-form-title" tabindex="-1" class="patrol-dialog" @keydown="dialogKeydown"><form @submit.prevent="save"><h3 id="patrol-form-title">{{ editingId ? '编辑' : '新增' }}巡查记录</h3><div class="form-grid">
         <label>加工厂<select v-model="draft.factory" required @change="selectFactory"><option value="">请选择加工厂</option><option v-for="f in availableFactories" :key="f.id" :value="f.id">{{ f.name }}</option></select></label>
         <label>检查日期<input v-model="draft.check_date" type="date" required /></label>
-        <label v-for="f in PATROL_FIELDS" :key="f.key" :class="{ wide: f.type === 'text' }">{{ f.label }}<textarea v-if="f.type === 'text'" v-model="draft[f.key]" rows="3" maxlength="10000" /><select v-else-if="f.type === 'grade'" v-model="draft[f.key]"><option value="">未评级</option><option v-for="g in PATROL_GRADES" :key="g" :value="g">{{ g }}</option></select><input v-else v-model="draft[f.key]" :type="f.type" :min="f.type === 'number' ? 0 : undefined" :step="f.key === 'area' ? 'any' : 1" /></label>
+        <label v-for="f in PATROL_FIELDS" :key="f.key" :class="{ wide: f.type === 'text' }">{{ f.label }}<textarea v-if="f.type === 'text'" v-model="draft[f.key]" rows="3" maxlength="10000" /><select v-else-if="f.type === 'grade'" v-model="draft[f.key]"><option value="">未评级</option><option v-for="g in PATROL_GRADES" :key="g" :value="g">{{ g }}</option></select><input v-else v-model="draft[f.key]" :type="f.type === 'short' ? 'text' : f.type" :min="f.type === 'number' ? 0 : undefined" :step="['area', 'processing_fee'].includes(f.key) ? 'any' : 1" /></label>
+        <p class="wide field-help">加工费按填写的统计期间记录，单位为万元。整改分项日期或“已完成”等文字请填入“整改完成说明（原文）”；该说明会显示在主表的整改完成时间列。</p>
         <label class="check"><input v-model="draft.visitor_ready" type="checkbox" />可供客户参观（厂名绿色）</label><label class="check"><input v-model="draft.below_standard" type="checkbox" />A级但基本条件未达标（人数黄色）</label>
         <label class="wide">现场照片（最多10张，每张≤10MB，本次新增合计≤30MB）<input type="file" accept="image/jpeg,image/png,image/webp" multiple @change="choosePhotos" /><span>{{ photos.length }} 张待上传</span></label>
         <div v-if="keptPhotos.length" class="wide kept-photos"><label v-for="name in keptPhotos" :key="name">{{ name }}<button type="button" @click="keptPhotos = keptPhotos.filter(n => n !== name)">移除照片</button></label></div>
@@ -272,16 +279,22 @@ button { min-height: 44px; min-width: 44px; padding: 8px 14px; border: 1px solid
 .sheet-scroll { overflow: auto; max-height: 65vh; background: white; border: 1px solid #c8ccd5; }
 table { border-collapse: separate; border-spacing: 0; font-size: 14px; }
 th, td { padding: 12px; border-right: 1px solid #bfc4cc; border-bottom: 1px solid #bfc4cc; text-align: center; white-space: pre-wrap; }
-.patrol-table { min-width: 2100px; width: 100%; }
+.patrol-table { min-width: 2300px; width: 100%; margin: 0; border-radius: 0; box-shadow: none; }
 .patrol-table thead { position: sticky; top: 0; z-index: 2; }
+.patrol-table thead th { background: #fff; }
 th { background: #f2f2f2; color: #202635; }
-.sheet-title { font-size: 20px; padding: 18px; background: #fff; }
+.sheet-heading { font-size: 20px; font-weight: 700; text-align: center; padding: 20px; background: #fff; border: 1px solid #c8ccd5; border-bottom: 0; }
 .narrative { min-width: 230px; max-width: 340px; text-align: left; line-height: 1.65; overflow-wrap: anywhere; }
-.factory-cell { min-width: 135px; } small { display: block; margin-top: 8px; color: #45515e; }
+.factory-cell { min-width: 170px; max-width: 220px; overflow-wrap: anywhere; } small { display: block; margin-top: 8px; color: #45515e; }
+.field-responsibility_scope, .field-responsible_supervisor { min-width: 90px; max-width: 150px; overflow-wrap: anywhere; }
+.field-processing_fee { min-width: 130px; }
+.field-completed_date { min-width: 165px; max-width: 230px; line-height: 1.65; overflow-wrap: anywhere; }
+.field-help { color: #596275; margin: 0; line-height: 1.6; }
 .grade-cell { font-size: 18px; font-weight: 700; } .changed { color: #c93427; }
 .visitor { background: #bce9c8; } .warning { background: #fff09c; }
 .photo-cell { min-width: 180px; } .photo-cell img { width: 76px; height: 76px; object-fit: cover; margin: 3px; border-radius: 5px; }
 .empty { padding: 48px; text-align: left; } tfoot td, tfoot th { background: #fff5da; }
+tfoot td:last-child { text-align: left; }
 .summary { display: flex; gap: 50px; flex-wrap: wrap; margin-top: 22px; padding: 22px; border: 1px solid #e1e4eb; border-radius: 12px; background: #fff; }
 .summary > div { min-width: 0; max-width: 100%; } .summary > div:first-child { flex: 0 1 320px; }
 .summary h3 { margin-top: 0; } .grade-summary { min-width: 0; border-top: 1px solid #bfc4cc; border-left: 1px solid #bfc4cc; }

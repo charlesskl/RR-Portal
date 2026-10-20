@@ -17,6 +17,7 @@ import PocketBase from 'pocketbase'
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const migration = '1792368000_create_quality_patrols.js'
+const templateMigration = '1792537200_extend_patrol_template02.js'
 const password = 'Synthetic941_' + randomBytes(16).toString('hex')
 const id = value => value.padEnd(15, '0')
 const factories = [
@@ -96,7 +97,7 @@ test('PocketBase 0.39.6 patrol migration and HTTP authorization contract', { tim
     if (process.env.QUALITY_PATROL_KEEP_FIXTURE !== '1') await rm(temp, { recursive: true, force: true })
     else t.diagnostic(`Synthetic fixture retained at ${temp}`)
   })
-  const prior = (await readdir(join(app, 'pb_migrations'))).filter(name => name.endsWith('.js') && name !== migration).sort()
+  const prior = (await readdir(join(app, 'pb_migrations'))).filter(name => name.endsWith('.js') && ![migration, templateMigration].includes(name)).sort()
   for (const file of prior) await copyFile(join(app, 'pb_migrations', file), join(migrations, file))
   const flags = ['--dir=' + data, '--migrationsDir=' + migrations, '--hooksDir=' + hooks]
   run(binary, ['migrate', 'up', ...flags])
@@ -142,6 +143,21 @@ test('PocketBase 0.39.6 patrol migration and HTTP authorization contract', { tim
     assert.equal(grant.viewRule, null)
     const patrol = after.collections.find(row => row.name === 'quality_patrols')
     assert.equal(JSON.parse(patrol.fields).find(field => field.name === 'photos').protected, true)
+  })
+  await check('template 02 migration preserves existing visits and access rules', async () => {
+    const db = new DatabaseSync(join(data, 'data.db'))
+    db.prepare('INSERT INTO quality_patrols (id,factory,check_date,staff,notes,planned_date) VALUES (?,?,?,?,?,?)')
+      .run(id('legacyvisit'), factories[0].id, '2026-10-16 00:00:00.000Z', '40', 'existing visit', '2026-10-21 00:00:00.000Z')
+    db.close()
+    const old = inspect(join(data, 'data.db'))
+    await copyFile(join(app, 'pb_migrations', templateMigration), join(migrations, templateMigration))
+    run(binary, ['migrate', 'up', ...flags])
+    const updated = inspect(join(data, 'data.db'))
+    for (const [key, value] of Object.entries(old.tables.quality_patrols[0])) assert.deepEqual(updated.tables.quality_patrols[0][key], value)
+    const original = old.collections.find(c => c.name === 'quality_patrols'), current = updated.collections.find(c => c.name === 'quality_patrols')
+    for (const key of ['listRule','viewRule','createRule','updateRule','deleteRule']) assert.equal(current[key], original[key])
+    const cleanup = new DatabaseSync(join(data, 'data.db'))
+    cleanup.prepare('DELETE FROM quality_patrols WHERE id=?').run(id('legacyvisit')); cleanup.close()
   })
   await copyFile(join(app, 'pb_hooks', 'quality_patrols.pb.js'), join(hooks, 'quality_patrols.pb.js'))
   const base = 'http://127.0.0.1:' + await freePort()
@@ -223,6 +239,17 @@ test('PocketBase 0.39.6 patrol migration and HTTP authorization contract', { tim
   })
   let nextDay = 0
   const day = () => new Date(Date.UTC(2027, 0, ++nextDay)).toISOString().slice(0, 10)
+  await check('template 02 fields round-trip and processing fees reject invalid JSON types', async () => {
+    const fields = { responsibility_scope:'责任人甲', responsible_supervisor:'主管乙', processing_fee_period:'1月-9月份', processing_fee:338.25, completion_details:'1:10/21完成\n2:10/26完成' }
+    const created = await create({ factory:factories[0].id, check_date:day(), ...fields })
+    assert.equal(created.status, 200)
+    for (const [key, value] of Object.entries(fields)) assert.equal(created.json[key], value)
+    for (const value of [-1, '12', {}, [], true]) assert.equal((await create({factory:factories[0].id,check_date:day(),processing_fee:value})).status, 400)
+    const body = new FormData(); body.set('factory',factories[0].id);body.set('check_date',day());body.set('processing_fee','0')
+    assert.equal((await create(body)).json.processing_fee,0)
+    body.set('check_date',day());body.set('processing_fee','null')
+    assert.equal((await create(body)).json.processing_fee,null)
+  })
   await check('strict JSON numbers preserve null/zero and reject strings, containers, overflow and unsafe integers', async () => {
     for (const [key, value] of [['staff', -1], ['staff', 1.1], ['staff', 2 ** 53], ['staff', '12'], ['staff', 'null'], ['lines', []], ['lines', {}], ['area', true], ['area', -1]]) {
       assert.equal((await create({ factory: factories[0].id, check_date: day(), [key]: value })).status, 400, key + ':' + JSON.stringify(value))
@@ -376,7 +403,7 @@ test('PocketBase 0.39.6 patrol migration and HTTP authorization contract', { tim
   await check('synthetic migration rollback removes only new objects and can reapply cleanly', () => {
     // Down is exercised only here on disposable synthetic data. Production
     // rollback must retain the new collection and never erase collected patrols.
-    run(binary, ['migrate', 'down', '1', ...flags], 'y\n')
+    run(binary, ['migrate', 'down', '2', ...flags], 'y\n')
     const reverted = inspect(join(data, 'data.db'))
     for (const row of before.schema) assert.deepEqual(reverted.schema.find(item => item.name === row.name), row)
     for (const row of before.collections) assert.deepEqual(reverted.collections.find(item => item.id === row.id), row)
@@ -387,9 +414,9 @@ test('PocketBase 0.39.6 patrol migration and HTTP authorization contract', { tim
     assert.deepEqual(reapplied.tables.quality_patrols, [])
     assert.ok(reapplied.schema.some(row => row.name === 'quality_patrol_access' && row.type === 'view'))
   })
-  assert.equal(passedChecks.length, 11, 'Do not produce successful evidence after a failed subtest')
+  assert.equal(passedChecks.length, 13, 'Do not produce successful evidence after a failed subtest')
   if (process.env.QUALITY_PATROL_EVIDENCE) {
-    const files = ['pb_hooks/quality_patrols.pb.js', 'pb_migrations/' + migration, 'tests/qualityPatrolBackend.integration.mjs']
+    const files = ['pb_hooks/quality_patrols.pb.js', 'pb_migrations/' + migration, 'pb_migrations/' + templateMigration, 'tests/qualityPatrolBackend.integration.mjs']
     const sourceHashes = {}
     for (const file of files) sourceHashes[file] = hash(await readFile(join(app, file)))
     await writeFile(process.env.QUALITY_PATROL_EVIDENCE, JSON.stringify({ pocketbase: '0.39.6', syntheticOnly: true, priorMigrationCount: prior.length, sourceHashes, passedChecks, oldSchemaPreserved: true, oldCollectionsPreserved: true, oldBusinessRowsPreservedDuringMigration: true, newObjects: after.schema.filter(row => !before.schema.some(old => old.name === row.name)), newCollectionMetadata: after.collections.filter(row => !before.collections.some(old => old.id === row.id)) }, null, 2), { mode: 0o600, flag: 'wx' })

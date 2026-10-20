@@ -20,7 +20,7 @@ function validatePatrol(e) {
   // PB normalizes numeric JSON strings during form loading. Bind the original
   // JSON body to nullable floats as well, rejecting those strings before save.
   if (!formEncoded) {
-    const input = new DynamicModel({ staff: nullFloat(), lines: nullFloat(), area: nullFloat() })
+    const input = new DynamicModel({ staff: nullFloat(), lines: nullFloat(), area: nullFloat(), processing_fee: nullFloat() })
     e.bindBody(input)
   }
   // requestInfo().body contains already-normalized DateTime wrappers. Bind the
@@ -28,11 +28,11 @@ function validatePatrol(e) {
   // silently cleared by DateField's normalization.
   const dateInput = new DynamicModel({ check_date: '', previous_date: '', planned_date: '', completed_date: '' })
   e.bindBody(dateInput)
-  for (const key of ['staff', 'lines', 'area']) {
+  for (const key of ['staff', 'lines', 'area', 'processing_fee']) {
     // PB exposes JSON fields as JSONRaw bytes, not native JS numbers. Decode
     // those bytes without coercing strings, arrays or booleans into numbers.
     const value = JSON.parse(toString(e.record.get(key)) || 'null')
-    if (value != null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || (key !== 'area' && !Number.isSafeInteger(value)))) throw new ApiError(400, '人数、拉线及面积必须为有效的非负数字，人数和拉线须为安全整数')
+    if (value != null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || (['staff', 'lines'].includes(key) && !Number.isSafeInteger(value)))) throw new ApiError(400, '人数、拉线、面积及加工费必须为有效的非负数字，人数和拉线须为安全整数')
   }
   // DateField accepts timestamps. Store UTC calendar days, including API writes,
   // so same-day uniqueness and the previous-date check match the visible dates.

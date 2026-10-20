@@ -1,5 +1,17 @@
 # Vue 3 + TypeScript + Vite
 
+## 巡查总结新版02
+
+主表按“2026年10月16日湖南加工厂检查总结02.xlsx”的列序展示责任范围、责任主管、
+加工费（万）、评级及整改内容。加工费保存原统计期间；跨期间查询时在各金额下显示期间，
+不将不同累计期间的费用合并。主表隐藏计划完成时间，原数据仍可编辑并参加历史对比。
+整改完成时间中的分项日期或文字保存在 `completion_details` 并原文展示，不推断单一完成日期；
+明确的完整日期仍保存在 `completed_date`。规则预警不会据这些自由文本自动认定整改完成。
+
+部署前应用增量迁移 `1792537200_extend_patrol_template02.js`，再部署对应前端及巡查校验钩子。
+迁移只添加字段，保留既有巡查和权限。新旧Excel模板均可导入；同厂同日仍跳过，不自动覆盖已有记录。
+新增字段可通过编辑既有记录补充。回退前端时保留该迁移，避免删除已收集的新字段数据。
+
 This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
 
 Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).

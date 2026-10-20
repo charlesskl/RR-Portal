@@ -103,7 +103,7 @@ async function confirmImport() {
 <template>
   <div class="overlay"><section :ref="setDialog" class="dialog" tabindex="-1" @keydown="keydown" role="dialog" aria-modal="true" aria-labelledby="import-title">
     <header><h3 id="import-title">导入 Excel 巡查记录</h3><button :disabled="busy || reading" @click="closeImport">关闭</button></header>
-    <p>支持9月18日、10月16日等单次巡查总结表，每行对应一家工厂的一次巡查。计划完成时间、整改完成时间可缺列或留空。导入明细和内嵌现场照片，合计与评级汇总自动重新计算。</p>
+    <p>支持新版“检查总结02”及原9月、10月单次巡查总结表。新版责任范围、责任主管、加工费及统计期间一并导入；整改完成时间中的分项说明按原文保留。每行对应一家工厂的一次巡查。导入明细和内嵌现场照片，合计与评级汇总自动重新计算。</p>
     <div class="controls">
       <label>导入厂区<select v-model="region" :disabled="locked || reading"><option value="">请选择厂区</option><option v-for="r in regions" :key="r" :value="r">{{ REGION_LABELS[r] }}</option></select></label>
       <label>选择 Excel<input type="file" accept=".xlsx" :disabled="!region || locked || reading" @change="readFile" /></label>

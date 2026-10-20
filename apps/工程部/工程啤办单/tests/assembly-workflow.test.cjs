@@ -63,17 +63,17 @@ test('assembly workflow uses isolated real HTTP storage', async t => {
     const res = await fetch(base + url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     return { code: res.status, data: await res.json() };
   }
-  async function create() {
+  async function create(workshop = undefined) {
     const result = await request('/api/assembly', 'POST', {
       order_number: '', product_name: '合成测试产品', client_name: '合成测试客户', supervisor: SUPERVISOR,
-      eng_name: '合成工程师', reason: '需保留的工程备注', new_images: [IMAGE],
+      workshop, eng_name: '合成工程师', reason: '需保留的工程备注', new_images: [IMAGE],
       items: [
         { product_name: '夹具甲', quantity: '2', required_date: '2026-10-20', new_image: IMAGE, notes: '需保留的行备注' },
         { product_name: '夹具乙', quantity: '3', required_date: '2026-10-21', new_image: IMAGE }
       ]
     }, '合成工程师');
     assert.equal(result.code, 201);
-    assert.equal(result.data.status, '待审核');
+    assert.equal(result.data.status, '未报价');
     return result.data;
   }
   async function status(order, value, role = 'supervisor', reviewer = SUPERVISOR, pin = TEST_PIN, reason) {
@@ -81,15 +81,14 @@ test('assembly workflow uses isolated real HTTP storage', async t => {
   }
   async function ready() {
     const order = await create();
-    assert.equal((await status(order, '待报价')).code, 200);
     return (await request(`/api/assembly/${order.id}`)).data;
   }
   function quoteBody(order) {
-    return { expected_updated_at: order.updated_at, items: order.items.map((it, i) => ({ id: it.id, price: i === 0 ? 0 : '25.50', completion_time: '2026-10-23' })) };
+    return { expected_updated_at: order.updated_at, items: order.items.map((it, i) => ({ id: it.id, price: i === 0 ? 0 : '25.50', completion_time: '2026-10-23', unit: '套', category: i === 0 ? '设备' : '工具' })) };
   }
   try {
     await start();
-    await t.test('new orders require product/client and begin at supervisor review; product number remains optional', async () => {
+    await t.test('new orders require product/client and begin unquoted; product number remains optional', async () => {
       const input = { product_name: '合成产品', client_name: '合成客户', supervisor: SUPERVISOR, items: [{ product_name: '夹具甲' }] };
       for (const body of [{ ...input, product_name: '' }, { ...input, client_name: '' }, { ...input, items: [] }, { ...input, status: '待生产' }, ...[undefined, null, '', '合成未知主管'].map(supervisor => ({ ...input, supervisor }))]) {
         assert.equal((await request('/api/assembly', 'POST', body, '合成工程师')).code, 400);
@@ -99,16 +98,20 @@ test('assembly workflow uses isolated real HTTP storage', async t => {
         assert.equal((await request(`/api/assembly/${order.id}`, 'PUT', { supervisor }, '合成工程师')).code, 400);
       }
     });
-    await t.test('PIN, reviewer assignment, stage, and edit locks prevent skipping quote or manager approval', async () => {
+    await t.test('PIN, assigned reviewer and stage prevent bypassing quote-first review', async () => {
       const order = await create();
-      assert.equal((await status(order, '待报价', 'supervisor', SUPERVISOR, '')).code, 403);
-      assert.equal((await status(order, '待报价', 'supervisor', OTHER_SUPERVISOR)).code, 403);
-      assert.equal((await status(order, '待生产', 'manager', MANAGER)).code, 409);
-      assert.equal((await request(`/api/assembly/${order.id}`, 'PUT', { status: '待生产' }, SUPERVISOR)).code, 403);
-      assert.equal((await status(order, '待报价')).code, 200);
-      assert.equal((await request(`/api/assembly/${order.id}/status`, 'PATCH', { status: '待经理审核' }, '夹具部')).code, 403);
+      for (const value of ['待审核', '待经理审核', '待生产', '待报价']) {
+        assert.ok([401, 403, 409].includes((await status(order, value)).code));
+        assert.equal((await request(`/api/assembly/${order.id}`, 'PUT', { status: value }, SUPERVISOR)).code, 403);
+      }
+      const quoted = (await request(`/api/assembly/${order.id}/quote`, 'POST', quoteBody(order), '夹具部')).data;
+      assert.equal((await status(quoted, '待经理审核', 'supervisor', SUPERVISOR, '')).code, 403);
+      assert.equal((await status(quoted, '待经理审核', 'supervisor', OTHER_SUPERVISOR)).code, 403);
+      assert.equal((await status(quoted, '待生产', 'manager', MANAGER)).code, 409);
       assert.equal((await request(`/api/assembly/${order.id}`, 'PUT', { reason: '越权更改' }, '合成工程师')).code, 403);
-      assert.equal((await status(order, '待生产', 'supervisor', SUPERVISOR)).code, 409);
+      assert.equal((await request(`/api/assembly/${order.id}`, 'PUT', { items: quoted.items }, SUPERVISOR)).code, 403);
+      assert.equal((await status(quoted, '待经理审核')).code, 200);
+      assert.equal((await status(quoted, '待生产', 'supervisor', SUPERVISOR)).code, 409);
     });
     await t.test('invalid, incomplete, foreign, and stale quotes leave both disk and order unchanged', async () => {
       const order = await ready();
@@ -117,13 +120,16 @@ test('assembly workflow uses isolated real HTTP storage', async t => {
       const url = `/api/assembly/${order.id}/quote`;
       assert.equal((await request(url, 'POST', good)).code, 401);
       assert.equal((await request(url, 'POST', good, '合成工程师')).code, 403);
-      for (const invalid of [null, '', -1, 'NaN', 'Infinity', {}, true]) {
+      for (const invalid of [null, '', '   ', -1, 'NaN', 'Infinity', {}, true]) {
         const body = structuredClone(good); body.items[0].price = invalid;
         assert.equal((await request(url, 'POST', body, '夹具部')).code, 400);
       }
       for (const invalid of ['', null, '2026-02-30', '2026-13-01', '0000-10-23', '2026-1-2', '明天']) {
         const body = structuredClone(good); body.items[0].completion_time = invalid;
         assert.equal((await request(url, 'POST', body, '夹具部')).code, 400);
+      }
+      for (const [field, values] of [['unit', ['', '           ', '超过十个字符的单位测试文字', null, 12]], ['category', ['', '其他', null, 1]]]) {
+        for (const value of values) { const body = structuredClone(good); body.items[0][field] = value; assert.equal((await request(url, 'POST', body, '夹具部')).code, 400); }
       }
       for (const body of [
         { ...good, expected_updated_at: '2020-01-01T00:00:00.000Z' },
@@ -161,18 +167,18 @@ test('assembly workflow uses isolated real HTTP storage', async t => {
       const results = await Promise.all([1, 2].map(() => request(`/api/assembly/${order.id}/quote`, 'POST', body, '夹具部')));
       assert.deepEqual(results.map(r => r.code).sort(), [200, 409]);
       const saved = results.find(r => r.code === 200).data;
-      assert.equal(saved.status, '待经理审核');
+      assert.equal(saved.status, '待审核');
       assert.equal(saved.items[0].price, 0);
       assert.equal(saved.items[1].price, 25.5);
       assert.ok(saved.updated_at > order.updated_at);
       assert.deepEqual(saved.images, order.images);
       for (let i = 0; i < saved.items.length; i++) {
-        const { price, completion_time, ...rest } = saved.items[i];
+        const { price, completion_time, unit, category, ...rest } = saved.items[i];
         assert.equal(completion_time, '2026-10-23');
         assert.deepEqual(rest, order.items[i]);
       }
       assert.equal(saved.reason, order.reason);
-      const reviews = await request('/api/pending-reviews?role=manager');
+      const reviews = await request('/api/pending-reviews?role=supervisor&name=' + encodeURIComponent(SUPERVISOR));
       assert.ok(reviews.data.orders.some(o => o.id === order.id && o.type === 'assembly'));
       await stop(); await start();
       assert.deepEqual((await request(`/api/assembly/${order.id}`)).data, saved);
@@ -182,6 +188,7 @@ test('assembly workflow uses isolated real HTTP storage', async t => {
         assert.deepEqual(Buffer.from(await image.arrayBuffer()), Buffer.from(IMAGE.split(',')[1], 'base64'));
       }
       assert.equal((await status(saved, '待生产', 'supervisor', SUPERVISOR)).code, 409);
+      assert.equal((await status(saved, '待经理审核')).code, 200);
       assert.equal((await status(saved, '待生产', 'manager', MANAGER)).code, 200);
       assert.equal((await request(`/api/assembly/${order.id}/status`, 'PATCH', { status: '已完成' }, '夹具部')).code, 409);
       assert.equal((await request(`/api/assembly/${order.id}/status`, 'PATCH', { status: '生产中' })).code, 401);
@@ -189,18 +196,44 @@ test('assembly workflow uses isolated real HTTP storage', async t => {
       assert.equal((await request(`/api/assembly/${order.id}/status`, 'PATCH', { status: '已完成' }, '夹具部')).code, 200);
       assert.ok((await request(`/api/assembly/${order.id}`)).data.completed_date);
     });
-    await t.test('PIN rejection preserves images and engineer can resubmit for a new full review', async () => {
+    await t.test('rejected orders must return to unquoted and cannot preserve a bypass through PUT', async () => {
       const order = await create();
+      assert.equal((await request(`/api/assembly/${order.id}/quote`, 'POST', quoteBody(order), '夹具部')).code, 200);
       assert.equal((await status(order, '已驳回', 'supervisor', SUPERVISOR, TEST_PIN, '合成驳回原因')).code, 200);
       const rejected = (await request(`/api/assembly/${order.id}`)).data;
       assert.equal(rejected.reject_reason, '合成驳回原因');
-      assert.deepEqual(rejected.items, order.items);
-      assert.equal((await request(`/api/assembly/${order.id}`, 'PUT', { status: '待审核', reason: '合成修订原因' }, '合成工程师')).code, 200);
-      assert.equal((await status(order, '待报价')).code, 200);
+      assert.equal((await request(`/api/assembly/${order.id}`, 'PUT', { status: '待审核' }, '合成工程师')).code, 403);
+      assert.equal((await request(`/api/assembly/${order.id}`, 'PUT', { status: '未报价', reason: '合成修订原因' }, '合成工程师')).code, 200);
+      assert.equal((await status(order, '待经理审核')).code, 409);
       const current = (await request(`/api/assembly/${order.id}`)).data;
       assert.equal((await request(`/api/assembly/${order.id}/quote`, 'POST', quoteBody(current), '夹具部')).code, 200);
+      assert.equal((await status(order, '待经理审核')).code, 200);
       assert.equal((await status(order, '已驳回', 'manager', MANAGER, TEST_PIN, '合成经理驳回原因')).code, 200);
       assert.equal((await request(`/api/assembly/${order.id}`)).data.reject_reason, '合成经理驳回原因');
+    });
+    await t.test('monthly HTTP validates month and workshop and returns real XLSX with zero price', async () => {
+      for (const month of ['2026-00', '2026-13', '0000-01', '2026-1']) {
+        assert.equal((await request('/api/assembly-monthly?month=' + month)).code, 400);
+      }
+      const a = await create('A车间'); const b = await create('B车间');
+      for (const order of [a, b]) assert.equal((await request(`/api/assembly/${order.id}/quote`, 'POST', quoteBody(order), '夹具部')).code, 200);
+      const response = await fetch(base + '/api/assembly-monthly?month=2026-10&workshop=' + encodeURIComponent('A车间'));
+      assert.equal(response.status, 200); assert.match(response.headers.get('content-type'), /spreadsheetml/);
+      const ExcelJS = require('exceljs'); const wb = new ExcelJS.Workbook(); await wb.xlsx.load(Buffer.from(await response.arrayBuffer()));
+      assert.ok(wb.getWorksheet('A车间')); assert.equal(wb.getWorksheet('B车间'), undefined);
+      assert.equal(wb.getWorksheet('A车间').getCell('F3').value, 0);
+      assert.equal(wb.getWorksheet('夹具月结总表').getCell('D5').value, 76.5);
+      assert.equal((await request('/api/assembly-monthly?month=2026-10&workshop=' + encodeURIComponent('不存在'))).code, 404);
+    });
+    await t.test('unquoted edits strip quote/system ownership fields and cancellation remains available', async () => {
+      const order = await create();
+      const changed = await request(`/api/assembly/${order.id}`, 'PUT', {
+        items: order.items.map(it => ({ ...it, id: 999999, order_id: 88888, price: 123, completion_time: '2026-10-23', unit: '套', category: '设备' }))
+      }, '合成工程师');
+      assert.equal(changed.code, 200);
+      assert.ok(changed.data.items.every(it => it.id !== 999999 && it.order_id === order.id && it.price === undefined));
+      assert.equal((await request(`/api/assembly/${order.id}/status`, 'PATCH', { status: '已取消' })).code, 401);
+      assert.equal((await request(`/api/assembly/${order.id}/status`, 'PATCH', { status: '已取消' }, '合成工程师')).code, 200);
     });
   } finally { await stop(); fs.rmSync(dir, { recursive: true, force: true }); }
 });

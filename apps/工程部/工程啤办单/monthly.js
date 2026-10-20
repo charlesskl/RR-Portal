@@ -5,16 +5,7 @@
  */
 const ExcelJS = require('exceljs');
 
-// 系统车间值 → 样表风格 sheet 名（样表用 华登/兴信A/兴信B，系统值为 华登车间/A车间/B车间）
-// A车间→兴信A、B车间→兴信B 为推测映射，待用户确认
-const WORKSHOP_SHEET_NAME = {
-  '华登车间': '华登',
-  '兴信车间': '兴信',
-  'A车间': '兴信A',
-  'B车间': '兴信B',
-  '湖南': '湖南邵阳华登',
-};
-const sheetNameOf = ws => WORKSHOP_SHEET_NAME[ws] || ws || '未分车间';
+const sheetNameOf = ws => String(ws || '未分车间');
 
 const FONT = '宋体';
 const BORDER = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
@@ -37,7 +28,7 @@ function parseDate(s) {
 
 /**
  * rows: [{date, order_number, product_name, item_name, quantity, unit, price, completion_time, reason, workshop}]
- * month: 'YYYY-MM'；rate: 人民币→港币 除数（系统 exchange_rate_rmb_to_hkd，缺省 0.86）
+ * month: 'YYYY-MM'；rate: 人民币→港币乘数（系统 exchange_rate_rmb_to_hkd，缺省 1.08）
  */
 async function buildMonthlyWorkbook(rows, month, rate) {
   const [y, m] = month.split('-').map(Number);
@@ -51,9 +42,16 @@ async function buildMonthlyWorkbook(rows, month, rate) {
     groups.get(ws).push(r);
   }
 
-  const workshopTotals = []; // {sheet, total}
+  const workshopTotals = [];
+  const usedNames = new Set(['夹具月结总表']);
+  function safeSheetName(label) {
+    const base = label.replace(/[\\/*?:\[\]]/g, '_').replace(/^'+|'+$/g, '').slice(0, 31) || '未分车间';
+    let name = base; let suffix = 1;
+    while (usedNames.has(name.toLowerCase())) { const end = '_' + suffix++; name = base.slice(0, 31 - end.length) + end; }
+    usedNames.add(name.toLowerCase()); return name;
+  }
   for (const [sheetName, list] of groups) {
-    const ws = wb.addWorksheet(sheetName);
+    const ws = wb.addWorksheet(safeSheetName(sheetName));
     ws.columns = [
       { width: 8.875 }, { width: 23.0 }, { width: 28.0 }, { width: 6.875 },
       { width: 6.75 }, { width: 6.875 }, { width: 9.625 }, { width: 8.75 },
@@ -83,13 +81,16 @@ async function buildMonthlyWorkbook(rows, month, rate) {
     // 明细
     let r = 3;
     let total = 0;
+    const categories = new Map(CATS.map(c => [c, 0]));
     for (const it of list) {
       const row = ws.getRow(r);
       row.height = 20;
       const qty = parseQty(it.quantity);
       const price = parsePrice(it.price);
-      const amt = (qty || 0) * (price || 0);
+      const amt = Math.round((qty || 0) * (price || 0) * 100) / 100;
       total += amt;
+      const category = CATS.includes(it.category) ? it.category : '未分类';
+      categories.set(category, (categories.get(category) || 0) + amt);
       const d = parseDate(it.completion_time) || parseDate(it.date);
       const prodLabel = [it.order_number, it.product_name].filter(s => s && String(s).trim()).join(' ') || '-';
       const vals = [d || it.completion_time || it.date || '-', prodLabel, it.item_name || '-',
@@ -124,7 +125,7 @@ async function buildMonthlyWorkbook(rows, month, rate) {
     const sg = ws.getRow(r + 1);
     sg.getCell(1).value = '                 ';
     sg.getCell(3).value = '  核对OK，请回签：';
-    workshopTotals.push({ sheet: sheetName, total });
+    workshopTotals.push({ sheet: sheetName, total, categories });
   }
 
   // ─── 总表 ───
@@ -154,42 +155,29 @@ async function buildMonthlyWorkbook(rows, month, rate) {
     if (col === 'D' || col === 'E') c.numFmt = FMT_AMT;
   }
   for (let c = 1; c <= 6; c++) t.getCell(2, c).border = BORDER;
-  // 每个车间 3 行：设备/原材料/工具（本版金额整车间合并，不按类别拆）
+  // 每类分别结算；历史未分类单据保留单独行，不猜测类别。
   let rr = 3;
-  const rmb = rate > 0 ? rate : 0.86; // 缺省 0.86（样表口径）
+  const rmb = Number.isFinite(rate) && rate > 0 ? rate : 1.08;
   let sumD = 0, sumE = 0;
   for (const g of workshopTotals) {
     const start = rr;
-    CATS.forEach((cat, i) => {
-      const row = t.getRow(rr);
-      row.height = 24.95;
-      const bc = row.getCell(2);
-      bc.value = cat;
-      bc.font = { name: FONT, size: 16 };
-      bc.alignment = { horizontal: 'center', vertical: 'middle' };
-      rr++;
-    });
-    t.mergeCells(`A${start}:A${start + 2}`);
-    t.mergeCells(`D${start}:D${start + 2}`);
-    t.mergeCells(`E${start}:E${start + 2}`);
-    t.mergeCells(`F${start}:F${start + 2}`);
-    const ac = t.getCell(`A${start}`);
-    ac.value = g.sheet;
-    ac.font = { name: FONT, size: 16 };
-    ac.alignment = { horizontal: 'center', vertical: 'middle' };
-    const eVal = g.total / rmb;
-    const dc = t.getCell(`D${start}`);
-    dc.value = Math.round(g.total * 100) / 100;
-    dc.numFmt = FMT_SUM;
-    dc.font = { name: FONT, size: 16 };
-    dc.alignment = { horizontal: 'center', vertical: 'middle' };
-    const ec = t.getCell(`E${start}`);
-    ec.value = Math.round(eVal * 100) / 100;
-    ec.numFmt = FMT_SUM;
-    ec.font = { name: FONT, size: 16 };
-    ec.alignment = { horizontal: 'center', vertical: 'middle' };
-    sumD += g.total; sumE += eVal;
-    for (let x = start; x < start + 3; x++) for (let c = 1; c <= 6; c++) t.getCell(x, c).border = BORDER;
+    for (const [cat, amount] of g.categories) {
+      const row = t.getRow(rr++); row.height = 24.95;
+      row.getCell(2).value = cat;
+      const rounded = Math.round(amount * 100) / 100;
+      const hkd = Math.round(rounded * rmb * 100) / 100;
+      row.getCell(4).value = rounded; row.getCell(5).value = hkd;
+      sumD += rounded; sumE += hkd;
+      for (let c = 1; c <= 6; c++) {
+        const cell = row.getCell(c); cell.border = BORDER;
+        cell.font = { name: FONT, size: 16 };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (c === 4 || c === 5) cell.numFmt = FMT_SUM;
+      }
+    }
+    t.mergeCells(`A${start}:A${rr - 1}`);
+    t.mergeCells(`F${start}:F${rr - 1}`);
+    t.getCell(`A${start}`).value = g.sheet;
   }
   // 合计行
   const tr = t.getRow(rr);

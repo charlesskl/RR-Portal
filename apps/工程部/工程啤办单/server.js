@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const { buildMonthlyWorkbook, monthlyFilename, contentDisposition } = require('./monthly');
+const { migrateUnquoted } = require('./scripts/migrate-unquoted');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,6 +13,12 @@ const DATA_FILE = path.join(DATA_DIR, 'data.json');
 
 // ─── JSON 文件存储 ───────────────────────────────────────────────────────────
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+// 在首次读取缓存之前迁移历史状态；失败时停止启动，不以空库覆盖原资料。
+try { migrateUnquoted(DATA_FILE); } catch {
+  console.error('夹具状态迁移失败；原数据和已有备份已保留，请停机检查后再启动。');
+  process.exit(1);
+}
 
 // 默认原料价格从文件读取（200条完整数据）
 const DEFAULT_PRICES_FILE = path.join(DATA_DIR, 'default-material-prices.json');
@@ -443,7 +450,7 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// 夹具流程：主管审核 → 报价 → 经理审核 → 生产。X-User 沿用既有部门标记，审核仍必须验证 PIN。
+// 夹具流程：报价 → 主管审核 → 经理审核 → 生产。X-User 沿用既有部门标记，审核仍必须验证 PIN。
 function validateAssemblyOrder(header, items) {
   if (typeof header.product_name !== 'string' || !header.product_name.trim()) return '请填写产品名称';
   if (typeof header.client_name !== 'string' || !header.client_name.trim()) return '请选择客户';
@@ -499,34 +506,36 @@ function updateAssemblyStatus(req, res) {
 // 按明细 completion_time 所在月份归集（空则用订单 date 兜底），按 workshop 分 sheet。
 app.get('/api/assembly-monthly', async (req, res) => {
   const month = String(req.query.month || '');
-  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: '请传入 month=YYYY-MM' });
+  if (!/^(?!0000)\d{4}-(?:0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: '请传入 month=YYYY-MM' });
   const data = loadData();
   const STATUSES = ['待审核', '待经理审核', '待生产', '生产中', '已完成'];
+  const workshop = String(req.query.workshop || '');
   const rows = [];
   for (const o of data.assembly_orders) {
-    if (!STATUSES.includes(o.status)) continue;
+    if (!STATUSES.includes(o.status) || (workshop && o.workshop !== workshop)) continue;
     for (const it of data.assembly_items.filter(i => i.order_id === o.id)) {
       const when = (it.completion_time && String(it.completion_time).trim()) || o.date || '';
-      if (!String(when).startsWith(month)) continue;
+      if (!monthMatches(when, month)) continue;
+      if (it.price == null || String(it.price).trim() === '' || !Number.isFinite(Number(it.price))) continue;
       rows.push({
         order_number: o.order_number, product_name: o.product_name, workshop: o.workshop,
         date: o.date, reason: o.reason,
         item_name: it.product_name, quantity: it.quantity, unit: it.unit,
-        price: it.price, completion_time: it.completion_time,
+        price: it.price, category: it.category, completion_time: it.completion_time,
       });
     }
   }
   rows.sort((a, b) => String(a.completion_time || a.date || '').localeCompare(String(b.completion_time || b.date || '')));
   if (!rows.length) return res.status(404).json({ error: `${month} 没有可导出的夹具单明细` });
   try {
-    const rate = +data.exchange_rate_rmb_to_hkd > 0 ? +data.exchange_rate_rmb_to_hkd : 0.86; // 读不到用 0.86（样表口径）
+    const rate = Number.isFinite(+data.exchange_rate_rmb_to_hkd) && +data.exchange_rate_rmb_to_hkd > 0 ? +data.exchange_rate_rmb_to_hkd : 1.08;
     const wb = await buildMonthlyWorkbook(rows, month, rate);
+    const bytes = await wb.xlsx.writeBuffer();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', contentDisposition(monthlyFilename(month)));
-    await wb.xlsx.write(res);
-    res.end();
+    res.send(Buffer.from(bytes));
   } catch (e) {
-    res.status(500).json({ error: '导出失败：' + e.message });
+    res.status(500).json({ error: '导出失败，请稍后重试' });
   }
 });
 
@@ -546,7 +555,7 @@ app.post('/api/assembly/:id/quote', (req, res) => {
     if (!it || !ids.has(it.id) || seen.has(it.id)) return res.status(409).json({ error: '明细已变更，请重新打开报价' });
     seen.add(it.id);
     const price = typeof it.price === 'string' ? it.price.trim() : it.price;
-    if ((typeof price !== 'string' && typeof price !== 'number') || price === '' || !Number.isFinite(Number(price)) || Number(price) < 0) return res.status(400).json({ error: '请填写有效且不小于 0 的价格' });
+    if ((typeof price !== 'string' && typeof price !== 'number') || String(price).trim() === '' || !Number.isFinite(Number(price)) || Number(price) < 0) return res.status(400).json({ error: '请填写有效且不小于 0 的价格' });
     const date = it.completion_time;
     if (typeof date !== 'string' || !/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) return res.status(400).json({ error: '请填写每项有效的完成日期' });
     const unit = typeof it.unit === 'string' ? it.unit.trim() : '';
@@ -583,6 +592,8 @@ app.post('/api/assembly/:id/quote', (req, res) => {
         if (error) return res.status(400).json({ error });
         if (header.status && header.status !== '未报价') return res.status(400).json({ error: '新夹具单必须先由夹具部报价' });
         header.status = '未报价';
+        delete header.id; delete header.created_at; delete header.updated_at;
+        items.forEach(it => { for (const key of ['id', 'order_id', 'sort_order', 'price', 'completion_time', 'unit', 'category']) delete it[key]; });
       }
       // 夹具申请单图片：new_images 为 base64 dataURL 数组，落盘为文件，订单只存文件名
       const newImages = type === 'assembly' ? header.new_images : undefined;
@@ -619,16 +630,18 @@ app.post('/api/assembly/:id/quote', (req, res) => {
     try {
       const data = loadData();
       const order = data[`${type}_orders`].find(o => o.id === +req.params.id);
-      if (checkLock(req, res, order, '修改')) return;
+      if (type !== 'assembly' && checkLock(req, res, order, '修改')) return;
       const { items, ...header } = req.body;
       if (type === 'assembly' && order) {
+        if (!['未报价', '已驳回'].includes(order.status)) return res.status(403).json({ error: '已报价单据请先审核驳回，再修改并重新报价' });
         const error = validateAssemblyOrder({ ...order, ...header }, items === undefined ? getOrderById(type, order.id).items : items);
         if (error) return res.status(400).json({ error });
-        if (header.status && header.status !== order.status && !(order.status === '已驳回' && header.status === '待审核')) {
+        if (header.status && header.status !== order.status && !(order.status === '已驳回' && header.status === '未报价')) {
           return res.status(403).json({ error: '请通过审核或报价操作变更夹具单状态' });
         }
         // 不接受从客户端回传的系统字段，明细图片仍走现有保存通道。
         delete header.id; delete header.created_at; delete header.updated_at;
+        if (Array.isArray(items)) items.forEach(it => { for (const key of ['id', 'order_id', 'sort_order', 'price', 'completion_time', 'unit', 'category']) delete it[key]; });
       }
       // 喷油收到胶件时间（delivery_time）仅喷油部可填：工程部编辑整单时 items 全量重建，
       // 这里按行位置把已有值补回，避免被清空

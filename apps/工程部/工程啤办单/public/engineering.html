@@ -609,7 +609,7 @@ function loadOrders() {
 }
 
 // 主管审核后的状态，普通用户不可编辑/删除；主管/经理可以
-const lockedStatuses = ['未报价', '待经理审核', '待生产', '生产中', '已完成'];
+const lockedStatuses = [ '待经理审核', '待生产', '生产中', '已完成'];
 let _supervisors = [], _managers = [];
 apiFetch('/api/roles').then(r => r.json()).then(d => { _supervisors = d.supervisors || []; _managers = d.managers || []; }).catch(() => {});
 function isPrivileged() { return _supervisors.includes(currentUser) || _managers.includes(currentUser); }
@@ -621,7 +621,7 @@ function applyNavPermissions() {
   const btn = document.getElementById('newOrderBtn');
   if (btn) btn.style.display = '';
 }
-const isLocked = s => lockedStatuses.includes(s) && !isPrivileged();
+const isLocked = s => currentTab === 'assembly' ? !['未报价', '已驳回'].includes(s) : lockedStatuses.includes(s) && !isPrivileged();
 
 const statusBadge = s => ({
   '未报价': '<span class="badge" style="background:#0f766e">未报价</span>',
@@ -1311,8 +1311,10 @@ function editAsmOrder(id) {
       document.getElementById('asm-supervisor').value = order.supervisor || '';
       document.getElementById('asm-engineer').value = order.eng_name || '';
       document.getElementById('asm-reason').value = order.reason || '';
-      document.getElementById('asm-workshop').value = order.workshop || '';
-      document.getElementById('asm-status').value = (order.status === '已驳回') ? '待审核' : order.status;
+      const workshop = document.getElementById('asm-workshop');
+      if (order.workshop && !Array.from(workshop.options).some(option => option.value === order.workshop)) workshop.add(new Option(order.workshop, order.workshop));
+      workshop.value = order.workshop || '';
+      document.getElementById('asm-status').value = (order.status === '已驳回') ? '未报价' : order.status;
       const tbody = document.getElementById('asmItemsBody');
       tbody.innerHTML = '';
       _asmRowSeq = 0;
@@ -1356,9 +1358,6 @@ function saveAsmOrder() {
     const st = tr._img || {};
     item.image = st.name || null;
     if (st.dataUrl) item.new_image = st.dataUrl;
-    const q = tr._quote || {};
-    item.price = q.price ?? null;
-    item.completion_time = q.completion_time ?? null;
     return item;
   }).filter(item => Object.values(item).some(value => value !== null && value !== ''));
   if (!items.length) { alert('请至少填写一项夹具名称'); return; }

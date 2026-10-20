@@ -39,7 +39,7 @@
 <nav class="navbar navbar-dark" style="background:#2980b9">
   <div class="container-fluid">
     <span class="navbar-brand"><i class="bi bi-wrench-adjustable-circle me-2"></i>夹具部 — 夹具申请单</span>
-    <div class="d-flex gap-2 align-items-center">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
       <a href="index.html"       class="nav-dept-link"><i class="bi bi-house me-1"></i>主页</a>
       <a href="engineering.html" class="nav-dept-link">工程部</a>
       <a href="injection.html"   class="nav-dept-link">啤机部</a>
@@ -58,6 +58,7 @@
         <option value="华登车间">华登车间</option>
         <option value="A车间">A车间</option>
         <option value="B车间">B车间</option>
+        <option value="兴信车间">兴信车间</option>
       </select>
       <div class="status-filter d-flex flex-wrap gap-1">
         <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
@@ -70,7 +71,7 @@
         <button class="btn btn-sm btn-danger"   onclick="filterStatus('已驳回',this)">已驳回</button>
       </div>
     </div>
-    <div class="d-flex gap-2 align-items-center">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
       <div class="btn-group btn-group-sm">
         <button class="btn btn-outline-primary active" id="viewListBtn" onclick="switchView('list')"><i class="bi bi-list-ul me-1"></i>列表</button>
         <button class="btn btn-outline-primary" id="viewSummaryBtn" onclick="switchView('summary')"><i class="bi bi-table me-1"></i>总表</button>
@@ -133,7 +134,7 @@
           <div class="col-md-3"><label class="form-label fw-bold">车间</label>
             <select class="form-select" id="asm-workshop">
               <option value="">请选择车间</option>
-              <option>华登车间</option><option>A车间</option><option>B车间</option>
+              <option>华登车间</option><option>A车间</option><option>B车间</option><option>兴信车间</option>
             </select>
           </div>
           <div class="col-md-3"><label class="form-label fw-bold">备注</label><input class="form-control" id="asm-reason" placeholder="备注信息"></div>
@@ -154,7 +155,7 @@
           <table class="table table-bordered table-sm items-table" id="asmItemsTable">
             <thead>
               <tr>
-                <th style="width:50px">序号</th><th>名称</th><th style="width:80px">数量</th><th>要求完成日期</th><th>价格</th><th>单位</th><th>类别</th><th>完成时间</th><th style="width:96px">图片</th><th style="width:40px"></th>
+                <th style="width:50px">序号</th><th>名称</th><th style="width:80px">数量</th><th>要求完成日期</th><th style="width:96px">图片</th><th style="width:40px"></th>
               </tr>
             </thead>
             <tbody id="asmItemsBody"></tbody>
@@ -257,7 +258,8 @@ function printSummary() {
 function exportMonthly() {
   const month = document.getElementById('monthFilter')?.value || '';
   if (!month) { alert('请先在筛选行选择要导出的月份（「全部」状态下无法导出月结表）'); return; }
-  window.location.href = `${API_BASE}/api/assembly-monthly?month=${encodeURIComponent(month)}`;
+  const workshop = document.getElementById('workshopFilter').value;
+  window.location.href = `${API_BASE}/api/assembly-monthly?month=${encodeURIComponent(month)}&workshop=${encodeURIComponent(workshop)}`;
 }
 
 function clearMonthFilter() {
@@ -329,7 +331,7 @@ function renderOrderList(orders) {
     return;
   }
   const rows = orders.map(o => {
-    const canEdit = o.status === '待审核' || o.status === '已驳回';
+    const canEdit = o.status === '未报价' || o.status === '已驳回';
     const canDelete = canEdit;
     const canQuote = o.status === '未报价';
     const canStart = o.status === '待生产';
@@ -376,7 +378,7 @@ function renderSummary(orders) {
     return;
   }
   // 按车间分组
-  const byWorkshop = {};
+  const byWorkshop = Object.create(null);
   orders.forEach(o => {
     const ws = o.workshop || '未分配';
     if (!byWorkshop[ws]) byWorkshop[ws] = [];
@@ -396,7 +398,7 @@ function renderSummary(orders) {
           <td>${it ? esc(it.product_name || '-') : '-'}</td>
           <td class="text-center">${it ? esc(it.quantity || '-') : '-'}</td>
           <td>${it ? esc(it.required_date || '-') : '-'}</td>
-          <td class="text-end">${it ? esc(it.price || '-') : '-'}</td>
+          <td class="text-end">${it ? esc(String(it.price ?? '-')) : '-'}</td>
           <td>${it ? esc(it.unit || '-') : '-'}</td>
           <td>${it ? esc(it.category || '-') : '-'}</td>
           <td>${it ? esc(it.completion_time || '-') : '-'}</td>
@@ -456,7 +458,7 @@ function editOrder(id) {
   apiFetch(`/api/assembly/${id}`)
     .then(r => r.json())
     .then(order => {
-      if (order.status !== '待审核' && order.status !== '已驳回') {
+      if (order.status !== '未报价' && order.status !== '已驳回') {
         showToast('当前状态不允许编辑', 'danger');
         return;
       }
@@ -468,9 +470,11 @@ function editOrder(id) {
       document.getElementById('asm-product_name').value = order.product_name || '';
       document.getElementById('asm-client_name').value = order.client_name || '';
       document.getElementById('asm-supervisor').value = order.supervisor || '';
-      document.getElementById('asm-workshop').value = order.workshop || '';
+      const workshop = document.getElementById('asm-workshop');
+      if (order.workshop && !Array.from(workshop.options).some(option => option.value === order.workshop)) workshop.add(new Option(order.workshop, order.workshop));
+      workshop.value = order.workshop || '';
       document.getElementById('asm-reason').value = order.reason || '';
-      document.getElementById('asm-status').value = (order.status === '已驳回') ? '待审核' : order.status;
+      document.getElementById('asm-status').value = (order.status === '已驳回') ? '未报价' : order.status;
 
       const tbody = document.getElementById('asmItemsBody');
       tbody.innerHTML = '';
@@ -568,13 +572,6 @@ function addAsmRow(it={}) {
     <td>${inp('text','product_name',it.product_name,'placeholder="夹具名称"')}</td>
     <td>${inp('number','quantity',it.quantity,'style="width:80px" min="1"')}</td>
     <td>${inp('text','required_date',it.required_date,'placeholder="YYYY-MM-DD" class="w-date"')}</td>
-    <td>${inp('number','price',it.price||'','placeholder="价格" step="0.01"')}</td>
-    <td>${inp('text','unit',it.unit,'placeholder="单位" list="asmUnitList" maxlength="10" style="width:70px"')}</td>
-    <td><select class="form-select form-select-sm" name="category" style="min-width:80px">
-      <option value="">类别</option>
-      ${['设备','原材料','工具'].map(c => `<option${it.category === c ? ' selected' : ''}>${c}</option>`).join('')}
-    </select></td>
-    <td>${inp('text','completion_time',it.completion_time,'placeholder="完成时间" class="w-date"')}</td>
     <td class="text-center asm-img-cell p-1">
       <input type="file" accept="image/*" hidden onchange="onAsmRowImage(this)">
       <button type="button" class="btn btn-sm btn-outline-primary py-0 px-1" title="上传图片" onclick="this.previousElementSibling.click()"><i class="bi bi-image"></i></button>
@@ -625,7 +622,7 @@ function removeRow(btn) {
 }
 
 // ─── 保存订单 ─────────────────────────────────────────────────────────────────
-const asmFields = ['product_name','quantity','required_date','price','unit','category','completion_time'];
+const asmFields = ['product_name','quantity','required_date'];
 
 function collectRows(tbodyId, fields) {
   return Array.from(document.getElementById(tbodyId).querySelectorAll('tr')).map(tr => {
@@ -644,7 +641,7 @@ function saveOrder() {
   const orderNumber = document.getElementById('asm-order_number').value.trim();
   if (!document.getElementById('asm-product_name').value.trim()) { alert('请填写货名'); return; }
   if (!document.getElementById('asm-client_name').value) { alert('请选择客户'); return; }
-  if (!document.getElementById('asm-supervisor').value) { alert('请选择主管，单据需先交主管审核'); return; }
+  if (!document.getElementById('asm-supervisor').value) { alert('请选择主管，报价后将交该主管审核'); return; }
 
   const items = collectRows('asmItemsBody', asmFields);
   if (!items.length || items.every(it => !it.product_name)) {
@@ -878,7 +875,7 @@ function viewOrderDetail(id, orderNum) {
   apiFetch(`/api/assembly/${id}`)
     .then(r => r.json())
     .then(order => {
-      const canEdit = order.status === '待审核' || order.status === '已驳回';
+      const canEdit = order.status === '未报价' || order.status === '已驳回';
       document.getElementById('detailEditBtn').style.display = canEdit ? '' : 'none';
       document.getElementById('orderDetailBody').innerHTML = renderOrderDetails(order);
     })
@@ -913,7 +910,7 @@ function renderOrderDetails(order) {
   if (!items.length) return headerHtml + '<div class="text-muted small">（无明细行）</div>';
 
   const thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>要求完成日期</th><th>价格</th><th>单位</th><th>类别</th><th>完成时间</th><th>图片</th></tr>';
-  const rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.price||'-')}</td><td>${esc(it.unit||'-')}</td><td>${esc(it.category||'-')}</td><td>${esc(it.completion_time||'-')}</td><td>${it.image ? `<img src="${asmImgUrl(order.id, it.image)}" style="max-height:48px;max-width:72px;border-radius:4px;border:1px solid #ddd">` : '-'}</td></tr>`).join('');
+  const rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(String(it.price??'-'))}</td><td>${esc(it.unit||'-')}</td><td>${esc(it.category||'-')}</td><td>${esc(it.completion_time||'-')}</td><td>${it.image ? `<img src="${asmImgUrl(order.id, it.image)}" style="max-height:48px;max-width:72px;border-radius:4px;border:1px solid #ddd">` : '-'}</td></tr>`).join('');
 
   return headerHtml + `<div class="table-responsive"><table class="table table-bordered table-sm"><thead class="table-light">${thead}</thead><tbody>${rows}</tbody></table></div>`;
 }

@@ -5,7 +5,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --production
 
-COPY server.js ./
+COPY server.js monthly.js ./
+COPY scripts/ ./scripts/
 COPY public/ ./public/
 COPY data/ ./data/
 

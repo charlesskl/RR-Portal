@@ -1,55 +1,80 @@
 #!/usr/bin/env node
-/**
- * 夹具单流程迁移：先报价后审核（方案 A）
- *
- * 旧流程：开单【待审核】→ 主管审核 →【待报价】→ 报价 →【待经理审核】→ 经理审核 →【待生产】
- * 新流程：开单【未报价】→ 夹具部报价 →【待审核】→ 主管审核 →【待经理审核】→ 经理审核 →【待生产】
- *
- * 本脚本把 data.json 中的历史数据迁移到新流程：
- *   1. 状态为「待报价」的夹具单 →「未报价」
- *   2. 状态为「待审核」且所有明细均未填价格的夹具单（从未报价的旧单）→「未报价」
- * 已填过价格的「待审核」单保持不变（视为已报价，等主管审核）。
- *
- * 用法：node scripts/migrate-unquoted.js
- * 幂等，可重复执行；执行前自动备份 data.json。
- */
+'use strict';
+// Run automatically before server.js loads its cache. CLI is inspection-only unless
+// --offline is explicit: stop every old container/process using DATA_PATH first.
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
-const DATA_DIR = process.env.DATA_PATH || path.join(__dirname, '..', 'data');
-const DATA_FILE = path.join(DATA_DIR, 'data.json');
-
-if (!fs.existsSync(DATA_FILE)) {
-  console.log(`未找到 ${DATA_FILE}，无需迁移`);
-  process.exit(0);
-}
-
-const raw = fs.readFileSync(DATA_FILE, 'utf8');
-const data = JSON.parse(raw);
-
-const backup = `${DATA_FILE}.bak-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-fs.writeFileSync(backup, raw);
-console.log(`已备份: ${backup}`);
-
-let renamed = 0;
-let unquoted = 0;
-
-for (const o of data.assembly_orders || []) {
-  if (o.status === '待报价') {
-    o.status = '未报价';
-    renamed++;
-  } else if (o.status === '待审核') {
-    const items = (data.assembly_items || []).filter(it => it.order_id === o.id);
-    const hasPrice = items.some(it => it.price !== null && it.price !== undefined && String(it.price).trim() !== '');
-    if (!hasPrice) {
-      o.status = '未报价';
-      unquoted++;
+function migrationPlan(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid data root');
+  for (const key of ['assembly_orders', 'assembly_items']) {
+    if (data[key] !== undefined && !Array.isArray(data[key])) throw new Error(`Invalid ${key}`);
+  }
+  const next = structuredClone(data);
+  const receipt = { renamed: 0, unquoted: 0, preservedAmbiguous: 0 };
+  for (const order of next.assembly_orders || []) {
+    if (!order || typeof order !== 'object') throw new Error('Invalid assembly order');
+    if (order.status === '待报价') {
+      order.status = '未报价'; receipt.renamed++;
+    } else if (order.status === '待审核') {
+      const items = (next.assembly_items || []).filter(it => it && it.order_id === order.id);
+      const missing = value => value == null || (typeof value === 'string' && !value.trim());
+      // No detail rows and partially quoted orders are ambiguous: preserve them.
+      // Completion dates without prices also indicate possible prior quote work.
+      if (items.length && items.every(it => missing(it.price) && missing(it.completion_time))) {
+        order.status = '未报价'; receipt.unquoted++;
+      } else if (!items.length || items.some(it => missing(it.price))) receipt.preservedAmbiguous++;
     }
   }
+  return { next, receipt };
 }
-
-const tmp = DATA_FILE + '.tmp';
-fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-fs.renameSync(tmp, DATA_FILE);
-
-console.log(`迁移完成: 待报价→未报价 ${renamed} 条; 待审核(无价格)→未报价 ${unquoted} 条`);
+function fsyncDir(dir) {
+  const fd = fs.openSync(dir, 'r');
+  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+}
+function migrateUnquoted(filename, { dryRun = false } = {}) {
+  if (!fs.existsSync(filename)) return { renamed: 0, unquoted: 0, preservedAmbiguous: 0 };
+  const st = fs.lstatSync(filename);
+  if (!st.isFile() || st.isSymbolicLink()) throw new Error('Migration requires a regular data file');
+  const raw = fs.readFileSync(filename);
+  const { next, receipt } = migrationPlan(JSON.parse(raw.toString('utf8')));
+  if (dryRun || !(receipt.renamed + receipt.unquoted)) return receipt;
+  const dir = path.dirname(filename);
+  const token = crypto.randomBytes(12).toString('hex');
+  const lock = filename + '.migration-lock';
+  // Never steal a stale lock automatically: inspect recovery evidence offline.
+  const lockfd = fs.openSync(lock, 'wx', 0o600);
+  let temp;
+  try {
+    if (!fs.readFileSync(filename).equals(raw)) throw new Error('Data changed during migration');
+    const backup = filename + '.bak-unquoted-' + token;
+    let fd = fs.openSync(backup, 'wx', 0o600);
+    try { fs.writeFileSync(fd, raw); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    fsyncDir(dir);
+    temp = filename + '.migration-' + token;
+    fd = fs.openSync(temp, 'wx', st.mode & 0o7777);
+    try {
+      fs.fchmodSync(fd, st.mode & 0o7777);
+      const current = fs.fstatSync(fd);
+      if (current.uid !== st.uid || current.gid !== st.gid) fs.fchownSync(fd, st.uid, st.gid);
+      fs.writeFileSync(fd, JSON.stringify(next, null, 2)); fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    if (!fs.readFileSync(filename).equals(raw)) throw new Error('Data changed during migration');
+    fs.renameSync(temp, filename); temp = null; fsyncDir(dir);
+    return receipt;
+  } finally {
+    if (temp && fs.existsSync(temp)) fs.unlinkSync(temp);
+    fs.closeSync(lockfd); fs.unlinkSync(lock); fsyncDir(dir);
+  }
+}
+if (require.main === module) {
+  const file = path.join(process.env.DATA_PATH || path.join(__dirname, '..', 'data'), 'data.json');
+  try {
+    const offline = process.argv.includes('--offline');
+    const result = migrateUnquoted(file, { dryRun: !offline });
+    console.log(JSON.stringify({ mode: offline ? 'offline-write' : 'dry-run', ...result }));
+    if (!offline) console.log('Inspection only. Stop all app processes before using --offline.');
+  } catch { console.error('Migration failed; original data and any backup were retained. Inspect offline before retrying.'); process.exitCode = 1; }
+}
+module.exports = { migrationPlan, migrateUnquoted };

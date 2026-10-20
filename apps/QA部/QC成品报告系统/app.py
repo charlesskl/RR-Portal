@@ -731,7 +731,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 claims = verify_portal_ticket(ticket)
             except Exception:
                 g.db.rollback()  # 票据无效则回落到账号密码登录
-                return redirect(request.path)
+                return redirect(request.base_url)  # base_url 含 PROXY_PREFIX；request.path 会丢前缀
             user = g.db.scalar(select(User).where(User.username == str(claims["sub"])))
             if user is None:
                 # 门户账号首次进入：自动建档；门户给了「系统管理」全部权限则设为管理员
@@ -750,7 +750,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             session["csrf_token"] = secrets.token_urlsafe(24)
             audit(g.db, "login", "user", user.id, "门户SSO免登")
             g.db.commit()
-            return redirect(request.path)
+            return redirect(request.base_url)  # base_url 含 PROXY_PREFIX；request.path 会丢前缀
         if "csrf_token" not in session:
             session["csrf_token"] = secrets.token_urlsafe(24)
         if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.endpoint != "static":

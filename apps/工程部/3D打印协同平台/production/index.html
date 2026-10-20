@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-<head><script>
+<head><script src="/production/production-report.js"></script><script>
 const originalFetch=window.fetch.bind(window);let csrf='';
 let authReady;
 function getAuth(){return authReady||(authReady=originalFetch('/api/me',{signal:AbortSignal.timeout(15000)}).then(r=>{if(!r.ok)throw Error('登录已失效，请重新登录');return r.json();}).then(d=>{csrf=d.csrf||'';}).catch(e=>{authReady=null;throw e;}));}
@@ -194,7 +194,7 @@ tr:hover{background:#f8f9ff}
     <a data-p="report"><span class="icon">&#128200;</span>报表导出</a>
     <a data-p="settings"><span class="icon">&#9881;</span>设置</a>
   </nav>
-  <div class="bottom" id="syncStatus">多人协作模式<br>数据实时同步</div>
+  <a href="/authority" target="_top">统一记账 / 修改申请</a><div id="authorityStatus" style="padding:12px;color:#855600"></div><div class="bottom" id="syncStatus">多人协作模式<br>数据实时同步</div>
 </div>
 
 <div id="dataLoadGate" role="status" style="position:fixed;inset:0;z-index:10000;background:#f8f9faf5;display:flex;align-items:center;justify-content:center;padding:24px">
@@ -988,7 +988,7 @@ function closeModal(id){document.getElementById(id).classList.remove('show')}
 // ═══════════════════════════════════════════════════════
 // 工具
 // ═══════════════════════════════════════════════════════
-function today(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function today(){return PrintLinkReport.today();}
 function fmt(v,d=2){ return v==null||isNaN(v)?'-':Number(v).toFixed(d) }
 function fmtM(v){ return v==null||isNaN(v)?'-':Number(v).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}) }
 function fmtP(v){ return v==null||isNaN(v)?'-':(Number(v)*100).toFixed(1)+'%' }
@@ -1083,52 +1083,7 @@ function getDayData(date){
   return records[date];
 }
 
-function getDaySummary(date){
-  const machineCount=getMachineCountForDate(date);
-  const day = records[date];
-  if(!day||day.off) return {revenue:0, materialCost:0, elecCost:0, laborCost:0, otherCost:0, totalCost:0, balance:0, runningMachines:0, utilization:0, machineCount, isOff:day&&day.off};
-  const items = (day.items||[]).filter(i=>!i._deleted);
-  const running = new Set(items.filter(i=>i.status==='running').map(i=>i.machine));
-  const runCount = running.size;
-  const revenue = items.filter(i=>i.status==='running').reduce((s,i)=>{
-    const qty = i.qty||1;
-    const c = calcUnitPrice(i.material, i.weight||0, i.time||0, qty, machineCount, i.machine);
-    const base = c.price > 0 ? c.price : (i.price||0)*qty;
-    return s + base + (+i.designFee||0);
-  },0);
-  const matCost = items.filter(i=>i.status==='running').reduce((s,i)=>s+calcRecordMaterialCost(i,i.qty||1),0);
-  const elecCost = items.filter(i=>i.status==='running').reduce((s,i)=>{
-    const c=calcUnitPrice(i.material,i.weight||0,i.time||0,i.qty||1,machineCount,i.machine);
-    return s+c.elecCost;
-  },0);
-  const hasFdmRunning = items.some(i=>i.status==='running' && Number(i.machine)!==21);
-  // 光固化电费和人工属于生产日固定支出：当天 #21 只要有生产就各计一次，
-  // 不按耗时折算，同一天有多条记录也不能重复计费。
-  const hasResinRunning=items.some(i=>i.status==='running'&&Number(i.machine)===21);
-  const resinElecCost=hasResinRunning?getResinElecPerDay():0;
-  const resinLaborCost=hasResinRunning?getResinLaborPerDay():0;
-  const laborCost = (hasFdmRunning ? S.laborPerDay : 0) + resinLaborCost;
-  const totalElecCost=elecCost+resinElecCost;
-  const totalCost = matCost + totalElecCost + laborCost;
-  const balance = revenue - totalCost;
-  const machineHours = {};
-  for(let i=1;i<=machineCount;i++) machineHours[i]={running:0,idle:0,fault:0};
-  items.forEach(i=>{
-    const mn = parseInt(i.machine);
-    if(machineHours[mn]){
-      if(i.status==='running') machineHours[mn].running += (i.time||0)*(i.qty||1);
-      else if(i.status==='idle') machineHours[mn].idle = 12;
-      else if(i.status==='fault') machineHours[mn].fault = 12;
-    }
-  });
-  let totalUtil=0;
-  for(let i=1;i<=machineCount;i++){
-    const h=machineHours[i];
-    const total=h.running+h.idle+h.fault;
-    if(total>0) totalUtil+=h.running/12;
-  }
-  return {revenue, materialCost:matCost, elecCost:totalElecCost, laborCost, totalCost, balance, runningMachines:runCount, utilization:machineCount>0?totalUtil/machineCount:0, machineCount, machineHours, isOff:false};
-}
+function getDaySummary(date){return PrintLinkReport.day({settings:S,materials,records},date);}
 
 // ═══════════════════════════════════════════════════════
 // 仪表盘
@@ -4030,7 +3985,13 @@ async function loadBusinessData(){
     console.error('生产资料加载失败',e);
   }finally{_loadingData=false;}
 }
+async function showAuthorityStatus(){
+ try{const r=await fetch('/api/production/authority/status');if(!r.ok)return;const s=await r.json();
+ if(s.enabled){const fresh=s.lastConfirmed&&Date.now()-Date.parse(s.lastConfirmed)<90000;document.getElementById('authorityStatus').textContent=(fresh?'现场数据已确认':'现场数据延迟，请勿视为实时')+' · 数据截至 '+(s.lastConfirmed?new Date(s.lastConfirmed).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}):'尚未确认')+'；修改请进入统一记账申请。';}
+ }catch{document.getElementById('authorityStatus').textContent='无法确认现场数据时间';}
+}
 async function boot(){
+ showAuthorityStatus();setInterval(showAuthorityStatus,15000);
   // Independent of the large business snapshot: device polling must keep running.
   loadBusinessData();
 

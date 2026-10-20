@@ -487,7 +487,7 @@ test('real large keep-both sync survives lost response, collector restart and Wi
   // Use the real installed Windows adapter, including its disk verification and
   // compare-and-swap check, with an isolated synthetic business file.
   for (const [source, target] of [['../legacy/business-sync-adapter.cjs', 'adapter.cjs'],
-    ['../shared/business-sync.cjs', 'business-sync-core.cjs'], ['../shared/json-stream.cjs', 'json-stream.cjs']]) {
+    ['../shared/business-sync.cjs', 'business-sync-core.cjs'], ['../shared/authority-commands.cjs', 'authority-commands.cjs'], ['../shared/json-stream.cjs', 'json-stream.cjs']]) {
     copyFileSync(new URL(source, import.meta.url), path.join(dir, target));
   }
   const adapter = createRequire(import.meta.url)(path.join(dir, 'adapter.cjs'));
@@ -535,7 +535,7 @@ test('real large keep-both sync survives lost response, collector restart and Wi
         results.push({status: result.status, ok: result.data.ok, requestBytes: Buffer.byteLength(JSON.stringify(data)), responseBytes: result.bytes});
         assert.equal(result.status, 200);
         sampleClient();
-        if (loseResponse && !data.probe) {loseResponse = false; throw Error('synthetic response lost after cloud commit');}
+        if (loseResponse && !data.probe && !data.authority) {loseResponse = false; throw Error('synthetic response lost after cloud commit');}
         return result.data;
       }});
     runner = makeRunner();

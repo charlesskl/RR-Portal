@@ -59,6 +59,7 @@ function readJSON(req, {maxBytes = MAX_BYTES} = {}) {
 // The internal collector route does not accept caller-selected operations or a
 // caller-selected station. Only the authenticated cloud proxy supplies station.
 function collectorInput(input, station) {
+  if(input.authority===1)return {action:'authority-exchange',protocol:1,station,clientId:input.clientId,remote:input.remote,receipts:input.receipts};
   return input.probe
     ? {action: 'probe', station, clientId: input.clientId, baseHash: input.baseHash, remoteHash: input.remoteHash}
     : {action: 'exchange', station, clientId: input.clientId, base: input.base, remote: input.remote};

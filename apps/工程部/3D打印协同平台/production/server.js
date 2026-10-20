@@ -166,6 +166,10 @@ const businessSync=require('./business-sync.cjs')(store,{
  load:()=>dataImages.restore(JSON.parse(store.prepare('SELECT value FROM snapshot WHERE id=1').get().value)),
  write:data=>{store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));_cachedData=null;dataVersion=Math.max(Date.now(),dataVersion+1);}
 });
+const authority=require('./authority-store.cjs')(store,{
+ load:()=>dataImages.restore(loadData()),
+ write:data=>{store.prepare('UPDATE snapshot SET value=? WHERE id=1').run(JSON.stringify(data));_cachedData=null;dataVersion=Math.max(Date.now(),dataVersion+1);}
+});
 const businessTransport=require('../shared/business-sync-transport.cjs');
 let collectorUpload=false;
 async function handleBusinessSync(req,res,collector){
@@ -178,7 +182,9 @@ async function handleBusinessSync(req,res,collector){
   try{
     const input=await businessTransport.readJSON(req);
     if(req.aborted||res.destroyed)return;
-    const value=businessSync(collector?businessTransport.collectorInput(input,station):input);
+    const operation=collector?businessTransport.collectorInput(input,station):input;
+    if(authority.enabled()&&!operation.action.startsWith('authority-'))throw Error('已切换统一记账，请升级现场桥接；旧双向写入已停用');
+    const value=operation.action.startsWith('authority-')?authority.handle(operation):businessSync(operation);
     businessTransport.replyJSON(res,200,value);
   }catch(e){businessTransport.replyJSON(res,e.status||400,{error:e.message});}
   finally{if(collector)collectorUpload=false;}
@@ -189,6 +195,13 @@ const server = http.createServer((req, res) => {
     handleBusinessSync(req,res,req.url==='/bridge/collector-business-sync');return;
   }
 
+  if(authority.enabled()&&req.url==='/bridge/jobs'&&req.method==='POST'){
+   businessTransport.readJSON(req,{maxBytes:65536}).then(job=>businessTransport.replyJSON(res,200,authority.handle({action:'authority-job',job}))).catch(e=>businessTransport.replyJSON(res,400,{error:e.message}));return;
+  }
+  if(req.url==='/api/authority/status'&&req.method==='GET'){businessTransport.replyJSON(res,200,authority.handle({action:'authority-status'}));return;}
+  if(authority.enabled()&&!['GET','HEAD'].includes(req.method)&&!/^\/api\/products\/[^/]+\/files(?:\/|\?)/.test(req.url)){
+    req.resume();businessTransport.replyJSON(res,409,{error:'生产资料由原 3d-server 统一记账，请在“统一记账”提交修改申请；本次未修改数据'});return;
+  }
   if(req.url==='/api/legacy-import/limits'&&req.method==='GET'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({maxBytes:businessLimitBytes,maxMB:businessLimitMB}));return;}
   if(['/api/legacy-import/preview','/api/legacy-import/apply'].includes(req.url)&&req.method==='POST'){
     const chunks=[];let size=0,aborted=false;

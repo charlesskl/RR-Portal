@@ -58,7 +58,7 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
  function collectorAuth(req){const found=stations.find(s=>s.token&&timingSafeEqual(digest(req.headers.authorization||''),digest('Bearer '+s.token)));if(!found)fail(401,'采集站凭据无效');return found;}
  async function sync(j){
   const p=JSON.parse(j.payload), o=db.prepare('SELECT * FROM orders WHERE id=?').get(j.order_id), op=JSON.parse(o.payload);
-  try {const r=await fetch(`http://127.0.0.1:${process.env.PRODUCTION_PORT||3102}/bridge/jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-Internal-Token':process.env.INTERNAL_TOKEN},body:JSON.stringify({cloudJobId:j.id,orderId:o.id,orderNumber:o.number,date:p.date,productName:p.productionProduct||op.product,customer:op.customer,material:p.productionMaterial||op.material,completion:p.quality||null,attempt:p.attempt||1,weight:p.weight,qty:p.quantity??op.quantity,machine:p.machineNumber,priority:'normal',status:({待打印:'pending',打印中:'printing',待质检:'printing',异常:'printing',待交付:'done',已取消:'cancelled'})[j.status],remark:`关联订单 ${o.number} · ${o.factory} · ${j.status}；请在生产协同页操作`}),signal:AbortSignal.timeout(3000)}); if(!r.ok){const result=await r.json();throw Error(result.error||'生产业务同步失败');}db.prepare("UPDATE production_jobs SET synced=1,sync_error='' WHERE id=? AND status=? AND payload=? AND sequence=?").run(j.id,j.status,j.payload,j.sequence);}catch(e){db.prepare('UPDATE production_jobs SET synced=0,sync_error=? WHERE id=?').run(e.message||'生产业务暂时不可用',j.id);}
+  try {const r=await fetch(`http://127.0.0.1:${process.env.PRODUCTION_PORT||3102}/bridge/jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-Internal-Token':process.env.INTERNAL_TOKEN},body:JSON.stringify({cloudJobId:j.id,revision:j.sequence,orderId:o.id,orderNumber:o.number,date:p.date,productName:p.productionProduct||op.product,customer:op.customer,material:p.productionMaterial||op.material,completion:p.quality||null,attempt:p.attempt||1,weight:p.weight,qty:p.quantity??op.quantity,machine:p.machineNumber,priority:'normal',status:({待打印:'pending',打印中:'printing',待质检:'printing',异常:'printing',待交付:'done',已取消:'cancelled'})[j.status],remark:`关联订单 ${o.number} · ${o.factory} · ${j.status}；请在生产协同页操作`}),signal:AbortSignal.timeout(3000)}); if(!r.ok){const result=await r.json();throw Error(result.error||'生产业务同步失败');}const receipt=await r.json();if(receipt.pending)throw Error('生产任务已排队，等待现场确认');db.prepare("UPDATE production_jobs SET synced=1,sync_error='' WHERE id=? AND status=? AND payload=? AND sequence=?").run(j.id,j.status,j.payload,j.sequence);}catch(e){db.prepare('UPDATE production_jobs SET synced=0,sync_error=? WHERE id=?').run(e.message||'生产业务暂时不可用',j.id);}
  }
  let syncing=false;
  const timer=setInterval(async()=>{if(syncing)return;syncing=true;try{for(const j of db.prepare('SELECT * FROM production_jobs WHERE synced=0').all())await sync(j);}finally{syncing=false;}},5000); timer.unref();
@@ -117,6 +117,12 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
   }
   if(!route.startsWith('/api/platform/')&&!route.startsWith('/api/production/')&&!route.startsWith('/production/'))return false;
   if(!u||u.role!=='admin')fail(403,'仅管理员可访问生产业务');
+  if(route==='/api/platform/authority'&&['GET','POST'].includes(req.method)){
+   const query=new URL(req.url,'http://localhost').searchParams;
+   const input=req.method==='GET'?(query.has('collection')?{action:'authority-view',collection:query.get('collection'),query:query.get('q')}:{action:'authority-status'}):await body(req);
+   if(!['authority-status','authority-view','authority-enable','authority-submit'].includes(input.action))fail(400,'不支持的统一记账操作');
+   return json(res,200,await exchangeBusiness(input)),true;
+  }
   if(route==='/api/platform/business-sync'&&['GET','POST'].includes(req.method)){
    return json(res,200,await exchangeBusiness(req.method==='GET'?{action:'status'}:{action:'resolve',choices:(await body(req)).choices})),true;
   }
@@ -212,9 +218,9 @@ export function integration({db,body,json,fail,recordEvent,DEMO,ROOT}) {
   }
   if(route.startsWith('/production/')){
    const name=route==='/production/'?'index.html':route.slice('/production/'.length);
-   if(!['index.html','chart.js','xlsx.js'].includes(name))fail(404,'文件不存在');
+   if(!['index.html','chart.js','xlsx.js','production-report.js'].includes(name))fail(404,'文件不存在');
    res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; frame-ancestors 'self'");res.setHeader('X-Frame-Options','SAMEORIGIN');
-   res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript; charset=utf-8':'text/html; charset=utf-8');createReadStream(path.join(ROOT,'../production',name)).pipe(res);return true;
+   res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript; charset=utf-8':'text/html; charset=utf-8');createReadStream(path.join(ROOT,name==='production-report.js'?'../shared':'../production',name)).pipe(res);return true;
   }
   if(route.startsWith('/api/production/')){
    const target=req.url.replace('/api/production/','/api/');

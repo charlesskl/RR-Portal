@@ -1,4 +1,4 @@
-name: VoyagePlex Read Only Xingxin and Gateway Evidence
+name: VoyagePlex Read Only Gateway Logs Only
 on:
   workflow_dispatch:
 permissions:
@@ -8,9 +8,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  READONLY_WORKFLOW_PIN: 'true'
-  READONLY_HELPER_SHA256: '2c5675ab534d1fcac5f28698e5418daf3ca0366b549c0c9b78fb58d95e95d4c0'
-  READONLY_CHILD_SHA256: '48b42782a801126d5c34f3ec761e23c0d711925a580c964aa81e400093c83328'
+  READONLY_WORKFLOW_PIN: 'false'
+  READONLY_HELPER_SHA256: 'ccf59e04f75eb9785983932a3c3b7200c17bd7535854d235b2b4f3285d28615c'
 jobs:
   observe:
     runs-on: ubuntu-latest
@@ -25,7 +24,7 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$READONLY_WORKFLOW_PIN" = true && "$READONLY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$READONLY_CHILD_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$READONLY_WORKFLOW_PIN" = true && "$READONLY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/ops/mail-readonly-20261020 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Capture private evidence and perform bounded read only IMAP observations
@@ -41,10 +40,10 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 18m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,READONLY_WORKFLOW_PIN,READONLY_HELPER_SHA256,READONLY_CHILD_SHA256
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,READONLY_WORKFLOW_PIN,READONLY_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$READONLY_WORKFLOW_PIN" = true && "$READONLY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$READONLY_CHILD_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$READONLY_WORKFLOW_PIN" = true && "$READONLY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
             [[ "$RELEASE_BRANCH" = refs/heads/ops/mail-readonly-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/mail-readonly-20261020:refs/remotes/origin/ops/mail-readonly-20261020 >/dev/null 2>&1 || exit 1
@@ -52,10 +51,10 @@ jobs:
             umask 077
             mail_readonly_tmp=$(mktemp -d /tmp/voyageplex-readonly-evidence.XXXXXX)
             trap 'rm -rf "$mail_readonly_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-mail-readonly-20261020-03.py" > "$mail_readonly_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-nginx-readonly-only.py" > "$mail_readonly_tmp/run.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$mail_readonly_tmp/run.py" | cut -d ' ' -f1)" = "$READONLY_HELPER_SHA256" ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-imap-readonly-child-03.py" > "$mail_readonly_tmp/voyageplex-imap-readonly-child.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$mail_readonly_tmp/voyageplex-imap-readonly-child.py" | cut -d ' ' -f1)" = "$READONLY_CHILD_SHA256" ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-mail-readonly-20261020-03.py" > "$mail_readonly_tmp/nginx-readonly-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$mail_readonly_tmp/nginx-readonly-library.py" | cut -d ' ' -f1)" = 2c5675ab534d1fcac5f28698e5418daf3ca0366b549c0c9b78fb58d95e95d4c0 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$mail_readonly_tmp/batch-backup-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$mail_readonly_tmp/batch-backup-library.py" | cut -d ' ' -f1)" = a06bd4dd932df22b9127cda35a2dd7a8d69fafd879d6619ce3b50aa54252cd5d ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$mail_readonly_tmp/release-data-ops-library.py" 2>/dev/null || exit 1

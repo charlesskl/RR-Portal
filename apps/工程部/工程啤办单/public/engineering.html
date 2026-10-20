@@ -616,7 +616,7 @@ function isPrivileged() { return _supervisors.includes(currentUser) || _managers
 function isManager() { return _managers.includes(currentUser); }
 // 修改规则：未审核（待审核/已驳回等非锁定状态）的单据所有人可新建/编辑/删除；
 // 审核后（待经理审核/待生产/生产中/已完成）仅经理可修改
-function canModifyOrder(status) { return !lockedStatuses.includes(status) || isManager(); }
+function canModifyOrder(status) { return currentTab === 'assembly' ? ['未报价', '已驳回'].includes(status) : !lockedStatuses.includes(status) || isManager(); }
 function applyNavPermissions() {
   const btn = document.getElementById('newOrderBtn');
   if (btn) btn.style.display = '';
@@ -1301,7 +1301,7 @@ function editAsmOrder(id) {
     .then(r => r.json())
     .then(order => {
       if (order.error) { showToast(order.error, 'danger'); return; }
-      if (!canModifyOrder(order.status)) { showToast('审核后的单据仅经理可修改', 'danger'); return; }
+      if (!canModifyOrder(order.status)) { showToast('已报价单据请先审核驳回，再修改并重新报价', 'danger'); return; }
       document.getElementById('asmModalTitle').textContent = `编辑夹具申请单 #${id}`;
       document.getElementById('asm-id').value = order.id;
       document.getElementById('asm-order_number').value = order.order_number || '';

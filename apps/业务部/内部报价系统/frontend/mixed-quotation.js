@@ -553,6 +553,12 @@
         upload.querySelector('[data-supplier-kind]').onchange=()=>{upload.querySelector('[data-supplier-preview]').textContent='';upload.querySelector('[data-supplier-file]').value='';attach();};
         attach();
       }
+      if (['electronic','slush','sewing'].includes(dept) && edit && !fixedProductId) {
+        const upload=document.createElement('section');upload.className='mixed-config';
+        upload.dataset.departmentBatchImport=dept;host.insertBefore(upload,detail);
+        window.DepartmentBatchImport.attach(upload,{dept,root,config:cfg,totalCode:window.__data.quote.quote_no,
+          onChange,onApplied:draw,buildElectronic:(payload,result)=>window.applyElectronicQuoteImport(payload,result,args[0],args[1])});
+      }
       if (dept === 'assembly' && edit && !fixedProductId) {
         const upload = document.createElement('section'); upload.className = 'mixed-config';
         upload.dataset.mixedAssemblyImport = '';

@@ -3775,6 +3775,27 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
 }
 
 // ============ 电子部 ============
+function applyElectronicQuoteImport(payload, result, fxRmbHkd, fxHkdUsd) {
+  const fx = num(fxRmbHkd) || 0.85;
+  const normalized = normalizeElectronicImport(result, fx, fxHkdUsd);
+  const sp = elecImportedSummaryRows(normalized, normalized.extras || {}, fx);
+  const taxLabel = (normalized.meta && normalized.meta.tax_label) || '含税';
+  syncElectronicDetailSummary(payload, buildElectronicSummaryRows(sp, taxLabel));
+  if (normalized.extras) {
+    payload.electronics_extra = payload.electronics_extra || {};
+    ['test_repair', 'packing_shipping', 'profit_pct', 'tax_diff', 'tax_payable', 'bonding_cost', 'smt_cost', 'labor_cost'].forEach(k => {
+      if (normalized.extras[k] != null) payload.electronics_extra[k] = normalized.extras[k];
+    });
+  }
+  // 保存原始 parts/extras 供导出
+  payload.electronics_doc = {
+    ...normalized,
+    source_format: normalized.source_format || 'dengxin',
+    parts_count: elecDetailRowCount(normalized.parts || []),
+    imported_at: new Date().toISOString().slice(0, 10),
+  };
+}
+
 function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) {
   fxHkdUsd = num(fxHkdUsd) || 7.8;
   payload.electronics = payload.electronics || [];
@@ -4055,23 +4076,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) 
             // 明细是 RMB，总表单价是 HKD：单价 HKD = RMB ÷ 汇率（与税点下拉/由明细汇总按钮口径一致）
             const fx = num(fxRmbHkd) || 0.85;
             j.source_currency = impPreview.querySelector('#el-source-currency').value;
-            const normalized = normalizeElectronicImport(j, fx, fxHkdUsd);
-            const sp = elecImportedSummaryRows(normalized, normalized.extras || {}, fx);
-            const taxLabel = (normalized.meta && normalized.meta.tax_label) || '含税';
-            syncElectronicDetailSummary(payload, buildElectronicSummaryRows(sp, taxLabel));
-            if (normalized.extras) {
-              payload.electronics_extra = payload.electronics_extra || {};
-              ['test_repair', 'packing_shipping', 'profit_pct', 'tax_diff', 'tax_payable', 'bonding_cost', 'smt_cost', 'labor_cost'].forEach(k => {
-                if (normalized.extras[k] != null) payload.electronics_extra[k] = normalized.extras[k];
-              });
-            }
-            // 保存原始 parts/extras 供导出
-            payload.electronics_doc = {
-              ...normalized,
-              source_format: normalized.source_format || 'dengxin',
-              parts_count: elecDetailRowCount(normalized.parts || []),
-              imported_at: new Date().toISOString().slice(0, 10),
-            };
+            applyElectronicQuoteImport(payload, j, fx, fxHkdUsd);
             impPreview.innerHTML = ''; impFile.value = '';
             onChange();
             renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
@@ -5759,8 +5764,8 @@ function createDepartmentExportButton(dept, quoteId) {
 function installDepartmentExport(host, dept, quoteId) {
   if (!host || !DEPARTMENT_EXPORT_NAMES[dept]) return;
   const sanitize = () => {
-    // 喷油部、电子部和车缝部保留报价导入入口，其余部门沿用手动填写模式。
-    if (!['painting', 'electronic', 'sewing'].includes(dept)) {
+    // 喷油部、电子部、搪胶和车缝部保留报价导入入口，其余部门沿用手动填写模式。
+    if (!['painting', 'electronic', 'slush', 'sewing'].includes(dept)) {
       host.querySelectorAll('button').forEach(button => {
         if (dept === 'assembly' && button.closest('[data-mixed-assembly-import]')) return;
         if (/导入/.test(button.textContent || '') || /上传.*报价/.test(button.textContent || '')) button.remove();

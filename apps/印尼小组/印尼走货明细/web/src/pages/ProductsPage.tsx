@@ -11,7 +11,7 @@ import { mergeImportedMoldings } from '../utils/moldingImportMerge'
 import { MaterialImportReview } from '../components/MaterialImportReview'
 import SupplierProfileEditor from '../components/SupplierProfileEditor'
 import {
-  HUASHENGYI_FULL_NAME, linkedCustomsCompany,
+  HUASHENGYI_FULL_NAME, materialCustomsCompany,
   supplierCustomsCompany, supplierProfileForName,
   supplierAutocompleteOptions, filterSupplierOption, supplierDisplayName,
 } from '../utils/supplierProfiles'
@@ -26,10 +26,6 @@ const WORKSHOPS = ['兴信A车间', '兴信B车间', '华登']
 
 function translatedMaterialName(nameZh: string, dicts: Dictionaries): string {
   return resolveMaterialTranslation(nameZh, dicts.translations || [])
-}
-
-function materialCustomsCompany(material: Material, dicts: Dictionaries): string {
-  return material.customs_company ?? linkedCustomsCompany(material.supplier || '', dicts.suppliers)
 }
 
 export default function ProductsPage() {
@@ -114,7 +110,7 @@ export default function ProductsPage() {
           hsCN: m.hs_cn ?? '',
           hsID: m.hs_id ?? '',
           supplier: m.supplier || '',
-          customsCompany: m.customs_company || '',
+          customsCompany: materialCustomsCompany(m, dicts.suppliers),
           unitKg: m.unit_kg ?? 'KGM',
           grossPerPc: m.gross_per_pc ?? 0,
           netPerPc: m.net_per_pc ?? 0,
@@ -139,8 +135,8 @@ export default function ProductsPage() {
           return {
             supplier: String(m.supplier || '').trim(),
             previousSupplier: String(previous?.supplier || '').trim(),
-            customs: materialCustomsCompany(m, dicts),
-            previousCustoms: previous ? materialCustomsCompany(previous, dicts) : '',
+            customs: materialCustomsCompany(m, dicts.suppliers),
+            previousCustoms: previous ? materialCustomsCompany(previous, dicts.suppliers) : '',
           }
         })
       let supplierAdded = 0
@@ -736,7 +732,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode, onSuppliersChange
         .map(material => ({
           ...material,
           supplier: material.supplier,
-          customs_company: material.customs_company || (material.supplier ? materialCustomsCompany(material, dicts) : ''),
+          customs_company: materialCustomsCompany(material, dicts.suppliers),
         }))
       if (!imported.length) { message.warning('没识别到有效行 (需含 中文名 / 料号 列)'); return }
       const result = mergeImportedMaterials(rows, imported)
@@ -808,7 +804,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode, onSuppliersChange
           { title: '报关公司', width: 200, render: (_v, r) => {
             const profile = supplierProfileForName(r.supplier || '', dicts.suppliers)
             const selfCompany = profile?.full?.trim() || r.supplier?.trim() || ''
-            const linked = materialCustomsCompany(r, dicts)
+            const linked = materialCustomsCompany(r, dicts.suppliers)
             const options = [
               ...(selfCompany ? [{ value: selfCompany, label: selfCompany }] : []),
               { value: HUASHENGYI_FULL_NAME, label: HUASHENGYI_FULL_NAME },

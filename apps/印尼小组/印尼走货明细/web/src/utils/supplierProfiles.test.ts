@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   supplierSummaryRows, documentSellerForLine, HUASHENGYI_FULL_NAME, linkedCustomsCompany,
-  supplierCustomsCompany, supplierForLine, supplierProfileForName,
+  supplierCustomsCompany, supplierForLine, supplierProfileForName, materialCustomsCompany,
   supplierAutocompleteOptions, filterSupplierOption, supplierDisplayName,
 } from './supplierProfiles'
 
@@ -14,6 +14,57 @@ const otherProfile = {
   ...profile, id: 2, keyword: '星徽', full: '东莞市星徽纸品有限公司',
   nameEn: 'Dongguan Xinghui Paper Products Co., Ltd.', email: 'xinghui@example.com',
 }
+
+describe('material customs-company automatic fill', () => {
+  const profiles = [{ ...otherProfile, customs: '华胜益' }, profile]
+
+  it('fills missing, empty and whitespace customs from supplier without reselecting it', () => {
+    for (const customs_company of [undefined, '', '  ']) {
+      for (const supplier of [otherProfile.keyword, otherProfile.full]) {
+        expect(materialCustomsCompany({ supplier, customs_company }, profiles)).toBe(HUASHENGYI_FULL_NAME)
+      }
+    }
+  })
+
+  it('defaults to the supplier company when its archive has no separate customs company', () => {
+    expect(materialCustomsCompany({ supplier: otherProfile.full, customs_company: '' }, [otherProfile]))
+      .toBe(otherProfile.full)
+  })
+
+  it('corrects stale customs from the matching archive without mutating material data', () => {
+    const row = { supplier: otherProfile.keyword, customs_company: '指定报关公司', unit_kg: 'TNE', net_per_pc: 0.12 }
+    const before = { ...row }
+    expect(materialCustomsCompany(row, profiles)).toBe(HUASHENGYI_FULL_NAME)
+    expect(row).toEqual(before)
+  })
+
+  it('follows changes to the supplier archive rather than a previously saved customs value', () => {
+    const row = { supplier: otherProfile.keyword, customs_company: HUASHENGYI_FULL_NAME }
+    expect(materialCustomsCompany(row, [otherProfile])).toBe(otherProfile.full)
+    expect(materialCustomsCompany(row, [{ ...otherProfile, customs: '指定报关公司' }])).toBe('指定报关公司')
+  })
+
+  it('resolves when dictionaries arrive after materials and can be saved without clicking supplier', () => {
+    const row = { supplier: otherProfile.full, customs_company: '' }
+    expect(materialCustomsCompany(row, [])).toBe('')
+    const displayed = materialCustomsCompany(row, profiles)
+    const saved = { ...row, customs_company: materialCustomsCompany(row, profiles) }
+    expect(saved.customs_company).toBe(displayed)
+    expect(materialCustomsCompany(saved, profiles)).toBe(HUASHENGYI_FULL_NAME)
+  })
+
+  it('does not guess for unknown, empty or ambiguous suppliers', () => {
+    const ambiguous = [
+      { keyword: '胶袋', full: '兴信公司', customs: '报关一' },
+      { keyword: '吸塑', full: '兴信公司', customs: '报关二' },
+    ]
+    for (const supplier of ['', '未建档', '兴信公司']) {
+      expect(materialCustomsCompany({ supplier, customs_company: '' }, ambiguous)).toBe('')
+      expect(materialCustomsCompany({ supplier, customs_company: '原报关公司' }, ambiguous)).toBe('原报关公司')
+    }
+    expect(materialCustomsCompany({ supplier: '吸塑', customs_company: '' }, ambiguous)).toBe('报关二')
+  })
+})
 
 describe('supplier autocomplete options', () => {
   it('prefers an exact company name over a longer similar company', () => {

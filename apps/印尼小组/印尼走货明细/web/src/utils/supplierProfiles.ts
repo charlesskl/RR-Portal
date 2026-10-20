@@ -1,4 +1,4 @@
-import type { SupplierDict } from '../api/client'
+import type { Material, SupplierDict } from '../api/client'
 
 export const HUASHENGYI_FULL_NAME = '深圳市华胜益出口贸易有限公司'
 
@@ -78,6 +78,15 @@ export function supplierCustomsCompany(profile: SupplierDict): string {
 export function linkedCustomsCompany(supplierName: string, profiles: SupplierDict[], fallback = ''): string {
   const profile = supplierProfileForName(supplierName, profiles)
   return profile ? supplierCustomsCompany(profile) : fallback.trim()
+}
+
+// 显示、导入和保存都以匹配的供应商档案为准，纠正旧资料中的不一致值。
+// 无法明确匹配档案时保留原报关公司，不猜测覆盖。
+export function materialCustomsCompany(
+  material: Pick<Material, 'supplier' | 'customs_company'>,
+  profiles: SupplierDict[],
+): string {
+  return linkedCustomsCompany(material.supplier || '', profiles, material.customs_company || '')
 }
 
 export function supplierForLine(name: string, profiles: SupplierDict[], allowIncomplete = false): SupplierDict {

@@ -1,6 +1,6 @@
 """Fixed read-only diagnosis of a sealed failed backup; no database opens."""
 import hashlib,importlib.util,json,os,pathlib,re,sys
-PROBE_PIN=False
+PROBE_PIN=True
 BRANCH='refs/heads/ops/batch-960-966-967-968-20261020'
 CORE_SHA='c71c9515eb03a200353e581da44f3c43827c5d5b1515e443cda535ee84c55e3d'
 ROOT=pathlib.Path('/opt/rr-portal')

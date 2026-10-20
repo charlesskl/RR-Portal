@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  BATCH_BACKUP_WORKFLOW_PIN: 'false'
-  BATCH_BACKUP_HELPER_SHA256: '018c5efcf6d4477a2d0b08ccd7f1817df63989f93819e0c67805616d58b0f354'
+  BATCH_BACKUP_WORKFLOW_PIN: 'true'
+  BATCH_BACKUP_HELPER_SHA256: 'eff1b6769fb1a2698c99b97bf9478a1cefda734fd1e8d433893cb54bcd07590f'
 jobs:
   fixed-six-service-backup:
     runs-on: ubuntu-latest

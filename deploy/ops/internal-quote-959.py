@@ -1,7 +1,7 @@
 """Fixed internal-quote backup first. Draft; deploy/verify are deliberately disabled."""
 import datetime,hashlib,importlib.util,json,os,pathlib,re,shutil,signal,sqlite3,stat,subprocess,sys,urllib.parse
 ROOT=pathlib.Path('/opt/rr-portal');APP=ROOT/'apps/业务部/内部报价系统';BASE='32440d3f0891e52707ea89f8dfe72eabe9f62ad7'
-BRANCH='refs/heads/ops/internal-quote-959-20261020';BACKUP_PIN=True;DEPLOY_PIN=False;VERIFY_PIN=False;TARGET='';TARGET_TREE='';REVIEWED_FILES={}
+BRANCH='refs/heads/ops/internal-quote-959-20261020';BACKUP_PIN=False;DEPLOY_PIN=False;VERIFY_PIN=False;TARGET='';TARGET_TREE='';REVIEWED_FILES={}
 OUT=ROOT/'deploy/backups/internal-quote-959-20261020-backup'
 DEPENDENCIES={'release-data-ops-library.py':'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5','release-data-library.py':'d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9','internal-quote-readonly-library.py':'be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69'}
 STAGE='preflight';COUNTER=0;OPS=None;READONLY=None

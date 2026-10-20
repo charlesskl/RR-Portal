@@ -25,6 +25,15 @@ export function modelName() {
   return process.env.MOONSHOT_MODEL?.trim() || DEFAULT_MODEL;
 }
 
+// Human-readable provider label stored on AI-generated drafts, derived from
+// the configured endpoint so data provenance stays accurate.
+export function providerName() {
+  const baseUrl = (process.env.MOONSHOT_BASE_URL || DEFAULT_BASE_URL).toLowerCase();
+  if (baseUrl.includes("dashscope")) return "aliyun-dashscope";
+  if (baseUrl.includes("openrouter")) return "openrouter";
+  return "moonshot";
+}
+
 function config() {
   const apiKey = process.env.MOONSHOT_API_KEY?.trim();
   if (!apiKey) {

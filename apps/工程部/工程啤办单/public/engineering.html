@@ -376,7 +376,7 @@
         </div>
         <div class="items-table-wrap">
           <table class="table table-bordered table-sm items-table">
-            <thead><tr><th style="width:50px">序号</th><th>名称</th><th style="width:120px">图片</th><th style="width:80px">数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th><th style="width:40px"></th></tr></thead>
+            <thead><tr><th style="width:50px">序号</th><th>名称</th><th style="width:120px">图片</th><th style="width:80px">数量</th><th>要求完成日期</th><th style="width:40px"></th></tr></thead>
             <tbody id="asmItemsBody"></tbody>
           </table>
         </div>
@@ -1324,7 +1324,7 @@ function editAsmOrder(id) {
     .catch(() => showToast('加载失败', 'danger'));
 }
 
-const asmItemFields = ['product_name','quantity','required_date','price','completion_time'];
+const asmItemFields = ['product_name','quantity','required_date'];
 let _asmSaving = false;
 document.getElementById('asmModal').addEventListener('hide.bs.modal', event => {
   if (_asmSaving) event.preventDefault();
@@ -1356,6 +1356,9 @@ function saveAsmOrder() {
     const st = tr._img || {};
     item.image = st.name || null;
     if (st.dataUrl) item.new_image = st.dataUrl;
+    const q = tr._quote || {};
+    item.price = q.price ?? null;
+    item.completion_time = q.completion_time ?? null;
     return item;
   }).filter(item => Object.values(item).some(value => value !== null && value !== ''));
   if (!items.length) { alert('请至少填写一项夹具名称'); return; }
@@ -2430,6 +2433,8 @@ function addAsmRow(it={}) {
   _asmRowSeq++;
   const tr = document.createElement('tr');
   tr._img = it.image ? { name: it.image, dataUrl: null } : {};
+  // 价格/完成时间由夹具部报价填写；编辑时保留已有值，保存时原样带回，避免被清空
+  tr._quote = { price: it.price ?? null, completion_time: it.completion_time ?? null };
   tr.innerHTML = `
     <td class="text-center asm-seq">${_asmRowSeq}</td>
     <td>${inp('text','product_name',it.product_name||'','placeholder="夹具名称"')}</td>
@@ -2444,8 +2449,6 @@ function addAsmRow(it={}) {
     </td>
     <td>${inp('number','quantity',it.quantity||'','style="width:80px" min="1"')}</td>
     <td>${inp('date','required_date',it.required_date||'')}</td>
-    <td>${inp('number','price',String(it.price ?? ''),'placeholder="价格" step="0.01" min="0"')}</td>
-    <td>${inp('text','completion_time',it.completion_time||'','placeholder="完成时间"')}</td>
     <td><button type="button" class="btn btn-sm btn-danger" onclick="removeAsmRow(this)"><i class="bi bi-x-lg"></i></button></td>`;
   document.getElementById('asmItemsBody').appendChild(tr);
   renderAsmRowImage(tr);

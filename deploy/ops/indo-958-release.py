@@ -1,9 +1,9 @@
 """Fixed one-service deployment and strict read-only verification. Gates remain false."""
 import hashlib,importlib.util,json,os,pathlib,re,signal,stat,subprocess,sys,time,urllib.request,urllib.error
 ROOT=pathlib.Path('/opt/rr-portal');BASE='6eece9ec6802533c077dd53d46e89902ffb4e90f';TARGET='32440d3f0891e52707ea89f8dfe72eabe9f62ad7';TREE='c00584ff572f2b37cad03eb974b712fc7f559ffb'
-BRANCH='refs/heads/ops/indo-shipping-958-20261020';DEPLOY_PIN=True;VERIFY_PIN=False
+BRANCH='refs/heads/ops/indo-shipping-958-20261020';DEPLOY_PIN=False;VERIFY_PIN=True
 BACKUP=ROOT/'deploy/backups/indo-shipping-958-20261020-backup';BACKUP_MANIFEST='63324cbb1eef24753f9d7cb73084dfe7cabed3e87bffc47d63e365cb1f351acc';BACKUP_RESULT='c95bdf322e61299c4594c0492c787535d0536a36ff66f3b31270275fa608c3a1'
-DEPLOY=BACKUP.with_name('indo-shipping-958-20261020-deploy');VERIFY=BACKUP.with_name('indo-shipping-958-20261020-verify');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+DEPLOY=BACKUP.with_name('indo-shipping-958-20261020-deploy');VERIFY=BACKUP.with_name('indo-shipping-958-20261020-verify');DEPLOY_MANIFEST='386a2728484f4ea599c257b69f392c23b1eb93fbe47a43df69ef66ad23bda489';DEPLOY_RESULT='8ba7b7336519ed8e1dad4f93f8576eb6cec35f07b955747e0889af552202a605'
 CORE_SHA='5631d65725bc871cee1e2be992723a03a437028b4b7c07632ed565ad904a42a6'
 SOURCE_MANIFEST_SHA='2f7d43445bffd4f8c5d465657913bf29639ca5553da36ef70f1dc211d4ff301d'
 STAGE='preflight';CORE=None;OUT=None;ENV=None

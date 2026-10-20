@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 env:
   INDO_RELEASE_WORKFLOW_PIN: 'true'
-  INDO_RELEASE_HELPER_SHA256: '20a584a7275f6330d06d594c18c0587b4d1855e0067b0a8850d6a3de668bc3fb'
+  INDO_RELEASE_HELPER_SHA256: '71decb0509f5ff8e36ca3a0cffb6d8df775c7e190939cc2f9d9b234c3cdd3002'
 jobs:
   fixed-indo-shipping-release:
     runs-on: ubuntu-latest

@@ -5,7 +5,7 @@ sequences independently bracketed, never claimed cross-store atomic.
 """
 import contextlib,datetime,decimal,hashlib,importlib.util,io,json,os,pathlib,re,shutil,signal,sqlite3,stat,subprocess,sys,tarfile,traceback,urllib.parse
 ROOT=pathlib.Path('/opt/rr-portal');BASE='4f1f64cac098caa6b202eb27cae9ab8fad9109dd'
-BRANCH='refs/heads/ops/batch-960-966-967-968-20261020';BACKUP_PIN=False
+BRANCH='refs/heads/ops/batch-960-966-967-968-20261020';BACKUP_PIN=True
 OUT=ROOT/'deploy/backups/batch-960-966-967-968-20261020-backup-02'
 DEPENDENCIES={'release-data-ops-library.py':'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5','release-data-library.py':'d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9','internal-quote-readonly-library.py':'be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69','portable-pdb-library.py':'cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5'}
 RR='apps/工程部/工程啤办单';QC='apps/生产部/品质管理系统';QUOTE='apps/业务部/内部报价系统';VOY='apps/船务部/VoyagePlex船务协同系统'

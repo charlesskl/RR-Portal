@@ -2,12 +2,12 @@
 Draft: both gates and all target/archive/source facts must be frozen before use.
 Strict verification deliberately has no startup-migration exemptions yet.
 """
-import hashlib,html.parser,importlib.util,json,os,pathlib,re,signal,sqlite3,stat,subprocess,sys,time,urllib.error,urllib.parse,urllib.request
+import contextlib,hashlib,html.parser,importlib.util,json,os,pathlib,re,signal,sqlite3,stat,subprocess,sys,time,urllib.error,urllib.parse,urllib.request
 ROOT=pathlib.Path('/opt/rr-portal');BASE='9a62c7059600c12d4781b94f69098e37a32d901d';TARGET='4f1f64cac098caa6b202eb27cae9ab8fad9109dd';TREE='f062e722bb9a16d51856e494f41a58d3e3670dd2'
 BRANCH='refs/heads/ops/batch-961-965-20261020';DEPLOY_PIN=True;VERIFY_PIN=False
 CORE_SHA='4259dcbba7cbdc78809e286c3b20829644104e4a30b284bea84cc6b20f0c24b5';SOURCE_MANIFEST_SHA='c6a2c4b7ea1e5866ed351d1fcef54f2d27f44d099e50879a95bfd535a38e2ab6';EXPECTED_CHANGED_FILES=83
 BACKUP=ROOT/'deploy/backups/batch-961-965-20261020-backup';BACKUP_MANIFEST='a18052ed05e4fea60d0073f71aa5a809f395739c89ce63eddf5dfc9ac0ef8924';BACKUP_RESULT='3928baa1a0e10249f22ef26e19d7a4a1be018aefa03b557bcb6c65cfc66aec3e'
-DEPLOY=BACKUP.with_name('batch-961-965-20261020-deploy');VERIFY=BACKUP.with_name('batch-961-965-20261020-verify');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+DEPLOY=BACKUP.with_name('batch-961-965-20261020-deploy-02');VERIFY=BACKUP.with_name('batch-961-965-20261020-verify-02');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 ORDER=('factory-review','factory-review-test','internal-quote','zuru-order-system','qc-plan-api','qc-plan-web','printlink')
 AI_ADDITIONS={'FACTORY_REVIEW_AI_ENABLED':'false','FACTORY_REVIEW_AI_API_KEY':'','FACTORY_REVIEW_AI_MODEL':'','FACTORY_REVIEW_AI_BASE_URL':'https://api.openai.com/v1'}
 
@@ -15,6 +15,10 @@ EXPECTED_APPLICATION_TREES={'apps/PMC跟仓管/加工厂月度评审管理制度
 ZURU_COMMAND_BEFORE=['gunicorn','--bind','0.0.0.0:5005','--workers','2','--threads','4','--timeout','300','app:app']
 ZURU_COMMAND_AFTER=['gunicorn','--bind','0.0.0.0:5005','--workers','1','--threads','4','--timeout','300','app:app']
 MAPPING_PINS={'country_map.json': {'before': '2de5a5af98594e4d626b7b83565f906d50d776a9229871fbba572a8133b22174', 'after': 'c30a4583a6130ae8854308d7e251a2d45dbbeba4e01f11c565dc226a216f7c59', 'afterBytes': 26316}, 'item_map.json': {'before': 'e251ba63423890f9dfedf8706299ba7c21270ad439519ae0620ef03137700d90', 'after': 'c46d4e113144dc551e97d3e15b850602302b8efb8828dbf8258736097cef31f0', 'afterBytes': 63161}, 'customer_country.json': {'before': None, 'after': '85ca806b646163bace88eabc21eacc9157fac393a69fda4c007d27cb728c107a', 'afterBytes': 5354}}
+ORIGINAL_FAILED=BACKUP.with_name('batch-961-965-20261020-deploy');DIAGNOSIS=BACKUP.with_name('batch-961-965-20261020-map-diagnosis-01')
+FAILED_MANIFEST='d3f3f11636e58ee719bfda2e468f6b74b3258ed6b940afe3b919b14133ae3ea8';FAILED_RESULT='9a9bcbe5d5571b7d9893240f090115a125f0b0b9be7a0149d78a02fd6324603c'
+DIAGNOSIS_MANIFEST='43af689118882628882116d56aea1032c4029f6997b9e7902d3d3f5d59cd1a13';DIAGNOSIS_RESULT='6b951cfe061aa5828148d6dda8f39bbbb98b23c1b042b9df752552ea079e2b20'
+WRITABLE_MAPS={'country_map.json':{'beforeMode':0o666,'afterMode':0o666,'beforeBytes':26315},'item_map.json':{'beforeMode':0o666,'afterMode':0o666,'beforeBytes':60903}}
 STAGE='entrypoint';CORE=None;OUT=None;ENV=None
 COMPOSE=['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production')]
 
@@ -25,8 +29,8 @@ def sha(value):return hashlib.sha256(value).hexdigest()
 def core_load():
  path=pathlib.Path(__file__).with_name('batch-backup-library.py');need(path.is_file()and not path.is_symlink()and sha(path.read_bytes())==CORE_SHA);spec=importlib.util.spec_from_file_location('fixed_batch_backup_core',path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 
-def archive(path,manifest_sha,result_sha):
- need(re.fullmatch('[a-f0-9]{64}',manifest_sha or'')and re.fullmatch('[a-f0-9]{64}',result_sha or'')and path.is_dir()and not path.is_symlink()and stat.S_IMODE(path.stat().st_mode)==0o700);need(CORE.OPS.L.file_hash(path/'manifest.json')==manifest_sha and CORE.OPS.L.file_hash(path/'first-result.json')==result_sha);manifest=json.loads((path/'manifest.json').read_bytes());entries=list(path.rglob('*'));need(len(entries)<=100000 and all(not p.is_symlink()and(p.is_file()or p.is_dir())and p.stat().st_mode&0o077==0 for p in entries));need(set(manifest)=={str(p.relative_to(path))for p in entries if p.is_file()and p!=path/'manifest.json'});need(all(CORE.OPS.L.safe_path(n)and re.fullmatch('[a-f0-9]{64}',h)and CORE.OPS.L.file_hash(path/n)==h for n,h in manifest.items()));receipt=json.loads((path/'first-result.json').read_bytes());need(receipt.get('success')is True);return receipt
+def archive(path,manifest_sha,result_sha,success=True):
+ need(re.fullmatch('[a-f0-9]{64}',manifest_sha or'')and re.fullmatch('[a-f0-9]{64}',result_sha or'')and path.is_dir()and not path.is_symlink()and stat.S_IMODE(path.stat().st_mode)==0o700);need(CORE.OPS.L.file_hash(path/'manifest.json')==manifest_sha and CORE.OPS.L.file_hash(path/'first-result.json')==result_sha);manifest=json.loads((path/'manifest.json').read_bytes());entries=list(path.rglob('*'));need(len(entries)<=100000 and all(not p.is_symlink()and(p.is_file()or p.is_dir())and p.stat().st_mode&0o077==0 for p in entries));need(set(manifest)=={str(p.relative_to(path))for p in entries if p.is_file()and p!=path/'manifest.json'});need(all(CORE.OPS.L.safe_path(n)and re.fullmatch('[a-f0-9]{64}',h)and CORE.OPS.L.file_hash(path/n)==h for n,h in manifest.items()));receipt=json.loads((path/'first-result.json').read_bytes());need(receipt.get('success')is success);return receipt
 
 def original():
  receipt=archive(BACKUP,BACKUP_MANIFEST,BACKUP_RESULT);need(receipt.get('base')==BASE and all(receipt.get(k)is True for k in('backupComplete','allSevenTargetServicesBound','allPersistentMountsCaptured','allOriginalFullTypedRowsAndSchemaCaptured','allRuntimeSourceProofsMatchBase','composeVersionAndLiteralRuntimeEnvironmentsProven','startupSafetyPassed')));baseline=json.loads((BACKUP/'baseline.private.json').read_bytes());need(baseline['head']==BASE and set(baseline['runtime']['targets'])==set(ORDER)==CORE.SERVICES and set(baseline['storage'])==set(CORE.STORAGE)and baseline['composeEnvironmentProof']['composeVersion']=='5.1.0');return baseline
@@ -47,10 +51,40 @@ def checked_source(revision,before,files,canonical=False):
   need(sha(CORE.run(['git','show',TARGET+':'+name]))==checksum)
   if canonical:
    path=ROOT/name;entry=CORE.run(['git','ls-tree','-z',TARGET,'--',name]).split(b'\t',1);need(len(entry)==2 and entry[1]==name.encode()+b'\0'and re.fullmatch(b'100(?:644|755) blob [a-f0-9]{40}',entry[0]));mode=0o755 if entry[0].startswith(b'100755')else 0o644
+   if name in{CORE.ZURU+'/data/'+n for n in WRITABLE_MAPS}:need(entry[0].startswith(b'100644'));mode=0o666
    for ancestor in(path,*path.parents):
     if ancestor==ROOT:break
     need(not ancestor.is_symlink())
    need(path.is_file()and stat.S_IMODE(path.stat().st_mode)==mode and CORE.OPS.L.file_hash(path)==checksum)
+
+def recovery_evidence(before):
+ failed=archive(ORIGINAL_FAILED,FAILED_MANIFEST,FAILED_RESULT,False);diagnosis=archive(DIAGNOSIS,DIAGNOSIS_MANIFEST,DIAGNOSIS_RESULT);need(failed.get('failedStage')=='exact-runtime-mapping-preflight'and failed.get('base')==BASE and failed.get('target')==TARGET and diagnosis.get('mode')=='map-diagnosis'and diagnosis.get('failedReleaseArchiveRetainedAndValid')is True and diagnosis.get('observationsStableDuringDiagnosis')is True)
+ for key in('beforeReadOnlyObservations','afterReadOnlyObservations'):
+  facts=diagnosis[key];need(facts.get('head')==BASE and all(facts.get(name)is True for name in('headStillBase','allTargetAndOtherRuntimeConfigurationUnchanged','environmentBytesUnchanged','preexistingFourDirtyExactlyUnchanged','allMaintenanceFlagsUnchanged')))
+ rows={row['path']:row for row in before['storage']['zuru-data']['files']};need('customer_country.json'not in rows and diagnosis['baselineMaps']['customer_country.json']=={'inventory':None,'present':False}and diagnosis['currentMaps']['customer_country.json']=={'ancestorSymlink':False,'present':False,'symlink':False})
+ for name,policy in WRITABLE_MAPS.items():
+  row=rows[name];old=diagnosis['baselineMaps'][name];current=diagnosis['currentMaps'][name];need(old['inventory']==row and old['present']is True and row['mode']==policy['beforeMode']and row['sha256']==MAPPING_PINS[name]['before']and row['bytes']==policy['beforeBytes']and row['directory']is False and current['present']is True and current['regular']is True and current['symlink']is False and current['ancestorSymlink']is False and current['mode']==row['mode']and current['sha256']==row['sha256']and current['bytes']==row['bytes']and current['canonicalJSONSHA256']==old['canonicalJSONSHA256']and current['entries']==old['entries']and current['kind']==old['kind']=='object'and diagnosis['indexTags'][name]=='H')
+ return {'failedReleaseAndReadOnlyDiagnosisArchivesValidated':True,'diagnosisProvesNoPriorSourceOrRuntimeMutation':True,'onlyTwoOriginalWritableMapModesBoundToSealed0666':True}
+
+def restore_original_writable_map_modes(before,receipts=None):
+ rows={row['path']:row for row in before['storage']['zuru-data']['files']};result={}if receipts is None else receipts;need(not result);opened={};key=lambda value:(value.st_dev,value.st_ino,value.st_mode,value.st_size,value.st_mtime_ns,value.st_ctime_ns,value.st_nlink)
+ with contextlib.ExitStack()as stack:
+  # Validate both original receipts and both open target descriptors before any
+  # permission mutation. A second-file mismatch cannot alter the first file.
+  for name,policy in WRITABLE_MAPS.items():
+   original=rows[name];pin=MAPPING_PINS[name];need(original['mode']==policy['beforeMode']==policy['afterMode']==0o666 and original['sha256']==pin['before']and original['bytes']==policy['beforeBytes']);path=ROOT/CORE.ZURU/'data'/name
+   for ancestor in(path,*path.parents):
+    if ancestor==ROOT:break
+    need(not ancestor.is_symlink())
+   stream=stack.enter_context(os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb'));info=os.fstat(stream.fileno());need(stat.S_ISREG(info.st_mode)and info.st_nlink==1 and stat.S_IMODE(info.st_mode)in{0o644,0o666}and info.st_size==pin['afterBytes']);content=stream.read(pin['afterBytes']+1);need(len(content)==pin['afterBytes']and sha(content)==pin['after']and key(info)==key(os.fstat(stream.fileno()))==key(path.lstat()));opened[name]=(stream,path,info)
+  for name,(stream,path,info)in opened.items():
+   pin=MAPPING_PINS[name];stream.seek(0);need(sha(stream.read(pin['afterBytes']+1))==pin['after']and key(info)==key(os.fstat(stream.fileno()))==key(path.lstat()))
+  for name,(stream,path,info)in opened.items():
+   policy=WRITABLE_MAPS[name];pin=MAPPING_PINS[name];need(key(info)==key(os.fstat(stream.fileno()))==key(path.lstat()));changed=stat.S_IMODE(info.st_mode)!=policy['afterMode'];result[name]={'sealedBeforeMode':policy['beforeMode'],'modeAfterGitCheckout':stat.S_IMODE(info.st_mode),'requestedPreservedAfterMode':policy['afterMode'],'reviewedTargetBytesSHA256':pin['after'],'fdFchmodAttempted':changed,'originalModePreserved':False}
+   if changed:os.fchmod(stream.fileno(),policy['afterMode'])
+   final=os.fstat(stream.fileno());need(stat.S_IMODE(final.st_mode)==policy['afterMode']and(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns)==(final.st_dev,final.st_ino,final.st_size,final.st_mtime_ns)and key(final)==key(path.lstat()));stream.seek(0);need(sha(stream.read(pin['afterBytes']+1))==pin['after']and key(final)==key(os.fstat(stream.fileno()))==key(path.lstat()));result[name].update(preservedAfterMode=policy['afterMode'],originalModePreserved=True,fdFchmodPerformed=changed)
+ return result
+
 
 def before_maps(service,before):
  raw=json.loads((BACKUP/'target-inspect.private.json').read_bytes())[service];need(raw['Id']==before['runtime']['targets'][service]['id']);actual=CORE.envmap(raw['Config']['Env']);literal=json.loads((BACKUP/(service+'-literal-compose-environment.private.json')).read_bytes());declared=json.loads((BACKUP/(service+'-compose-environment.private.json')).read_bytes());image=json.loads((BACKUP/(service+'-image.private.json')).read_bytes());need(image['Id']==raw['Image']and CORE.literal_explicit_environment(actual,CORE.envmap(image['Config'].get('Env')or[]),declared)==literal);return actual,literal
@@ -107,8 +141,8 @@ def mapping_preflight(before):
   if pin['before']is None:
    if row is None:need(not path.exists()and not path.is_symlink());continue
    need(row.get('directory')is False and row.get('sha256')==pin['after']and row.get('bytes')==pin['afterBytes']and row.get('mode')==0o644);already=True
-  else:need(row is not None and row.get('directory')is False and row.get('sha256')==pin['before']and row.get('mode')==0o644)
-  need(sha(CORE.stable_environment_bytes(path))==(pin['after']if pin['before']is None else pin['before']))
+  else:need(name in WRITABLE_MAPS and row is not None and row.get('directory')is False and row.get('sha256')==pin['before']and row.get('mode')==WRITABLE_MAPS[name]['beforeMode']and row.get('bytes')==WRITABLE_MAPS[name]['beforeBytes'])
+  need(sha(CORE.stable_environment_bytes(path))==(pin['after']if pin['before']is None else pin['before'])and stat.S_IMODE(path.lstat().st_mode)==row['mode'])
  return already
 
 def prepare_identical_existing_customer_file(already):
@@ -148,7 +182,7 @@ def deploy(result,before,files):
  global STAGE
  STAGE='initial-runtime-source-and-maintenance';current,raw=CORE.runtime();need(current==before['runtime']and CORE.maintenance_inventory()==before['maintenanceInventory']);CORE.BASE=BASE;need(CORE.source()==before['configuration']and CORE.dirty_snapshot()==before['preexistingFourDirty']and CORE.OPS.L.file_hash(ROOT/'.env.cloud.production')==before['environmentSHA256']);
  for service in ORDER:maintenance('require_maintenance_cleared',service)
- result.update(compose_preflight(before,False));STAGE='exact-runtime-mapping-preflight';customerAlreadyExact=mapping_preflight(before);STAGE='fetch-exact-main';CORE.run(['git','-c','core.hooksPath=/dev/null','fetch','origin','main']);need(CORE.run(['git','rev-parse','FETCH_HEAD']).decode().strip()==TARGET);CORE.run(['git','merge-base','--is-ancestor',BASE,TARGET]);checked_source(BASE,before,files);STAGE='fast-forward-reviewed-source';prepare_identical_existing_customer_file(customerAlreadyExact);operation(['git','-c','core.hooksPath=/dev/null','-c','merge.autoStash=false','merge','--ff-only','--no-autostash',TARGET],180,checkout=True);checked_source(TARGET,before,files,True);result.update(compose_preflight(before,True));built={}
+ result.update(compose_preflight(before,False));STAGE='sealed-failed-and-diagnosis-recovery-evidence';result.update(recovery_evidence(before));STAGE='exact-runtime-mapping-preflight';customerAlreadyExact=mapping_preflight(before);STAGE='fetch-exact-main';CORE.run(['git','-c','core.hooksPath=/dev/null','fetch','origin','main']);need(CORE.run(['git','rev-parse','FETCH_HEAD']).decode().strip()==TARGET);CORE.run(['git','merge-base','--is-ancestor',BASE,TARGET]);checked_source(BASE,before,files);STAGE='fast-forward-reviewed-source';prepare_identical_existing_customer_file(customerAlreadyExact);operation(['git','-c','core.hooksPath=/dev/null','-c','merge.autoStash=false','merge','--ff-only','--no-autostash',TARGET],180,checkout=True);STAGE='preserve-only-two-original-writable-map-modes';result['originalWritableMapModesPreserved']={};restore_original_writable_map_modes(before,result['originalWritableMapModesPreserved']);checked_source(TARGET,before,files,True);result.update(compose_preflight(before,True));built={}
  # All expensive builds finish before the first target enters maintenance.
  for service in ORDER:
   STAGE=service+'-build-only-target-image';need(CORE.runtime()[0]==current);tag=raw[service]['Config']['Image'];need(tag.removesuffix(':latest')=='rr-portal-'+service);old=json.loads(CORE.run(['docker','image','inspect',tag]));need(len(old)==1 and old[0]['Id']==current['targets'][service]['image']);operation([*COMPOSE,'build',service],1800);candidate=json.loads(CORE.run(['docker','image','inspect',tag]));need(len(candidate)==1 and re.fullmatch('sha256:[a-f0-9]{64}',candidate[0]['Id'])and candidate[0]['Id']!=old[0]['Id']);actual,literal=expected_maps(service,before);defaults=CORE.envmap(candidate[0]['Config'].get('Env')or[]);need(dict(defaults,**literal)==actual);expected_command=ZURU_COMMAND_AFTER if service=='zuru-order-system'else raw[service]['Config'].get('Cmd');need(candidate[0]['Config'].get('Cmd')==expected_command and all(candidate[0]['Config'].get(key)==raw[service]['Config'].get(key)for key in('Entrypoint','User','WorkingDir')))

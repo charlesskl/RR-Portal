@@ -267,10 +267,10 @@ def complete_body_literal(parts, uid, size):
     if (not declared or not isinstance(raw, bytes) or not raw
             or len(raw) != int(declared[1]) or not closing.rstrip().endswith(b")")):
         raise RuntimeError()
-    # Verified 163 responses can report RFC822.SIZE two bytes larger than the
-    # complete BODY[] literal. Its own framing must still match exactly; other
-    # size differences remain transient failures, never partially parsed mail.
-    if size not in (len(raw), len(raw) + 2):
+    # Verified 163 responses can report RFC822.SIZE two bytes smaller, or two
+    # or four bytes larger, than the complete BODY[] literal. Its own framing
+    # must still match exactly; all other size differences remain retry barriers.
+    if size not in (len(raw) - 2, len(raw), len(raw) + 2, len(raw) + 4):
         raise RuntimeError()
     return raw
 

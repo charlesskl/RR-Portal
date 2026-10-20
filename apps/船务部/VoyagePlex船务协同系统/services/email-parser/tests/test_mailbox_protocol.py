@@ -80,8 +80,9 @@ class MailboxProtocolTests(unittest.TestCase):
 
     def test_real_wire_trailing_uid_unsolicited_fetch_and_continuous_drip_deadline(self):
         raw = b"Subject: synthetic wire\r\nFrom: fixture@example.invalid\r\n\r\n" + b"x" * 100
-        for scenario in ("uid-before", "uid-after", "size-plus-two", "size-plus-one",
-                         "size-plus-three", "size-minus-two", "truncated",
+        for scenario in ("uid-before", "uid-after", "size-plus-two", "size-plus-four",
+                         "size-minus-two", "size-plus-one", "size-plus-three",
+                         "size-minus-one", "size-minus-three", "size-minus-four", "size-plus-five", "truncated",
                          "ambiguous", "multiple-literals", "drip"):
             with self.subTest(scenario=scenario):
                 class Handler(socketserver.StreamRequestHandler):
@@ -102,8 +103,11 @@ class MailboxProtocolTests(unittest.TestCase):
                                     elif "RFC822.SIZE" in args[0]:
                                         uid = args[0].split()[1].encode()
                                         self.wfile.write(b'* 1 FETCH (UID ' + uid + b' FLAGS (\\Seen))\r\n')
-                                        delta = {"size-plus-two": 2, "size-plus-one": 1,
-                                                 "size-plus-three": 3, "size-minus-two": -2}.get(scenario, 0)
+                                        delta = {"size-plus-two": 2, "size-plus-four": 4,
+                                                 "size-minus-two": -2, "size-plus-one": 1,
+                                                 "size-plus-three": 3, "size-minus-one": -1,
+                                                 "size-minus-three": -3, "size-minus-four": -4,
+                                                 "size-plus-five": 5}.get(scenario, 0)
                                         self.wfile.write(b'* 1 FETCH (INTERNALDATE "19-Oct-2026 09:30:00 +0800" RFC822.SIZE ' + str(len(raw) + delta).encode() + b' UID ' + uid + b')\r\n')
                                     else:
                                         uid = args[0].split()[1].encode()
@@ -145,7 +149,7 @@ class MailboxProtocolTests(unittest.TestCase):
                         start = time.monotonic()
                         result = fetch_mailbox(10, credentials={"address": "fixture@example.invalid", "auth_code": "synthetic", "host": "imap.163.com", "folder": "INBOX"})
                         elapsed = time.monotonic() - start
-                    if scenario not in ("uid-before", "uid-after", "size-plus-two"):
+                    if scenario not in ("uid-before", "uid-after", "size-plus-two", "size-plus-four", "size-minus-two"):
                         if scenario == "drip":
                             self.assertLess(elapsed, 2)
                         self.assertEqual(len(result["messages"]), 1)

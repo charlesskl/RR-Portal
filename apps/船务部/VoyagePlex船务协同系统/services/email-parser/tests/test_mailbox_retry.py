@@ -141,14 +141,51 @@ class MailboxRetryTests(unittest.TestCase):
         self.assertTrue(result["messages"][0]["retryable"])
         self.assertIsNone(result["messages"][0]["raw"])
 
-    def test_exact_literal_framing_is_required_even_for_metadata_plus_two(self):
-        for prefix, suffix in ((b'1 (UID 11 BODY[] {1}', b')'),
-                               (b'1 (UID 11 BODY[] {' + str(len(RAW)).encode() + b'}', b'')):
-            with self.subTest(prefix=prefix, suffix=suffix):
-                with self.assertRaises(RuntimeError):
-                    complete_body_literal([(prefix, RAW), suffix], 11, len(RAW) + 2)
+    def test_unverified_metadata_size_deltas_keep_retry_barrier_and_later_uids_unread(self):
+        for delta in (-8, -4, -3, -1, 1, 3, 5, 8):
+            with self.subTest(delta=delta):
+                fake = RetryImap()
+                original = fake.uid
+
+                def uid(command, *args):
+                    status, parts = original(command, *args)
+                    if args[1] == "(INTERNALDATE RFC822.SIZE)":
+                        parts = [part.replace(b'RFC822.SIZE ' + str(len(RAW)).encode(),
+                                              b'RFC822.SIZE ' + str(len(RAW) + delta).encode())
+                                 for part in parts]
+                    return status, parts
+
+                fake.uid = uid
+                with patch("app.mailbox.BoundedImap", return_value=fake):
+                    result = fetch_mailbox(credentials=CREDENTIALS, selected_uids=[11, 12], expected_uid_validity=123)
+                self.assertEqual(result["blocked_uid"], 11)
+                self.assertEqual([item["uid"] for item in result["messages"]], [11])
+                self.assertIsNone(result["messages"][0]["raw"])
+                self.assertTrue(result["messages"][0]["retryable"])
+                self.assertEqual(result["messages"][0]["received_at"], "2026-10-19T01:30:00+00:00")
+                self.assertEqual([args[0] for _, args in fake.commands], ["11", "11"])
+
+    def test_verified_size_deltas_still_require_exact_literal_and_uid_framing(self):
+        prefix = b'1 (UID 11 BODY[] {' + str(len(RAW)).encode() + b'}'
         parts = [(b'1 (UID 11 BODY[] {' + str(len(RAW)).encode() + b'}', RAW), b')']
-        self.assertEqual(complete_body_literal(parts, 11, len(RAW) + 2), RAW)
+        malformed = {
+            "declared-length": [(b'1 (UID 11 BODY[] {1}', RAW), b')'],
+            "truncated": [(prefix, RAW[:-1]), b')'],
+            "wrong-uid": [(prefix.replace(b'UID 11', b'UID 12'), RAW), b')'],
+            "partial": [(prefix.replace(b'BODY[]', b'BODY[]<0>'), RAW), b')'],
+            "multiple-groups": parts + parts,
+            "multiple-literals": [(prefix, RAW), (b' BODY[] {' + str(len(RAW)).encode() + b'}', RAW), b')'],
+            "missing-close": [(prefix, RAW), b''],
+            "empty-body": [(b'1 (UID 11 BODY[] {0}', b''), b')'],
+        }
+        for delta in (-2, 0, 2, 4):
+            with self.subTest(delta=delta):
+                self.assertEqual(complete_body_literal(parts, 11, len(RAW) + delta), RAW)
+                trailing_uid = [(b'1 (BODY[] {' + str(len(RAW)).encode() + b'}', RAW), b' UID 11)']
+                self.assertEqual(complete_body_literal(trailing_uid, 11, len(RAW) + delta), RAW)
+            for failure, response in malformed.items():
+                with self.subTest(delta=delta, failure=failure), self.assertRaises(RuntimeError):
+                    complete_body_literal(response, 11, len(RAW) + delta)
 
     def test_retry_validation_is_strict_and_does_not_echo_credentials(self):
         invalid = ([], [1] * 2, list(range(1, 7)), [0], [-1], [4294967296],

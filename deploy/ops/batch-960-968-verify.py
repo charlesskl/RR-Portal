@@ -4,7 +4,7 @@ change credentials/flags, retry mailbox, restore data, or signal a service.
 """
 import contextlib,datetime,hashlib,importlib.util,json,os,pathlib,re,signal,sqlite3,stat,sys,tarfile,traceback
 ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-960-966-967-968-20261020'
-VERIFY_PIN=False;CORE_SHA='a06bd4dd932df22b9127cda35a2dd7a8d69fafd879d6619ce3b50aa54252cd5d';RELEASE_SHA='1fc87fa04ca0de1f2927b623fdab6fed172fc5c9ee0d0478eb686e00d538786b';VOYAGE_COMPARE_SHA='fbb6ed5498654e2e9e73a636d87ad95abe9bfbdb97b30f17a6c99600578bae8a'
+VERIFY_PIN=True;CORE_SHA='a06bd4dd932df22b9127cda35a2dd7a8d69fafd879d6619ce3b50aa54252cd5d';RELEASE_SHA='1fc87fa04ca0de1f2927b623fdab6fed172fc5c9ee0d0478eb686e00d538786b';VOYAGE_COMPARE_SHA='fbb6ed5498654e2e9e73a636d87ad95abe9bfbdb97b30f17a6c99600578bae8a'
 EXPECTED_TARGET='b30a803e74641e0e18150597e0114f6cb99b2e9c';EXPECTED_TREE='60936186cae64d44ee728ac80ec3033779e9a676';DEPLOY_MANIFEST='8b5b9a56d4c117eca860dbd53ed7c5cef18b95a092adced94a2146fc2951588f';DEPLOY_RESULT='c02e7b97f36309bd03d261b5843e6fb6f9a98dcd61632fd5b883e8072d3abd8e'
 OUT=ROOT/'deploy/backups/batch-960-966-967-968-20261020-verify'
 CORE=None;RELEASE=None;VOYAGE=None;STAGE='entrypoint'

@@ -15,9 +15,9 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  RELEASE_WORKFLOW_PIN: 'false'
+  RELEASE_WORKFLOW_PIN: 'true'
   VERIFY_WORKFLOW_PIN: 'false'
-  HELPER_SHA256: 'ef7acb90b67a6d7d9e1632eeba405b84fc2483957ece45edea05350664f182da'
+  HELPER_SHA256: 'ddefc7385bd0a4058b4dda99e5acc6353cc48d68d02d3f20045ce98c27366455'
 jobs:
   parser:
     runs-on: ubuntu-latest

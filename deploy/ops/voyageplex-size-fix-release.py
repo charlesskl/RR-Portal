@@ -1,7 +1,7 @@
 """Scoped parser release and read-only natural-sync verification. Both gates default off."""
 import collections,contextlib,copy,hashlib,importlib.util,io,json,os,pathlib,re,sqlite3,stat,subprocess,sys,tarfile,time,traceback
 ROOT=pathlib.Path('/opt/rr-portal');BASE='b30a803e74641e0e18150597e0114f6cb99b2e9c';TARGET='6fc1143c0b39470d814caac553beaaf3bc2912e0';TREE='d8d061f9febf7608e7a07721f96b6b9ba5a88266'
-BRANCH='refs/heads/ops/voyageplex-size-fix-20261020';RELEASE_PIN=False;VERIFY_PIN=False
+BRANCH='refs/heads/ops/voyageplex-size-fix-20261020';RELEASE_PIN=True;VERIFY_PIN=False
 RELEASE=ROOT/'deploy/backups/voyageplex-size-fix-20261020-release';RELEASE_MANIFEST='';RELEASE_RESULT=''
 PREFIX='apps/船务部/VoyagePlex船务协同系统/services/email-parser';REVIEWED_FILES={PREFIX+'/app/mailbox.py':'c6246781845d4cd40439d7286c9f3afcfae0dcafc4b106de780bd715e3b201a9',PREFIX+'/tests/test_mailbox_protocol.py':'2b408538ed347a1ab40a223f7593fca5c47696efd8710d371afaba1fde211c8e',PREFIX+'/tests/test_mailbox_retry.py':'e270051a932b48b11346f64fe87f7b02410752cf553344041c3cad7bc226e12e'}
 ALLOWED={PREFIX+'/app/mailbox.py',PREFIX+'/tests/test_mailbox_protocol.py',PREFIX+'/tests/test_mailbox_retry.py'};SERVICE='voyageplex-parser'

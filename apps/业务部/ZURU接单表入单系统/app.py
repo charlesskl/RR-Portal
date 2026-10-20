@@ -8,6 +8,7 @@ import sys
 import json
 import time
 import uuid
+import tempfile
 import logging
 import logging.handlers
 import threading
@@ -162,8 +163,23 @@ def _load_cancelled_pos():
 
 
 def _save_cancelled_pos(pos):
-    with open(_cancel_pos_file(), 'w', encoding='utf-8') as f:
-        json.dump({'cancelled_pos': sorted(pos)}, f, ensure_ascii=False, indent=2)
+    _atomic_json(_cancel_pos_file(), {'cancelled_pos': sorted(pos)})
+
+
+def _atomic_json(path, value):
+    """Keep the previous complete file if writing the replacement fails."""
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                                         dir=os.path.dirname(path), delete=False) as f:
+            temp_path = f.name
+            json.dump(value, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 
 CANCELLED_POS = _load_cancelled_pos()
@@ -318,7 +334,18 @@ def _translate_country(en_name):
     for k, v in COUNTRY_MAP.items():
         if k.lower() == key.lower():
             return v
+    parts = [part.strip() for part in key.split(',') if part.strip()]
+    if len(parts) > 1:
+        return ', '.join(_translate_country(part) for part in parts)
     return key
+
+
+def _destination_parts(destination):
+    value = re.sub(r'\s+', ' ', str(destination or '')).strip()
+    # Official country names containing commas must remain a single country.
+    if any(key.lower() == value.lower() for key in COUNTRY_MAP):
+        return [value] if value else []
+    return [part.strip() for part in value.split(',') if part.strip()]
 
 
 def _norm_customer(s):
@@ -341,12 +368,13 @@ def _country_from_customer(customer):
         return ''
     if key in CUSTOMER_COUNTRY:
         return CUSTOMER_COUNTRY[key]
-    best = ''
-    for k in CUSTOMER_COUNTRY:
-        if len(k) >= 8 and (key.startswith(k) or k.startswith(key)):
-            if len(k) > len(best):
-                best = k
-    return CUSTOMER_COUNTRY.get(best, '') if best else ''
+    matches = [(name, country) for name, country in CUSTOMER_COUNTRY.items()
+               if len(name) >= 8 and (key.startswith(name) or name.startswith(key))]
+    # Aliases can identify the same country, but callers still need the original
+    # English value for destination splitting and a single translation pass.
+    if len({_translate_country(country) for _, country in matches}) != 1:
+        return ''
+    return max(matches, key=lambda match: len(match[0]))[1]
 
 
 # 行级客户PO后缀 → 国家英文名（多国家PO分行用，如 AG260316-HK → 香港）
@@ -369,7 +397,7 @@ def _country_for_line(customer_po, dest_parts):
         return None
     # 后缀国家必须在PO的目的国列表里，避免把无关后缀误判为国家
     if dest_parts and not any(
-            en.lower() == re.sub(r'\s+', ' ', p).strip().lower() for p in dest_parts):
+            _translate_country(en) == _translate_country(p) for p in dest_parts):
         return None
     return _translate_country(en)
 
@@ -390,6 +418,10 @@ def _generate_excel(parsed_orders, custom_date=None):
     warnings = []
     details = []
     written = 0
+    # An update replaces the mapping while other request threads can export.
+    # Both filtering and the lookup sheet must describe the same version.
+    with _item_map_lock:
+        item_map = dict(ITEM_MAP)
 
     wb = openpyxl.Workbook()
 
@@ -449,8 +481,7 @@ def _generate_excel(parsed_orders, custom_date=None):
                 warnings.append(
                     f'PO {po}: 未识别到目的国，出货国家已留空，请人工填写')
         # 多个国家（如 "Taiwan, Hong Kong"）：逐段翻译；行级再按客户PO后缀细分
-        dest_parts = [p.strip() for p in destination.split(',') if p.strip()] \
-            if destination else []
+        dest_parts = _destination_parts(destination)
         multi_country = len(dest_parts) > 1
         if multi_country:
             country_cn = '、'.join(_translate_country(p) for p in dest_parts)
@@ -478,7 +509,7 @@ def _generate_excel(parsed_orders, custom_date=None):
                 continue
 
             # 货号不在映射表：纯数字→跳过，M开头→照写只警告
-            if simple_no and simple_no not in ITEM_MAP:
+            if simple_no and simple_no not in item_map:
                 if simple_no[0].upper() != 'M':
                     skipped_items.append(f'{simple_no}({sku_full})')
                     continue
@@ -584,7 +615,7 @@ def _generate_excel(parsed_orders, custom_date=None):
     ws2.cell(1, 3, '生产车间').font = Font(bold=True)
     ws2.cell(1, 4, '排期名').font = Font(bold=True)
 
-    for ri, (k, v) in enumerate(ITEM_MAP.items(), 2):
+    for ri, (k, v) in enumerate(item_map.items(), 2):
         try:
             ws2.cell(ri, 1, int(k))
         except (ValueError, TypeError):
@@ -600,7 +631,7 @@ def _generate_excel(parsed_orders, custom_date=None):
 
     # 保存
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f'接单表数据_{ts}.xlsx'
+    filename = f'接单表数据_{ts}_{uuid.uuid4().hex[:12]}.xlsx'
     filepath = os.path.join(app.config['EXPORT_FOLDER'], filename)
     wb.save(filepath)
     wb.close()
@@ -617,6 +648,31 @@ def _generate_excel(parsed_orders, custom_date=None):
 def health():
     """Docker/nginx健康检查端点"""
     return jsonify({'status': 'ok'})
+
+
+@app.route('/api/translate')
+def translate_api():
+    """只读自检：英文国家名 → 中文（含洲）。
+
+    用于部署后在线核对 country_map 是否已被进程加载（本模块的 COUNTRY_MAP
+    在启动时读入内存，数据文件更新必须重启才生效）。不写任何数据。
+    """
+    name = (request.args.get('name') or '').strip()
+    if not name:
+        return jsonify({'ok': False, 'error': '缺少 name 参数',
+                        'map_size': len(COUNTRY_MAP)}), 400
+    out = _translate_country(name)
+    # 输出段含中文字符才算翻译成功；原样保留的英文段即为未翻译
+    untranslated = [seg for seg in out.split(', ')
+                    if seg and not re.search(r'[一-鿿]', seg)]
+    return jsonify({
+        'ok': True,
+        'input': name,
+        'output': out,
+        'fully_translated': not untranslated,
+        'untranslated': untranslated,
+        'map_size': len(COUNTRY_MAP),
+    })
 
 
 @app.route('/')
@@ -760,8 +816,7 @@ def update_items():
                 changed.append(k)
         save_to = os.path.join(app.config['DATA_FOLDER'], 'item_map.json')
         try:
-            with open(save_to, 'w', encoding='utf-8') as fp:
-                json.dump(merged, fp, ensure_ascii=False, indent=2)
+            _atomic_json(save_to, merged)
         except OSError as e:
             return jsonify({'ok': False, 'error': f'保存失败: {e}'}), 500
         ITEM_MAP = merged
@@ -784,6 +839,11 @@ def cancelled_pos_api():
         with _cancel_pos_lock:
             return jsonify({'ok': True, 'cancelled_pos': sorted(CANCELLED_POS)})
     data = request.get_json(force=True)
+    if not isinstance(data, dict) or any(
+            not isinstance(data.get(key, []), list) or len(data.get(key, [])) > 1000
+            or any(not isinstance(value, str) or len(value) > 100 for value in data.get(key, []))
+            for key in ('add', 'remove')):
+        return jsonify({'ok': False, 'error': '请提供有效的 PO 号列表'}), 400
     add = [_norm_po(x) for x in data.get('add') or []]
     remove = [_norm_po(x) for x in data.get('remove') or []]
     add = [x for x in add if x]
@@ -791,12 +851,12 @@ def cancelled_pos_api():
     if not add and not remove:
         return jsonify({'ok': False, 'error': '没有要添加/移除的PO号'}), 400
     with _cancel_pos_lock:
-        CANCELLED_POS |= set(add)
-        CANCELLED_POS -= set(remove)
+        updated = (CANCELLED_POS | set(add)) - set(remove)
         try:
-            _save_cancelled_pos(CANCELLED_POS)
+            _save_cancelled_pos(updated)
         except OSError as e:
             return jsonify({'ok': False, 'error': f'保存失败: {e}'}), 500
+        CANCELLED_POS = updated
         logging.info(f'取消PO名单更新: +{add} -{remove} 现有{len(CANCELLED_POS)}个')
         return jsonify({'ok': True, 'cancelled_pos': sorted(CANCELLED_POS),
                         'added': add, 'removed': remove})

@@ -19,4 +19,6 @@ ENV DATA_PATH=/app
 
 EXPOSE 5005
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5005", "--workers", "2", "--threads", "4", "--timeout", "300", "app:app"]
+# Task progress and the editable reference maps are process-local. All four
+# request threads must use the same task registry and protected state.
+CMD ["gunicorn", "--bind", "0.0.0.0:5005", "--workers", "1", "--threads", "4", "--timeout", "300", "app:app"]

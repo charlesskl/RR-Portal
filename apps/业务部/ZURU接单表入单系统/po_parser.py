@@ -7,6 +7,7 @@ import re
 import logging
 import zipfile
 import hashlib
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 
 import openpyxl
@@ -76,15 +77,11 @@ _CANCEL_STAMP_SHA1 = {
     '70d73f3af75d74cc5df55a1aaa024b3787fa2f91',  # 订单取消.png 1432x346 透明横幅（2026-08-11 PO-4500218205）
 }
 
-# 形状/文本框水印关键词：形状文字基本是章/水印，直接包含匹配
-# （排期系统生产验证过的做法；单元格长文本如"Cancel Date"字段不会出现在形状里）
-_CANCEL_SHAPE_KW = ('取消', '取 消', '作废', 'CANCEL', 'VOID')
-
 # 单元格短文本章：去掉全部空白后整体比对（大写）。
 # 必须整体匹配，防止误伤 "Cancel Date" 字段、修订记录 "Line 10 cancelled" 这类正常内容
 _CANCEL_CELL_EXACT = {
     '取消', '订单取消', '此单取消', '此单作废', '作废', '已取消',
-    'CANCELLED', 'CANCELED', 'VOID',
+    'CANCEL', 'CANCELLED', 'CANCELED', 'VOID',
     'ORDERCANCELLED', 'POCANCELLED', 'CANCELLEDORDER',
     'THISORDERISCANCELLED', 'THISPOISCANCELLED',
 }
@@ -119,11 +116,20 @@ def is_cancelled(filepath, filename=None):
             # 形状/文本框水印（大字取消章常以文本框/艺术字盖在PO上）
             for n in names:
                 if n.startswith('xl/drawings/') and n.endswith('.xml'):
-                    xml = z.read(n).decode('utf-8', errors='ignore')
-                    texts = re.findall(r'<a:t[^>]*>([^<]*)</a:t>', xml)
-                    combined = re.sub(r'\s+', ' ', _xml_text(''.join(texts))).upper()
-                    if any(kw.upper() in combined for kw in _CANCEL_SHAPE_KW):
-                        return True
+                    try:
+                        drawing = ET.fromstring(z.read(n))
+                    except ET.ParseError:
+                        continue
+                    # Each text box is independent. Joining an entire drawing
+                    # would hide a real stamp beside an ordinary note.
+                    for shape in drawing.iter():
+                        if shape.tag.rsplit('}', 1)[-1] != 'sp':
+                            continue
+                        text = ''.join(node.text or '' for node in shape.iter()
+                                       if node.tag.rsplit('}', 1)[-1] == 't')
+                        compact = re.sub(r'\s+', '', text).upper().strip('!！。.')
+                        if compact in _CANCEL_CELL_EXACT:
+                            return True
 
             # 单元格短文本章（sharedStrings + 工作表内联字符串）
             blocks = []
@@ -138,10 +144,7 @@ def is_cancelled(filepath, filename=None):
                 compact = re.sub(r'\s+', '', _xml_text(blk))
                 if not compact or len(compact) > _CANCEL_CELL_MAXLEN:
                     continue
-                if compact.upper() in _CANCEL_CELL_EXACT:
-                    return True
-                if len(compact) <= 20 and any(
-                        k in compact for k in ('订单取消', '此单取消', '已取消')):
+                if compact.upper().strip('!！。.') in _CANCEL_CELL_EXACT:
                     return True
 
             # 图片章

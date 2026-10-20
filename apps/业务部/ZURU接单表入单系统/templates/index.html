@@ -214,6 +214,12 @@ body { font-family:'Microsoft YaHei',sans-serif; background:#f0f2f5; color:#333;
 </div>
 
 <script>
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, character => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  }[character]));
+}
+
 const fileInput = document.getElementById('fileInput');
 const dropZone = document.getElementById('dropZone');
 const fileList = document.getElementById('fileList');
@@ -260,7 +266,7 @@ async function browseTo(path) {
     // 盘符列表
     const driveList = document.getElementById('driveList');
     driveList.innerHTML = data.drives.map(d =>
-      `<button class="drive-btn" onclick="browseTo('${d.replace(/\\/g,'\\\\')}')">${d}</button>`
+      `<button class="drive-btn" onclick="browseTo(${escapeHtml(JSON.stringify(d))})">${escapeHtml(d)}</button>`
     ).join('');
 
     // 目录内容
@@ -270,22 +276,22 @@ async function browseTo(path) {
       return;
     }
     body.innerHTML = data.items.map(item => {
-      const escaped = (data.current + '\\' + item.name).replace(/\\/g, '\\\\');
+      const escaped = escapeHtml(JSON.stringify(data.current + '\\' + item.name));
       if (item.type === 'dir') {
-        return `<div class="browse-item is-dir" ondblclick="browseTo('${escaped}')">
+        return `<div class="browse-item is-dir" ondblclick="browseTo(${escaped})">
           <span class="icon">&#128193;</span>
-          <span class="item-name">${item.name}</span>
+          <span class="item-name">${escapeHtml(item.name)}</span>
         </div>`;
       } else {
-        return `<div class="browse-item is-file" onclick="selectFile('${escaped}')">
+        return `<div class="browse-item is-file" onclick="selectFile(${escaped})">
           <span class="icon">&#128196;</span>
-          <span class="item-name">${item.name}</span>
+          <span class="item-name">${escapeHtml(item.name)}</span>
         </div>`;
       }
     }).join('');
   } catch(e) {
     document.getElementById('browserBody').innerHTML =
-      `<div class="browse-empty">加载失败: ${e.message}</div>`;
+      `<div class="browse-empty">加载失败: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -433,15 +439,15 @@ function showItemUpdateResult(d) {
     更新完成 — 新增 ${d.added.length} 条 | 变更 ${d.changed.length} 条 | 货号总数 ${d.total} 条</div>`;
   if (d.added.length) {
     html += `<div class="result-section result-success"><b>新增货号:</b>
-      <ul>${d.added.map(k => '<li>'+k+'</li>').join('')}</ul></div>`;
+      <ul>${d.added.map(k => '<li>'+escapeHtml(k)+'</li>').join('')}</ul></div>`;
   }
   if (d.changed.length) {
     html += `<div class="result-section result-info"><b>资料有变更（已按接单表更新）:</b>
-      <ul>${d.changed.map(k => '<li>'+k+'</li>').join('')}</ul></div>`;
+      <ul>${d.changed.map(k => '<li>'+escapeHtml(k)+'</li>').join('')}</ul></div>`;
   }
   if (d.dupes && d.dupes.length) {
     html += `<div class="result-section result-warning"><b>⚠ 接单表里有重复货号（已取第一行，与接单表VLOOKUP一致），建议回接单表核对:</b>
-      <ul>${d.dupes.map(k => '<li>'+k+'</li>').join('')}</ul></div>`;
+      <ul>${d.dupes.map(k => '<li>'+escapeHtml(k)+'</li>').join('')}</ul></div>`;
   }
   if (!d.added.length && !d.changed.length) {
     html += '<div class="result-section result-info">货号数据已是最新，没有变化</div>';
@@ -599,7 +605,7 @@ function renderFileList() {
   selectedFiles.forEach((f, i) => {
     const type = getFileType(f.name);
     const cls = fileClassification[f.name];
-    const poLabel = cls && cls.po ? `<span class="po-num">PO: ${cls.po}</span>` : '';
+    const poLabel = cls && cls.po ? `<span class="po-num">PO: ${escapeHtml(cls.po)}</span>` : '';
     let tagClass, tagText;
     if (type === 'new') { tagClass = 'tag-new'; tagText = '新单'; }
     else if (type === 'rev') { tagClass = 'tag-rev'; tagText = '修改单'; }
@@ -613,7 +619,7 @@ function renderFileList() {
       const others = duplicatePos[filePo].filter(n => n !== f.name);
       if (others.length > 0) {
         dupHtml = `<div style="font-size:11px;color:#d32f2f;margin-top:4px;font-weight:600;">
-          ⚠ 重复PO！同PO文件: ${others.join(', ')}</div>`;
+          ⚠ 重复PO！同PO文件: ${others.map(escapeHtml).join(', ')}</div>`;
       }
     }
 
@@ -621,7 +627,7 @@ function renderFileList() {
     let missingHtml = '';
     if (cls && cls.missing_items && cls.missing_items.length > 0 && type === 'new') {
       missingHtml = `<div style="font-size:11px;color:#c62828;margin-top:4px;">
-        匹配不到: ${cls.missing_items.join(', ')}（将跳过）</div>`;
+        匹配不到: ${cls.missing_items.map(escapeHtml).join(', ')}（将跳过）</div>`;
     }
 
     // 重复PO标签
@@ -631,7 +637,7 @@ function renderFileList() {
     }
 
     fileList.innerHTML += `<div class="file-item" style="flex-wrap:wrap">
-      <span class="name">${f.name}${poLabel}</span>
+      <span class="name">${escapeHtml(f.name)}${poLabel}</span>
       <span>
         ${dupTag}<span class="tag ${tagClass}">${tagText}</span>
         <span class="remove" onclick="removeFile(${i})">&times;</span>
@@ -731,7 +737,7 @@ function showResult(data) {
   // 下载按钮
   if (data.filename) {
     html += `<div class="download-area">
-      <button class="btn btn-download" style="font-size:16px;padding:14px 40px;" onclick="dlFile('${data.filename.replace(/'/g,"\\'")}')">下载接单表Excel</button>
+      <button class="btn btn-download" style="font-size:16px;padding:14px 40px;" onclick="dlFile(${escapeHtml(JSON.stringify(data.filename))})">下载接单表Excel</button>
     </div>`;
   } else if (data.written === 0 && !revCnt) {
     html += '<div class="result-section result-error">没有可处理的新单数据</div>';
@@ -740,25 +746,25 @@ function showResult(data) {
   // 新单明细
   if (data.details && data.details.length) {
     html += `<div class="result-section result-success"><b>新单明细:</b>
-      <ul>${data.details.map(d => '<li>'+d+'</li>').join('')}</ul></div>`;
+      <ul>${data.details.map(d => '<li>'+escapeHtml(d)+'</li>').join('')}</ul></div>`;
   }
 
   // 修改单
   if (data.revisions && data.revisions.length) {
     html += `<div class="result-section result-warning"><b>修改单（接单表已有，已跳过）:</b>
-      <ul>${data.revisions.map(r => '<li>'+r+'</li>').join('')}</ul></div>`;
+      <ul>${data.revisions.map(r => '<li>'+escapeHtml(r)+'</li>').join('')}</ul></div>`;
   }
 
   // 警告（含匹配不到的货号）
   if (data.warnings && data.warnings.length) {
     html += `<div class="result-section result-error"><b>匹配不到 / 警告:</b>
-      <ul>${data.warnings.map(w => '<li>'+w+'</li>').join('')}</ul></div>`;
+      <ul>${data.warnings.map(w => '<li>'+escapeHtml(w)+'</li>').join('')}</ul></div>`;
   }
 
   // 解析错误
   if (data.parse_errors && data.parse_errors.length) {
     html += `<div class="result-section result-error"><b>解析失败:</b>
-      <ul>${data.parse_errors.map(e => '<li>'+e+'</li>').join('')}</ul></div>`;
+      <ul>${data.parse_errors.map(e => '<li>'+escapeHtml(e)+'</li>').join('')}</ul></div>`;
   }
 
   resultPanel.innerHTML = html;

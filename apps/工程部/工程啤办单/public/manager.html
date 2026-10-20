@@ -110,7 +110,7 @@
         <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
         <button class="btn btn-sm" style="background:#fd7e14;color:#fff;border-color:#fd7e14" onclick="filterStatus('待审核',this)">待审核</button>
         <button class="btn btn-sm" style="background:#7c3aed;color:#fff;border-color:#7c3aed" onclick="filterStatus('待经理审核',this)">待经理审核</button>
-        <button class="btn btn-sm" style="background:#0f766e;color:#fff;border-color:#0f766e" onclick="filterStatus('待报价',this)">待报价</button>
+        <button class="btn btn-sm" style="background:#0f766e;color:#fff;border-color:#0f766e" onclick="filterStatus('未报价',this)">未报价</button>
         <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
         <button class="btn btn-sm btn-info"     onclick="filterStatus('生产中',this)">生产中</button>
         <button class="btn btn-sm btn-success"  onclick="filterStatus('已完成',this)">已完成</button>
@@ -451,7 +451,7 @@ async function saveManagerActualWeight() {
 
 // ─── 状态 ─────────────────────────────────────────────────────────────────────
 const statusBadge = s => ({
-  '待报价': '<span class="badge" style="background:#0f766e">待报价</span>',
+  '未报价': '<span class="badge" style="background:#0f766e">未报价</span>',
   '待审核': '<span class="badge" style="background:#fd7e14">待审核</span>',
   '待经理审核': '<span class="badge" style="background:#7c3aed">待经理审核</span>',
   '待生产': '<span class="badge badge-pending">待生产</span>',
@@ -476,7 +476,7 @@ function loadOrders() {
     .then(orders => {
       if (currentFilter) orders = orders.filter(o => o.status === currentFilter);
       orders.sort((a, b) => {
-        const so = { '待审核':0,'待报价':1,'待经理审核':2,'待生产':3,'生产中':4,'已完成':5,'已驳回':6 };
+        const so = { '未报价':0,'待审核':1,'待经理审核':2,'待生产':3,'生产中':4,'已完成':5,'已驳回':6 };
         const oa = so[a.status] ?? 9, ob = so[b.status] ?? 9;
         if (oa !== ob) return oa - ob;
         return b.id - a.id;

@@ -78,7 +78,7 @@
     <div class="d-flex flex-wrap align-items-center gap-2">
       <div class="status-filter d-flex flex-wrap gap-1">
         <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
-        <button class="btn btn-sm" style="background:#0f766e;color:#fff;border-color:#0f766e" onclick="filterStatus('待报价',this)">待报价</button>
+        <button class="btn btn-sm" style="background:#0f766e;color:#fff;border-color:#0f766e" onclick="filterStatus('未报价',this)">未报价</button>
         <button class="btn btn-sm" style="background:#fd7e14;color:#fff;border-color:#fd7e14" onclick="filterStatus('待审核',this)">待审核</button>
         <button class="btn btn-sm" style="background:#7c3aed;color:#fff;border-color:#7c3aed" onclick="filterStatus('待经理审核',this)">待经理审核</button>
         <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
@@ -342,7 +342,7 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="asm-id">
-        <input type="hidden" id="asm-status" value="待审核">
+        <input type="hidden" id="asm-status" value="未报价">
         <div class="row g-3 mb-3">
           <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="asm-order_number" placeholder="如 157149（选填）"></div>
           <div class="col-md-3"><label class="form-label fw-bold" for="asm-product_name">产品名称 <span class="text-danger">*</span></label><input class="form-control" id="asm-product_name" placeholder="产品名称" required></div>
@@ -590,7 +590,7 @@ function loadOrders() {
     if (currentWorkshop) orders = orders.filter(o => o.workshop === currentWorkshop);
     if (currentClient)   orders = orders.filter(o => o.client_name === currentClient || (o.items && o.items.some(it => it.client_name === currentClient)));
     // 按主管分组，每组内待审核排最前，其次按 ID 降序
-    const _sOrd = { '待审核':0, '待报价':1, '待经理审核':2, '待生产':3, '生产中':4, '已完成':5, '已驳回':6, '已取消':7 };
+    const _sOrd = { '未报价':0, '待审核':1, '待经理审核':2, '待生产':3, '生产中':4, '已完成':5, '已驳回':6, '已取消':7 };
     orders.sort((a, b) => {
       const sa = (a.supervisor || ''), sb = (b.supervisor || '');
       if (sa !== sb) return sa.localeCompare(sb, 'zh');
@@ -603,7 +603,7 @@ function loadOrders() {
 }
 
 // 主管审核后的状态，普通用户不可编辑/删除；主管/经理可以
-const lockedStatuses = ['待报价', '待经理审核', '待生产', '生产中', '已完成'];
+const lockedStatuses = ['未报价', '待经理审核', '待生产', '生产中', '已完成'];
 let _supervisors = [], _managers = [];
 apiFetch('/api/roles').then(r => r.json()).then(d => { _supervisors = d.supervisors || []; _managers = d.managers || []; }).catch(() => {});
 function isPrivileged() { return _supervisors.includes(currentUser) || _managers.includes(currentUser); }
@@ -618,7 +618,7 @@ function applyNavPermissions() {
 const isLocked = s => lockedStatuses.includes(s) && !isPrivileged();
 
 const statusBadge = s => ({
-  '待报价': '<span class="badge" style="background:#0f766e">待报价</span>',
+  '未报价': '<span class="badge" style="background:#0f766e">未报价</span>',
   '待审核': '<span class="badge" style="background:#fd7e14">待审核</span>',
   '待经理审核': '<span class="badge" style="background:#7c3aed">待经理审核</span>',
   '待生产': '<span class="badge badge-pending">待生产</span>',
@@ -1682,12 +1682,12 @@ async function submitReview(action) {
     return;
   }
   if (type === 'assembly' && (isManager ? reviewingOrderStatus !== '待经理审核' : reviewingOrderStatus !== '待审核')) {
-    showToast(isManager ? '夹具单需先经主管审核并完成报价，再由经理审核' : '主管只能审核待审核的夹具单', 'warning');
+    showToast(isManager ? '夹具单需先由夹具部报价并经主管审核，再由经理审核' : '主管只能审核待审核的夹具单', 'warning');
     return;
   }
 
   let newStatus, toastMsg;
-  // 啤办单需经理二级审核；夹具单主管通过后先转夹具部报价（待报价），报价完成后才由经理审核；搪胶/喷油主管通过即可
+  // 夹具单先由夹具部报价（未报价→待审核），再经主管→经理两级审核；啤办单同样需经理二级审核；搪胶/喷油主管通过即可
   const needManagerReview = type === 'injection' || type === 'assembly';
   if (action === 'reject') {
     newStatus = '已驳回';
@@ -1695,9 +1695,6 @@ async function submitReview(action) {
   } else if (isManager) {
     newStatus = '待生产';
     toastMsg = '经理审核通过！单据已进入待生产';
-  } else if (type === 'assembly') {
-    newStatus = '待报价';
-    toastMsg = '主管审核通过！已转夹具部报价';
   } else if (!needManagerReview) {
     newStatus = '待生产';
     toastMsg = '主管审核通过！单据已进入待生产';
@@ -2412,7 +2409,7 @@ function openNewAsmModal() {
   document.getElementById('asm-supervisor').value = '';
   document.getElementById('asm-engineer').value = '';
   document.getElementById('asm-reason').value = '';
-  document.getElementById('asm-status').value = '待审核';
+  document.getElementById('asm-status').value = '未报价';
   document.getElementById('asmItemsBody').innerHTML = '';
   _asmRowSeq = 0;
   addAsmRow();

@@ -456,7 +456,7 @@ function updateAssemblyStatus(req, res) {
   const order = data.assembly_orders.find(o => o.id === +req.params.id);
   if (!order) return res.status(404).json({ error: '未找到' });
   const { status, pin, reviewer_name, reviewer_role, reason } = req.body;
-  const review = ['待报价', '待生产', '已驳回'].includes(status);
+  const review = ['待经理审核', '待生产', '已驳回'].includes(status);
   if (review) {
     const role = reviewer_role || 'supervisor';
     const manager = role === 'manager';
@@ -471,15 +471,13 @@ function updateAssemblyStatus(req, res) {
     clearPinFailures(key);
     const valid = manager
       ? order.status === '待经理审核' && ['待生产', '已驳回'].includes(status)
-      : order.status === '待审核' && ['待报价', '已驳回'].includes(status);
+      : order.status === '待审核' && ['待经理审核', '已驳回'].includes(status);
     if (!valid) return res.status(409).json({ error: '单据状态已变更，请刷新后按当前流程操作' });
-  } else if (status === '待经理审核') {
-    return res.status(403).json({ error: '请由夹具部填写报价后提交经理审核' });
   } else {
     const user = decodeURIComponent(req.headers['x-user'] || '');
     if (!user.trim()) return res.status(401).json({ error: '未授权：请登录后操作' });
     const production = (status === '生产中' && order.status === '待生产') || (status === '已完成' && order.status === '生产中');
-    const cancel = status === '已取消' && ['待审核', '已驳回'].includes(order.status);
+    const cancel = status === '已取消' && ['未报价', '待审核', '已驳回'].includes(order.status);
     if (production && user !== '夹具部') return res.status(403).json({ error: '请在夹具部登记生产状态' });
     if (!production && !cancel) return res.status(409).json({ error: '单据状态已变更，请刷新后按当前流程操作' });
   }
@@ -494,14 +492,14 @@ function updateAssemblyStatus(req, res) {
   res.json({ success: true });
 }
 
-// 报价仅更新现有明细的价格/完成日期，与进入经理审核同次保存，禁止全量 PUT 覆盖工程资料。
+// 报价仅更新现有明细的价格/完成日期，与进入主管审核同次保存，禁止全量 PUT 覆盖工程资料。
 app.post('/api/assembly/:id/quote', (req, res) => {
   if (decodeURIComponent(req.headers['x-user'] || '') !== '夹具部') return res.status(403).json({ error: '请在夹具部提交报价' });
   const data = loadData();
   const order = data.assembly_orders.find(o => o.id === +req.params.id);
   if (!order) return res.status(404).json({ error: '未找到' });
   const { items, expected_updated_at } = req.body;
-  if (order.status !== '待报价' || !expected_updated_at || expected_updated_at !== order.updated_at) return res.status(409).json({ error: '单据已变更，请重新打开报价' });
+  if (order.status !== '未报价' || !expected_updated_at || expected_updated_at !== order.updated_at) return res.status(409).json({ error: '单据已变更，请重新打开报价' });
   const existing = data.assembly_items.filter(it => it.order_id === order.id);
   if (!Array.isArray(items) || !items.length || items.length !== existing.length) return res.status(400).json({ error: '请填写每一项夹具报价' });
   const ids = new Set(existing.map(it => it.id));
@@ -520,7 +518,7 @@ app.post('/api/assembly/:id/quote', (req, res) => {
   const byId = new Map(updates.map(it => [it.id, it]));
   next.assembly_items.forEach(it => { if (it.order_id === order.id) Object.assign(it, byId.get(it.id)); });
   const updated = next.assembly_orders.find(o => o.id === order.id);
-  updated.status = '待经理审核';
+  updated.status = '待审核';
   updated.updated_at = nextUpdatedAt(order.updated_at);
   try { saveData(next); } catch (e) { return res.status(500).json({ error: '保存失败，请重试' }); }
   res.json(getOrderById('assembly', order.id));
@@ -541,8 +539,8 @@ app.post('/api/assembly/:id/quote', (req, res) => {
       if (type === 'assembly') {
         const error = validateAssemblyOrder(header, items);
         if (error) return res.status(400).json({ error });
-        if (header.status && header.status !== '待审核') return res.status(400).json({ error: '新夹具单必须先提交主管审核' });
-        header.status = '待审核';
+        if (header.status && header.status !== '未报价') return res.status(400).json({ error: '新夹具单必须先由夹具部报价' });
+        header.status = '未报价';
       }
       // 夹具申请单图片：new_images 为 base64 dataURL 数组，落盘为文件，订单只存文件名
       const newImages = type === 'assembly' ? header.new_images : undefined;
@@ -564,8 +562,8 @@ app.post('/api/assembly/:id/quote', (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // 主管审核后锁定，仅主管/经理可修改删除
-  const LOCKED_STATUSES = ['待报价', '待经理审核', '待生产', '生产中', '已完成'];
+  // 进入审核流程后锁定，仅主管/经理可修改删除
+  const LOCKED_STATUSES = ['待经理审核', '待生产', '生产中', '已完成'];
 
   function checkLock(req, res, order, action) {
     if (!order || !LOCKED_STATUSES.includes(order.status)) return false;

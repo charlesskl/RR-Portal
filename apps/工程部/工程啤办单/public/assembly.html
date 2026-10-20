@@ -35,7 +35,7 @@
     <div class="d-flex flex-wrap align-items-center gap-2">
       <div class="status-filter d-flex flex-wrap gap-1">
         <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
-        <button class="btn btn-sm" style="background:#0f766e;color:#fff;border-color:#0f766e" onclick="filterStatus('待报价',this)">待报价</button>
+        <button class="btn btn-sm" style="background:#0f766e;color:#fff;border-color:#0f766e" onclick="filterStatus('未报价',this)">未报价</button>
         <button class="btn btn-sm" style="background:#fd7e14;color:#fff;border-color:#fd7e14" onclick="filterStatus('待审核',this)">待审核</button>
         <button class="btn btn-sm" style="background:#7c3aed;color:#fff;border-color:#7c3aed" onclick="filterStatus('待经理审核',this)">待经理审核</button>
         <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
@@ -67,7 +67,7 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="asm-id">
-        <input type="hidden" id="asm-status" value="待审核">
+        <input type="hidden" id="asm-status" value="未报价">
         <div class="row g-3 mb-3">
           <div class="col-md-3"><label class="form-label fw-bold">申请人 <span class="text-danger">*</span></label><input class="form-control" id="asm-applicant" placeholder="您的姓名"></div>
           <div class="col-md-3"><label class="form-label fw-bold">货号</label><input class="form-control" id="asm-order_number" placeholder="选填"></div>
@@ -150,7 +150,7 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭报价"></button>
       </div>
       <div class="modal-body">
-        <p class="text-muted small mb-2"><i class="bi bi-info-circle me-1"></i>请为每项夹具填写价格和完成时间，提交后单据进入「待经理审核」，由工程经理审核。</p>
+        <p class="text-muted small mb-2"><i class="bi bi-info-circle me-1"></i>请为每项夹具填写价格和完成时间，提交后单据进入「待审核」，由主管审核。</p>
         <div id="quoteError" class="alert alert-danger" role="alert" hidden></div>
         <div id="quoteBody"></div>
       </div>
@@ -193,7 +193,7 @@ function loadOrders() {
     .then(r => r.json())
     .then(orders => {
       if (currentFilter) orders = orders.filter(o => o.status === currentFilter);
-      const _sOrd = { '待审核':0, '待报价':1, '待经理审核':2, '待生产':3, '生产中':4, '已完成':5, '已驳回':6, '已取消':7 };
+      const _sOrd = { '未报价':0, '待审核':1, '待经理审核':2, '待生产':3, '生产中':4, '已完成':5, '已驳回':6, '已取消':7 };
       orders.sort((a, b) => {
         const oa = _sOrd[a.status] ?? 9, ob = _sOrd[b.status] ?? 9;
         if (oa !== ob) return oa - ob;
@@ -205,7 +205,7 @@ function loadOrders() {
 }
 
 const statusBadge = s => ({
-  '待报价': '<span class="badge" style="background:#0f766e">待报价</span>',
+  '未报价': '<span class="badge" style="background:#0f766e">未报价</span>',
   '待审核': '<span class="badge" style="background:#fd7e14">待审核</span>',
   '待经理审核': '<span class="badge" style="background:#7c3aed">待经理审核</span>',
   '待生产': '<span class="badge badge-pending">待生产</span>',
@@ -223,7 +223,7 @@ function renderOrderList(orders) {
   const rows = orders.map(o => {
     const canEdit = o.status === '待审核' || o.status === '已驳回';
     const canDelete = canEdit;
-    const canQuote = o.status === '待报价';
+    const canQuote = o.status === '未报价';
     const canStart = o.status === '待生产';
     const canFinish = o.status === '生产中';
     const itemCount = (o.items || []).length;
@@ -281,7 +281,7 @@ function openNewModal() {
   document.getElementById('asm-supervisor').value = '';
   document.getElementById('asm-workshop').value = '';
   document.getElementById('asm-reason').value = '';
-  document.getElementById('asm-status').value = '待审核';
+  document.getElementById('asm-status').value = '未报价';
   document.getElementById('asmItemsBody').innerHTML = '';
   _rowSeq = 0;
   asmImages = [];
@@ -518,7 +518,7 @@ function saveOrder() {
     .catch(() => showToast('保存失败', 'danger'));
 }
 
-// ─── 报价（待报价 → 一次保存全部报价并转待经理审核）─────────────────────────
+// ─── 报价（未报价 → 一次保存全部报价并转待审核）─────────────────────────
 let _quoteOrderId = null;
 let _quoteItems = [];
 let _quoteVersion = null;
@@ -564,7 +564,7 @@ async function openQuoteModal(id) {
   try {
     const order = await quoteResponse(await apiFetch(`/api/assembly/${id}`));
     if (request !== _quoteRequestSeq) return;
-    if (order.status !== '待报价') throw new Error('该单据当前不在「待报价」状态，请关闭后刷新列表');
+    if (order.status !== '未报价') throw new Error('该单据当前不在「未报价」状态，请关闭后刷新列表');
     if (!Array.isArray(order.items) || !order.items.length || !order.updated_at) {
       throw new Error('该单据缺少报价明细或版本信息，请关闭后刷新列表');
     }
@@ -626,7 +626,7 @@ async function submitQuote() {
     }));
     setQuoteBusy(false);
     bootstrap.Modal.getInstance(document.getElementById('quoteModal'))?.hide();
-    showToast('报价已提交，单据进入「待经理审核」', 'success');
+    showToast('报价已提交，单据进入「待审核」', 'success');
     loadOrders();
   } catch (error) {
     quoteError(error.message || '提交失败，请稍后重试；已填写内容已保留');

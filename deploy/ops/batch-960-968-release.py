@@ -6,10 +6,10 @@ import contextlib,copy,hashlib,importlib.util,json,os,pathlib,re,signal,sqlite3,
 ROOT=pathlib.Path('/opt/rr-portal')
 BASE='4f1f64cac098caa6b202eb27cae9ab8fad9109dd';TARGET='b30a803e74641e0e18150597e0114f6cb99b2e9c';TREE='60936186cae64d44ee728ac80ec3033779e9a676'
 BRANCH='refs/heads/ops/batch-960-966-967-968-20261020'
-PREPARE_PIN=True;DEPLOY_PIN=False
+PREPARE_PIN=False;DEPLOY_PIN=False
 CORE_SHA='a06bd4dd932df22b9127cda35a2dd7a8d69fafd879d6619ce3b50aa54252cd5d';SOURCE_MANIFEST_SHA='57d99fb9ff414dab029c955a8dceb6a277b5d4c263ad1148ee50a813ce2efbb1';EXPECTED_CHANGED_FILES=77
 BACKUP=ROOT/'deploy/backups/batch-960-966-967-968-20261020-backup-05';BACKUP_MANIFEST='4533352f7d160d95c78dce83741b81cca8f363c7d253b27959595a579e977794';BACKUP_RESULT='bf36c36ffae529787564bccc74a7ef15140b3ff62cc46f09cf97008c51698ce0'
-PREPARE=ROOT/'deploy/backups/batch-960-966-967-968-20261020-prepare';PREPARE_MANIFEST='';PREPARE_RESULT=''
+PREPARE=ROOT/'deploy/backups/batch-960-966-967-968-20261020-prepare';PREPARE_MANIFEST='a719ca9fdd3b662eb9339422338309d9ae52a2db27a51deff51f7667bb142675';PREPARE_RESULT='5f2e81a33254a64980792bb6d7ff44f4bfb7a8e77589f5d7fc7e10bfbd2ec575'
 DEPLOY=ROOT/'deploy/backups/batch-960-966-967-968-20261020-deploy'
 ORDER=('rr-production','qc','internal-quote','voyageplex-parser','voyageplex-api','voyageplex-web')
 GROUPS=(('rr-production',),('qc',),('internal-quote',),('voyageplex-parser','voyageplex-api','voyageplex-web'))
@@ -153,7 +153,11 @@ def effective_candidate_config(candidate,declared,oldraw):
  config=candidate['Config'];old=oldraw['Config'];result={}
  for field,override in(('Cmd','command'),('Entrypoint','entrypoint'),('WorkingDir','working_dir'),('User','user')):
   value=declared.get(override,config.get(field));expected=old.get(field)
+  if field in{'Cmd','Entrypoint'}and declared.get(override)is None:value=config.get(field)
   same=value==expected
+  # A non-null entrypoint suppresses the image CMD when command is null/absent.
+  # This batch has null overrides; conservatively reject that more complex case.
+  if field=='Cmd'and declared.get('command')is None and declared.get('entrypoint')is not None:same=False
   if field=='User'and override not in declared and value in(None,'')and expected in(None,''):same=True
   result[field+'MatchesPreservedRuntime']=same
  return result
@@ -259,6 +263,32 @@ def prepare(result,before,files):
  CORE.OPS.L.private_write(OUT/'prepared.private.json',enc(observed))
  result.update(success=True,allSixBuildsCompletedBeforeAnyMaintenance=True,allOriginalRunningContainersUnchanged=True,allOtherContainersUnchanged=True,allMaintenanceFlagsUnchanged=True,environmentFileByteIdentical=True,candidateFacts=facts,candidateImageIDs=observed['candidateImageIDs'],webArtifacts=web,allCandidateNonEnvironmentGuardsPass=all(all(row['configurationGuards'].values())for row in facts.values()),allCandidateEnvironmentsStrictlyIdentical=all(row['noEnvironmentDifference']for row in facts.values()),maintenanceOrServiceSwitchesPerformed=False,sourceFastForwardOnly=True)
 
+# Exact nine false guards recorded by the sealed preparation run 39384119867.
+# The archive is retained byte-identically; corrected facts are separate evidence.
+EXPECTED_NULL_INHERIT_CORRECTIONS={
+ 'rr-production':{'CmdMatchesPreservedRuntime','EntrypointMatchesPreservedRuntime'},
+ 'qc':{'CmdMatchesPreservedRuntime','EntrypointMatchesPreservedRuntime'},
+ 'internal-quote':{'CmdMatchesPreservedRuntime','EntrypointMatchesPreservedRuntime'},
+ 'voyageplex-api':{'EntrypointMatchesPreservedRuntime'},
+ 'voyageplex-parser':{'CmdMatchesPreservedRuntime'},
+ 'voyageplex-web':{'EntrypointMatchesPreservedRuntime'},
+}
+
+def reassess_candidate_facts(service,candidate,raw,before,declared,literal,sealed):
+ corrected=candidate_facts(service,candidate,raw,before,declared,literal);legacy=copy.deepcopy(corrected)
+ for field,override in(('Cmd','command'),('Entrypoint','entrypoint')):
+  legacy['configurationGuards'][field+'MatchesPreservedRuntime']=declared.get(override,candidate['Config'].get(field))==raw[service]['Config'].get(field)
+ need(enc(legacy)==enc(sealed),'candidate-original-sealed-legacy-facts-exact-'+service)
+ corrections=[]
+ for field,override in(('Cmd','command'),('Entrypoint','entrypoint')):
+  key=field+'MatchesPreservedRuntime';old=legacy['configurationGuards'][key];new=corrected['configurationGuards'][key]
+  if old!=new:
+   need(old is False and new is True and declared.get(override)is None and candidate['Config'].get(field)==raw[service]['Config'].get(field),'candidate-null-inheritance-only-correction-'+service)
+   if field=='Cmd':need(declared.get('entrypoint')is None,'candidate-null-command-without-entrypoint-override-'+service)
+   corrections.append(key)
+ need(all(value is True for value in corrected['configurationGuards'].values()),'candidate-all-corrected-config-guards-'+service)
+ return corrected,{'sealedConfigurationGuards':copy.deepcopy(sealed['configurationGuards']),'legacyFactsRecomputedExactly':True,'onlyNullOrOmittedCommandEntrypointInheritanceCorrected':True,'correctedGuardNames':sorted(corrections),'correctedConfigurationGuards':copy.deepcopy(corrected['configurationGuards'])}
+
 def prepared_evidence(before,files):
  receipt=archive(PREPARE,PREPARE_MANIFEST,PREPARE_RESULT);prepared=read_json(PREPARE/'prepared.private.json')
  need(receipt.get('mode')=='prepare'and receipt.get('allSixBuildsCompletedBeforeAnyMaintenance')is True and receipt.get('maintenanceOrServiceSwitchesPerformed')is False,'sealed-preparation-before-maintenance')
@@ -269,17 +299,28 @@ def prepared_evidence(before,files):
  for service in ORDER:
   candidate=read_json(PREPARE/(service+'-candidate-image.private.json'));need(candidate['Id']==prepared['candidateImageIDs'][service]and receipt['builds'][service].get('completed')is True and receipt['builds'][service].get('candidateImageID')==candidate['Id'],'candidate-bound-to-own-build-receipt')
   live=json.loads(CORE.run(['docker','image','inspect',candidate['Id']]));need(len(live)==1 and live[0]==candidate,'candidate-immutable-metadata-still-exact');candidates[service]=candidate
- need(receipt.get('allCandidateNonEnvironmentGuardsPass')is True,'prepared-all-non-environment-config-guards')
- return prepared,candidates
+ need(enc(receipt.get('candidateFacts'))==enc(prepared['candidateFacts']),'prepared-public-and-private-candidate-facts-identical')
+ aggregate=all(all(value is True for value in row['configurationGuards'].values())for row in prepared['candidateFacts'].values())
+ need(type(receipt.get('allCandidateNonEnvironmentGuardsPass'))is bool and receipt['allCandidateNonEnvironmentGuardsPass']==aggregate,'prepared-original-aggregate-matches-sealed-facts')
+ paths=list(PREPARE.glob('*-validated-compose.stdout.private'));need(len(paths)==1,'one-sealed-validated-compose-configuration');declared=read_json(paths[0]);need(type(declared)is dict and type(declared.get('services'))is dict,'sealed-declared-compose-shape')
+ raw=read_json(PREPARE/'old-target-inspect.private.json');backup_raw=read_json(BACKUP/'target-inspect.private.json');need(set(raw)==set(ORDER)==set(backup_raw),'sealed-original-inspect-six-services')
+ corrected={};reassessment={}
+ for service in ORDER:
+  need(raw[service]['Id']==before['runtime']['targets'][service]['id']and raw[service]['Image']==before['runtime']['targets'][service]['image']and enc(raw[service]['Config'])==enc(backup_raw[service]['Config']),'sealed-old-config-bound-to-original-backup-'+service)
+  literal=read_json(BACKUP/(service+'-literal-compose-environment.private.json'))
+  corrected[service],reassessment[service]=reassess_candidate_facts(service,candidates[service],raw,before,declared['services'][service],literal,prepared['candidateFacts'][service])
+  need(set(reassessment[service]['correctedGuardNames'])==EXPECTED_NULL_INHERIT_CORRECTIONS[service],'exact-reviewed-nine-null-inherit-corrections-'+service)
+ need(aggregate is False,'original-preparation-false-aggregate-retained')
+ return dict(prepared,correctedCandidateFacts=corrected,candidateConfigurationReassessment=reassessment,sealedPreparationAllCandidateNonEnvironmentGuardsPass=aggregate),candidates
 
 def deploy(result,before,files):
  global STAGE
  STAGE='deploy-preparation-seal';prepared,candidates=prepared_evidence(before,files);expected,raw,roots=runtime_stable(before['runtime'],before,files)
  STAGE='deploy-private-exact-literal-and-image-overlay';command,declared,literals=compose_overlay(before,raw,prepared['candidateImageIDs']);old_process=read_json(PREPARE/'old-process-environments.private.json');proposed={}
  for service in ORDER:
-  facts=candidate_facts(service,candidates[service],raw,before,declared['services'][service],literals[service]);need(facts==prepared['candidateFacts'][service],'candidate-effective-metadata-equals-sealed-preparation');need(all(facts['configurationGuards'].values()),'candidate-non-environment-configuration-'+service)
+  facts,reassessment=reassess_candidate_facts(service,candidates[service],raw,before,declared['services'][service],literals[service],prepared['candidateFacts'][service]);need(enc(facts)==enc(prepared['correctedCandidateFacts'][service])and enc(reassessment)==enc(prepared['candidateConfigurationReassessment'][service]),'fresh-effective-config-equals-sealed-null-inherit-reassessment-'+service)
   proposed[service]=approved_environment(service,candidates[service],raw,before);need(sha(enc(old_process[service]))==before['runtime']['targets'][service]['processEnvironmentWithoutAutomaticHostnameSHA256'],'old-process-environment-bound-to-original-backup')
- result['freshStartupGuards']={};proofs={};public=[]
+ CORE.OPS.L.private_write(OUT/'candidate-configuration-reassessment.private.json',enc(prepared['candidateConfigurationReassessment']));result.update(sealedPreparationAllCandidateNonEnvironmentGuardsPass=prepared['sealedPreparationAllCandidateNonEnvironmentGuardsPass'],allCorrectedCandidateConfigurationGuardsPass=True,candidateConfigurationReassessment=prepared['candidateConfigurationReassessment']);result['freshStartupGuards']={};proofs={};public=[]
  for group in GROUPS:
   alias=ALIASES[group[0]];need(all(ALIASES[service]==alias for service in group),'group-shared-alias')
   STAGE='deploy-pre-switch-'+alias;runtime_stable(expected,before,files);result['freshStartupGuards'][alias]=fresh_startup_guard(before,expected,files,alias)

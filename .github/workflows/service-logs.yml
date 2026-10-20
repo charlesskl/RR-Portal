@@ -1,8 +1,8 @@
-name: PR 960 966 967 968 Reviewed Prepare
+name: PR 960 966 967 968 Reviewed Deploy
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [prepare]}
+      mode: {type: choice, required: true, options: [deploy]}
 permissions:
   contents: read
 concurrency:
@@ -10,14 +10,14 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  BATCH_EXECUTION_WORKFLOW_PIN: 'true'
-  BATCH_EXECUTION_HELPER_SHA256: 'b0d36d939e4a2697de134169b14ad023a380c2384f7c278bc659bb9bae74e2a0'
+  BATCH_EXECUTION_WORKFLOW_PIN: 'false'
+  BATCH_EXECUTION_HELPER_SHA256: '91361fc81659476c2eefc367c1d480eaa62d098746e010fb7b668b708f77f059'
   BATCH_CORE_LIBRARY_SHA256: 'a06bd4dd932df22b9127cda35a2dd7a8d69fafd879d6619ce3b50aa54252cd5d'
   BATCH_SOURCE_MANIFEST_SHA256: '57d99fb9ff414dab029c955a8dceb6a277b5d4c263ad1148ee50a813ce2efbb1'
 jobs:
-  fixed-six-service-prepare:
+  fixed-six-service-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 40
     steps:
       - name: Validate reviewed workflow, branch and first attempt
         shell: bash
@@ -30,9 +30,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$BATCH_EXECUTION_WORKFLOW_PIN" = true && "$BATCH_EXECUTION_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-960-966-967-968-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-960-966-967-968-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Execute only fixed reviewed prepare helper
+      - name: Execute only fixed reviewed deploy helper
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -45,17 +45,17 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 50m
+          command_timeout: 38m
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,BATCH_EXECUTION_WORKFLOW_PIN,BATCH_EXECUTION_HELPER_SHA256,BATCH_CORE_LIBRARY_SHA256,BATCH_SOURCE_MANIFEST_SHA256
           script: |
             set -euo pipefail
             [[ "$BATCH_EXECUTION_WORKFLOW_PIN" = true && "$BATCH_EXECUTION_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-960-966-967-968-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-960-966-967-968-20261020 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch origin ops/batch-960-966-967-968-20261020 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            batch_task_tmp=$(mktemp -d /tmp/batch-960-968-prepare.XXXXXX)
+            batch_task_tmp=$(mktemp -d /tmp/batch-960-968-deploy.XXXXXX)
             trap 'rm -rf "$batch_task_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/batch-960-968-release.py" > "$batch_task_tmp/run.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_task_tmp/run.py" | cut -d ' ' -f1)" = "$BATCH_EXECUTION_HELPER_SHA256" ]] || exit 1
@@ -71,4 +71,4 @@ jobs:
             [[ "$(sha256sum "$batch_task_tmp/internal-quote-readonly-library.py" | cut -d ' ' -f1)" = be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/portable-pdb-library.py" > "$batch_task_tmp/portable-pdb-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_task_tmp/portable-pdb-library.py" | cut -d ' ' -f1)" = cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5 ]] || exit 1
-            timeout --signal=TERM --kill-after=20s 45m python3 -B "$batch_task_tmp/run.py" prepare
+            timeout --signal=TERM --kill-after=20s 35m python3 -B "$batch_task_tmp/run.py" deploy

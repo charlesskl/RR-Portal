@@ -4,7 +4,7 @@ The only subprocesses are one fixed NGINX identity lookup and bounded log read.
 Only aggregate counts, technical column names, action hashes and time bounds print.
 """
 import collections,contextlib,datetime,hashlib,importlib.util,json,os,pathlib,re,sqlite3,stat,subprocess,sys
-CLASSIFY_PIN=False
+CLASSIFY_PIN=True
 BRANCH='refs/heads/ops/batch-960-966-967-968-20261020'
 ROOT=pathlib.Path('/opt/rr-portal/deploy/backups')
 OLD=ROOT/'batch-960-966-967-968-20261020-backup-05'

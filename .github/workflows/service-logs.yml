@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SEALED_CLASSIFY_WORKFLOW_PIN: 'false'
-  SEALED_CLASSIFY_HELPER_SHA256: '0baee928b6f796a4ff24acfab345da09b0af96bfe9c60ba9014226e798a413d3'
+  SEALED_CLASSIFY_WORKFLOW_PIN: 'true'
+  SEALED_CLASSIFY_HELPER_SHA256: '1a646fd2e6eb4fe2b315aaf7322bbdd29596841cbc5147b6f2e5e83d4b346452'
 jobs:
   fixed-sealed-voyage-classification:
     runs-on: ubuntu-latest

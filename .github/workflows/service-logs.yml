@@ -8,9 +8,9 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  READONLY_WORKFLOW_PIN: 'false'
-  READONLY_HELPER_SHA256: '7f8ea0c7bc93d62e93fa5788263a7e707a745fee9ae8976609d38d82a96dd3dc'
-  READONLY_CHILD_SHA256: '24aeb6d64ef57df1e4a981ae1c558b36fad5177862bb32ad747d03b651cf51a9'
+  READONLY_WORKFLOW_PIN: 'true'
+  READONLY_HELPER_SHA256: '39d0c9a62fdf3053ee7feb6523f107421bffd46edec819daa9f66b1e9271af58'
+  READONLY_CHILD_SHA256: 'abb430f80f782d2c6279b478789f45c748b25eba8757505581942e249c3e0415'
 jobs:
   observe:
     runs-on: ubuntu-latest

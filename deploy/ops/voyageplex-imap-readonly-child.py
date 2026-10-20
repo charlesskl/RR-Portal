@@ -8,8 +8,8 @@ Never call application poll/test/sync/retry, parse mail, or persist raw bytes.
 import hashlib,importlib.util,json,os,pathlib,re,resource,signal,ssl,sys,threading,time
 from datetime import date,timedelta
 
-RUN_PIN=False
-BODY_PEEK_PIN=False
+RUN_PIN=True
+BODY_PEEK_PIN=True
 SCOPE='ops/mail-readonly-20261020'
 MAILBOX_SOURCE_SHA='4707664cb2a158c76f5df639972b3d7c475cead0f1297d0b8c52b125dbed267e'
 BODY_ACCOUNT_LABELS={'xingxin','huadeng-1','huadeng-2','huadeng-3','huadeng-4'}

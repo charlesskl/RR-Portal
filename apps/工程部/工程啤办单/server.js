@@ -512,7 +512,12 @@ app.post('/api/assembly/:id/quote', (req, res) => {
     if ((typeof price !== 'string' && typeof price !== 'number') || price === '' || !Number.isFinite(Number(price)) || Number(price) < 0) return res.status(400).json({ error: '请填写有效且不小于 0 的价格' });
     const date = it.completion_time;
     if (typeof date !== 'string' || !/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) return res.status(400).json({ error: '请填写每项有效的完成日期' });
-    updates.push({ id: it.id, price: Number(price), completion_time: date });
+    const unit = typeof it.unit === 'string' ? it.unit.trim() : '';
+    if (!unit) return res.status(400).json({ error: `第 ${updates.length + 1} 项请填写单位` });
+    if (unit.length > 10) return res.status(400).json({ error: `第 ${updates.length + 1} 项单位过长（最多 10 字）` });
+    const category = typeof it.category === 'string' ? it.category.trim() : '';
+    if (!['设备', '原材料', '工具'].includes(category)) return res.status(400).json({ error: `第 ${updates.length + 1} 项类别必须是「设备/原材料/工具」之一` });
+    updates.push({ id: it.id, price: Number(price), completion_time: date, unit, category });
   }
   const next = structuredClone(data);
   const byId = new Map(updates.map(it => [it.id, it]));

@@ -145,10 +145,15 @@
           </div>
         </div>
         <div class="items-table-wrap">
+          <datalist id="asmUnitList">
+            <option value="套"></option><option value="个"></option><option value="条"></option>
+            <option value="台"></option><option value="支"></option><option value="卷"></option>
+            <option value="把"></option><option value="米"></option><option value="天"></option>
+          </datalist>
           <table class="table table-bordered table-sm items-table" id="asmItemsTable">
             <thead>
               <tr>
-                <th style="width:50px">序号</th><th>名称</th><th style="width:80px">数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th><th style="width:96px">图片</th><th style="width:40px"></th>
+                <th style="width:50px">序号</th><th>名称</th><th style="width:80px">数量</th><th>要求完成日期</th><th>价格</th><th>单位</th><th>类别</th><th>完成时间</th><th style="width:96px">图片</th><th style="width:40px"></th>
               </tr>
             </thead>
             <tbody id="asmItemsBody"></tbody>
@@ -384,6 +389,8 @@ function renderSummary(orders) {
           <td class="text-center">${it ? esc(it.quantity || '-') : '-'}</td>
           <td>${it ? esc(it.required_date || '-') : '-'}</td>
           <td class="text-end">${it ? esc(it.price || '-') : '-'}</td>
+          <td>${it ? esc(it.unit || '-') : '-'}</td>
+          <td>${it ? esc(it.category || '-') : '-'}</td>
           <td>${it ? esc(it.completion_time || '-') : '-'}</td>
           <td>${idx === 0 ? statusBadge(o.status) : ''}</td>
         </tr>`;
@@ -398,7 +405,7 @@ function renderSummary(orders) {
         <thead style="background:#f8f9fa">
           <tr>
             <th>货号</th><th>货名</th><th>客名</th><th>夹具名称</th>
-            <th style="width:70px">数量</th><th>要求完成日期</th><th style="width:90px">价格</th><th>完成时间</th><th>状态</th>
+            <th style="width:70px">数量</th><th>要求完成日期</th><th style="width:90px">价格</th><th style="width:60px">单位</th><th style="width:80px">类别</th><th>完成时间</th><th>状态</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -554,6 +561,11 @@ function addAsmRow(it={}) {
     <td>${inp('number','quantity',it.quantity,'style="width:80px" min="1"')}</td>
     <td>${inp('text','required_date',it.required_date,'placeholder="YYYY-MM-DD" class="w-date"')}</td>
     <td>${inp('number','price',it.price||'','placeholder="价格" step="0.01"')}</td>
+    <td>${inp('text','unit',it.unit,'placeholder="单位" list="asmUnitList" maxlength="10" style="width:70px"')}</td>
+    <td><select class="form-select form-select-sm" name="category" style="min-width:80px">
+      <option value="">类别</option>
+      ${['设备','原材料','工具'].map(c => `<option${it.category === c ? ' selected' : ''}>${c}</option>`).join('')}
+    </select></td>
     <td>${inp('text','completion_time',it.completion_time,'placeholder="完成时间" class="w-date"')}</td>
     <td class="text-center asm-img-cell p-1">
       <input type="file" accept="image/*" hidden onchange="onAsmRowImage(this)">
@@ -605,7 +617,7 @@ function removeRow(btn) {
 }
 
 // ─── 保存订单 ─────────────────────────────────────────────────────────────────
-const asmFields = ['product_name','quantity','required_date','price','completion_time'];
+const asmFields = ['product_name','quantity','required_date','price','unit','category','completion_time'];
 
 function collectRows(tbodyId, fields) {
   return Array.from(document.getElementById(tbodyId).querySelectorAll('tr')).map(tr => {
@@ -726,14 +738,25 @@ async function openQuoteModal(id) {
           <td>${esc(it.required_date || '-')}</td>
           <td><input type="number" class="form-control" name="quote_price" data-idx="${i}" aria-label="第${i + 1}项价格"
               value="${it.price === null || it.price === undefined ? '' : esc(String(it.price))}" step="0.01" min="0" placeholder="0.00" required></td>
+          <td><input class="form-control" name="quote_unit" data-idx="${i}" list="quoteUnitList" aria-label="第${i + 1}项单位"
+              value="${esc(it.unit || '')}" maxlength="10" placeholder="单位" required></td>
+          <td><select class="form-select" name="quote_category" data-idx="${i}" aria-label="第${i + 1}项类别" required>
+              <option value="">请选择</option>
+              ${['设备','原材料','工具'].map(c => `<option${it.category === c ? ' selected' : ''}>${c}</option>`).join('')}
+            </select></td>
           <td><input type="date" class="form-control" name="quote_completion" data-idx="${i}" aria-label="第${i + 1}项完成日期"
               value="${esc(it.completion_time || '')}" min="0001-01-01" max="9999-12-31" required></td>
         </tr>`).join('');
     document.getElementById('quoteBody').innerHTML = `
+      <datalist id="quoteUnitList">
+        <option value="套"></option><option value="个"></option><option value="条"></option>
+        <option value="台"></option><option value="支"></option><option value="卷"></option>
+        <option value="把"></option><option value="米"></option><option value="天"></option>
+      </datalist>
       <div class="table-responsive">
-        <table class="table table-bordered table-sm mb-0" style="min-width:650px">
+        <table class="table table-bordered table-sm mb-0" style="min-width:800px">
           <thead class="table-dark">
-            <tr><th style="width:50px">序号</th><th>名称</th><th style="width:70px">数量</th><th>要求完成日期</th><th style="width:130px">价格</th><th style="width:150px">完成时间</th></tr>
+            <tr><th style="width:50px">序号</th><th>名称</th><th style="width:70px">数量</th><th>要求完成日期</th><th style="width:120px">价格</th><th style="width:90px">单位 <span class="text-danger">*</span></th><th style="width:110px">类别 <span class="text-danger">*</span></th><th style="width:150px">完成时间</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
@@ -749,20 +772,26 @@ async function submitQuote() {
   if (!_quoteOrderId || _quoteSubmitting) return;
   quoteError();
   const items = [];
+  const CATS = ['设备', '原材料', '工具'];
   for (let i = 0; i < _quoteItems.length; i++) {
     const price = document.querySelector(`#quoteBody [name="quote_price"][data-idx="${i}"]`);
     const completion = document.querySelector(`#quoteBody [name="quote_completion"][data-idx="${i}"]`);
-    if (!price || !completion) { quoteError('报价明细不完整，请关闭后重新打开'); return; }
-    if (!price.reportValidity() || !completion.reportValidity()) return;
+    const unit = document.querySelector(`#quoteBody [name="quote_unit"][data-idx="${i}"]`);
+    const category = document.querySelector(`#quoteBody [name="quote_category"][data-idx="${i}"]`);
+    if (!price || !completion || !unit || !category) { quoteError('报价明细不完整，请关闭后重新打开'); return; }
+    if (!price.reportValidity() || !completion.reportValidity() || !unit.reportValidity() || !category.reportValidity()) return;
     if (!price.value.trim() || !Number.isFinite(Number(price.value)) || Number(price.value) < 0) {
       quoteError(`第 ${i + 1} 项请填写有效的非负价格`); price.focus(); return;
     }
+    if (!unit.value.trim()) { quoteError(`第 ${i + 1} 项请填写单位`); unit.focus(); return; }
+    if (unit.value.trim().length > 10) { quoteError(`第 ${i + 1} 项单位过长（最多 10 字）`); unit.focus(); return; }
+    if (!CATS.includes(category.value)) { quoteError(`第 ${i + 1} 项请选择类别（设备/原材料/工具）`); category.focus(); return; }
     const date = completion.value;
     const parsed = new Date(date + 'T00:00:00Z');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || +date.slice(0, 4) < 1 || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
       quoteError(`第 ${i + 1} 项请填写有效的完成日期`); completion.focus(); return;
     }
-    items.push({ id: _quoteItems[i].id, price: price.value.trim(), completion_time: date });
+    items.push({ id: _quoteItems[i].id, price: price.value.trim(), completion_time: date, unit: unit.value.trim(), category: category.value });
   }
   setQuoteBusy(true);
   try {
@@ -875,8 +904,8 @@ function renderOrderDetails(order) {
   const items = order.items || [];
   if (!items.length) return headerHtml + '<div class="text-muted small">（无明细行）</div>';
 
-  const thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th><th>图片</th></tr>';
-  const rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.price||'-')}</td><td>${esc(it.completion_time||'-')}</td><td>${it.image ? `<img src="${asmImgUrl(order.id, it.image)}" style="max-height:48px;max-width:72px;border-radius:4px;border:1px solid #ddd">` : '-'}</td></tr>`).join('');
+  const thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>要求完成日期</th><th>价格</th><th>单位</th><th>类别</th><th>完成时间</th><th>图片</th></tr>';
+  const rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.price||'-')}</td><td>${esc(it.unit||'-')}</td><td>${esc(it.category||'-')}</td><td>${esc(it.completion_time||'-')}</td><td>${it.image ? `<img src="${asmImgUrl(order.id, it.image)}" style="max-height:48px;max-width:72px;border-radius:4px;border:1px solid #ddd">` : '-'}</td></tr>`).join('');
 
   return headerHtml + `<div class="table-responsive"><table class="table table-bordered table-sm"><thead class="table-light">${thead}</thead><tbody>${rows}</tbody></table></div>`;
 }

@@ -1,6 +1,6 @@
 """Bounded read-only cause evidence for one already observed unrelated restart."""
 import datetime,hashlib,importlib.util,json,os,pathlib,re,sys,traceback
-ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';DIAG_PIN=True
+ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';DIAG_PIN=False
 RUNTIME_LIBRARY_SHA='760230a691c298a6c31e99fc69381a9cb96fe547b41555d104056aae8ac5a8ab';RELEASE_SHA='5776dcf97872c86e54aa4239cc2aba8160b40008c16fae545f4896a441e07287'
 CID='e533624b4acea4cafb69a5014e21c1751596f115002176385d0f3b7420959d48';START='2026-10-21T02:00:50Z';END='2026-10-21T02:01:40Z'
 OLD=ROOT/'deploy/backups/batch-969-970-972-974-20261021-runtime-diagnose-01';OLD_MANIFEST='86fa1eb0d1761456c6b895752c52c0c035135ad70b2871bed7199b70cff8e48f';OLD_RESULT='e94eb70ea583428ca34b62d26a62e9da9c9c2318203ac704b8c7ca60ac260a84'

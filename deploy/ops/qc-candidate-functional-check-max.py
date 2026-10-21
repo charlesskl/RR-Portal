@@ -1,7 +1,7 @@
 """Closed by default: two synthetic calls through the immutable candidate image."""
 import base64,hashlib,json,os,pathlib,re,signal,stat,subprocess,sys
 ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/qc-provider-429-20261021'
-FUNCTIONAL_PIN=True;TARGET='b4c3763fe43e30c80c041c70e7a9f0750145d7b0';TREE='57085d6dcd242f154b4dbb199e54a71061abbd4d';WORKER_IMAGE='sha256:8a7abe630e49db8051be8ccc5be26a70a0b6d610410d16d701b9681841cca047';PREPARE_MANIFEST='b8c4bef03ba53971d04fdf0becab3d30add8ffa9b839dda3b653fdf2fd15905b';PREPARE_RESULT='aa052c2f6dd6e04872a1ba911465a7a6f58c7df176318196ff1cab7483b6c8cb'
+FUNCTIONAL_PIN=False;TARGET='b4c3763fe43e30c80c041c70e7a9f0750145d7b0';TREE='57085d6dcd242f154b4dbb199e54a71061abbd4d';WORKER_IMAGE='sha256:8a7abe630e49db8051be8ccc5be26a70a0b6d610410d16d701b9681841cca047';PREPARE_MANIFEST='b8c4bef03ba53971d04fdf0becab3d30add8ffa9b839dda3b653fdf2fd15905b';PREPARE_RESULT='aa052c2f6dd6e04872a1ba911465a7a6f58c7df176318196ff1cab7483b6c8cb'
 PREPARE=ROOT/'deploy/backups/qc-provider-429-20261021-prepare-02';OUT=ROOT/'deploy/backups/qc-provider-429-20261021-candidate-check-02'
 OWNER='qc429-candidate-functional';QC='apps/QA部/QC成品报告系统';STAGE='entry'
 PROVIDER_FIELDS=('OPENAI_API_KEY','OPENAI_BASE_URL','OPENAI_MODEL','OPENAI_API_FORMAT')

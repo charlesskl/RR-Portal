@@ -1,8 +1,8 @@
-name: QC Candidate Max Functional Check Before Maintenance
+name: QC Only Reviewed Max Provider Switch And Verify 03
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [candidate-check-02]}
+      mode: {type: choice, required: true, options: [deploy, verify]}
 permissions:
   contents: read
 concurrency:
@@ -10,12 +10,12 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  QC_CANDIDATE_WORKFLOW_PIN: 'true'
-  QC_CANDIDATE_HELPER_SHA256: '1c113d3433793948a133cec593f151edcf2de0e2c65c75c7254b24d86dd46568'
+  QC_RELEASE_WORKFLOW_PIN: 'false'
+  QC_RELEASE_HELPER_SHA256: 'ac6b24c4fe0a06f49b265a75f8adcbc823ec5c86442d25a10c55cb6ef5fa441c'
 jobs:
-  fixed-qc-candidate-functional-check:
+  fixed-qc-provider-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 13
+    timeout-minutes: 50
     steps:
       - name: Validate fixed source and first attempt
         shell: bash
@@ -27,10 +27,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$QC_CANDIDATE_WORKFLOW_PIN" = true && "$QC_CANDIDATE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = candidate-check-02 ]] || exit 1
+          [[ "$QC_RELEASE_WORKFLOW_PIN" = true && "$QC_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && ( "$RELEASE_MODE" = deploy || "$RELEASE_MODE" = verify ) ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Verify synthetic PO and photo requests with the exact candidate worker image
+      - name: Switch only QC after sealed candidate checks or verify the actual release
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -43,18 +43,31 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 11m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,QC_CANDIDATE_WORKFLOW_PIN,QC_CANDIDATE_HELPER_SHA256
+          command_timeout: 45m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,QC_RELEASE_WORKFLOW_PIN,QC_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$QC_CANDIDATE_WORKFLOW_PIN" = true && "$QC_CANDIDATE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = candidate-check-02 && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$QC_RELEASE_WORKFLOW_PIN" = true && "$QC_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && ( "$RELEASE_MODE" = deploy || "$RELEASE_MODE" = verify ) && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/qc-provider-429-20261021:refs/remotes/origin/ops/qc-provider-429-20261021 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/qc-provider-429-20261021)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            qc_candidate_tmp=$(mktemp -d /tmp/qc-candidate-functional.XXXXXX)
-            trap 'rm -rf "$qc_candidate_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/qc-candidate-functional-check-max.py" > "$qc_candidate_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$qc_candidate_tmp/run.py" | cut -d ' ' -f1)" = "$QC_CANDIDATE_HELPER_SHA256" ]] || exit 1
-            timeout --signal=TERM --kill-after=2m 8m python3 -B "$qc_candidate_tmp/run.py" candidate-check-02
+            qc_release_tmp=$(mktemp -d /tmp/qc-provider-429-release.XXXXXX)
+            trap 'rm -rf "$qc_release_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/qc-provider-429-release-03.py" > "$qc_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$qc_release_tmp/run.py" | cut -d ' ' -f1)" = "$QC_RELEASE_HELPER_SHA256" ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/qc-candidate-prepare-02-library.py" > "$qc_release_tmp/qc-candidate-prepare-02-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$qc_release_tmp/qc-candidate-prepare-02-library.py" | cut -d ' ' -f1)" = 46ed834714a2414b51429065103779042c2e3d10eeb1b358e2c47f04271c4d81 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/qc-host-config-library.py" > "$qc_release_tmp/qc-host-config-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$qc_release_tmp/qc-host-config-library.py" | cut -d ' ' -f1)" = bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/qc-scoped-backup-library.py" > "$qc_release_tmp/qc-scoped-backup-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$qc_release_tmp/qc-scoped-backup-library.py" | cut -d ' ' -f1)" = b3b042788d75b4bb11f77641d1a5ecec34e40fe71c9bc7bb64c5b28597e559ec ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/qc429-reviewed-files.json" > "$qc_release_tmp/qc429-reviewed-files.json" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/qc-source-library.py" > "$qc_release_tmp/qc-source-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$qc_release_tmp/qc-source-library.py" | cut -d ' ' -f1)" = 4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$qc_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$qc_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$qc_release_tmp/release-data-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$qc_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            timeout --signal=TERM --kill-after=10s 40m python3 -B "$qc_release_tmp/run.py" "$RELEASE_MODE"

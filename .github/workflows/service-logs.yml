@@ -1,4 +1,4 @@
-name: VoyagePlex Xingxin Natural Sync and Queue Read Only Acceptance
+name: VoyagePlex Xingxin Failed Rows Read Only Diagnosis
 on:
   workflow_dispatch:
 permissions:
@@ -8,12 +8,12 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  READONLY_WORKFLOW_PIN: 'true'
-  READONLY_HELPER_SHA256: 'b4796e4828b2482cf3fc4adbd859397ff3d2f5cd92aa1e6a61be26dc1adabdee'
+  READONLY_WORKFLOW_PIN: 'false'
+  READONLY_HELPER_SHA256: '7a138002819af3fb21cb487f88e4fc3a55755c47103eb7cc1af2467be66b8058'
 jobs:
-  observe:
+  inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     steps:
       - name: Validate fixed branch first attempt and pinned host
         shell: bash
@@ -27,7 +27,7 @@ jobs:
           [[ "$READONLY_WORKFLOW_PIN" = true && "$READONLY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-size-fix-20261020 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Observe a natural successful round and read only the current queue
+      - name: Read only failed rows and fixed safe mailbox settings
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -39,7 +39,7 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 10m
+          command_timeout: 5m
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,READONLY_WORKFLOW_PIN,READONLY_HELPER_SHA256
           script: |
             set -euo pipefail
@@ -51,12 +51,12 @@ jobs:
             umask 077
             xingxin_probe_tmp=$(mktemp -d /tmp/voyageplex-xingxin-readonly.XXXXXX)
             trap 'rm -rf "$xingxin_probe_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-xingxin-final-readonly-20261021.py" > "$xingxin_probe_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-xingxin-failed-readonly-20261021.py" > "$xingxin_probe_tmp/run.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$xingxin_probe_tmp/run.py" | cut -d ' ' -f1)" = "$READONLY_HELPER_SHA256" ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/voyageplex-mail-readonly-20261020-03.py" > "$xingxin_probe_tmp/mail-observation-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$xingxin_probe_tmp/mail-observation-library.py" | cut -d ' ' -f1)" = 2c5675ab534d1fcac5f28698e5418daf3ca0366b549c0c9b78fb58d95e95d4c0 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/voyageplex-xingxin-sections-host-20261021.py" > "$xingxin_probe_tmp/xingxin-recovery-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$xingxin_probe_tmp/xingxin-recovery-library.py" | cut -d ' ' -f1)" = e74006dba9ecba87968bebbd05cb85c4c740b8ab1fe6d64f3dbb6bfc6f7f99ab ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-xingxin-queue-child-20261021.py" > "$xingxin_probe_tmp/voyageplex-xingxin-queue-child-20261021.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$xingxin_probe_tmp/voyageplex-xingxin-queue-child-20261021.py" | cut -d ' ' -f1)" = 64e581cbfc0847af3105aadd18171a51e8f1437dac71e78a2cf86ed0a3e2f915 ]] || exit 1
-            timeout --signal=TERM --kill-after=10s 470s python3 -B "$xingxin_probe_tmp/run.py" observe
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-xingxin-final-readonly-20261021.py" > "$xingxin_probe_tmp/xingxin-final-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$xingxin_probe_tmp/xingxin-final-library.py" | cut -d ' ' -f1)" = b4796e4828b2482cf3fc4adbd859397ff3d2f5cd92aa1e6a61be26dc1adabdee ]] || exit 1
+            timeout --signal=TERM --kill-after=10s 160s python3 -B "$xingxin_probe_tmp/run.py" inspect

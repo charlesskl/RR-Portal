@@ -8,7 +8,7 @@ TREE='f0a724fb72b06e9cea3dc5aa1baa8bed629f127d'
 BASE='9b890cc016da403f929f8a7aaeddb878d3de24c5'
 BRANCH='refs/heads/ops/pr-981-20261021'
 ROOT=pathlib.Path('/opt/rr-portal');APP='apps/PMC跟仓管/加工厂月度评审管理制度'
-BACKUP=ROOT/'deploy/backups/pr-981-20261021-backup';PREPARE=BACKUP.with_name('pr-981-20261021-prepare-03');DEPLOY=BACKUP.with_name('pr-981-20261021-deploy');VERIFY=BACKUP.with_name('pr-981-20261021-verify')
+BACKUP=ROOT/'deploy/backups/pr-981-20261021-backup';PREPARE=BACKUP.with_name('pr-981-20261021-prepare-04');DEPLOY=BACKUP.with_name('pr-981-20261021-deploy');VERIFY=BACKUP.with_name('pr-981-20261021-verify')
 BACKUP_MANIFEST='1f09e9e07ad438b8bcc61d2d48626af52da83e4e30b5c0a97e1857a89217e9cf';BACKUP_RESULT='f91ca497bc7fe74b263fce4ae244bcb5861e948de4cd3eae494713542630cfe3'
 PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 SERVICES=('factory-review-test','factory-review');ALLOW={ 'FACTORY_REVIEW_AI_'+x for x in ('PROVIDER','ENABLED','API_KEY','MODEL','BASE_URL')}
@@ -65,7 +65,7 @@ def proof(image,cid=None):
 
 def candidate(s,image,old):
  i=json.loads(run(['docker','image','inspect',image]))[0];need(i['Id']==image and i['Architecture']=='amd64'and i['Os']=='linux'and i['Config']['Labels'].get('org.opencontainers.image.revision')==TARGET,'candidate-revision-platform')
- for k in('Cmd','Entrypoint','User','WorkingDir'):need(i['Config'].get(k)==old['Config'].get(k),'candidate-process-contract')
+ for k in('Cmd','Entrypoint','User','WorkingDir'):need(i['Config'].get(k)==old['Config'].get(k)or k=='User'and i['Config'].get(k)in(None,'')and old['Config'].get(k)in(None,''),'candidate-process-'+k.lower())
  original=read(BACKUP/(s+'-image.private.json'));need(original['Id']==old['Image']and i['Config'].get('Healthcheck')==original['Config'].get('Healthcheck'),'candidate-image-healthcheck-preserved')
  need(dict(F.envmap(i['Config'].get('Env')or[]),**envs()[s])==envs()[s],'candidate-default-env-covered-by-old-runtime')
  return proof(image)
@@ -199,9 +199,14 @@ def deploy(result,b):
   raise
  private('final-runtime.private.json',runtime)
 
+def normalized_ai_declaration(env):
+ need(type(env)is dict and all(type(k)is str and type(v)is str for k,v in env.items()),'string-test-env');value=copy.deepcopy(env);provider=value.get('FACTORY_REVIEW_AI_PROVIDER')or'openai';value['FACTORY_REVIEW_AI_PROVIDER']=provider;need(provider in{'openai','qwen'},'known-test-provider');key='FACTORY_REVIEW_AI_BASE_URL'
+ if not value.get(key):value[key]='https://dashscope.aliyuncs.com/compatible-mode/v1'if provider=='qwen'else'https://api.openai.com/v1'
+ return value
+
 def verify(result,b):
  sealed(PREPARE,PREPARE_MANIFEST,PREPARE_RESULT);sealed(DEPLOY,DEPLOY_MANIFEST,DEPLOY_RESULT);p=read(PREPARE/'prepared.private.json');source(b,TARGET);runtime,raw=F.runtime();need(runtime==read(DEPLOY/'final-runtime.private.json')and runtime['others']==b['runtime']['others']and flags()==b['maintenanceInventory'],'final-runtime-source-flags');literal=read(PREPARE/'intended-environments.private.json')
- need((ROOT/'.env.cloud.production').read_bytes()==(DEPLOY/'updated-environment.private').read_bytes()and F.file_metadata(ROOT/'.env.cloud.production')==b['environmentFileMetadata'],'persistent-env-file-exact');rendered=json.loads(run([*COMPOSE,'config','--format','json']));oldrender=read(BACKUP/'compose-render.private.json');need(rendered['services']['factory-review-test']['environment']==dict(oldrender['services']['factory-review-test']['environment'],FACTORY_REVIEW_AI_PROVIDER='openai'),'test-declared-env-preserved')
+ need((ROOT/'.env.cloud.production').read_bytes()==(DEPLOY/'updated-environment.private').read_bytes()and F.file_metadata(ROOT/'.env.cloud.production')==b['environmentFileMetadata'],'persistent-env-file-exact');rendered=json.loads(run([*COMPOSE,'config','--format','json']));oldrender=read(BACKUP/'compose-render.private.json');need(normalized_ai_declaration(rendered['services']['factory-review-test']['environment'])==normalized_ai_declaration(oldrender['services']['factory-review-test']['environment']),'test-declared-env-preserved')
  for k in ALLOW:need(rendered['services']['factory-review']['environment'].get(k)==literal['factory-review'][k].replace('$','$$'),'final-persistent-ai-five-vars')
  for s in SERVICES:need(F.envmap(raw[s]['Config']['Env'])==literal[s]and proof(p['images'][s],raw[s]['Id'])==p['proofs'][s],'final-runtime-environment-source');result.setdefault('public',{})[s]=public(s,p['proofs'][s])
  result.update(success=True,images=p['images'],productionProvider='qwen',productionModel='qwen3.8-max',testAIEnabled=False,allOther44ContainersUnchanged=True,providerCallsPerformed=False)

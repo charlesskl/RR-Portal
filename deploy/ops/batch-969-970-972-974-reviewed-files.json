@@ -1,0 +1,18 @@
+{
+  "apps/QA部/QC成品报告系统/app.py": "116a87b8618ff09d676ca1f9497fc3c136afbc61bca23be220e6e6f559999739",
+  "apps/QA部/玩具质量管理系统/server/ai.js": "4a906b503032399288f935a1e70b4564646be5c2e61bf6b4ed4530d4696ff066",
+  "apps/QA部/玩具质量管理系统/server/index.js": "16bd78ddd2b02e729a94cbee675caae6d204dd37f2df1c72745bdfda92d8bb4f",
+  "apps/QA部/玩具质量管理系统/server/test/ai-provider.test.js": "8901e229eeea04aa3736a83999fe1ac0aef2b57b400a8afb7d605fb7aa2e684b",
+  "apps/业务部/内部报价系统/frontend/mixed-quotation.js": "8e38a92748ee0dabc184ea5bc50932aa16453eb08b585c55a3c81c19d16e069c",
+  "apps/业务部/内部报价系统/frontend/mixed-sku.js": "fdba1e2d00e8a6c72a94cba971cc9a1f72d7339ddb2fc6489322264464f68042",
+  "apps/业务部/内部报价系统/frontend/quote.html": "a6c544fd9e871173f38a008b20fe90da351a1d1078db404210a4241b60216e90",
+  "apps/业务部/内部报价系统/frontend/workbench.js": "331f2fb4c3fe397c6fa0a1e873e1428e6c5d0efe9bf31b09c6a872e69d2ce8ae",
+  "apps/业务部/内部报价系统/tests/mixed-config-save.test.js": "ce4622487e33e95b9e31218e7d4990465721dcbb4f0f49c296cb200a7c833cce",
+  "apps/业务部/内部报价系统/tests/mixed-exclusive-sku.test.js": "c82696f160d0ce7d8487eb54d0655466b32e77e135033c3c806c74c5af99549a",
+  "apps/业务部/内部报价系统/tests/mixed-sku.test.js": "3dcc785fd6ed0537ad6c23eb37a75a653ce58f51a0ecbfafbfcd583b03d08f0b",
+  "apps/业务部/内部报价系统/tests/section-save-queue.test.js": "7655a6e2c79cd4bd9634ffb36ef9f08658c8a6f79ea75268b1dd15a36279c587",
+  "apps/印尼小组/印尼走货明细/web/src/pages/ProductsPage.supplier.test.ts": "e2d8643d53dc68691bb08dbb9de39e3e64132a36a4e391d47992700101befe6a",
+  "apps/印尼小组/印尼走货明细/web/src/pages/ProductsPage.tsx": "02be92561d15fef8e575ad48a317639ba4d06df94ef31fdf2f3ada77cce2f936",
+  "apps/印尼小组/印尼走货明细/web/src/utils/supplierProfiles.test.ts": "1786d64329f9716487128a7183ec192f8a44d956c541d076a4be7081b5511bc1",
+  "apps/印尼小组/印尼走货明细/web/src/utils/supplierProfiles.ts": "7735d9ff9866906ac0824d29eca19f241282a1ca99b0b24fcbf6b6dd8ee257c9"
+}

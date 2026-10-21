@@ -1,4 +1,4 @@
-name: Batch 969 970 972 974 Reviewed Backup
+name: Batch 969 970 972 974 Reviewed Backup 02
 on:
   workflow_dispatch:
     inputs:
@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  BATCH_BACKUP_WORKFLOW_PIN: 'true'
-  BATCH_BACKUP_HELPER_SHA256: '6fbe84ecc95804d5f5ab49057f571b10e8d76b2cacbe6ae89009480cbf25906a'
+  BATCH_BACKUP_WORKFLOW_PIN: 'false'
+  BATCH_BACKUP_HELPER_SHA256: '4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5'
 jobs:
   fixed-four-services-backup:
     runs-on: ubuntu-latest
@@ -55,7 +55,7 @@ jobs:
             umask 077
             batch_backup_tmp=$(mktemp -d /tmp/batch-969-974-backup.XXXXXX)
             trap 'rm -rf "$batch_backup_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-backup.py" > "$batch_backup_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-backup-02.py" > "$batch_backup_tmp/run.py" 2>/dev/null || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$batch_backup_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$batch_backup_tmp/release-data-library.py" 2>/dev/null || exit 1
             git show "$RELEASE_SHA:deploy/ops/internal-quote-readonly-library.py" > "$batch_backup_tmp/internal-quote-readonly-library.py" 2>/dev/null || exit 1

@@ -2,7 +2,7 @@ name: QC Sealed Candidate Failure Audit
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [candidate-audit]}
+      mode: {type: choice, required: true, options: [candidate-audit-02]}
 permissions:
   contents: read
 concurrency:
@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  QC_CANDIDATE_AUDIT_WORKFLOW_PIN: 'true'
-  QC_CANDIDATE_AUDIT_HELPER_SHA256: '82ee88a3fd9cd72b7c33acedafcce98080ebf2e32795b5acdf0032e91384c857'
+  QC_CANDIDATE_AUDIT_WORKFLOW_PIN: 'false'
+  QC_CANDIDATE_AUDIT_HELPER_SHA256: '1c247807e1b763eeddb27d94ba49681f34447f464a102c1628c5b4e7fdd4ec1f'
 jobs:
   fixed-qc-candidate-failure-probe:
     runs-on: ubuntu-latest
@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$QC_CANDIDATE_AUDIT_WORKFLOW_PIN" = true && "$QC_CANDIDATE_AUDIT_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = candidate-audit ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = candidate-audit-02 ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Read sealed synthetic failure and replay validation without network
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
@@ -48,13 +48,13 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$QC_CANDIDATE_AUDIT_WORKFLOW_PIN" = true && "$QC_CANDIDATE_AUDIT_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = candidate-audit && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = candidate-audit-02 && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/qc-provider-429-20261021:refs/remotes/origin/ops/qc-provider-429-20261021 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/qc-provider-429-20261021)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            qc_candidate_tmp=$(mktemp -d /tmp/qc-candidate-audit.XXXXXX)
+            qc_candidate_tmp=$(mktemp -d /tmp/qc-candidate-audit-02.XXXXXX)
             trap 'rm -rf "$qc_candidate_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/qc-candidate-failure-probe.py" > "$qc_candidate_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/qc-candidate-failure-probe-02.py" > "$qc_candidate_tmp/run.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$qc_candidate_tmp/run.py" | cut -d ' ' -f1)" = "$QC_CANDIDATE_AUDIT_HELPER_SHA256" ]] || exit 1
-            timeout --signal=TERM --kill-after=10s 2m python3 -B "$qc_candidate_tmp/run.py" candidate-audit
+            timeout --signal=TERM --kill-after=10s 2m python3 -B "$qc_candidate_tmp/run.py" candidate-audit-02

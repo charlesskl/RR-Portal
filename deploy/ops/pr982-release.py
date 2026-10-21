@@ -5,12 +5,12 @@ Draft: all execution gates false. No database restore, sequence reset or busines
 import copy,hashlib,importlib.util,json,os,pathlib,re,signal,stat,subprocess,sys,time,traceback,urllib.error,urllib.parse,urllib.request
 
 ROOT=pathlib.Path('/opt/rr-portal');BASE='67385924fc40958701843411b3731d2eeb90b2ad';TARGET='556798afb260020ca8f990c66290177ad0bf3e44';TREE='e190beed13d0318a2f3fa2e5b2eb5acf6c6f4308'
-BRANCH='refs/heads/ops/pr-982-20261021';PREPARE_PIN=False;DEPLOY_PIN=True;VERIFY_PIN=False
+BRANCH='refs/heads/ops/pr-982-20261021';PREPARE_PIN=False;DEPLOY_PIN=False;VERIFY_PIN=True
 CORE_SHA='4189c1e58f9cac7dfba76693c1a132ab78b93ade9027aa95eb45454b697413d9'
 SOURCE_MANIFEST_SHA='52358df007164964c40e7d3938a1ff2e8e1362f068ae67652e564cbfe7c93484';EXPECTED_CHANGED_FILE_COUNT=9
 BACKUP=ROOT/'deploy/backups/pr-982-20261021-backup';BACKUP_MANIFEST='32bfef9ff989cb8f0b8caed414ff27185f9e53c9dc3c1c3583d906b8747d93e7';BACKUP_RESULT='654029c040230009c247500ad1a756736ae5711bc5a4f022abfce9df409e7230'
 PREPARE=BACKUP.with_name('pr-982-20261021-prepare');PREPARE_MANIFEST='8d46199dc99423bc5cfe33e8eae612315032c37d091fb29377d7c4867ec1719a';PREPARE_RESULT='fe9108e71e6a1168c296a2d35c2a911b39b8d3db5445dbbe04ebc8ab63896327'
-DEPLOY=BACKUP.with_name('pr-982-20261021-deploy');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+DEPLOY=BACKUP.with_name('pr-982-20261021-deploy');DEPLOY_MANIFEST='ddf4a1a73d0ea2b14c68312fc2760619d5aac82ebf28b76661336c499a61e9b4';DEPLOY_RESULT='41d2b41fc12cb20eaec077c93cbb5f52d9b614d4fe4f3da69617fb963b548368'
 VERIFY=BACKUP.with_name('pr-982-20261021-verify')
 SERVICE='internal-quote';COMPOSE=['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production')]
 STAGE='entrypoint';FAILED_CHECK=None;CORE=None;OUT=None;ENV=None;COUNTER=0;DRAIN=None

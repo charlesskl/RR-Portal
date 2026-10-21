@@ -5,9 +5,9 @@ The one retention correction uses the sealed after-snapshot observation cutoff;
 new log timestamps still must be within exact candidate start..observation.
 """
 import copy,hashlib,importlib.util,json,os,pathlib,re,signal,stat,subprocess,sys,traceback
-PHASE='resume'
+PHASE='resume-verify'
 ROOT=pathlib.Path('/opt/rr-portal');BASE='556798afb260020ca8f990c66290177ad0bf3e44';TARGET='97d563e93aca3d9e3c0bc512dd622d6a3002e710';TREE='ad906e8b24b81df8e7ade91d15c5e9ab4ab839ab';BRANCH='refs/heads/ops/pr-986-20261021'
-RESUME=ROOT/'deploy/backups/pr-986-20261021-resume';VERIFY=RESUME.with_name('pr-986-20261021-resume-verify');RESUME_MANIFEST='';RESUME_RESULT=''
+RESUME=ROOT/'deploy/backups/pr-986-20261021-resume';VERIFY=RESUME.with_name('pr-986-20261021-resume-verify');RESUME_MANIFEST='05373927fced72c2cac3ecd845faa74dc4bf7b68e34ce0424948d5fc00955568';RESUME_RESULT='5b4ec6d857db7a65249e8bb119c7096f1be1c24596c8b18547091a617324f431'
 DEPS={'pr986-release-library.py':'3441d89e4ed33ef0ac2cfd20bfa1ab3618f92f5ae4904a61786707f604050688','factory-review-backup-library.py':'79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666','batch-host-config-library.py':'bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1','release-data-ops-library.py':'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5','release-data-library.py':'d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9','pr986-reviewed-files.json':'41b2007efcf669f17d0f2061f2fd67cf6af99241c3abed1a05a802e38d04de40'}
 ARCHIVES={'backup':('pr-986-20261021-backup','5663afabd6a7a3c1923bfbd7fa3806429f94ac3042bff53e0b12fac0fa74cdd7','12271c965cd359d715caba26ea53e471d5e07f63e4d7605a339f720bb954a273'),'prepare':('pr-986-20261021-prepare','dddcfdaca6b1c0cef03c42ffadf50fd9dc71dc9f94f62a6ec09a84ca8c47b7a2','17a7197f4435db08a6ce54877974057e2ebbb2848dbe1cfa1f80c16de29162ca'),'deploy':('pr-986-20261021-deploy','5757e2fe6dcbcaa889c7a9a743cd2c98a07bf3646fd6680b6bb17912d20e5115','24b9cd70f51c1b65fd9fb58d21e6d484145c6b6c628be6c8c8fb42b1ee6c98b2'),'diagnose':('pr-986-20261021-log-diagnose','c787c044b8f11b8b40d5b7ab7cd29c2bfeba7ad864102426a08c736b951c241c','e6ed81bc640fb7cae4255359d6a6ce74b43c24795d8e41c89de325de4214cf64')}
 S=None;OUT=None;STAGE='entrypoint';PROD='factory-review';TEST='factory-review-test'

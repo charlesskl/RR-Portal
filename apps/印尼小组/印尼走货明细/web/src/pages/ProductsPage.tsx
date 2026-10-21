@@ -3,7 +3,7 @@ import {
   AutoComplete, Button, Card, Col, Drawer, Form, Input, InputNumber, Popconfirm,
   Row, Select, Space, Switch, Table, Tabs, Tag, Typography, App,
 } from 'antd'
-import { api, type Dictionaries, type Material, type Molding, type MoldingPart, type Product, type ProductDetail } from '../api/client'
+import { api, type Dictionaries, type Material, type Molding, type MoldingPart, type Product, type ProductDetail, type SupplierDict } from '../api/client'
 import { MATERIAL_CATEGORIES, inferMaterialCategory } from '../utils/engineeringImport'
 import { resolveMaterialTranslation } from '../utils/materialTranslate'
 import { mergeImportedMaterials, recommendMaterialChoices, resolveMaterialImport, type ImportChoice } from '../utils/materialImportMerge'
@@ -423,7 +423,22 @@ export default function ProductsPage() {
                 rows={materials}
                 onChange={setMaterials}
                 dicts={dicts}
-                onSuppliersChanged={loadDicts}
+                onSuppliersChanged={(profile) => {
+                  // 档案保存已成功，先让当前显示和立即保存使用该结果，再刷新字典。
+                  setDicts(current => {
+                    const matches = (entry: SupplierDict) => profile.id != null
+                      ? entry.id === profile.id
+                      : entry.keyword.trim().toLocaleLowerCase() === profile.keyword.trim().toLocaleLowerCase()
+                    const found = current.suppliers.some(matches)
+                    return {
+                      ...current,
+                      suppliers: found
+                        ? current.suppliers.map(entry => matches(entry) ? { ...entry, ...profile } : entry)
+                        : [...current.suppliers, profile],
+                    }
+                  })
+                  loadDicts()
+                }}
                 productCode={currentProductCode?.trim() || editing?.code}
               />,
             },
@@ -586,7 +601,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode, onSuppliersChange
   onChange: (rows: Material[]) => void
   dicts: Dictionaries
   productCode?: string
-  onSuppliersChanged: () => void
+  onSuppliersChanged: (profile: SupplierDict) => void
 }) {
   const { message } = App.useApp()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -798,7 +813,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode, onSuppliersChange
             <SupplierProfileEditor name={r.supplier || ''} onSaved={(profile) => {
               onChange(rows.map((row, index) => index === i
                 ? { ...row, supplier: profile.keyword?.trim() || profile.full, customs_company: supplierCustomsCompany(profile) } : row))
-              onSuppliersChanged()
+              onSuppliersChanged(profile)
             }} />
           </> },
           { title: '报关公司', width: 200, render: (_v, r) => {

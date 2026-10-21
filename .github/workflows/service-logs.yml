@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '19cb5e215ca30d90a87e862a52c29fefaadbdaa62def635f2f78a2a69702d962'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
+  SCOPED_RELEASE_HELPER_SHA256: 'c62a155b2b3b94c69f33f9f4d9aab4650b31747eea07243e486e9855b77127ac'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -55,7 +55,7 @@ jobs:
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/batch-977-978-979-release.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch-977-978-979-release-02.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-977-978-979-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = "$SCOPED_RELEASE_HELPER_SHA256" ]] || exit 1

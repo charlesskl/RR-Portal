@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  QC_COMPANY_WORKFLOW_PIN: 'false'
-  QC_COMPANY_HELPER_SHA256: '8524cba7b4dfb5c563b7e552932b18d45c0f0e95ddcc5b2eb748b25ee37ac5b2'
+  QC_COMPANY_WORKFLOW_PIN: 'true'
+  QC_COMPANY_HELPER_SHA256: 'f3cdf7587a4db722b386708c1971d3c50c75d39f577ee752878056ad26b22c9e'
 jobs:
   fixed-qc-company-preflight:
     runs-on: ubuntu-latest

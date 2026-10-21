@@ -2,7 +2,7 @@
 import base64,datetime,hashlib,importlib.util,json,os,pathlib,re,sys
 from urllib.parse import urlsplit
 ROOT=pathlib.Path('/opt/rr-portal');TARGET='25a76f71e556f77a8aadb031823b392832d2354a';BRANCH='refs/heads/ops/qc-provider-429-20261021'
-INFO_PIN=False;PREFLIGHT_PIN=False;CANDIDATE_MODEL='qwen3.8-flash'
+INFO_PIN=False;PREFLIGHT_PIN=True;CANDIDATE_MODEL='qwen3.8-flash'
 LIBRARY_SHA='88eb0bab5eb7c6972fcdd926423ff035296617c53810165d7b1a06ff19d9db0e';D=None;OUT=None;STAGE='entry'
 HOST_PATTERN=r'(?:dashscope\.aliyuncs\.com|dashscope-intl\.aliyuncs\.com|cn-hongkong\.dashscope\.aliyuncs\.com|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:cn-beijing|ap-southeast-1|us-east-1|eu-central-1|cn-hongkong|ap-northeast-1)\.maas\.aliyuncs\.com)'
 KEYS=('QC_BAILIAN_API_KEY','PEISE_BAILIAN_BASE_URL','PAIJI_BAILIAN_VISION_MODEL','PEISE_BAILIAN_MODEL','BAOJIA_BAILIAN_TEXT_MODEL')

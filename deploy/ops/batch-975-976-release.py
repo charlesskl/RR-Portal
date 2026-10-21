@@ -4,9 +4,9 @@ environment fields. No mailbox operation, global deployment or automatic data re
 """
 import contextlib,copy,datetime,hashlib,html.parser,importlib.util,json,os,pathlib,re,signal,sqlite3,stat,subprocess,sys,tarfile,time,traceback,urllib.error,urllib.request,io
 ROOT=pathlib.Path('/opt/rr-portal');BASE='dfcdf751cae42fdd1731729dd662fce041c28caf';TARGET='25a76f71e556f77a8aadb031823b392832d2354a';TREE='2a1e0a1f25e9133828bae52cebe5c9dadb0ed7fb'
-BRANCH='refs/heads/ops/batch-975-976-20261021';PREPARE_PIN=True;DEPLOY_PIN=False;VERIFY_PIN=False
+BRANCH='refs/heads/ops/batch-975-976-20261021';PREPARE_PIN=False;DEPLOY_PIN=True;VERIFY_PIN=False
 CORE_SHA='01776d2c2be81fc67cfa2cc10fb12608958b6e29d38d2e783cb58bc55dfbf3f3';HOST_SHA='bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1'
-SOURCE_MANIFEST_SHA='591b3366970b132d7b0ea5467a34599b823f05884e5d4096260319c0844ef7d2';BACKUP_MANIFEST='f1151f21c607e632ac6979bb451775f8782e62802f1d67fd62d7ff9ffad2ff75';BACKUP_RESULT='9986dfc8e9e19961efa80b219c4dd928f46c4c2de2b00e531a80918f4b360d9a';PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+SOURCE_MANIFEST_SHA='591b3366970b132d7b0ea5467a34599b823f05884e5d4096260319c0844ef7d2';BACKUP_MANIFEST='f1151f21c607e632ac6979bb451775f8782e62802f1d67fd62d7ff9ffad2ff75';BACKUP_RESULT='9986dfc8e9e19961efa80b219c4dd928f46c4c2de2b00e531a80918f4b360d9a';PREPARE_MANIFEST='472794244c32a557a2e583f6e4613f2d39592e003218ad2ee4665c86988e9c7f';PREPARE_RESULT='fce03723398c5e0a04fcb0068b7ae26b8c58c7f2f80556964c6ee612ac97e94b';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 BACKUP=ROOT/'deploy/backups/batch-975-976-20261021-backup-02';PREPARE=BACKUP.with_name('batch-975-976-20261021-prepare');DEPLOY=BACKUP.with_name('batch-975-976-20261021-deploy');VERIFY=BACKUP.with_name('batch-975-976-20261021-verify')
 FACTORY='apps/PMC跟仓管/加工厂月度评审管理制度';QC='apps/QA部/QC成品报告系统';FACTORY_SERVICES=('factory-review-test','factory-review');QC_SERVICES=('qc-report','qc-report-worker');ORDER=FACTORY_SERVICES+QC_SERVICES
 NUMERIC={'OPENAI_TIMEOUT_SECONDS':'900','OPENAI_MAX_OUTPUT_TOKENS':'64000','RQ_JOB_TIMEOUT_SECONDS':'1200'};SERVER_KEYS={'QC_REPORT_'+name:name for name in NUMERIC};QC_CONTRACT_FILES=('task_queue.py','ai_service.py','worker.py')

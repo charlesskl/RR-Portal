@@ -2,7 +2,7 @@
 No business CRUD or database restore. Model smoke contains synthetic evidence only.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,io,json,os,secrets,shutil,tempfile,pathlib,re,signal,stat,subprocess,sys,tarfile,time,urllib.error,urllib.request
-PHASE='prepare'
+PHASE='deploy'
 TARGET='97d563e93aca3d9e3c0bc512dd622d6a3002e710'
 TREE='ad906e8b24b81df8e7ade91d15c5e9ab4ab839ab'
 BASE='556798afb260020ca8f990c66290177ad0bf3e44'
@@ -13,7 +13,7 @@ BRANCH='refs/heads/ops/pr-986-20261021'
 ROOT=pathlib.Path('/opt/rr-portal');APP='apps/PMC跟仓管/加工厂月度评审管理制度'
 BACKUP=ROOT/'deploy/backups/pr-986-20261021-backup';PREPARE=BACKUP.with_name('pr-986-20261021-prepare');DEPLOY=BACKUP.with_name('pr-986-20261021-deploy');VERIFY=BACKUP.with_name('pr-986-20261021-verify')
 BACKUP_MANIFEST='5663afabd6a7a3c1923bfbd7fa3806429f94ac3042bff53e0b12fac0fa74cdd7';BACKUP_RESULT='12271c965cd359d715caba26ea53e471d5e07f63e4d7605a339f720bb954a273'
-PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+PREPARE_MANIFEST='dddcfdaca6b1c0cef03c42ffadf50fd9dc71dc9f94f62a6ec09a84ca8c47b7a2';PREPARE_RESULT='17a7197f4435db08a6ce54877974057e2ebbb2848dbe1cfa1f80c16de29162ca';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 SERVICES=('factory-review-test','factory-review');ALLOW={ 'FACTORY_REVIEW_AI_'+x for x in ('PROVIDER','ENABLED','API_KEY','MODEL','BASE_URL')}
 COMPOSE=['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production')]
 DEPS={'factory-review-backup-library.py':'79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666','batch-host-config-library.py':'bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1'}

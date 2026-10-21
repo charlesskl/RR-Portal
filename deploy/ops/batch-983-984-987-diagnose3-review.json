@@ -1,0 +1,45 @@
+{
+  "status": "CHECKED",
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr987_review",
+  "reviewedAtUtc": "2026-10-21T10:48:28.622453+00:00",
+  "draftSHA256": "f6f0c31ca0443f7b1f5a85fe19384a7c99597ad590a93532b89d923ace62b2f9",
+  "activeSHA256": "448a13f8b6c604a431140a877749e08466eb86dc58e402e3172a4742fa01f85d",
+  "workflowSHA256": "b46d1c83d06ed6d5d79d30a5370013cec5b0dfe44e38a608bb15e7df5f546ff3",
+  "planSHA256": "a02ec961b6db8ed6a9bbf9fb25a1810dca32a71db4c5ca0a17e6d5360279c940",
+  "opsParent": "d18a5463a3fc5a5cab90ed8e200f07ae3a1664e6",
+  "branch": "ops/batch-983-984-987-20261021",
+  "mode": "diagnose",
+  "diagnosticAttempt": 3,
+  "readOnly": true,
+  "archiveManifestSHA256": "9909d235d8ae98b0bc714e1c10139ca139754cc882abeff3eb6b66620176c0c2",
+  "archiveResultSHA256": "9427ff59145f513b79f24a3b95893d9e27641a6a0958f332b1a05fb2c8347006",
+  "checks": [
+    "Only archive path-v2/pins plus ASCII manifest-derived .db relative path list differ from checkeddiag2 source; existingtrace/stderr safety unchanged",
+    "False gate rejects before filesystemread; active is exactly PINFalse→True",
+    "Workflow exactly matches reviewed fixedbranch/attempt1/helperSHA/fingerprint/sharedconcurrency generator",
+    "PASS sealed synthetic archive outputs only sorted ASCII relative .db paths; no SQLite bytes/rows, WAL, secret or rawtrace output",
+    "PASS non-ASCII database relative path rejects before public output"
+  ],
+  "remainingBlockers": [],
+  "authorizationScope": "Root may publish this new exact diagnose3 commit and dispatch once as first attempt, without rerunning any prior action. Reviewer performed no live operations.",
+  "files": {
+    "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose3.py": {
+      "sha256": "f6f0c31ca0443f7b1f5a85fe19384a7c99597ad590a93532b89d923ace62b2f9",
+      "bytes": 3197
+    },
+    "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose3-active.py": {
+      "sha256": "448a13f8b6c604a431140a877749e08466eb86dc58e402e3172a4742fa01f85d",
+      "bytes": 3196
+    },
+    "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose3-workflow.yml": {
+      "sha256": "b46d1c83d06ed6d5d79d30a5370013cec5b0dfe44e38a608bb15e7df5f546ff3",
+      "bytes": 3292
+    },
+    "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose3-plan.json": {
+      "sha256": "a02ec961b6db8ed6a9bbf9fb25a1810dca32a71db4c5ca0a17e6d5360279c940",
+      "bytes": 623
+    }
+  }
+}

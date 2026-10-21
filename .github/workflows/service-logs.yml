@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  FACTORY_DIAG_WORKFLOW_PIN: 'false'
-  FACTORY_DIAG_HELPER_SHA256: '23c32a231db50b0c2089ee183dd662c9adb2b7c37f6dfd08e0ebd483c5cd8c41'
+  FACTORY_DIAG_WORKFLOW_PIN: 'true'
+  FACTORY_DIAG_HELPER_SHA256: 'dedd78cf2ac884d0482531daad5f7b890740ba9a74ab2f5f375942a258717bd3'
 jobs:
   fixed-factory-review-diagnose:
     runs-on: ubuntu-latest

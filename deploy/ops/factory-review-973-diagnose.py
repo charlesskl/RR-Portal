@@ -1,6 +1,6 @@
 """PR973 fixed initial-preflight read-only diagnosis; disabled until independent review."""
 import hashlib,importlib.util,json,os,pathlib,re,subprocess,sys,traceback
-ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/factory-review-973-20261021-diagnose-01';PIN=False
+ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/factory-review-973-20261021-diagnose-01';PIN=True
 BRANCH='refs/heads/ops/factory-review-973-20261021';RELEASE_SHA='8c7f870eddbdadb093c50761ba177d63b2cd37a3eab9a5a1b240efa18f010b3e'
 FAILED=ROOT/'deploy/backups/factory-review-973-20261021-deploy';FAILED_MANIFEST='3b9d2093460313baac6c15144d614a8208608bec556578dcbdf8c8111f97fc12';FAILED_RESULT='680bc74dafc5df496139077db726720c0444938130c296ebd756b1f0eaf3ac41'
 ALLOWED_ERRORS={'RuntimeError','ValueError','TypeError','KeyError','OSError','OperationalError','TimeoutExpired','FileNotFoundError','PermissionError'}

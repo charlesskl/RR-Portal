@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  FACTORY_BACKUP_WORKFLOW_PIN: 'false'
-  FACTORY_BACKUP_HELPER_SHA256: '79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666'
+  FACTORY_BACKUP_WORKFLOW_PIN: 'true'
+  FACTORY_BACKUP_HELPER_SHA256: '587812a638756e0eb7e7bcf1cb5042a5f7531d1b3c0e3200be77f894627b9b39'
 jobs:
   fixed-factory-review-backup:
     runs-on: ubuntu-latest

@@ -1,7 +1,7 @@
 """PR973 factory-review backup only. Draft; all execution gates default off."""
 import io,tarfile,hashlib,importlib.util,json,os,pathlib,re,shutil,signal,stat,subprocess,sys
 ROOT=pathlib.Path('/opt/rr-portal');APP=ROOT/'apps/PMC跟仓管/加工厂月度评审管理制度';BASE='6fc1143c0b39470d814caac553beaaf3bc2912e0'
-BRANCH='refs/heads/ops/factory-review-973-20261021';BACKUP_PIN=False;DEPLOY_PIN=False;VERIFY_PIN=False;TARGET='';TARGET_TREE='';REVIEWED_FILES={}
+BRANCH='refs/heads/ops/factory-review-973-20261021';BACKUP_PIN=True;DEPLOY_PIN=False;VERIFY_PIN=False;TARGET='';TARGET_TREE='';REVIEWED_FILES={}
 OUT=ROOT/'deploy/backups/factory-review-973-20261021-backup'
 DEPENDENCIES={'release-data-ops-library.py':'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5','release-data-library.py':'d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9'}
 STAGE='preflight';COUNTER=0;OPS=None

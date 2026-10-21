@@ -1,8 +1,8 @@
-name: QC Provider 429 Readonly Diagnostic
+name: QC Provider Readonly Key Metadata Audit
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [diagnose]}
+      mode: {type: choice, required: true, options: [audit]}
 permissions:
   contents: read
 concurrency:
@@ -10,10 +10,10 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  QC_DIAGNOSE_WORKFLOW_PIN: 'false'
-  QC_DIAGNOSE_HELPER_SHA256: '88eb0bab5eb7c6972fcdd926423ff035296617c53810165d7b1a06ff19d9db0e'
+  QC_AUDIT_WORKFLOW_PIN: 'false'
+  QC_AUDIT_HELPER_SHA256: '14d870f4630d63992d74e93b6d6c1522f7e9ca417c331d91e1ea74239682de78'
 jobs:
-  fixed-qc-provider-diagnostic:
+  fixed-qc-key-audit:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -27,10 +27,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$QC_DIAGNOSE_WORKFLOW_PIN" = true && "$QC_DIAGNOSE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose ]] || exit 1
+          [[ "$QC_AUDIT_WORKFLOW_PIN" = true && "$QC_AUDIT_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = audit ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Capture bounded private logs and one synthetic error diagnostic
+      - name: Read key metadata once and report provider key availability
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -44,17 +44,19 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 5m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,QC_DIAGNOSE_WORKFLOW_PIN,QC_DIAGNOSE_HELPER_SHA256
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,QC_AUDIT_WORKFLOW_PIN,QC_AUDIT_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$QC_DIAGNOSE_WORKFLOW_PIN" = true && "$QC_DIAGNOSE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$QC_AUDIT_WORKFLOW_PIN" = true && "$QC_AUDIT_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = audit && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/qc-provider-429-20261021:refs/remotes/origin/ops/qc-provider-429-20261021 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/qc-provider-429-20261021)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            qc_diag_tmp=$(mktemp -d /tmp/qc-provider-429-diag.XXXXXX)
-            trap 'rm -rf "$qc_diag_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/qc-provider-429-diagnose.py" > "$qc_diag_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$qc_diag_tmp/run.py" | cut -d ' ' -f1)" = "$QC_DIAGNOSE_HELPER_SHA256" ]] || exit 1
-            timeout --signal=TERM --kill-after=10s 3m python3 -B "$qc_diag_tmp/run.py" diagnose
+            qc_audit_tmp=$(mktemp -d /tmp/qc-provider-key-audit.XXXXXX)
+            trap 'rm -rf "$qc_audit_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/qc-provider-429-config-audit.py" > "$qc_audit_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$qc_audit_tmp/run.py" | cut -d ' ' -f1)" = "$QC_AUDIT_HELPER_SHA256" ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/qc-provider-diagnostic-library.py" > "$qc_audit_tmp/qc-provider-diagnostic-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$qc_audit_tmp/qc-provider-diagnostic-library.py" | cut -d ' ' -f1)" = 88eb0bab5eb7c6972fcdd926423ff035296617c53810165d7b1a06ff19d9db0e ]] || exit 1
+            timeout --signal=TERM --kill-after=10s 3m python3 -B "$qc_audit_tmp/run.py" audit

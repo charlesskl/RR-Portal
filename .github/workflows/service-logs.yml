@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_BACKUP_WORKFLOW_PIN: 'true'
-  SCOPED_BACKUP_HELPER_SHA256: 'c3b1fa14aabe5b3f9cc927fbb6a8a26815177fe73522be274a6b41442b007f8d'
+  SCOPED_BACKUP_WORKFLOW_PIN: 'false'
+  SCOPED_BACKUP_HELPER_SHA256: '01776d2c2be81fc67cfa2cc10fb12608958b6e29d38d2e783cb58bc55dfbf3f3'
 jobs:
   fixed-scoped-backup:
     runs-on: ubuntu-latest
@@ -55,7 +55,7 @@ jobs:
             umask 077
             scoped_backup_tmp=$(mktemp -d /tmp/batch-975-976-backup.XXXXXX)
             trap 'rm -rf "$scoped_backup_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch-975-976-backup.py" > "$scoped_backup_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-975-976-backup-02.py" > "$scoped_backup_tmp/run.py" 2>/dev/null || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$scoped_backup_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_backup_tmp/release-data-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_backup_tmp/run.py" | cut -d ' ' -f1)" = "$SCOPED_BACKUP_HELPER_SHA256" ]] || exit 1

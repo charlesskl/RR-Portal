@@ -1,4 +1,4 @@
-name: Batch 977 978 979 Finalize Existing Indo 02
+name: Batch 977 978 979 Clear Indo Maintenance 03
 on:
   workflow_dispatch:
     inputs:
@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '122a1c6caa57573e2c1830f5cc45e1187a3029281419e7c23ad1990d8183323b'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
+  SCOPED_RELEASE_HELPER_SHA256: 'f544966d013bf9d0b7aeaf5099df966e4a16b33b013cf6693943e1b2a9fc8e9b'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest

@@ -4,7 +4,7 @@ No database writes/restores, config updates, container signals or deployments.
 Only fixed counts, booleans, policy integers and UTC timestamps leave the server.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,signal,sqlite3,stat,subprocess,sys,tarfile,time,traceback
-PIN=True
+PIN=False
 ROOT=pathlib.Path('/opt/rr-portal');BASE='556798afb260020ca8f990c66290177ad0bf3e44';TARGET='97d563e93aca3d9e3c0bc512dd622d6a3002e710';TREE='ad906e8b24b81df8e7ade91d15c5e9ab4ab839ab';BRANCH='refs/heads/ops/pr-986-20261021'
 OUT=ROOT/'deploy/backups/pr-986-20261021-log-diagnose'
 LIBRARY_SHA='d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9'

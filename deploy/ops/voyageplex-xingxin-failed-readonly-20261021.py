@@ -1,6 +1,6 @@
 """Read only at most three failed rows and three safe settings; no mailbox calls."""
 import contextlib,datetime,hashlib,importlib.util,json,os,pathlib,re,signal,sqlite3,sys
-PIN=False;BRANCH='refs/heads/ops/voyageplex-size-fix-20261020';TARGET='6fc1143c0b39470d814caac553beaaf3bc2912e0'
+PIN=True;BRANCH='refs/heads/ops/voyageplex-size-fix-20261020';TARGET='6fc1143c0b39470d814caac553beaaf3bc2912e0'
 ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/voyageplex-xingxin-sections-20261021-03'
 FINAL_SHA='b4796e4828b2482cf3fc4adbd859397ff3d2f5cd92aa1e6a61be26dc1adabdee';F=None;S=None
 FINAL_PROOF=ROOT/'deploy/backups/voyageplex-xingxin-sections-20261021-02';FINAL_MANIFEST='c4e09164c33d705f24261f2166dc429a901074956a28f651b113a3c1f56a33bd';FINAL_RESULT='72bc8e18dad4d978c6de4e449fd4dc3f56298553fddf53ed6170ea7a358342e8'

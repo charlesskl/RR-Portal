@@ -8,7 +8,7 @@ TREE='f0a724fb72b06e9cea3dc5aa1baa8bed629f127d'
 BASE='9b890cc016da403f929f8a7aaeddb878d3de24c5'
 BRANCH='refs/heads/ops/pr-981-20261021'
 ROOT=pathlib.Path('/opt/rr-portal');APP='apps/PMC跟仓管/加工厂月度评审管理制度'
-BACKUP=ROOT/'deploy/backups/pr-981-20261021-backup';PREPARE=BACKUP.with_name('pr-981-20261021-prepare-02');DEPLOY=BACKUP.with_name('pr-981-20261021-deploy');VERIFY=BACKUP.with_name('pr-981-20261021-verify')
+BACKUP=ROOT/'deploy/backups/pr-981-20261021-backup';PREPARE=BACKUP.with_name('pr-981-20261021-prepare-03');DEPLOY=BACKUP.with_name('pr-981-20261021-deploy');VERIFY=BACKUP.with_name('pr-981-20261021-verify')
 BACKUP_MANIFEST='1f09e9e07ad438b8bcc61d2d48626af52da83e4e30b5c0a97e1857a89217e9cf';BACKUP_RESULT='f91ca497bc7fe74b263fce4ae244bcb5861e948de4cd3eae494713542630cfe3'
 PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 SERVICES=('factory-review-test','factory-review');ALLOW={ 'FACTORY_REVIEW_AI_'+x for x in ('PROVIDER','ENABLED','API_KEY','MODEL','BASE_URL')}
@@ -49,7 +49,7 @@ def overlay(images,literal,name,build=False):
  p=OUT/name;lines=['services:']
  for s in SERVICES:
   lines += ['  '+s+':','    image: '+images[s],'    pull_policy: never','    environment: !override '+json.dumps({k:v.replace('$','$$')for k,v in literal[s].items()},ensure_ascii=True)]
-  if build:lines+=['    build:','      labels: '+json.dumps({'org.opencontainers.image.revision':TARGET}),'      args:','        OCI_REVISION: '+TARGET]
+  if build:lines+=['    build:','      labels: '+json.dumps({'org.opencontainers.image.revision':TARGET}),'      args:','        OCI_REVISION: '+read(BACKUP/(s+'-image.private.json'))['Config']['Labels']['org.opencontainers.image.revision']]
  private(name,('\n'.join(lines)+'\n').encode());args=[*COMPOSE,'-f',str(p)];render=json.loads(run([*args,'config','--format','json']))
  for s in SERVICES:need(render['services'][s]['image']==images[s]and render['services'][s]['environment']=={k:v.replace('$','$$')for k,v in literal[s].items()},'literal-compose-environment')
  return args
@@ -65,7 +65,8 @@ def proof(image,cid=None):
 
 def candidate(s,image,old):
  i=json.loads(run(['docker','image','inspect',image]))[0];need(i['Id']==image and i['Architecture']=='amd64'and i['Os']=='linux'and i['Config']['Labels'].get('org.opencontainers.image.revision')==TARGET,'candidate-revision-platform')
- for k in('Cmd','Entrypoint','User','WorkingDir','Healthcheck'):need(i['Config'].get(k)==old['Config'].get(k),'candidate-process-contract')
+ for k in('Cmd','Entrypoint','User','WorkingDir'):need(i['Config'].get(k)==old['Config'].get(k),'candidate-process-contract')
+ original=read(BACKUP/(s+'-image.private.json'));need(original['Id']==old['Image']and i['Config'].get('Healthcheck')==original['Config'].get('Healthcheck'),'candidate-image-healthcheck-preserved')
  need(dict(F.envmap(i['Config'].get('Env')or[]),**envs()[s])==envs()[s],'candidate-default-env-covered-by-old-runtime')
  return proof(image)
 def model_probe(image,literal,raw):

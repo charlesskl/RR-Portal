@@ -2,16 +2,16 @@ name: PR 981 Factory AI Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [verify]}
+      mode: {type: choice, required: true, options: [prepare]}
 permissions:
   contents: read
 concurrency:
-  group: pr981-ownbuild-control
+  group: deploy-cloud
   queue: max
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '529ee7f0091da8b98264a138252156f91f9e0508e3c00d39264ad0b7ed7024b9'
+  SCOPED_RELEASE_HELPER_SHA256: '6ff960208ba8b3c94ee3110cd4f104030a4bcbde542aec7ea650ca172ed311e0'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-981-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(verify)$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-981-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(prepare)$ ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Build or switch only the two factory environments
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
@@ -48,14 +48,14 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-981-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(verify)$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-981-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(prepare)$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-981-20261021:refs/remotes/origin/ops/pr-981-20261021 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-981-20261021)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/pr981-backup.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr981-stop-own-build.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr981-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = "$SCOPED_RELEASE_HELPER_SHA256" ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/factory-review-backup-library.py" > "$scoped_release_tmp/factory-review-backup-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/factory-review-backup-library.py" | cut -d ' ' -f1)" = 79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666 ]] || exit 1

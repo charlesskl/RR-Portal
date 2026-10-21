@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   QC_DIAGNOSE_WORKFLOW_PIN: 'false'
-  QC_DIAGNOSE_HELPER_SHA256: '2dd9895ccdf616149dbe6a5ef7e273a83068f0cac29b8576af4ab45886b62e1f'
+  QC_DIAGNOSE_HELPER_SHA256: '88eb0bab5eb7c6972fcdd926423ff035296617c53810165d7b1a06ff19d9db0e'
 jobs:
   fixed-qc-provider-diagnostic:
     runs-on: ubuntu-latest

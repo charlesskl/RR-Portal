@@ -1,0 +1,11 @@
+{
+  "apps/业务部/内部报价系统/frontend/quote.html": "149725eb9f295385e67e6a298cb5ddc9d228b3259a5c24a99a0cd3703d7fee11",
+  "apps/业务部/内部报价系统/frontend/styles.css": "50edf43ecc894c854b8ffd961c40d97cf679bc0f1cbd3b0e646394ca41dad303",
+  "apps/业务部/内部报价系统/frontend/verification.html": "a4de2b9454ca35fc02fe9743c7a524b8b5415cc92873dfd0fa687e5dc9b983db",
+  "apps/业务部/内部报价系统/frontend/vq-extension.js": "68a259a4249973e74eebe12d96f2bf2d0dab835d1e84021c51972b6eb3bc3136",
+  "apps/业务部/内部报价系统/frontend/workbench.js": "b0664f767d399437b363e3d3e643ebc77b340ab47bd95baef33291e3a23b4db1",
+  "apps/业务部/内部报价系统/tests/itemized-tax-parity.test.js": "e719ec35ffa4ca11fd210a17ae008e8afdbe51cf4195e53167623a33c4e7c0ab",
+  "apps/业务部/内部报价系统/tests/section-save-queue.test.js": "8276a4a898ffe153ea8147346b1dabe31cd5cc2891a8e8bc3715bb9f10787925",
+  "apps/业务部/内部报价系统/tests/shipping-summary-save.test.js": "79e9e0b012ca3baca3accef891543c33d2e6c78cd10e141b355c3c54d041dfb8",
+  "apps/业务部/内部报价系统/tests/shipping-summary-vq-integration.test.js": "094b41befa950fe92d8ffaab8b0af14c56ac09163371d69c809226d05b25c6f8"
+}

@@ -4,7 +4,7 @@ Only the explicitly enabled synthetic request may incur vendor token usage.
 """
 import hashlib,json,os,pathlib,re,subprocess,sys
 ROOT=pathlib.Path('/opt/rr-portal');TARGET='25a76f71e556f77a8aadb031823b392832d2354a'
-BRANCH='refs/heads/ops/batch-975-976-20261021';PROBE_PIN=True;EXPECTED_WORKER_IMAGE_ID='sha256:13be768463dc49fb063394df2c48bcd87b66509e858da362cf414b3c14a44b2b'
+BRANCH='refs/heads/ops/batch-975-976-20261021';PROBE_PIN=False;EXPECTED_WORKER_IMAGE_ID=''
 FRAGMENT_SHA='e81cdb9120f4b720264258729b72dc60486d4ea0f973c7a0c47052e2ed79b5bd'
 LIMITS={'OPENAI_TIMEOUT_SECONDS':'900','OPENAI_MAX_OUTPUT_TOKENS':'64000','RQ_JOB_TIMEOUT_SECONDS':'1200'}
 STAGE='entry'

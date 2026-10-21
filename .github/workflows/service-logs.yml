@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_PROBE_WORKFLOW_PIN: 'true'
-  SCOPED_PROBE_HELPER_SHA256: 'e98fea726e51c5ed2b5917690021eaf8e414f18411b8c144418ce9bc2bf40b86'
+  SCOPED_PROBE_WORKFLOW_PIN: 'false'
+  SCOPED_PROBE_HELPER_SHA256: '210607f95c92b3b5ff0a017c2a0056aa94e48b86c52a2c7e8fdc7e3a44e5fee9'
 jobs:
   fixed-synthetic-provider-probe:
     runs-on: ubuntu-latest

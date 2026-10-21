@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  QC_CANDIDATE_WORKFLOW_PIN: 'false'
-  QC_CANDIDATE_HELPER_SHA256: 'f69403cf3e04cf1606394ef48ce19cc7f69a715ff8ba2039aed914eca6738aa4'
+  QC_CANDIDATE_WORKFLOW_PIN: 'true'
+  QC_CANDIDATE_HELPER_SHA256: '1c113d3433793948a133cec593f151edcf2de0e2c65c75c7254b24d86dd46568'
 jobs:
   fixed-qc-candidate-functional-check:
     runs-on: ubuntu-latest

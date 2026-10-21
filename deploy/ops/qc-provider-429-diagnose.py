@@ -4,7 +4,7 @@ Provider error bytes, selected response headers and QC logs stay server-private.
 import base64,datetime,hashlib,json,os,pathlib,re,resource,subprocess,sys
 from email.utils import parsedate_to_datetime
 ROOT=pathlib.Path('/opt/rr-portal');TARGET='25a76f71e556f77a8aadb031823b392832d2354a';BRANCH='refs/heads/ops/qc-provider-429-20261021'
-DIAGNOSE_PIN=True;IMAGE='sha256:13be768463dc49fb063394df2c48bcd87b66509e858da362cf414b3c14a44b2b'
+DIAGNOSE_PIN=False;IMAGE='sha256:13be768463dc49fb063394df2c48bcd87b66509e858da362cf414b3c14a44b2b'
 OUT=ROOT/'deploy/backups/qc-provider-429-20261021-diagnose';LIMITS={'OPENAI_TIMEOUT_SECONDS':'900','OPENAI_MAX_OUTPUT_TOKENS':'64000','RQ_JOB_TIMEOUT_SECONDS':'1200'};STAGE='entry'
 def enc(value):return json.dumps(value,sort_keys=True,ensure_ascii=True,separators=(',',':')).encode()
 def sha(value):return hashlib.sha256(value).hexdigest()

@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  QC_DIAGNOSE_WORKFLOW_PIN: 'true'
-  QC_DIAGNOSE_HELPER_SHA256: '5bbbe59a627624c8485964bece85d3884583a372a5bcbd90e7f2bb7e87431403'
+  QC_DIAGNOSE_WORKFLOW_PIN: 'false'
+  QC_DIAGNOSE_HELPER_SHA256: '88eb0bab5eb7c6972fcdd926423ff035296617c53810165d7b1a06ff19d9db0e'
 jobs:
   fixed-qc-provider-diagnostic:
     runs-on: ubuntu-latest

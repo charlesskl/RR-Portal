@@ -51,9 +51,10 @@
   </form>
 
   <section class="card section-card ai-review-section" id="ai-review" data-run-url="{{ url_for('start_analysis_run', report_id=report.id) }}" data-api-prefix="{{ request.script_root }}/api" data-status-base="{{ url_for('get_analysis_run', run_id=0)[:-1] }}" {% if latest_run %}data-status-url="{{ url_for('get_analysis_run', run_id=latest_run.id) }}" data-run-status="{{ latest_run.status }}"{% endif %}>
-    <div class="section-title"><div><span class="ai-draft-badge">AI DRAFT · 不能自动定稿</span><h2>AI 验货分析与 QC 审核</h2><p>AI 只判断照片中可见、且能由 PO 佐证的问题。QC 必须审核每条建议并填写受影响样品数量。</p></div><button id="start-ai-analysis" class="button" type="button" {% if required_done < required_total or (latest_run and latest_run.status in ['queued','processing']) %}disabled{% endif %}>{{ '重新开始 AI 分析' if latest_run and latest_run.status in ['completed','failed'] else '开始 AI 验货分析' }}</button></div>
-    <div id="analysis-message" class="analysis-message {% if latest_run %}{{ latest_run.status }}{% endif %}">
+    <div class="section-title"><div><span class="ai-draft-badge">AI DRAFT · 不能自动定稿</span><h2>AI 验货分析与 QC 审核</h2><p>AI 只判断照片中可见、且能由 PO 佐证的问题。QC 必须审核每条建议并填写受影响样品数量。</p></div><button id="start-ai-analysis" class="button" type="button" {% if required_done < required_total or (latest_run and latest_run.status in ['queued','processing','retrying']) %}disabled{% endif %}>{{ '重新开始 AI 分析' if latest_run and latest_run.status in ['completed','failed'] else '开始 AI 验货分析' }}</button></div>
+    <div id="analysis-message" class="analysis-message {% if latest_run %}{{ latest_run.status }}{% endif %}" role="status" aria-live="polite">
       {% if not latest_run %}<strong>尚未运行</strong><span>必拍照片上传齐全后，由 QC 手动启动。</span>
+      {% elif latest_run.status=='retrying' %}<span class="spinner"></span><div><strong>等待重试</strong><span>本次分析暂未完成，系统将自动重试。请勿重复启动，完成后页面会自动刷新。</span></div>
       {% elif latest_run.status in ['queued','processing'] %}<span class="spinner"></span><div><strong>AI 正在分析照片</strong><span>识别清晰度、标签、条码、日期码、包装和可见缺陷…</span></div>
       {% elif latest_run.status=='failed' %}<strong>分析失败</strong><span>{{ latest_run.error_message }}</span>
       {% else %}<strong>分析已返回草稿</strong><span>{{ latest_run.model }} · {{ latest_run.completed_at.strftime('%Y-%m-%d %H:%M') if latest_run.completed_at else '' }} · Request {{ latest_run.request_id }}</span>{% endif %}

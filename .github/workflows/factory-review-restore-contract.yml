@@ -64,6 +64,8 @@ jobs:
                   ;;
                 apps/船务部/VoyagePlex船务协同系统/components/app-shell.tsx|apps/船务部/VoyagePlex船务协同系统/server/VoyagePlex.Api/Program.cs)
                   ;;
+                apps/QA部/QC成品报告系统/ai_service.py)
+                  ;;
                 *)
                   echo "Unexpected branch-only blob larger than 50000 bytes: ${path:-<unknown>} ($size bytes)" >&2
                   exit 1

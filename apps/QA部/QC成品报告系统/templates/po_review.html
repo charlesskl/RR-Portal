@@ -8,8 +8,8 @@
   </header>
   <div class="progress-steps"><span class="step done"><i>✓</i>上传 PO</span><b class="step-line"></b><span class="step active"><i>2</i>校对货号</span><b class="step-line"></b><span class="step"><i>3</i>拍照与测试</span><b class="step-line"></b><span class="step"><i>4</i>AI 草稿</span><b class="step-line"></b><span class="step"><i>5</i>签字出报告</span></div>
 
-  {% if po_import.status in ['queued','processing'] %}
-  <section class="card processing-card" data-import-status="{{ po_import.status }}" data-status-url="{{ url_for('api_get_po_import', import_id=po_import.id) }}"><span class="spinner"></span><div><h2>正在读取 PO…</h2><p>正在识别页面、单元格和货号。页面会在提取完成后自动刷新。</p></div></section>
+  {% if po_import.status in ['queued','processing','retrying'] %}
+  <section class="card processing-card" data-import-status="{{ po_import.status }}" data-status-url="{{ url_for('api_get_po_import', import_id=po_import.id) }}" role="status" aria-live="polite"><span class="spinner"></span><div><h2>{{ '等待重试…' if po_import.status == 'retrying' else '正在读取 PO…' }}</h2><p>{{ '本次读取暂未完成，系统将自动重试。请勿重复上传，完成后页面会自动刷新。' if po_import.status == 'retrying' else '正在识别页面、单元格和货号。页面会在提取完成后自动刷新。' }}</p></div></section>
   {% elif po_import.status == 'failed' %}
   <section class="card error-panel"><h2>提取失败</h2><p>{{ po_import.error_message }}</p><a class="button" href="{{ url_for('new_report') }}">重新上传</a></section>
   {% elif not items %}
@@ -43,6 +43,6 @@
 {% block scripts %}
 <script>
 const processing=document.querySelector('[data-import-status]');
-if(processing){const poll=async()=>{try{const response=await fetch(processing.dataset.statusUrl);const data=await response.json();if(!['queued','processing'].includes(data.status)){location.reload();return;}}catch(e){}setTimeout(poll,1600)};setTimeout(poll,1000)}
+if(processing){const poll=async()=>{try{const response=await fetch(processing.dataset.statusUrl);const data=await response.json();if(!['queued','processing','retrying'].includes(data.status)){location.reload();return;}processing.dataset.importStatus=data.status;processing.querySelector('h2').textContent=data.status==='retrying'?'等待重试…':'正在读取 PO…';processing.querySelector('p').textContent=data.status==='retrying'?'本次读取暂未完成，系统将自动重试。请勿重复上传，完成后页面会自动刷新。':'正在识别页面、单元格和货号。页面会在提取完成后自动刷新。';}catch(e){}setTimeout(poll,1600)};setTimeout(poll,1000)}
 </script>
 {% endblock %}

@@ -1,0 +1,33 @@
+{
+  "backupDisposition": "CHECKED_BACKUP_ONLY",
+  "backupDraftSha256": "4189c1e58f9cac7dfba76693c1a132ab78b93ade9027aa95eb45454b697413d9",
+  "backupGateFrozenFalse": true,
+  "base": "67385924fc40958701843411b3731d2eeb90b2ad",
+  "baseTree": "f0a724fb72b06e9cea3dc5aa1baa8bed629f127d",
+  "dependencies": {
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "internal-quote-readonly-library.py": "be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1"
+  },
+  "independentBackupTests": {
+    "passed": 6,
+    "total": 6,
+    "script": "work/test-pr982-backup-independent.py",
+    "scriptSha256": "35841bd07c2efd67ff1837205a5f1a6817cd7f967de48c5dc592b2280d00cce6"
+  },
+  "readOnlyScope": "Only generic PostgreSQL exported repeatable-read snapshot, same-snapshot pg_dump, independently bracketed sequences, pg_restore --list, portable read-only WAL-aware legacy SQLite snapshots, private complete file/owner inventory, metadata/source/runtime checks. No login, business HTTP, container signal, environment update, database restore or sequence reset.",
+  "schemaProofScope": [
+    "columns",
+    "constraints",
+    "sequence definitions and ownership",
+    "views/functions/triggers/enums",
+    "indexes"
+  ],
+  "permissionProofScope": "All actual business users/roles/password hashes/factory/customer/menu authorization rows are included in typed PostgreSQL table fingerprints; no claim that every possible PostgreSQL catalog ACL/RLS attribute is enumerated.",
+  "privateEvidence": "New mode0700 archive and umask077, private env/inspect/stderr/tracebacks/DB dump/file bytes; public receipt limited to booleans, counts, fixed SHAs and safe failure stage/type.",
+  "findings": [],
+  "releaseDisposition": "PENDING_FULL_CONTROLLER_AND_FAULT_REVIEW",
+  "productionOperationsPerformed": false,
+  "gitOperationsPerformed": false
+}

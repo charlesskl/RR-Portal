@@ -4,7 +4,7 @@ environment, queue contents and business data must remain byte/typed identical.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,time,traceback,urllib.parse,urllib.request
 ROOT=pathlib.Path('/opt/rr-portal');BASE='b4c3763fe43e30c80c041c70e7a9f0750145d7b0';TARGET='9b890cc016da403f929f8a7aaeddb878d3de24c5';TREE='e322834bbbd43082854d8c564192c3ca1e097534'
-BRANCH='refs/heads/ops/batch-977-978-979-20261021';PREPARE_PIN=False;DEPLOY_PIN=False;VERIFY_PIN=False
+BRANCH='refs/heads/ops/batch-977-978-979-20261021';PREPARE_PIN=True;DEPLOY_PIN=False;VERIFY_PIN=False
 CORE_SHA='bc35ae39aff4a54681e242928c729f15393ab8d778ffda0df1b581a5c1f02d9a';HOST_SHA='bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1';SOURCE_MANIFEST_SHA='5a8d788ec323972c7f690e7e2823b186280d3017033302f6984fa16aa35b38ae'
 BACKUP_MANIFEST='53ca11e474b8691a4e0ba6645938f64d5179b03693cb7fdff1f62fd1d720c4a3';BACKUP_RESULT='d994105360343894922ed3052dac1dd5bf2cd942206f02c5644813003b048802';PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 BACKUP=ROOT/'deploy/backups/batch-977-978-979-20261021-backup';PREPARE=BACKUP.with_name('batch-977-978-979-20261021-prepare');DEPLOY=BACKUP.with_name('batch-977-978-979-20261021-deploy');VERIFY=BACKUP.with_name('batch-977-978-979-20261021-verify')

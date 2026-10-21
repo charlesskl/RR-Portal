@@ -1,0 +1,83 @@
+{
+  "backupDisposition": "CHECKED_BACKUP_ONLY",
+  "backupDraftSha256": "4189c1e58f9cac7dfba76693c1a132ab78b93ade9027aa95eb45454b697413d9",
+  "backupGateFrozenFalse": true,
+  "base": "67385924fc40958701843411b3731d2eeb90b2ad",
+  "baseTree": "f0a724fb72b06e9cea3dc5aa1baa8bed629f127d",
+  "dependencies": {
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "internal-quote-readonly-library.py": "be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1"
+  },
+  "independentBackupTests": {
+    "passed": 6,
+    "total": 6,
+    "script": "work/test-pr982-backup-independent.py",
+    "scriptSha256": "35841bd07c2efd67ff1837205a5f1a6817cd7f967de48c5dc592b2280d00cce6"
+  },
+  "readOnlyScope": "Only generic PostgreSQL exported repeatable-read snapshot, same-snapshot pg_dump, independently bracketed sequences, pg_restore --list, portable read-only WAL-aware legacy SQLite snapshots, private complete file/owner inventory, metadata/source/runtime checks. No login, business HTTP, container signal, environment update, database restore or sequence reset.",
+  "schemaProofScope": [
+    "columns",
+    "constraints",
+    "sequence definitions and ownership",
+    "views/functions/triggers/enums",
+    "indexes"
+  ],
+  "permissionProofScope": "All actual business users/roles/password hashes/factory/customer/menu authorization rows are included in typed PostgreSQL table fingerprints; no claim that every possible PostgreSQL catalog ACL/RLS attribute is enumerated.",
+  "privateEvidence": "New mode0700 archive and umask077, private env/inspect/stderr/tracebacks/DB dump/file bytes; public receipt limited to booleans, counts, fixed SHAs and safe failure stage/type.",
+  "findings": [],
+  "releaseDisposition": "CHECKED_RELEASE_PHASES",
+  "productionOperationsPerformed": false,
+  "gitOperationsPerformed": false,
+  "releaseDraftSha256": "ba654928ece6bb2b8769b7414aebb9e79d513051621f3fe5d4df14e4fa9e96e6",
+  "independentControllerTests": {
+    "passed": 8,
+    "total": 8,
+    "script": "work/test-pr982-controller-independent.py",
+    "scriptSha256": "af3b11680e41ccd9185e2b48613513bdb8e0049ecb736343bd2b34b75d9de289"
+  },
+  "authorRegressionReexecuted": {
+    "passed": 16,
+    "total": 16,
+    "script": "work/test-pr982-release-local.py",
+    "scriptSha256": "74215b152b21a9dc87560dd257c97ebd896dc09de5ec6e1cc03db265b6d4a943"
+  },
+  "fixedFindingsRechecked": [
+    "Fetch exact TARGET object before target tree/blob guards",
+    "Complete Config.Image fixed immutable reference, original-ID restart keeps original reference",
+    "Recovery-only missing-target inventory still requires exact all-other-container contracts and original healthy DB",
+    "Fresh startup safety before either original-ID restart or old-image recreation prevents bootstrap logical writes after unsafe guard refusal"
+  ],
+  "controllerFaultCoverage": [
+    "Stop CLI throws after stop actually took effect: restart only original ID",
+    "Closed startup unsafe: never restart old and retain own maintenance",
+    "Rollback startup late unsafe after public failure: never recreate old",
+    "Business changes after reopening: retain all data, do not rollback/restore",
+    "Foreign container change: block restoration",
+    "Compose removes old then fails to create candidate: safe old immutable image recovery without requiring existing target",
+    "Recovery inventory missing target still enforces healthy DB, no duplicate target and exact other HostConfig/network/config hashes",
+    "Other sequence or wrong known sequence delta: reject"
+  ],
+  "releaseScope": "Only internal-quote immutable candidate build/recreate/rollback and own maintenance flag. Actual full environment, PID1 environment, Config/HostConfig/Mounts preserved except explicitly pinned image/automatic hostname/source Compose labels. All other 45 container runtime contracts exact when 46 total. No environment-file mutation, database restore or sequence reset.",
+  "dataContract": "Fresh stopped-writer pre-start and post-start snapshots before reopening; exact supported PG schema metadata and every table fingerprint, legacy SQLite logical snapshots plus raw original files, uploads and owners. Only unchanged sequence state or exact existing quote_sections_id_seq one-startup conflict consumption with unchanged definition/called/cache and quotes*departments delta.",
+  "activationConditions": [
+    "Only mechanical exact phase gate/TARGET/TREE/9-file-manifest and successful matching prior receipt SHA pins may differ from reviewed draft",
+    "Actual merged main must match reviewed base-to-target nine frontend/test paths and predicted merge tree; no backend/compose/startup or factory changes",
+    "Use fresh private phase archives, exact pinned dependencies and deploy-cloud concurrency; disable ordinary all-site deploy around merge/scoped release and restore in finally",
+    "Do not adopt #985 or enable factory AI in this PR982 release",
+    "Keep startup safety checks and closed-data comparisons as blockers; do not broaden sequence/data exceptions if live evidence differs"
+  ],
+  "limitations": [
+    "Local synthetic Docker/Postgres fault models and one real SQLite WAL regression, no real PostgreSQL or production operations by independent reviewer",
+    "Schema catalog comparison is limited to explicitly enumerated generic helper properties; business account/role/authorization rows are all protected",
+    "Later live data observations can include user activity and must not be automatically attributed or overwritten"
+  ],
+  "releaseGatesFrozenFalse": true,
+  "allowedReleasePhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "actualPinReview": "Actual phase/TARGET/TREE/nine-file source manifest/prior receipt seals/activated helper SHA must still receive root independent plan review before apply. This metadata covers the reviewed false-gated source for the three phases only, and does not expand scope or authorize unreviewed code changes."
+}

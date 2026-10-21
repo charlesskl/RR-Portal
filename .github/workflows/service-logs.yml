@@ -2,7 +2,7 @@ name: PR 982 Internal Quote Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [prepare]}
+      mode: {type: choice, required: true, options: [deploy]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'eb733bce8e850f76f3a1a8a627e179433d5ea93dbf51d52ee11ce600c5a711b4'
+  SCOPED_RELEASE_HELPER_SHA256: '8c8374c9da5c2aac4c78313ee6f2e1e3d5950f4695938fb8685556fc2e4dd0a7'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-982-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-982-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed internal quote prepare
+      - name: Run only reviewed internal quote deploy
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,7 +48,7 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-982-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-982-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-982-20261021:refs/remotes/origin/ops/pr-982-20261021 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-982-20261021)" = "$RELEASE_SHA" ]] || exit 1
@@ -56,7 +56,7 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/pr982-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr982-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = eb733bce8e850f76f3a1a8a627e179433d5ea93dbf51d52ee11ce600c5a711b4 ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 8c8374c9da5c2aac4c78313ee6f2e1e3d5950f4695938fb8685556fc2e4dd0a7 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-host-config-library.py" > "$scoped_release_tmp/batch-host-config-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/batch-host-config-library.py" | cut -d ' ' -f1)" = bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/internal-quote-readonly-library.py" > "$scoped_release_tmp/internal-quote-readonly-library.py" 2>/dev/null || exit 1
@@ -65,8 +65,8 @@ jobs:
             [[ "$(sha256sum "$scoped_release_tmp/pr982-backup-library.py" | cut -d ' ' -f1)" = 4189c1e58f9cac7dfba76693c1a132ab78b93ade9027aa95eb45454b697413d9 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr982-reviewed-files.json" > "$scoped_release_tmp/pr982-reviewed-files.json" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/pr982-reviewed-files.json" | cut -d ' ' -f1)" = 52358df007164964c40e7d3938a1ff2e8e1362f068ae67652e564cbfe7c93484 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr982-source-review-prepare.json" > "$scoped_release_tmp/pr982-source-review-prepare.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr982-source-review-prepare.json" | cut -d ' ' -f1)" = c785e2ad0e3ca79c631fded47518f8c648ac73afe01da068a667b9af5b64f8bc ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr982-source-review-deploy.json" > "$scoped_release_tmp/pr982-source-review-deploy.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr982-source-review-deploy.json" | cut -d ' ' -f1)" = c785e2ad0e3ca79c631fded47518f8c648ac73afe01da068a667b9af5b64f8bc ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1

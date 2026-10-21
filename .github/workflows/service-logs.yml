@@ -1,4 +1,4 @@
-name: VoyagePlex Xingxin Read Only NO Detail Evidence
+name: VoyagePlex Xingxin Current Recovery and Read Only Sections Evidence
 on:
   workflow_dispatch:
 permissions:
@@ -8,8 +8,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  READONLY_WORKFLOW_PIN: 'true'
-  READONLY_HELPER_SHA256: '6ac09584327090df7bfbaabe5744f5182bc200cecf127fbe2b39264cb88ece24'
+  READONLY_WORKFLOW_PIN: 'false'
+  READONLY_HELPER_SHA256: 'a1e0a2bfa3aa346ae311b27e7c52f1e13d8f16fc8c3bbd7d9b2d5e1b9547757d'
 jobs:
   observe:
     runs-on: ubuntu-latest
@@ -27,7 +27,7 @@ jobs:
           [[ "$READONLY_WORKFLOW_PIN" = true && "$READONLY_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/ops/voyageplex-size-fix-20261020 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Collect sealed evidence cursor and one bounded NO detail read
+      - name: Check current recovery and conditionally read only the original UID sections
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -51,10 +51,10 @@ jobs:
             umask 077
             xingxin_probe_tmp=$(mktemp -d /tmp/voyageplex-xingxin-readonly.XXXXXX)
             trap 'rm -rf "$xingxin_probe_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-xingxin-no-detail-host.py" > "$xingxin_probe_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-xingxin-sections-host-20261021.py" > "$xingxin_probe_tmp/run.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$xingxin_probe_tmp/run.py" | cut -d ' ' -f1)" = "$READONLY_HELPER_SHA256" ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/voyageplex-mail-readonly-20261020-03.py" > "$xingxin_probe_tmp/mail-observation-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$xingxin_probe_tmp/mail-observation-library.py" | cut -d ' ' -f1)" = 2c5675ab534d1fcac5f28698e5418daf3ca0366b549c0c9b78fb58d95e95d4c0 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/voyageplex-xingxin-no-detail-child.py" > "$xingxin_probe_tmp/voyageplex-xingxin-no-detail-child.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$xingxin_probe_tmp/voyageplex-xingxin-no-detail-child.py" | cut -d ' ' -f1)" = 8ecea9aa9ba48eedacfe79fde5680fac659afc6cf086328e897cf702aed910ac ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/voyageplex-xingxin-sections-child-20261021.py" > "$xingxin_probe_tmp/voyageplex-xingxin-sections-child-20261021.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$xingxin_probe_tmp/voyageplex-xingxin-sections-child-20261021.py" | cut -d ' ' -f1)" = 7000c2e3c5915a3703badfad409ced45d7f64596fd2071fac9f6103ead5964e2 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 8m python3 -B "$xingxin_probe_tmp/run.py" observe

@@ -1,0 +1,34 @@
+{
+  "draftSHA256": "e507b152e02a3b45f5076d0489d5df0edf2627a4a6cf33fcdca16cf802a5afc5",
+  "activeSHA256": "c4cda2db80f4c6de9a6a9f6c052f92bcf67087438453c2946226392433faffb9",
+  "workflowSHA256": "bd7412c13bd54a57b776d6edee19c393d249199bb870712f7811d7b3f5558336",
+  "opsParent": "a65b4cc52c7be3efb64c1fc209b39f2b33a18bf4",
+  "branch": "ops/batch-983-984-987-20261021",
+  "mode": "diagnose",
+  "readOnly": true,
+  "archiveManifestSHA256": "9909d235d8ae98b0bc714e1c10139ca139754cc882abeff3eb6b66620176c0c2",
+  "archiveResultSHA256": "9427ff59145f513b79f24a3b95893d9e27641a6a0958f332b1a05fb2c8347006",
+  "diagnosticAttempt": 4,
+  "status": "CHECKED",
+  "independent": true,
+  "reviewer": "/root independent of diagnose4 author pr987_review",
+  "checks": [
+    "Exact sole suffix-filter removal; all private SQLite snapshot filenames retained, no bytes/rows output.",
+    "Original fixed sealed archive, trace redaction, ASCII path guards and False gate preserved.",
+    "Active only PIN True; workflow exactly fixed reviewed generator, scoped SSH fingerprint/commit/attempt1."
+  ],
+  "files": {
+    "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose4.py": {
+      "sha256": "e507b152e02a3b45f5076d0489d5df0edf2627a4a6cf33fcdca16cf802a5afc5"
+    },
+    "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose4-active.py": {
+      "sha256": "c4cda2db80f4c6de9a6a9f6c052f92bcf67087438453c2946226392433faffb9"
+    },
+    "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose4-workflow.yml": {
+      "sha256": "bd7412c13bd54a57b776d6edee19c393d249199bb870712f7811d7b3f5558336"
+    },
+    "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose4-plan.json": {
+      "sha256": "19ab5960cf467026b6aa27f39d0e9d9d704f20c05c985ade08fd5c178ae6277a"
+    }
+  }
+}

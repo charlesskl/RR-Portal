@@ -4,7 +4,7 @@ maintenance operation, container signal, checkout, migration or business write.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,json,os,pathlib,re,shutil,signal,stat,subprocess,sys,traceback
 ROOT=pathlib.Path('/opt/rr-portal');BASE='dfcdf751cae42fdd1731729dd662fce041c28caf'
-BRANCH='refs/heads/ops/batch-975-976-20261021';BACKUP_PIN=False
+BRANCH='refs/heads/ops/batch-975-976-20261021';BACKUP_PIN=True
 OUT=ROOT/'deploy/backups/batch-975-976-20261021-backup-02'
 FACTORY='apps/PMC跟仓管/加工厂月度评审管理制度';QC='apps/QA部/QC成品报告系统'
 SERVICES=('factory-review','factory-review-test','qc-report','qc-report-worker')

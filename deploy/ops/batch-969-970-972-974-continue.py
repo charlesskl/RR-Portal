@@ -1,11 +1,11 @@
 """Only Indo/Quote immutable continuation and sealed all-four verification. Default false."""
 import copy,hashlib,importlib.util,json,os,pathlib,re,signal,sys,time,traceback
-ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';CONTINUE_PIN=True;VERIFY_PIN=False
+ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';CONTINUE_PIN=False;VERIFY_PIN=True
 TARGET='dfcdf751cae42fdd1731729dd662fce041c28caf';TREE='d5a107e898fe35066416fa0431ccd92400467875'
 RELEASE_SHA='2db18fac4f09a6dc4ae64c07fc248e9cd575ed5e06eebabc77de58e1584254e7';HOST_SHA='bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1'
 FAILED=ROOT/'deploy/backups/batch-969-970-972-974-20261021-deploy-03';FAILED_MANIFEST='964efbf2e6f32bdd7355c00db59a8cd7d06e58c523fef31f4aa72ec2dfadd109';FAILED_RESULT='d280456999159e3dc7482fc8fdc4878deb63e11fd566e9e2c39f279689b4a98e'
 RESTORED=ROOT/'deploy/backups/batch-969-970-972-974-20261021-toy-restore-01';RESTORED_MANIFEST='931e6d491d7533226c8bfbcade43ea873bcfe47900c45e193c5ee91f75a35461';RESTORED_RESULT='cf2e68e76cf3a8d99c232edd178e8fe982f37ab414ad707fb567353282619b8b'
-CONTINUED=ROOT/'deploy/backups/batch-969-970-972-974-20261021-continue-01';CONTINUED_MANIFEST='';CONTINUED_RESULT=''
+CONTINUED=ROOT/'deploy/backups/batch-969-970-972-974-20261021-continue-01';CONTINUED_MANIFEST='ba7fb928889f3f9ec57c5d08641a6449cd26b817ffecc9c3a28f00b758c56fdd';CONTINUED_RESULT='b15713cfb33f833da44d7017ae421da35ff98ed6c08b1c10da0ae3c818490113'
 VERIFIED=ROOT/'deploy/backups/batch-969-970-972-974-20261021-verify-01';REMAINING=('indo-shipping','internal-quote');COMPLETED=('qc-report','toyqms')
 R=None;H=None;OUT=None;STAGE='entrypoint';ORIGINAL_CONFIGURATION_PRESERVED=None;LOCAL_FAILED_CHECK=None
 

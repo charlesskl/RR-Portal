@@ -1,0 +1,10 @@
+{
+  "apps/PMC跟仓管/加工厂月度评审管理制度/src/stores/factories.ts": "8bb736878354d9c7b674ffb8204766175cfe3b168be3a0271c0a25b78ccf8e61",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/src/stores/output.ts": "bd5480991def89731014195ef91e2f5839944ebfb04fd326d9fe7d5630c25652",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/src/utils/outputPeriod.ts": "baeaf36307ee3513c24c2821cd4d928cb17f4d8a64707e894afee926cbf460e8",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/src/views/MonthlyOutputView.vue": "eae7e83f8a412dce81905f60dfd64b44251972f1fe8377534176c2951df25298",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/tests/MonthlyOutputView.spec.ts": "2c16abeec0d433abe22002e1fb906c1481dcfc5b28d245e0463a6e1493082c2f",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/tests/outputPeriod.spec.ts": "b49ead36852ca5f903da0ac371321cf9419b15965b58dc2835a25aef7e2a4487",
+  "apps/QA部/QC成品报告系统/tests/test_ai_service.py": "e09d53ad82e39bcc79f97e35080f593a3f5cfe2c4cf726eb03e5e0b3b14e8a90",
+  "docker-compose.cloud.yml": "6bd91d6714989ea57bd094091df8fcf37334d7cce90da1c2c8a1e140ad8370dc"
+}

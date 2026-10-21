@@ -6,10 +6,9 @@
    做两件事：
      1【开机预加载】app.js 的 init 之前，同步拉取后端全量数据写入 localStorage，
         使 initData / initUsers / initDefectLib 直接读到服务器数据（多浏览器共享）。
-     2【写穿透】劫持 persist / _saveUsers / _saveDefectLib 三个写入咽喉，
-        本地写完后把全量推回后端落库。
+     2【数据同步】记录、名单及不良库写入后排队同步；账号操作等服务器确认。
 
-   后端不可用时自动回退到本地 localStorage，离线也能用（只是不共享）。
+   服务器会话决定登录及权限；本地缓存不能建立会话。写入失败保留本地草稿并明确提示。
 ══════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -45,7 +44,104 @@
   })();
 
   window.__QC_BACKEND_OK = false;
+  window.__QC_AUTH = null;
   window.__QC_LAST_SYNC = null;
+  var failedWrites = Object.create(null);
+
+  function publicUser(user) {
+    var copy = Object.assign({}, user);
+    delete copy.password;
+    delete copy.newPassword;
+    return copy;
+  }
+  function notice(message, error) {
+    window.__QC_SYNC_NOTICE = message;
+    if (typeof window.showToast === 'function') window.showToast(message, error ? 'error' : 'info');
+    var banner = document.getElementById('qcSyncNotice');
+    if (!banner && document.body && document.createElement) {
+      banner = document.createElement('div');
+      banner.id = 'qcSyncNotice';
+      banner.setAttribute('role', 'status');
+      banner.setAttribute('aria-live', 'polite');
+      banner.style.cssText = 'position:fixed;bottom:12px;left:12px;right:12px;z-index:99990;padding:12px 16px;border-radius:8px;background:var(--bg-card,#fff);color:var(--text-hi,#18212f);border:1px solid var(--border,#b7c0cc);font:14px/1.5 sans-serif;';
+      document.body.appendChild(banner);
+    }
+    if (banner) {
+      banner.textContent = message;
+      banner.style.display = message ? '' : 'none';
+      var hasRecordFailure = Object.keys(failedWrites).some(function (url) { return url.indexOf('/api/records') !== -1; });
+      if (error && hasRecordFailure && document.createElement) {
+        var retry = document.createElement('button');
+        retry.type = 'button'; retry.textContent = '重试同步'; retry.className = 'btn-primary'; retry.style.marginLeft = '12px';
+        retry.onclick = function () { window.__QC_SYNC_NOW(); };
+        banner.appendChild(retry);
+      }
+    }
+  }
+  function clearAuth(message) {
+    window.__QC_AUTH = null;
+    window.__QC_BACKEND_OK = false;
+    notice('', false);
+    try { localStorage.removeItem(PREFIX + 'session'); localStorage.removeItem('xingxin_qms_switch_ticket'); } catch (_) {}
+    window.__QC_AUTH_NOTICE = message || '请使用当前公司的品质账号登录';
+    if (typeof window._showLogin === 'function') window._showLogin();
+  }
+  function acceptAuth(data) {
+    if (!data || !data.user || typeof data.user.username !== 'string' || data.user.enabled !== true ||
+        !Array.isArray(data.companies) || data.companies.indexOf(COMPANY) === -1 ||
+        typeof data.csrfToken !== 'string' || !data.csrfToken) throw new Error('服务器会话无效，请重新登录');
+    window.__QC_AUTH = { user: publicUser(data.user), companies: data.companies.slice(), csrfToken: data.csrfToken, company: COMPANY };
+    window.__QC_BACKEND_OK = true;
+    window.__QC_AUTH_NOTICE = '';
+    try { localStorage.removeItem(PREFIX + 'session'); } catch (_) {}
+    return window.__QC_AUTH;
+  }
+  function apiUrl(path) {
+    return API_BASE + path + (path.indexOf('?') === -1 ? '?' : '&') + 'company=' + encodeURIComponent(COMPANY);
+  }
+  window.__QC_ACCEPT_AUTH = acceptAuth;
+  window.__QC_CLEAR_AUTH = clearAuth;
+  window.__QC_API_URL = apiUrl;
+  window.__QC_REQUEST = function (path, options) {
+    options = Object.assign({}, options || {});
+    options.credentials = 'same-origin';
+    options.cache = 'no-store';
+    options.headers = Object.assign({}, options.headers || {});
+    if (window.__QC_AUTH) options.headers['X-QC-CSRF'] = window.__QC_AUTH.csrfToken;
+    if (options.method && !/^(GET|HEAD)$/i.test(options.method)) {
+      if (!window.__QC_AUTH) return Promise.reject(new Error('请先登录当前公司'));
+      options.headers['X-QC-CSRF'] = window.__QC_AUTH.csrfToken;
+    }
+    var requestAuth = window.__QC_AUTH;
+    return fetch(apiUrl(path), options).then(function (res) {
+      if (window.__QC_AUTH === requestAuth && (res.status === 401 || res.status === 403)) clearAuth(res.status === 401 ? '登录已失效，请重新登录' : '当前账号无权限，请重新登录或联系管理员');
+      return res;
+    });
+  };
+  window.__QC_REFRESH_SESSION = function () {
+    var requestAuth = window.__QC_AUTH;
+    return window.__QC_REQUEST('/api/session').then(function (res) {
+      if (!res.ok) throw new Error('会话验证失败');
+      return res.json();
+    }).then(function (data) { return window.__QC_AUTH === requestAuth ? acceptAuth(data) : window.__QC_AUTH; })
+      .catch(function (err) { if (window.__QC_AUTH === requestAuth) clearAuth(err.message); throw err; });
+  };
+  window.__QC_LOGIN = function (username, password) {
+    return fetch(apiUrl('/api/login'), { method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: username, password: password })
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        if (!res.ok) throw new Error(data.error || (res.status === 429 ? '登录尝试过多，请稍后重试' : '用户名或密码错误'));
+        acceptAuth(data);
+        if (!syncBootstrap()) throw new Error('登录后数据加载失败，请重试登录');
+        return window.__QC_AUTH;
+      });
+    }).catch(function (err) { clearAuth(); throw err; });
+  };
+  window.__QC_LOGOUT = function () {
+    return window.__QC_REQUEST('/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function (res) { if (!res.ok && res.status !== 401) throw new Error('退出失败，请重试'); clearAuth('已退出，请使用品质账号登录'); });
+  };
 
   /* 待删除记录 id 队列：app.js 删除记录时标记，下次推送时带给服务端按 id 删除。
      （服务端已改为按 id 合并写入，不再全量替换，删除必须显式告知） */
@@ -53,6 +149,48 @@
   var deleteRevisions = Object.create(null);
   var nextDeleteRevision = 0;
   var recordPushQueue = Promise.resolve();
+  var recordRevision = 0;
+  var recordToken = null;
+  function newRecordToken() { return window.crypto && typeof window.crypto.randomUUID === 'function' ? window.crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2); }
+  var recordQueueEpoch = 0;
+  var draftOwner = null;
+  function draftKey(owner) { return PREFIX + 'pending_records_' + encodeURIComponent(owner); }
+  function saveRecordDraft(owner) {
+    if (!owner || !window.__QC_AUTH || window.__QC_AUTH.user.username !== owner) return false;
+    try {
+      localStorage.setItem(draftKey(owner), JSON.stringify({ owner: owner, company: COMPANY, revision: recordRevision, token: recordToken,
+        state: JSON.parse(localStorage.getItem(KEY.records) || '{}'), deletedIds: window.__QC_PENDING_DELETES,
+        deleteRevisions: deleteRevisions, nextDeleteRevision: nextDeleteRevision, replacement: window.__QC_FORCE_REPLACE || false }));
+      return true;
+    } catch (_) { notice('本地草稿备份失败，请保留此页面并检查浏览器存储空间。', true); return false; }
+  }
+  function restoreRecordDraft() {
+    recordQueueEpoch++;
+    var owner = window.__QC_AUTH.user.username;
+    var changedOwner = draftOwner !== owner;
+    draftOwner = owner;
+    if (changedOwner) { failedWrites = Object.create(null); notice('', false); }
+    window.__QC_PENDING_DELETES = []; deleteRevisions = Object.create(null); nextDeleteRevision = 0;
+    window.__QC_FORCE_REPLACE = false; recordRevision = 0; recordToken = null;
+    try {
+      var draft = JSON.parse(localStorage.getItem(draftKey(owner)) || 'null');
+      if (!draft || draft.owner !== owner || draft.company !== COMPANY || !draft.state || !Array.isArray(draft.state.records)) return;
+      recordToken = typeof draft.token === 'string' ? draft.token : newRecordToken();
+      recordRevision = Number.isSafeInteger(draft.revision) && draft.revision > 0 ? draft.revision : 1;
+      nextDeleteRevision = Number.isSafeInteger(draft.nextDeleteRevision) ? draft.nextDeleteRevision : 0;
+      (Array.isArray(draft.deletedIds) ? draft.deletedIds : []).forEach(function (id) {
+        if (!Number.isSafeInteger(id) || id <= 0) return;
+        window.__QC_PENDING_DELETES.push(id);
+        var rev = draft.deleteRevisions && draft.deleteRevisions[id];
+        deleteRevisions[id] = Number.isSafeInteger(rev) ? rev : ++nextDeleteRevision;
+        nextDeleteRevision = Math.max(nextDeleteRevision, deleteRevisions[id]);
+      });
+      window.__QC_FORCE_REPLACE = draft.replacement || false;
+      localStorage.setItem(KEY.records, JSON.stringify(draft.state));
+      failedWrites[apiUrl('/api/records')] = true;
+      notice('当前账号有未同步的本地验货草稿，已保留。请核对后点击“重试同步”，系统不会自动重发。', true);
+    } catch (_) { notice('本地草稿读取失败，请保留浏览器数据并联系管理员。', true); }
+  }
   window.__QC_MARK_DELETED = function (ids) {
     if (!Array.isArray(ids)) return;
     for (var i = 0; i < ids.length; i++) {
@@ -67,78 +205,96 @@
   function syncBootstrap() {
     try {
       var xhr = new XMLHttpRequest();
-      xhr.open('GET', API_BASE + '/api/bootstrap?company=' + COMPANY, false); // 同步请求
+      xhr.open('GET', apiUrl('/api/bootstrap'), false);
       xhr.send(null);
-      if (xhr.status !== 200) throw new Error('HTTP ' + xhr.status);
+      if (xhr.status !== 200) throw new Error(xhr.status === 401 ? '请使用当前公司的品质账号登录' : '数据加载失败，请重新登录');
       var data = JSON.parse(xhr.responseText);
-
-      // records → app.js 的 state 形态 { records, nextId }
-      localStorage.setItem(KEY.records, JSON.stringify({
-        records: Array.isArray(data.records) ? data.records : [],
-        nextId:  data.nextId || 31,
-      }));
-      if (Array.isArray(data.users))     localStorage.setItem(KEY.users,     JSON.stringify(data.users));
+      acceptAuth(data);
+      if (!Array.isArray(data.records)) throw new Error('服务器数据格式不正确');
+      localStorage.setItem(KEY.records, JSON.stringify({ records: data.records, nextId: data.nextId || 31 }));
+      localStorage.setItem(KEY.users, JSON.stringify(Array.isArray(data.users) ? data.users.map(publicUser) : []));
       if (Array.isArray(data.defectLib)) localStorage.setItem(KEY.defectLib, JSON.stringify(data.defectLib));
-      if (Array.isArray(data.partners))  localStorage.setItem(KEY.partners,  JSON.stringify(data.partners));
-
-      window.__QC_BACKEND_OK = true;
-      console.log('[QC后端] 预加载成功：公司', COMPANY, '记录', (data.records || []).length,
-        '账号', (data.users || []).length, '不良库', (data.defectLib || []).length);
+      if (Array.isArray(data.partners)) localStorage.setItem(KEY.partners, JSON.stringify(data.partners));
+      restoreRecordDraft();
+      return true;
     } catch (e) {
-      window.__QC_BACKEND_OK = false;
-      console.warn('[QC后端] 预加载失败，回退本地缓存（离线模式）：', e.message);
+      clearAuth(e.message);
+      console.warn('[QC后端] 会话数据未加载:', e.message);
+      return false;
     }
   }
+  window.__QC_BOOTSTRAP = syncBootstrap;
 
   /* ── 写穿透：把本地写入推回后端 ── */
   function post(url, body) {
-    if (window.__QC_BACKEND_OK !== true) return Promise.resolve(false); // 后端不可用时不尝试，避免拖慢
-    try {
-      return fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }).then(function (r) {
-        window.__QC_LAST_SYNC = { url: url, ok: r.ok, status: r.status, time: new Date().toISOString() };
-        if (!r.ok) console.warn('[QC后端] 写回非200:', url, r.status);
-        return r.ok;
-      }).catch(function (err) {
-        window.__QC_LAST_SYNC = { url: url, ok: false, error: err && err.message, time: new Date().toISOString() };
-        console.warn('[QC后端] 写回失败:', url, err && err.message);
-        return false;
-      });
-    } catch (e) {
-      window.__QC_LAST_SYNC = { url: url, ok: false, error: e && e.message, time: new Date().toISOString() };
-      console.warn('[QC后端] 写回异常:', url, e && e.message);
-      return Promise.resolve(false);
+    function completed(ok, status, error) {
+      window.__QC_LAST_SYNC = { url: url, ok: ok, status: status, error: error, time: new Date().toISOString() };
+      if (ok) {
+        delete failedWrites[url];
+        if (url.indexOf('/api/records') !== -1) { delete failedWrites[apiUrl('/api/records')]; delete failedWrites[apiUrl('/api/records/replace')]; }
+      } else failedWrites[url] = true;
+      if (Object.keys(failedWrites).length) notice('服务器尚未保存部分修改。请保留此页面，检查连接和权限后重新保存；验货记录可重试同步。', true);
+      else notice('服务器已保存修改', false);
+      return ok;
     }
+    if (!window.__QC_AUTH || window.__QC_BACKEND_OK !== true) return Promise.resolve(completed(false, 401));
+    notice('修改已在本地暂存，正在同步服务器…', false);
+    var requestAuth = window.__QC_AUTH;
+    try {
+      return fetch(url, { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-QC-CSRF': window.__QC_AUTH.csrfToken }, body: JSON.stringify(body)
+      }).then(function (r) {
+        if (window.__QC_AUTH !== requestAuth) return false;
+        if (r.status === 401 || r.status === 403) clearAuth(r.status === 401 ? '登录已失效，请重新登录；未同步修改仍保留在本地' : '保存被拒绝，请联系管理员核对权限；未同步修改仍保留在本地');
+        return completed(r.ok, r.status);
+      }).catch(function () { return window.__QC_AUTH === requestAuth ? completed(false, 0, '网络连接失败') : false; });
+    } catch (_) { return Promise.resolve(completed(false, 0, '网络连接失败')); }
   }
+  window.__QC_SAVE_USERS = function (users) {
+    return pushUsers(users).then(function (ok) {
+      if (!ok) return false;
+      localStorage.setItem(KEY.users, JSON.stringify(users.map(publicUser)));
+      return window.__QC_REFRESH_SESSION().then(function () { return true; }, function () { return true; });
+    });
+  };
 
   function pushRecords() {
-    // Serialize record writes; an earlier replace must finish before a later
-    // ordinary save, and only acknowledge deletion revisions actually sent.
-    recordPushQueue = recordPushQueue.then(sendRecords, sendRecords);
+    var owner = window.__QC_AUTH && window.__QC_AUTH.user.username;
+    if (!owner) return Promise.resolve(false);
+    var epoch = recordQueueEpoch;
+    recordRevision++; recordToken = newRecordToken();
+    if (!saveRecordDraft(owner)) return Promise.resolve(false);
+    // Each queued write is bound to the authenticated actor that created it.
+    recordPushQueue = recordPushQueue.then(function () { return sendRecords(owner, epoch); }, function () { return sendRecords(owner, epoch); });
     return recordPushQueue;
   }
-  function sendRecords() {
+  function sendRecords(owner, epoch) {
+    if (!window.__QC_AUTH || window.__QC_AUTH.user.username !== owner || draftOwner !== owner || epoch !== recordQueueEpoch) return Promise.resolve(false);
     try {
       var st = JSON.parse(localStorage.getItem(KEY.records) || '{}');
+      var sentRevision = recordRevision;
+      var sentToken = recordToken;
+      var sentDeleteRevision = nextDeleteRevision;
       var deleted = window.__QC_PENDING_DELETES.slice();
       var revisions = deleted.map(function (id) { return deleteRevisions[id]; });
-      function acknowledgeDeletes() {
+      var replacement = window.__QC_FORCE_REPLACE;
+      function acknowledge(ok) {
+        // A response from an old actor/session must never clear another actor's draft.
+        if (!ok || !window.__QC_AUTH || window.__QC_AUTH.user.username !== owner || draftOwner !== owner || epoch !== recordQueueEpoch) return ok;
         window.__QC_PENDING_DELETES = window.__QC_PENDING_DELETES.filter(function (id) {
           var index = deleted.indexOf(id);
           return index === -1 || deleteRevisions[id] !== revisions[index];
         });
+        if (replacement && window.__QC_FORCE_REPLACE === replacement) window.__QC_FORCE_REPLACE = false;
+        try {
+          var stored = JSON.parse(localStorage.getItem(draftKey(owner)) || 'null');
+          if (stored && stored.token === sentToken && recordToken === sentToken && stored.revision === sentRevision && recordRevision === sentRevision && nextDeleteRevision === sentDeleteRevision) localStorage.removeItem(draftKey(owner));
+          else if (stored && stored.token === recordToken) saveRecordDraft(owner);
+        } catch (_) { notice('服务器已保存，但本地草稿标记未清除；请核对后刷新。', true); }
+        return ok;
       }
-      /* 整库替换操作（清空数据/恢复示例/替换模式导入）走 replace 通道 */
-      var replacement = window.__QC_FORCE_REPLACE;
-      if (replacement) {
-        return post(API_BASE + '/api/records/replace?company=' + COMPANY, { records: st.records || [] })
-          .then(function (ok) { if (ok) { if (window.__QC_FORCE_REPLACE === replacement) window.__QC_FORCE_REPLACE = false; acknowledgeDeletes(); } return ok; });
-      }
-      return post(API_BASE + '/api/records?company=' + COMPANY, { records: st.records || [], deletedIds: deleted })
-        .then(function (ok) { if (ok) acknowledgeDeletes(); return ok; });
+      if (replacement) return post(apiUrl('/api/records/replace'), { records: st.records || [] }).then(acknowledge);
+      return post(apiUrl('/api/records'), { records: st.records || [], deletedIds: deleted }).then(acknowledge);
     } catch (e) { console.warn('[QC后端] 读本地记录失败', e); }
     return Promise.resolve(false);
   }
@@ -164,21 +320,12 @@
     if (typeof window.persist === 'function' && !window.persist.__qcPatched) {
       var origPersist = window.persist;
       window.persist = function () {
+        if (!window.__QC_AUTH) { notice('请先登录当前公司，记录尚未保存。', true); return false; }
         var ret = origPersist.apply(this, arguments);
-        pushRecords();
+        if (ret !== false) pushRecords();
         return ret;
       };
       window.persist.__qcPatched = true;
-      patched = true;
-    }
-    if (typeof window._saveUsers === 'function' && !window._saveUsers.__qcPatched) {
-      var origUsers = window._saveUsers;
-      window._saveUsers = function (users) {
-        var ret = origUsers.apply(this, arguments);
-        pushUsers(users);
-        return ret;
-      };
-      window._saveUsers.__qcPatched = true;
       patched = true;
     }
     if (typeof window._savePartners === 'function' && !window._savePartners.__qcPatched) {
@@ -219,6 +366,10 @@
   };
 
   /* 本文件早于 app.js 加载：立即预加载，确保 app.js 初始化前 localStorage 已是服务器数据 */
+  try {
+    var cachedUsers = JSON.parse(localStorage.getItem(KEY.users) || '[]');
+    if (Array.isArray(cachedUsers)) localStorage.setItem(KEY.users, JSON.stringify(cachedUsers.map(publicUser)));
+  } catch (_) {}
   syncBootstrap();
 
   /* app.js 解析完成后反复接管写入函数，避免线上脚本时序导致只改本地不写服务器 */

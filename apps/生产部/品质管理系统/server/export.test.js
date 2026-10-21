@@ -8,6 +8,9 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const test = require('node:test');
+const vm = require('node:vm');
+const { DatabaseSync } = require('node:sqlite');
+const Auth = require('./auth');
 
 async function getFreePort() {
   const server = net.createServer();
@@ -34,6 +37,13 @@ test('CSV export neutralizes spreadsheet formulas in text fields', async t => {
   const port = await getFreePort();
   const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-export-test-'));
   const serverPath = path.join(__dirname, 'server.js');
+  const source = fs.readFileSync(serverPath, 'utf8');
+  const schema = vm.runInNewContext(source.slice(source.indexOf('const RECORD_COLS'), source.indexOf('const toNum')) + ';SCHEMA_SQL');
+  const companyPath = path.join(dataPath, 'dg-xingxin'); fs.mkdirSync(companyPath);
+  const fixtureDb = new DatabaseSync(path.join(companyPath, 'qc.db'));
+  fixtureDb.exec(schema);
+  fixtureDb.prepare('INSERT INTO users(username,password,role,enabled) VALUES(?,?,?,1)').run('jc', Auth.legacyHash('export-fixture-password'), 'admin');
+  fixtureDb.close();
   const child = spawn(process.execPath, [serverPath], {
     env: { ...process.env, PORT: String(port), DATA_PATH: dataPath },
     stdio: 'ignore',
@@ -49,6 +59,10 @@ test('CSV export neutralizes spreadsheet formulas in text fields', async t => {
 
   const baseUrl = `http://127.0.0.1:${port}`;
   await waitForHealth(baseUrl);
+  const login = await fetch(baseUrl + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'jc', password: 'export-fixture-password' }) });
+  assert.equal(login.status, 200);
+  const csrf = (await login.json()).csrfToken, cookie = login.headers.get('set-cookie').split(';')[0];
+  const authenticatedFetch = (url, options = {}) => fetch(url, { ...options, headers: { cookie, 'X-QC-CSRF': csrf, ...options.headers } });
   const records = [{
     // POST now merges records; do not overwrite the freshly seeded id 1 with
     // an intentionally historical timestamp used by this export fixture.
@@ -62,14 +76,14 @@ test('CSV export neutralizes spreadsheet formulas in text fields', async t => {
     result: 'PASS',
     updatedAt: '2026-07-16T09:30:00.000Z',
   }];
-  const saveResponse = await fetch(baseUrl + '/api/records', {
+  const saveResponse = await authenticatedFetch(baseUrl + '/api/records', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ records }),
   });
   assert.equal(saveResponse.status, 200);
 
-  const csvResponse = await fetch(baseUrl + '/api/export/records.csv');
+  const csvResponse = await authenticatedFetch(baseUrl + '/api/export/records.csv');
   assert.equal(csvResponse.status, 200);
   const csv = await csvResponse.text();
   assert.match(csv, /"'=HYPERLINK\(""https:\/\/example\.invalid"",""click""\)"/);
@@ -80,11 +94,11 @@ test('CSV export neutralizes spreadsheet formulas in text fields', async t => {
   assert.match(csv, /"2026-07-16"/);
   assert.doesNotMatch(csv, /(?:^|,)"[=+\-@]/m);
 
-  const searchResponse = await fetch(baseUrl + '/api/export/records.csv?search=2026-07-16');
+  const searchResponse = await authenticatedFetch(baseUrl + '/api/export/records.csv?search=2026-07-16');
   assert.equal(searchResponse.status, 200);
   assert.match(await searchResponse.text(), /"PO-2026-001"/);
 
-  const excelResponse = await fetch(baseUrl + '/api/export/factory-excel.xls');
+  const excelResponse = await authenticatedFetch(baseUrl + '/api/export/factory-excel.xls');
   assert.equal(excelResponse.status, 200);
   const excel = await excelResponse.text();
   assert.match(excel, /<th class="head">PO号<\/th>/);

@@ -3,10 +3,12 @@ import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 
 const source = readFileSync('pb_hooks/qms_inspections.pb.js', 'utf8')
-function setup(options: { permissions?: object; region?: string; crafts?: string[]; records?: object[]; fail?: boolean; factories?: object[]; wrongCompany?: boolean } = {}) {
+const syntheticToken = 'qms-read-test-only-credential-not-production-123456789'
+function setup(options: { permissions?: object; region?: string; crafts?: string[]; records?: object[]; fail?: boolean; factories?: object[]; wrongCompany?: boolean; token?: string; integrationStatus?: number } = {}) {
   let handler: any
   const send = vi.fn(({ url }: { url: string }) => {
     if (options.fail) throw new Error('offline')
+    if (url.includes('/api/integration/inspections') && options.integrationStatus) return { statusCode: options.integrationStatus }
     if (url.endsWith('/api/companies')) return { statusCode: 200, json: { companies: [
       { id: 'dg-xingxin', site: '东莞', name: '东莞兴信' },
       { id: 'dg-huajia', site: '东莞', name: '东莞华嘉' },
@@ -23,7 +25,7 @@ function setup(options: { permissions?: object; region?: string; crafts?: string
   runInNewContext(source, {
     routerAdd: (_method: string, _path: string, fn: any) => { handler = fn },
     $apis: { requireAuth: () => null },
-    $os: { getenv: () => '' }, $http: { send }, ApiError,
+    $os: { getenv: (name: string) => name === 'FACTORY_REVIEW_QMS_READ_TOKEN' ? (options.token ?? syntheticToken) : '' }, $http: { send }, ApiError,
     ForbiddenError: Error, BadRequestError: Error,
     $app: { findRecordsByFilter: () => (options.factories || [
       { id: 'a', name: '伟创', craft: 'sewing' },
@@ -79,9 +81,10 @@ describe('QMS inspection bridge', () => {
     invoke()
     expect(send.mock.calls.map(([arg]) => arg.url)).toEqual([
       'http://qc:3400/api/companies',
-      'http://qc:3400/api/bootstrap?company=dg-xingxin',
-      'http://qc:3400/api/bootstrap?company=dg-huajia',
+      'http://qc:3400/api/integration/inspections?company=dg-xingxin',
+      'http://qc:3400/api/integration/inspections?company=dg-huajia',
     ])
+    for (const [request] of send.mock.calls) expect((request as any).headers).toEqual({ Authorization: 'Bearer ' + syntheticToken })
     expect(setup({ wrongCompany: true }).invoke).toThrow('子公司数据异常')
   })
   it('rejects unauthenticated requests', () => { expect(() => setup().invoke(null)).toThrow() })
@@ -96,5 +99,29 @@ describe('QMS inspection bridge', () => {
   })
   it('returns a retriable error if QMS is down', () => {
     expect(setup({ fail: true }).invoke).toThrow('品质管理系统暂时无法连接')
+  })
+  it('refuses to read without a dedicated server credential', () => {
+    for (const token of ['', 'short', 'bad token with whitespace'.repeat(3)]) {
+      const { invoke, send } = setup({ token })
+      expect(invoke).toThrow('品质读取连接尚未配置')
+      expect(send).not.toHaveBeenCalled()
+    }
+  })
+  it('supports only a missing old integration endpoint during the rolling upgrade', () => {
+    const { invoke, send } = setup({ integrationStatus: 404 })
+    expect(invoke().records).toHaveLength(2)
+    expect(send.mock.calls.map(([arg]) => arg.url)).toEqual([
+      'http://qc:3400/api/companies',
+      'http://qc:3400/api/integration/inspections?company=dg-xingxin',
+      'http://qc:3400/api/bootstrap?company=dg-xingxin',
+      'http://qc:3400/api/integration/inspections?company=dg-huajia',
+      'http://qc:3400/api/bootstrap?company=dg-huajia',
+    ])
+    expect(JSON.stringify(invoke())).not.toContain(syntheticToken)
+  })
+  it.each([401, 403, 429, 500, 503])('never retries an auth or service failure %s through the old endpoint', status => {
+    const { invoke, send } = setup({ integrationStatus: status })
+    expect(invoke).toThrow('品质管理系统返回异常')
+    expect(send.mock.calls.map(([arg]) => arg.url).some(url => url.includes('/api/bootstrap'))).toBe(false)
   })
 })

@@ -498,6 +498,8 @@ services:
       # 阿里云百炼 (DashScope/Qwen-VL) — 送货单 AI 识别用；复用同一把 Bailian key
       - DASHSCOPE_API_KEY=${QC_BAILIAN_API_KEY:-}
       - SSO_SECRET=${SSO_SECRET:?SSO_SECRET is required}
+      # Server-only, read-only credential for the factory-review inspection bridge.
+      - QC_INSPECTIONS_READ_TOKEN=${QC_INSPECTIONS_READ_TOKEN:-}
     volumes:
       - ./apps/生产部/品质管理系统/data:/app/data
     healthcheck:
@@ -945,6 +947,7 @@ services:
       - FACTORY_REVIEW_ADMIN_PASSWORD=${FACTORY_REVIEW_ADMIN_PASSWORD:-}
       # 对车缝核价对比系统的只读集成 API 密钥；未设置时集成接口一律返回 401
       - INTEGRATION_API_KEY=${FACTORY_REVIEW_INTEGRATION_API_KEY:-}
+      - FACTORY_REVIEW_QMS_READ_TOKEN=${FACTORY_REVIEW_QMS_READ_TOKEN:-}
       # AI remains disabled until a dedicated service/model/key is configured.
       - FACTORY_REVIEW_AI_PROVIDER=${FACTORY_REVIEW_AI_PROVIDER:-openai}
       - FACTORY_REVIEW_AI_ENABLED=${FACTORY_REVIEW_AI_ENABLED:-false}
@@ -984,6 +987,7 @@ services:
       - FACTORY_REVIEW_ADMIN_PASSWORD=${FACTORY_REVIEW_ADMIN_PASSWORD:-}
       # 测试版不开集成 API（密钥留空，集成接口一律 401）
       - INTEGRATION_API_KEY=
+      - FACTORY_REVIEW_QMS_READ_TOKEN=${FACTORY_REVIEW_QMS_READ_TOKEN:-}
       - FACTORY_REVIEW_AI_PROVIDER=${FACTORY_REVIEW_TEST_AI_PROVIDER:-openai}
       - FACTORY_REVIEW_AI_ENABLED=${FACTORY_REVIEW_TEST_AI_ENABLED:-false}
       - FACTORY_REVIEW_AI_API_KEY=${FACTORY_REVIEW_TEST_AI_API_KEY:-}

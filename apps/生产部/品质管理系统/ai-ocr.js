@@ -38,8 +38,9 @@
   }
 
   function checkAiStatus(force) {
+    if (!window.__QC_AUTH || typeof window.__QC_REQUEST !== 'function') return Promise.resolve(false);
     if (statusPromise && !force) return statusPromise;
-    statusPromise = fetch(API_BASE + '/api/ai/status', { cache: 'no-store' })
+    statusPromise = window.__QC_REQUEST('/api/ai/status')
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -166,7 +167,7 @@
 
     return shrinkDataUrl(dataUrl, 2000)
       .then(function (small) {
-        return fetch(API_BASE + '/api/ai/ocr-extract', {
+        return window.__QC_REQUEST('/api/ai/ocr-extract', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ image: small }),
@@ -227,6 +228,7 @@
   }
 
   function aiDispatch() {
+    if (!window.__QC_AUTH) { toast('请先登录当前公司的品质账号', 'error'); return Promise.resolve(); }
     return checkAiStatus(true).then(function (ready) {
       if (ready) return aiStartOcr();
       setT('ocrStatus', 'AI OCR 未就绪，正在改用本地 OCR...');
@@ -273,7 +275,7 @@
           loadQueueItem(q);
         } else {
           window.__qcQueue = null;
-          toast(q.items.length + ' 条货品已全部录入完成', 'success');
+          toast(q.items.length + ' 条货品已在本地录入，等待服务器同步', 'info');
         }
         return ret;
       };

@@ -50,9 +50,19 @@ routerAdd('GET', '/api/factory-review/qms-inspections', (e) => {
     return factories.find((f) => f.id === candidates[0].id) || null
   }
   const base = ($os.getenv('FACTORY_REVIEW_QMS_URL') || 'http://qc:3400').replace(/\/$/, '')
-  function readQms(path) {
+  const readToken = $os.getenv('FACTORY_REVIEW_QMS_READ_TOKEN') || ''
+  if (!/^[A-Za-z0-9_-]{43,128}$/.test(readToken)) throw new ApiError(503, '品质读取连接尚未配置，请联系管理员')
+  function readQms(path, legacyPath) {
     let response
-    try { response = $http.send({ url: base + path, method: 'GET', timeout: 5 }) }
+    const options = { url: base + path, method: 'GET', timeout: 5, headers: { Authorization: 'Bearer ' + readToken } }
+    try {
+      response = $http.send(options)
+      // Rolling upgrades deploy this bridge before QMS. Only an old server's
+      // missing endpoint may use its legacy read route; auth failures never do.
+      if (response.statusCode === 404 && legacyPath) {
+        response = $http.send({ ...options, url: base + legacyPath })
+      }
+    }
     catch (_) { throw new ApiError(502, '品质管理系统暂时无法连接，请稍后重试') }
     if (response.statusCode !== 200 || !response.json) {
       throw new ApiError(502, '品质管理系统返回异常，请稍后重试')
@@ -70,7 +80,8 @@ routerAdd('GET', '/api/factory-review/qms-inspections', (e) => {
     'defect', 'qc', 'remark']
   const records = []
   companies.forEach((company) => {
-    const data = readQms('/api/bootstrap?company=' + encodeURIComponent(company.id))
+    const query = '?company=' + encodeURIComponent(company.id)
+    const data = readQms('/api/integration/inspections' + query, '/api/bootstrap' + query)
     if (data.company !== company.id || !Array.isArray(data.records)) {
       throw new ApiError(502, '品质管理系统子公司数据异常，请稍后重试')
     }

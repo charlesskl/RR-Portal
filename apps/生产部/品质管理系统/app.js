@@ -151,50 +151,32 @@ function effPerms(user) {
   return base;
 }
 
-/* 当前登录账号的实时记录（权限改了立即生效） */
-function _liveUser() {
-  const sess = getCurrentUser();
-  if (!sess) return null;
-  return _getUsers().find(x => x.username === sess.username) || sess;
-}
+/* 权限只来自服务器已验证的当前公司会话，本地账号列表仅用于显示。 */
+function _liveUser() { return getCurrentUser(); }
 
-/* ── 初始化账号数据（首次启动自动创建默认主账号 jc / qqwwee）── */
 function initUsers() {
-  const raw = localStorage.getItem(STORAGE_KEYS.users);
-  if (!raw) {
-    const defaultUsers = [{
-      username:    'jc',
-      password:    _hashPwd('qqwwee'),
-      role:        'admin',
-      enabled:     true,
-      createdAt:   new Date().toISOString(),
-      lastLoginAt: null,
-    }];
-    localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(defaultUsers));
-  }
-}
-
-function _getUsers() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.users)) || []; }
-  catch(e) { return []; }
-}
-function _saveUsers(users) {
+  const users = _getUsers().map(u => { const copy = { ...u }; delete copy.password; delete copy.newPassword; return copy; });
   localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(users));
 }
-
-/* ── 会话操作 ── */
+function _getUsers() {
+  try { const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.users)); return Array.isArray(users) ? users : []; }
+  catch(e) { return []; }
+}
+async function _saveUsers(users) {
+  if (!can('manageUsers') || typeof window.__QC_SAVE_USERS !== 'function') {
+    showToast('账号未保存：请登录有账号管理权限的品质账号', 'error'); return false;
+  }
+  const ok = await window.__QC_SAVE_USERS(users);
+  if (!ok) showToast('账号未保存成功，请检查连接和权限后重试', 'error');
+  return ok;
+}
 function getCurrentUser() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.session)); }
-  catch(e) { return null; }
+  const auth = window.__QC_AUTH;
+  return auth && auth.company === getCompany() && auth.user && auth.user.enabled === true ? auth.user : null;
 }
-
-function _saveSession(user) {
-  const sess = { username: user.username, role: user.role, loginTime: new Date().toISOString() };
-  localStorage.setItem(STORAGE_KEYS.session, JSON.stringify(sess));
-}
-
 function _clearSession() {
-  localStorage.removeItem(STORAGE_KEYS.session);
+  if (typeof window.__QC_CLEAR_AUTH === 'function') window.__QC_CLEAR_AUTH();
+  else { window.__QC_AUTH = null; localStorage.removeItem(STORAGE_KEYS.session); }
 }
 
 /* ── 权限判断（基于权限矩阵；jc 主账号保底全权）── */
@@ -326,16 +308,12 @@ function closeCompanySwitch() {
 }
 function swBackToSites()           { _swView = 'sites'; renderCompanySwitch(); }
 function swSelectSite(siteId)      { _swSite = siteId;  _swView = 'subs'; renderCompanySwitch(); }
-/* 换子公司一次性免登录票据（全局 key，不按公司前缀；用后即焚） */
+/* 各公司使用独立的 HttpOnly 会话；切换时仅改变公司，不传递凭据。 */
 const SWITCH_TICKET_KEY = 'xingxin_qms_switch_ticket';
 function swPickCompany(id) {
   if (id === getCompany()) { closeCompanySwitch(); return; }
-  try {
-    const sess = getCurrentUser();
-    const me   = sess && _getUsers().find(u => u.username === sess.username);
-    if (me) localStorage.setItem(SWITCH_TICKET_KEY, JSON.stringify({ username: me.username, pwd: me.password, ts: Date.now() }));
-  } catch(e) {}
-  pickCompany(id);   /* 换公司：落盘 + reload，bootstrap 拉新公司数据 */
+  try { localStorage.removeItem(SWITCH_TICKET_KEY); } catch(e) {}
+  pickCompany(id);
 }
 function renderCompanySwitch() {
   const box = document.getElementById('companySwitchBox');
@@ -359,49 +337,44 @@ function renderCompanySwitch() {
 }
 
 /* ── 登录 ── */
-function login() {
+let _loginPending = false;
+async function login() {
+  if (_loginPending) return;
   const unameEl = document.getElementById('loginUsername');
-  const pwdEl   = document.getElementById('loginPassword');
-  const errEl   = document.getElementById('loginError');
+  const pwdEl = document.getElementById('loginPassword');
+  const errEl = document.getElementById('loginError');
   const username = (unameEl?.value || '').trim();
-  const password = (pwdEl?.value || '').trim();
-
-  if (!username || !password) {
-    if (errEl) { errEl.textContent = '请输入用户名和密码'; errEl.style.display = ''; }
-    return;
-  }
-
-  const users = _getUsers();
-  const user  = users.find(u => u.username === username);
-
-  if (!user || user.password !== _hashPwd(password)) {
-    if (errEl) { errEl.textContent = '用户名或密码错误'; errEl.style.display = ''; }
+  const password = pwdEl?.value || '';
+  const showError = msg => { if (errEl) { errEl.textContent = msg; errEl.style.display = ''; errEl.setAttribute('role', 'alert'); } };
+  if (!username || !password) { showError('请输入用户名和密码'); return; }
+  const button = document.querySelector('#loginFields button');
+  _loginPending = true;
+  if (button) { button.disabled = true; button.textContent = '登录中…'; }
+  if (errEl) errEl.style.display = 'none';
+  try {
+    if (typeof window.__QC_LOGIN !== 'function') throw new Error('登录服务未加载，请刷新页面后重试');
+    await window.__QC_LOGIN(username, password);
+    initUsers();
+    initData();
+    _partners = null;
+    if (pwdEl) pwdEl.value = '';
+    _showApp();
+  } catch (err) {
+    showError(err.message || '登录失败，请检查连接后重试');
+    if (unameEl) unameEl.value = username;
     if (pwdEl) { pwdEl.value = ''; pwdEl.focus(); }
-    return;
+  } finally {
+    _loginPending = false;
+    if (button) { button.disabled = false; button.textContent = '登 录'; }
   }
-  if (!user.enabled) {
-    if (errEl) { errEl.textContent = '账号已停用，请联系管理员'; errEl.style.display = ''; }
-    return;
-  }
-
-  /* 更新最后登录时间 */
-  user.lastLoginAt = new Date().toISOString();
-  _saveUsers(users);
-  _saveSession(user);
-
-  /* 进入系统 */
-  _showApp();
 }
-
-/* 按 Enter 键登录 */
-function loginOnEnter(e) {
-  if (e.key === 'Enter') login();
-}
-
-/* ── 退出登录 ── */
-function logout() {
-  _clearSession();
-  _showLogin();
+function loginOnEnter(e) { if (e.key === 'Enter') login(); }
+async function logout() {
+  try {
+    if (typeof window.__QC_LOGOUT !== 'function') throw new Error('退出服务未加载，请刷新后重试');
+    await window.__QC_LOGOUT();
+    _showLogin();
+  } catch (err) { showToast(err.message || '退出未完成，请检查连接后重试', 'error'); }
 }
 
 /* ── 显示 / 隐藏登录页 ── */
@@ -415,7 +388,8 @@ function _showLogin() {
   const e = document.getElementById('loginError');
   if (u) u.value = '';
   if (p) p.value = '';
-  if (e) { e.textContent = ''; e.style.display = 'none'; }
+  const notice = window.__QC_AUTH_NOTICE || window.__QC_LEGACY_SSO_NOTICE || '';
+  if (e) { e.textContent = notice; e.style.display = notice ? '' : 'none'; e.setAttribute('role', 'alert'); }
 }
 
 function _showApp() {
@@ -479,24 +453,8 @@ function applyPermissions() {
 /* ── requireLogin：启动时鉴权 ── */
 function requireLogin() {
   initUsers();
-  /* 换子公司免登录：一次性票据（10 分钟内有效，用后即焚）；
-     目标公司存在同名+同密码+启用中的账号 → 直接进入，否则走正常登录页 */
-  try {
-    const t = JSON.parse(localStorage.getItem(SWITCH_TICKET_KEY) || 'null');
-    localStorage.removeItem(SWITCH_TICKET_KEY);
-    if (t && t.username && t.pwd && Date.now() - (t.ts || 0) < 10 * 60 * 1000) {
-      const u = _getUsers().find(x => x.username === t.username && x.password === t.pwd && x.enabled);
-      if (u) { _saveSession(u); _showApp(); return; }
-    }
-  } catch(e) {}
-  const sess = getCurrentUser();
-  if (!sess) { _showLogin(); return; }
-
-  /* 验证 session 中的用户是否仍有效且未被停用 */
-  const users = _getUsers();
-  const user  = users.find(u => u.username === sess.username);
-  if (!user || !user.enabled) { _clearSession(); _showLogin(); return; }
-
+  try { localStorage.removeItem(SWITCH_TICKET_KEY); localStorage.removeItem(STORAGE_KEYS.session); } catch(e) {}
+  if (!getCurrentUser()) { _showLogin(); return; }
   _showApp();
 }
 
@@ -677,13 +635,13 @@ function _closeUserModal() {
   _editingUsername = null;
 }
 
-function _saveUser() {
+async function _saveUser() {
   const errEl  = document.getElementById('userModalErr');
   const show   = msg => { if(errEl){ errEl.textContent=msg; errEl.style.display=''; } };
 
   const uname  = (document.getElementById('umUsername')?.value||'').trim();
-  const pwd    = (document.getElementById('umPassword')?.value||'').trim();
-  const pwd2   = (document.getElementById('umPassword2')?.value||'').trim();
+  const pwd    = document.getElementById('umPassword')?.value || '';
+  const pwd2   = document.getElementById('umPassword2')?.value || '';
   const role   = document.getElementById('umRole')?.value || 'viewer';
   const name   = (document.getElementById('umName')?.value||'').trim();
   const dept   = document.getElementById('umDept')?.value || '';
@@ -700,7 +658,7 @@ function _saveUser() {
     if (pwd) {
       if (pwd.length < 6) { show('密码至少6位'); return; }
       if (pwd !== pwd2)   { show('两次密码不一致'); return; }
-      u.password = _hashPwd(pwd);
+      u.newPassword = pwd;
     }
     u.role = role;
     u.name = name;
@@ -718,7 +676,7 @@ function _saveUser() {
       username:    uname,
       name,
       dept,
-      password:    _hashPwd(pwd),
+      newPassword: pwd,
       role,
       enabled:     true,
       createdAt:   new Date().toISOString(),
@@ -726,7 +684,7 @@ function _saveUser() {
     });
   }
 
-  _saveUsers(users);
+  if (!await _saveUsers(users)) { show('账号未保存成功，请重试'); return; }
   _closeUserModal();
   showToast('✓ 账号已保存', 'success');
   renderUsersPage();
@@ -789,12 +747,12 @@ function _permResetRole() {
   _renderPermMatrix();
   showToast('已按角色预设重置，保存后生效', 'info');
 }
-function _savePerms() {
+async function _savePerms() {
   const users = _getUsers();
   const u = users.find(x => x.username === _permEditing);
   if (u) {
     u.perms = _permMatrix;
-    _saveUsers(users);
+    if (!await _saveUsers(users)) return;
     showToast('✓ 权限已保存', 'success');
   }
   _closePermModal();
@@ -802,7 +760,7 @@ function _savePerms() {
   renderUsersPage();
 }
 
-function _toggleUser(username) {
+async function _toggleUser(username) {
   const users = _getUsers();
   const u     = users.find(x => x.username === username);
   if (!u) return;
@@ -816,12 +774,12 @@ function _toggleUser(username) {
   }
 
   u.enabled = !u.enabled;
-  _saveUsers(users);
+  if (!await _saveUsers(users)) return;
   showToast(u.enabled ? '✓ 账号已启用' : '账号已停用', u.enabled ? 'success' : 'info');
   renderUsersPage();
 }
 
-function _deleteUser(username) {
+async function _deleteUser(username) {
   const me = getCurrentUser();
   if (username === me?.username) { showToast('不能删除当前登录账号', 'error'); return; }
   if (!confirm(`确认删除账号「${username}」？此操作不可撤销。`)) return;
@@ -834,7 +792,7 @@ function _deleteUser(username) {
   }
 
   const newUsers = users.filter(x => x.username !== username);
-  _saveUsers(newUsers);
+  if (!await _saveUsers(newUsers)) return;
   showToast('✓ 账号已删除', 'success');
   renderUsersPage();
 }
@@ -845,15 +803,14 @@ function initData() {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.records) && parsed.records.length > 0) {
+      if (parsed && Array.isArray(parsed.records) && parsed.records.length >= 0) {
         state = parsed;
         return;
       }
     }
   } catch (e) { /* ignore */ }
-  /* 没有或损坏时加载种子数据 */
-  state = { records: SEED_RECORDS.map(r => Object.assign({}, r)), nextId: 31 };
-  persist();
+  /* 缓存缺失时保持空表，登录后的 bootstrap 提供真实数据。 */
+  state = { records: [], nextId: 31 };
 }
 
 function persist() {
@@ -2118,10 +2075,12 @@ async function refreshRecordsPage() {
   }
 
   try {
-    const apiBase = (location.pathname.replace(/[^/]*$/, '') || '/').replace(/\/$/, '');
-    const res = await fetch(apiBase + '/api/bootstrap?company=' + getCompany(), { cache: 'no-store' });
+    const authAtStart = window.__QC_AUTH;
+    const res = await window.__QC_REQUEST('/api/bootstrap');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
+    if (window.__QC_AUTH !== authAtStart) throw new Error('会话已变化，请重新刷新');
+    window.__QC_ACCEPT_AUTH(data);
     if (!Array.isArray(data.records)) throw new Error('服务器返回数据格式不正确');
     if (_recordsSnapshotsDiffer(state.records, data.records)) {
       const syncFailed = window.__QC_BACKEND_OK !== true || (window.__QC_LAST_SYNC && window.__QC_LAST_SYNC.ok === false);
@@ -2143,7 +2102,9 @@ async function refreshRecordsPage() {
     if (Array.isArray(data.defectLib)) localStorage.setItem(STORAGE_KEYS.defectLib, JSON.stringify(data.defectLib));
     if (Array.isArray(data.partners))  localStorage.setItem(STORAGE_KEYS.partners,  JSON.stringify(data.partners));
 
+    _partners = null;
     _selectedIds.clear();
+    applyPermissions();
     filterRecords();
     updateTopKpis();
     showToast('✓ 验货明细已刷新，共 ' + state.records.length + ' 条', 'success');
@@ -2478,7 +2439,7 @@ function batchDelete() {
   /* 清空选中状态 */
   _selectedIds.clear();
 
-  showToast(`✓ 已删除 ${selCount} 条记录`, 'success');
+  showToast(`删除 ${selCount} 条记录的操作已在本地暂存，等待服务器同步`, 'info');
 
   /* 刷新所有相关视图 */
   filterRecords();
@@ -2617,7 +2578,7 @@ function addPartner(type) {
   renderCustomerDatalist();
   renderProcessTypeDatalist();
   if (typeof recheckNameWhitelist === 'function') recheckNameWhitelist();
-  showToast(label + '「' + name + '」已添加 ✓', 'success');
+  showToast(label + '「' + name + '」已在本地暂存，等待服务器同步', 'info');
 }
 
 function delPartner(type, name) {
@@ -2629,7 +2590,7 @@ function delPartner(type, name) {
   renderSupplierDatalist();
   renderCustomerDatalist();
   renderProcessTypeDatalist();
-  showToast(label + '「' + name + '」已从名单删除', 'info');
+  showToast(label + '「' + name + '」的删除已在本地暂存，等待服务器同步', 'info');
 }
 
 const DEFAULT_SUPPLIERS = [
@@ -3361,7 +3322,7 @@ function confirmBatchImport() {
   const n = _batchRows.length;
   _batchRows = [];
   closeModalDirect();
-  showToast(`✓ 成功导入 ${n} 条验货记录`, 'success');
+  showToast(`${n} 条验货记录已在本地暂存，等待服务器同步`, 'info');
 
   /* 刷新所有相关视图 */
   renderRecordsTable();
@@ -4401,7 +4362,7 @@ function _saveDefLibItem() {
   }
   _saveDefectLib(lib);
   _closeDefLibModal();
-  showToast('✓ 已保存', 'success');
+  showToast('修改已在本地暂存，等待服务器同步', 'info');
   renderDefectLibPage();
   refreshDefectDescDatalist();
 }
@@ -4414,7 +4375,7 @@ function _toggleDefLibItem(idx) {
   _saveDefectLib(lib);
   renderDefectLibPage();
   refreshDefectDescDatalist();
-  showToast(lib[idx].enabled ? '✓ 已启用' : '已停用', lib[idx].enabled?'success':'info');
+  showToast('修改已在本地暂存，等待服务器同步', 'info');
 }
 
 function _deleteDefLibItem(idx) {
@@ -4426,7 +4387,7 @@ function _deleteDefLibItem(idx) {
   _saveDefectLib(lib);
   renderDefectLibPage();
   refreshDefectDescDatalist();
-  showToast('✓ 已删除', 'success');
+  showToast('删除操作已在本地暂存，等待服务器同步', 'info');
 }
 
 /* ════════════════════════════════════════
@@ -4949,7 +4910,7 @@ function saveRecord(options = {}) {
   }
   const wasEditing = editingId !== null;
   if (!continueEntry) closeModalDirect();
-  showToast(wasEditing ? (rec.resubmitted ? '记录已重新提交审核 ✓' : '记录已更新 ✓') : (continueEntry ? '记录已添加并提交审核，可继续录入下一条 ✓' : '记录已添加，已提交审核 ✓'), 'success');
+  showToast(wasEditing ? '记录修改已在本地暂存，等待服务器同步' : '记录已在本地暂存，等待服务器同步，可继续录入', 'info');
   renderSupplierDatalist();   /* 新供应商/客户保存后立即进入下拉选项 */
   renderCustomerDatalist();
   renderProcessTypeDatalist();
@@ -4979,7 +4940,7 @@ function deleteRecord(id) {
   state.records = state.records.filter(r => r.id !== id);
   _selectedIds.delete(id);   /* 清掉已选状态 */
   persist();
-  showToast('记录已删除', 'info');
+  showToast('删除操作已在本地暂存，等待服务器同步', 'info');
   filterRecords();
   updateTopKpis();
   if (currentPage === 'dashboard') renderDashboard();
@@ -5103,7 +5064,7 @@ function approveRecord(id) {
   r.rejectReason = ''; r.rejectBy = ''; r.rejectAt = '';
   delete r.resubmitted;
   persist();
-  showToast(`记录 #${id} 已审核通过，进入验货明细 ✓`, 'success');
+  showToast(`记录 #${id} 的审核操作已在本地暂存，等待服务器同步`, 'info');
   renderReviewPage();
   if (currentPage === 'records') renderRecordsTable();
   updateTopKpis();
@@ -5143,7 +5104,7 @@ function confirmReject() {
   r.updatedAt  = nowIso();
   persist();
   closeRejectModal();
-  showToast(`记录 #${r.id} 已退回，修改保存后将重新进入待审核`, 'info');
+  showToast(`记录 #${r.id} 的退回操作已在本地暂存，等待服务器同步`, 'info');
   /* 提交反审核原因后跳到审核中心「已退回」列表 */
   _reviewTab = 'rejected';
   showPage('review');
@@ -5759,7 +5720,7 @@ function _backupDoImport(incoming, mode) {
     persist();
 
     const modeLabel = mode === 'replace' ? '覆盖' : '追加';
-    showToast(`✓ 已${modeLabel}导入 ${normalized.length} 条备份记录`, 'success');
+    showToast(`${normalized.length} 条备份记录已在本地暂存，等待服务器同步`, 'info');
     _backupLog(`${modeLabel}导入备份 ${normalized.length} 条记录`, 'ok');
     _backupRefreshAll();
   } catch(e) {
@@ -5816,7 +5777,7 @@ function backupClearAll() {
       state.records = [];
       state.nextId  = Math.max(1, state.nextId || 1);
       persist();
-      showToast(`已清空全部 ${count} 条记录`, 'info');
+      showToast(`清空 ${count} 条记录的操作已在本地暂存，等待服务器同步`, 'info');
       _backupLog(`清空数据 ${count} 条记录`, 'warn');
       _backupRefreshAll();
     },
@@ -5841,7 +5802,7 @@ function backupRestoreSeed() {
       state.records = SEED_RECORDS.map(r => Object.assign({}, r));
       state.nextId  = Math.max(state.nextId || 1, SEED_RECORDS.length + 1);
       persist();
-      showToast(`✓ 已恢复 ${SEED_RECORDS.length} 条示例数据`, 'success');
+      showToast(`${SEED_RECORDS.length} 条示例数据已在本地暂存，等待服务器同步`, 'info');
       _backupLog(`恢复示例数据 ${SEED_RECORDS.length} 条`, 'ok');
       _backupRefreshAll();
     },
@@ -6693,7 +6654,7 @@ function executeImportConfirm() {
     persist();
 
     const modeLabel = plan.mode === 'replace' ? '替换' : '追加';
-    showToast('✓ 成功' + modeLabel + '导入 ' + plan.records.length + ' 条记录', 'success');
+    showToast(plan.records.length + ' 条记录已在本地暂存，等待服务器同步', 'info');
 
     setTimeout(() => {
       _closeImportConfirmPreview();

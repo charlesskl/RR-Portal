@@ -18,33 +18,16 @@
 const http = require('node:http');
 const fs   = require('node:fs');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
-
-/* ── 门户 SSO 票据（HS256 JWT）校验：与门户 SSO_SECRET 一致 ── */
-function verifyPortalTicket(ticket) {
-  const parts = String(ticket || '').split('.');
-  if (parts.length !== 3) throw new Error('票据格式不正确');
-  const secret = process.env.SSO_SECRET || 'dev-sso-secret-change-me';
-  const expected = crypto.createHmac('sha256', secret).update(parts[0] + '.' + parts[1]).digest();
-  const actual = Buffer.from(parts[2].replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) throw new Error('票据校验失败');
-  let payload;
-  try {
-    payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
-  } catch (e) { throw new Error('票据无效'); }
-  if (!payload.exp || Date.now() > payload.exp) throw new Error('票据已过期');
-  if (payload.app !== 'xingxin-qms') throw new Error('票据不属于本系统');
-  if (!payload.sub) throw new Error('票据缺少账号');
-  return payload;
-}
+const Auth = require('./auth');
+const sessions = Auth.createSessions();
 
 const ROOT      = path.join(__dirname, '..');           // 前端静态根目录
 const DATA_DIR  = process.env.DATA_PATH || path.join(__dirname, 'data');
 const LEGACY_DB = path.join(__dirname, 'qc.db');        // 本地开发的旧版单库路径（自动迁移用；生产旧库在 DATA_PATH/qc.db）
 const SEED_PATH = path.join(__dirname, 'seed.json');
 const AI_CONFIG_PATH = path.join(__dirname, 'ai-config.json');
-const PORT      = Number(process.env.PORT) || 8765;
+const PORT      = process.env.PORT === undefined ? 8765 : Number(process.env.PORT);
 
 /* ════════ 厂区 → 子公司清单（数据隔离边界；每家子公司一个独立库 server/data/<id>/qc.db）════════
    新增子公司：在这里加一行 + 前端 app.js 的 QC_COMPANIES 加一行即可 */
@@ -670,10 +653,7 @@ migrateLegacyDb();
 function getBootstrap(db) {
   const records = db.prepare('SELECT * FROM records ORDER BY id').all().map(rowToRecord);
   const nextId  = nextRecordId(db);
-  const users   = db.prepare('SELECT * FROM users').all().map(u => Object.assign({}, u, {
-    enabled: !!u.enabled,
-    perms: (() => { try { return u.perms ? JSON.parse(u.perms) : null; } catch (e) { return null; } })(),
-  }));
+  const users = db.prepare('SELECT * FROM users').all().map(Auth.publicUser);
   const defectLib = db.prepare('SELECT * FROM defect_library ORDER BY id').all().map(d => ({
     name: d.name, category: d.category, defaultLevel: d.defaultLevel,
     keywords: (() => { try { return JSON.parse(d.keywords || '[]'); } catch (e) { return []; } })(),
@@ -684,10 +664,133 @@ function getBootstrap(db) {
   return { records, nextId, users, defectLib, partners };
 }
 
+/* Authorize the effective write, not the unchanged full browser snapshot. All
+   checks finish before the existing atomic merge/replace transaction begins. */
+const REVIEW_FIELDS = ['status', 'reviewBy', 'reviewAt', 'rejectReason', 'rejectBy', 'rejectAt'];
+const NUMBER_FIELDS = new Set(['id', 'qty', 'sampleQty', 'pass', 'fail', 'orderQty']);
+function statusOf(record) { return record.status || 'approved'; } // legacy records
+function canonicalValues(record) {
+  return recordValues(record).map((value, i) => {
+    if (value === null) return null;
+    if (NUMBER_FIELDS.has(RECORD_COLS[i])) {
+      if (!Number.isFinite(value)) Auth.fail(400, '记录包含无效数值');
+      return value;
+    }
+    if (!['string', 'number', 'boolean'].includes(typeof value)) Auth.fail(400, '记录字段格式不正确');
+    return String(value);
+  });
+}
+function validIds(ids) {
+  if (!Array.isArray(ids)) Auth.fail(400, '记录编号须为数组');
+  return ids.map(value => {
+    const id = Number(value);
+    if (!Number.isSafeInteger(id) || id <= 0) Auth.fail(400, '记录编号无效');
+    return id;
+  });
+}
+function authorizeRecordBatch(db, input, ids, user, replace = false) {
+  if (!Array.isArray(input)) Auth.fail(400, 'records须为数组');
+  const deleted = validIds(ids), seen = new Set();
+  if (replace) Auth.requirePermission(user, 'import', 'm');
+  if (deleted.length) Auth.requirePermission(user, 'records', 'm');
+  const get = db.prepare('SELECT * FROM records WHERE id=?');
+  const tomb = db.prepare('SELECT id FROM record_tombstones WHERE id=?');
+  for (const id of deleted) {
+    const current = get.get(id);
+    if (current && statusOf(current) === 'approved') Auth.requirePermission(user, 'review', 'a');
+  }
+  if (replace && db.prepare("SELECT id FROM records WHERE status IS NULL OR status='' OR status='approved' LIMIT 1").get()) {
+    Auth.requirePermission(user, 'review', 'a');
+  }
+  const output = input.map(raw => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) Auth.fail(400, '记录格式不正确');
+    const [id] = validIds([raw.id]);
+    if (seen.has(id)) Auth.fail(400, '记录编号重复');
+    seen.add(id);
+    const currentRow = get.get(id), current = currentRow && rowToRecord(currentRow);
+    // These rows cannot be written by upsertRecords. Preserve the stale and
+    // tombstone rules without requiring edit rights on somebody else's row.
+    if (!replace && (deleted.includes(id) || tomb.get(id) || current?.updatedAt &&
+        (!raw.updatedAt || !Number.isFinite(Date.parse(raw.updatedAt)) || Date.parse(current.updatedAt) >= Date.parse(raw.updatedAt)))) return raw;
+    const record = { ...raw, id };
+    const values = canonicalValues(record);
+    const before = current && canonicalValues(current);
+    const businessChanged = !current || RECORD_COLS.some((col, i) => !REVIEW_FIELDS.includes(col) && col !== 'updatedAt' && values[i] !== before[i]);
+    const nextStatus = record.status || (current ? statusOf(current) : 'pending');
+    if (!['pending', 'approved', 'rejected'].includes(nextStatus)) Auth.fail(400, '审核状态无效');
+    const reviewChanged = current && REVIEW_FIELDS.some(col => String(record[col] || '') !== String(current[col] || ''));
+    const resubmission = current && statusOf(current) === 'rejected' && nextStatus === 'pending' && businessChanged;
+    if (!replace && !current) Auth.requirePermission(user, 'records', 'e');
+    if (!replace && current && businessChanged) Auth.requirePermission(user, 'records', 'a');
+    if (current && businessChanged && statusOf(current) === 'approved') Auth.requirePermission(user, 'review', 'a');
+    if ((!current && (nextStatus !== 'pending' || REVIEW_FIELDS.slice(1).some(col => record[col]))) ||
+        current && reviewChanged && !resubmission) Auth.requirePermission(user, 'review', 'a');
+    if (resubmission) Auth.requirePermission(user, 'records', 'a');
+    // Unchanged rows may carry an old client-side audit display. Business edits
+    // retain the database's audit fields unless a real review is being made.
+    if (current && !businessChanged && !reviewChanged && !replace) return null;
+    if (current && !reviewChanged) return record;
+    record.status = nextStatus;
+    if (nextStatus === 'pending') {
+      for (const col of REVIEW_FIELDS.slice(1)) record[col] = '';
+    } else {
+      const actor = user.name || user.username, stamp = new Date().toISOString();
+      if (nextStatus === 'approved') {
+        record.reviewBy = actor; record.reviewAt = stamp;
+        record.rejectBy = ''; record.rejectAt = ''; record.rejectReason = '';
+      } else {
+        if (!String(record.rejectReason || '').trim()) Auth.fail(400, '请填写退回原因');
+        record.rejectBy = actor; record.rejectAt = stamp; record.reviewBy = ''; record.reviewAt = '';
+      }
+    }
+    return record;
+  });
+  return { records: output.filter(Boolean), deletedIds: deleted };
+}
+function validatedUsers(db, input) {
+  if (!Array.isArray(input)) Auth.fail(400, 'users须为数组');
+  const old = new Map(db.prepare('SELECT * FROM users').all().map(user => [user.username, user]));
+  const seen = new Set();
+  const users = input.map(raw => {
+    if (!raw || typeof raw.username !== 'string' || !raw.username.trim() || raw.username.length > 100 || raw.username.includes('\0')) Auth.fail(400, '账号格式不正确');
+    const username = raw.username.trim();
+    if (seen.has(username) || !['admin', 'manager', 'viewer'].includes(raw.role)) Auth.fail(400, '账号或角色无效');
+    if (Object.hasOwn(raw, 'password')) Auth.fail(400, '修改密码请使用新密码字段');
+    seen.add(username); const prior = old.get(username);
+    let password = prior?.password || null;
+    if (Object.hasOwn(raw, 'newPassword')) password = Auth.hashPassword(raw.newPassword);
+    if (!prior && !password) Auth.fail(400, '新增账号须设置密码');
+    let perms = null;
+    if (raw.perms != null) {
+      if (typeof raw.perms !== 'object' || Array.isArray(raw.perms)) Auth.fail(400, '权限格式不正确');
+      perms = {};
+      for (const menu of Object.keys(raw.perms)) {
+        if (!Auth.MENUS.includes(menu) || !raw.perms[menu] || typeof raw.perms[menu] !== 'object' || Array.isArray(raw.perms[menu])) Auth.fail(400, '权限菜单无效');
+        perms[menu] = {};
+        for (const [col, value] of Object.entries(raw.perms[menu])) {
+          if (!Auth.COLUMNS.includes(col) || ![0, 1, false, true].includes(value)) Auth.fail(400, '权限值无效');
+          perms[menu][col] = value === 1 || value === true ? 1 : 0;
+        }
+      }
+    }
+    const enabled = raw.enabled === true || raw.enabled === 1;
+    if (username === 'jc' && (!enabled || raw.role !== 'admin')) Auth.fail(400, '主账号不能停用或降权');
+    return { username, password, role: raw.role, enabled, name: String(raw.name || '').slice(0, 200),
+      dept: String(raw.dept || '').slice(0, 200), perms,
+      createdAt: prior?.createdAt || new Date().toISOString(), lastLoginAt: prior?.lastLoginAt || null };
+  });
+  if (old.has('jc') && !seen.has('jc')) Auth.fail(400, '主账号不能删除');
+  if (!users.some(user => user.role === 'admin' && user.enabled)) Auth.fail(400, '须保留至少一个启用的主账号');
+  return users;
+}
+function sessionResponse(session, companyId) {
+  return { ok: true, user: Auth.publicUser(session.user), companies: [companyId], csrfToken: session.csrfToken };
+}
+
 /* ════════ HTTP 工具 ════════ */
 function sendJson(res, code, obj) {
   const body = JSON.stringify(obj);
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
   res.end(body);
 }
 
@@ -842,7 +945,8 @@ const MIME = {
 };
 
 function serveStatic(req, res, pathname) {
-  let rel = decodeURIComponent(pathname);
+  let rel;
+  try { rel = decodeURIComponent(pathname); } catch (_) { res.writeHead(400); return res.end('bad request'); }
   if (rel === '/' || rel === '') rel = '/index.html';
   const norm = rel.replace(/\\/g, '/').toLowerCase();
   // 安全：禁止访问后端目录、数据目录(qc.db)、上级目录
@@ -868,7 +972,8 @@ function serveStatic(req, res, pathname) {
 
 /* ════════ 路由 ════════ */
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost');
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); } catch (_) { return sendJson(res, 400, { ok: false, error: '请求地址无效' }); }
   const p = url.pathname;
 
   if (!p.startsWith('/api/')) return serveStatic(req, res, p);
@@ -882,43 +987,69 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { companies: COMPANIES });
     }
 
-    /* ── 门户 SSO 验票（免登，无需鉴权，不分厂区）── */
+    // The old quality portal signs tickets in public browser JavaScript. Those
+    // tickets cannot establish a server identity, regardless of their signature.
     if (p === '/api/sso-verify' && req.method === 'POST') {
-      const body = await readBody(req);
-      try {
-        const claims = verifyPortalTicket(body && body.ticket);
-        return sendJson(res, 200, {
-          ok: true,
-          user: {
-            username: String(claims.sub),
-            name: String(claims.name || claims.sub),
-            dept: String(claims.dept || ''),
-            role: 'admin',
-            perms: claims.perms || null,
-          },
-          companies: Array.isArray(claims.companies) ? claims.companies : null,
-        });
-      } catch (e) {
-        return sendJson(res, 401, { ok: false, error: String(e && e.message || e) });
-      }
+      return sendJson(res, 401, { ok: false, error: '请使用品质系统账号登录' });
     }
-
-    /* ── 数据类路由：解析目标厂区（缺省东莞，兼容旧链接）── */
     const companyId = resolveCompany(url.searchParams);
-    if (companyId === null) {
-      return sendJson(res, 400, { ok: false, error: '未知厂区：' + String(url.searchParams.get('company')) });
+    if (companyId === null) return sendJson(res, 400, { ok: false, error: '未知厂区' });
+    if (p === '/api/login' && req.method === 'POST') {
+      Auth.validJSONRequest(req);
+      const body = await readBody(req);
+      if (!body || typeof body.username !== 'string' || !body.username.trim() || body.username.length > 100 ||
+          typeof body.password !== 'string' || !body.password || body.password.length > 1024) Auth.fail(400, '请输入用户名和密码');
+      const username = body.username.trim();
+      const succeeded = sessions.loginAttempt(req, companyId, username);
+      const db = _dbs.get(companyId);
+      const user = db && db.prepare('SELECT * FROM users WHERE username=?').get(username);
+      if (!user || user.enabled !== 1 || !Auth.checkPassword(body.password, user.password)) Auth.fail(401, '用户名或密码错误，或账号已停用');
+      // Upgrade the legacy browser checksum only after verifying the existing
+      // password. Existing passwords and roles continue to work unchanged.
+      if (!user.password.startsWith('scrypt$')) user.password = Auth.hashPassword(body.password, 1);
+      user.lastLoginAt = new Date().toISOString();
+      db.prepare('UPDATE users SET lastLoginAt=?,password=? WHERE username=?').run(user.lastLoginAt, user.password, username);
+      const csrfToken = sessions.login(req, res, companyId, user); succeeded();
+      return sendJson(res, 200, sessionResponse({ user, csrfToken }, companyId));
     }
-    const db = getDb(companyId);
+    if (p === '/api/integration/inspections' && req.method === 'GET') {
+      const expected = process.env.QC_INSPECTIONS_READ_TOKEN;
+      if (!/^[A-Za-z0-9_-]{43,128}$/.test(expected || '') || !Auth.equalSecret(req.headers.authorization, 'Bearer ' + expected)) Auth.fail(401, '读取凭据无效');
+      const db = _dbs.get(companyId);
+      if (!db) Auth.fail(503, '品质系统尚未就绪');
+      const fields = ['id', 'date', 'inspDate', 'supplier', 'client', 'productNo', 'productName',
+        'deliveryNo', 'orderNo', 'type', 'qty', 'sampleQty', 'fail', 'defectRate', 'result', 'defect', 'qc', 'remark'];
+      const records = db.prepare('SELECT * FROM records ORDER BY id').all().map(row => Object.fromEntries(fields.map(key => [key, row[key]])));
+      return sendJson(res, 200, { company: companyId, records });
+    }
+    // Reject before calling getDb(): unauthenticated callers cannot initialize,
+    // migrate, seed or select another company's database.
+    const session = sessions.authenticate(req, companyId, username => _dbs.get(companyId)?.prepare('SELECT * FROM users WHERE username=?').get(username));
+    if (!['GET', 'HEAD'].includes(req.method)) sessions.requireCSRF(req, session);
+    if (p === '/api/session' && req.method === 'GET') return sendJson(res, 200, sessionResponse(session, companyId));
+    if (p === '/api/logout' && req.method === 'POST') {
+      sessions.clear(req, res, companyId); return sendJson(res, 200, { ok: true });
+    }
+    const db = _dbs.get(companyId), user = session.user;
+    if (!db) Auth.fail(503, '品质系统尚未就绪');
 
     if (p === '/api/bootstrap' && req.method === 'GET') {
-      return sendJson(res, 200, Object.assign({ company: companyId }, getBootstrap(db)));
+      const data = getBootstrap(db);
+      const readRecords = ['dashboard', 'records', 'review', 'analysis', 'daily', 'weekly', 'monthly', 'yearly', 'supplier-report'].some(menu => Auth.can(user, menu, 'v'));
+      if (!readRecords) { data.records = []; data.nextId = 31; }
+      if (!Auth.can(user, 'users', 'v')) data.users = [Auth.publicUser(user)];
+      if (!Auth.can(user, 'suppliers', 'v')) data.partners = [];
+      if (!Auth.can(user, 'defectlib', 'v') && !Auth.can(user, 'records', 'v')) data.defectLib = [];
+      return sendJson(res, 200, { company: companyId, ...data, ...sessionResponse(session, companyId) });
     }
     if (p === '/api/export/records.csv' && (req.method === 'GET' || req.method === 'HEAD')) {
+      Auth.requirePermission(user, 'records', 'v');
       const records = getFilteredExportRecords(db, url.searchParams);
       const body = buildRecordsCsv(records);
       return sendDownload(req, res, 'text/csv; charset=utf-8', `${companyName(companyId)}验货明细_${todayStr()}.csv`, body);
     }
     if (p === '/api/export/factory-excel.xls' && (req.method === 'GET' || req.method === 'HEAD')) {
+      Auth.requirePermission(user, 'records', 'v');
       const records = getFilteredExportRecords(db, url.searchParams);
       const from = String(url.searchParams.get('dateFrom') || '').trim();
       const to = String(url.searchParams.get('dateTo') || '').trim();
@@ -928,46 +1059,64 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/records' && req.method === 'POST') {
       const body = await readBody(req);
-      const r = mergeRecordChanges(db, Array.isArray(body.records) ? body.records : [],
-        Array.isArray(body.deletedIds) ? body.deletedIds : []);
+      const allowed = authorizeRecordBatch(db, body.records, body.deletedIds || [], user);
+      const r = mergeRecordChanges(db, allowed.records, allowed.deletedIds);
       return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM records').get().c,
         ...r });
     }
     if (p === '/api/records/delete' && req.method === 'POST') {
       const body = await readBody(req);
-      const n = deleteRecords(db, Array.isArray(body.ids) ? body.ids : []);
+      const allowed = authorizeRecordBatch(db, [], body.ids, user);
+      const n = deleteRecords(db, allowed.deletedIds);
       return sendJson(res, 200, { ok: true, deleted: n });
     }
     if (p === '/api/records/replace' && req.method === 'POST') {
       const body = await readBody(req);
-      replaceRecords(db, Array.isArray(body.records) ? body.records : []);
+      const allowed = authorizeRecordBatch(db, body.records, [], user, true);
+      replaceRecords(db, allowed.records);
       return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM records').get().c });
     }
     if (p === '/api/users' && req.method === 'POST') {
       const body = await readBody(req);
-      replaceUsers(db, Array.isArray(body.users) ? body.users : []);
+      Auth.requirePermission(user, 'users', 'm');
+      const previous = db.prepare('SELECT username,password,enabled FROM users').all();
+      const users = validatedUsers(db, body.users);
+      replaceUsers(db, users);
+      for (const old of previous) {
+        const next = users.find(item => item.username === old.username);
+        if (!next || !next.enabled || next.password !== old.password) sessions.revoke(companyId, old.username);
+      }
       return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM users').get().c });
     }
     if (p === '/api/partners' && req.method === 'POST') {
       const body = await readBody(req);
-      replacePartners(db, Array.isArray(body.partners) ? body.partners : []);
+      Auth.requirePermission(user, 'suppliers', 'e');
+      if (!Array.isArray(body.partners)) Auth.fail(400, 'partners须为数组');
+      replacePartners(db, body.partners);
       return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM partners').get().c });
     }
     if (p === '/api/defects' && req.method === 'POST') {
       const body = await readBody(req);
-      replaceDefects(db, Array.isArray(body.defectLib) ? body.defectLib : []);
+      Auth.requirePermission(user, 'defectlib', 'm');
+      if (!Array.isArray(body.defectLib)) Auth.fail(400, 'defectLib须为数组');
+      const oldDefects = db.prepare('SELECT name,category FROM defect_library').all();
+      if (oldDefects.some(old => !body.defectLib.some(item => item.name === old.name && item.category === old.category))) Auth.requirePermission(user, 'records', 'm');
+      replaceDefects(db, body.defectLib);
       return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM defect_library').get().c });
     }
     /* ── AI（阿里百炼，全局共用，不分厂区）── */
     if (p === '/api/ai/status' && req.method === 'GET') {
+      Auth.requirePermission(user, 'records', 'e');
       return sendJson(res, 200, { ready: AI.ready, ocrModel: AI.ocrModel, baseURL: AI.baseURL });
     }
     if (p === '/api/ai/reload' && req.method === 'POST') {
+      Auth.requirePermission(user, 'users', 'm');
       AI = loadAiConfig();
       return sendJson(res, 200, { ok: true, ready: AI.ready, ocrModel: AI.ocrModel });
     }
     if (p === '/api/ai/ocr-extract' && req.method === 'POST') {
       const body = await readBody(req);
+      Auth.requirePermission(user, 'records', 'e');
       if (!body || !body.image) return sendJson(res, 400, { ok: false, error: '缺少 image 字段（base64 dataURL）' });
       try {
         const r = await aiVisionExtract(body.image);
@@ -979,15 +1128,16 @@ const server = http.createServer(async (req, res) => {
     }
     return sendJson(res, 404, { ok: false, error: 'unknown api route' });
   } catch (e) {
-    console.error('[api error]', p, e);
-    return sendJson(res, 500, { ok: false, error: String(e && e.message || e) });
+    const code = e instanceof Auth.AuthError ? e.status : e instanceof SyntaxError ? 400 : 500;
+    if (code === 500) console.error('[api error]', p, e && e.name);
+    return sendJson(res, code, { ok: false, error: e instanceof Auth.AuthError ? e.message : code === 400 ? 'JSON格式不正确' : '请求失败，请稍后重试' });
   }
 });
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log('════════════════════════════════════════════');
   console.log('  兴信 QMS 后端已启动（多厂区模式）');
-  console.log('  本机:   http://localhost:' + PORT + '/index.html');
+  console.log('  本机:   http://localhost:' + server.address().port + '/index.html');
   console.log('  数据目录: ' + DATA_DIR);
   for (const c of COMPANIES) {
     const b = getBootstrap(getDb(c.id));

@@ -4,7 +4,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
 const core = vm.runInNewContext(source.slice(source.indexOf('const RECORD_COLS'), source.indexOf('function replaceUsers')) +
@@ -60,25 +59,14 @@ test('failed explicit replacement restores both original rows and original tombs
   assert.deepEqual(all(db).map(r => r.id), [1]);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM record_tombstones WHERE id=2').get().n, 1);
 });
-test('portal SSO still accepts a valid ticket and rejects expired/wrong-app tickets', () => {
-  const verifier = source.slice(source.indexOf('function verifyPortalTicket'), source.indexOf('const ROOT'));
-  const verify = vm.runInNewContext(verifier + ';verifyPortalTicket', { crypto, Buffer, process: { env: { SSO_SECRET: 'test-only-qms-ticket-secret' } } });
-  function ticket(extra = {}) {
-    const head = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
-    const body = Buffer.from(JSON.stringify({ sub: 'synthetic-user', app: 'xingxin-qms', exp: Date.now() + 60000, ...extra })).toString('base64url');
-    return head + '.' + body + '.' + crypto.createHmac('sha256', 'test-only-qms-ticket-secret').update(head + '.' + body).digest('base64url');
-  }
-  assert.equal(verify(ticket()).sub, 'synthetic-user'); assert.throws(() => verify(ticket({ exp: 1 })));
-  assert.throws(() => verify(ticket({ app: 'other-app' })));
-  assert.match(source, /p === '\/api\/sso-verify' && req.method === 'POST'/);
-});
+// HTTP rejection of legacy VITE/browser-signed SSO tickets is covered in api-auth.test.js.
 
 function browser() {
   const store = new Map([['xingxin_qms_dg-xingxin_records', JSON.stringify({ records: [] })]]);
   const requests = [];
   const sandbox = { window: {}, location: { pathname: '/qc/' }, console: { log() {}, warn() {} },
-    document: { addEventListener() {} }, localStorage: { getItem: key => store.get(key), setItem: (key, value) => store.set(key, value) },
-    XMLHttpRequest: class { open() {} send() { this.status = 200; this.responseText = '{"records":[]}'; } },
+    document: { addEventListener() {}, getElementById() { return null; } }, localStorage: { getItem: key => store.get(key), setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) },
+    XMLHttpRequest: class { open() {} send() { this.status = 200; this.responseText = JSON.stringify({ records: [], user: { username: 'fixture-admin', role: 'admin', enabled: true }, companies: ['dg-xingxin'], csrfToken: 'fixture-csrf' }); } },
     fetch: (url, options) => new Promise(resolve => requests.push({ url, body: JSON.parse(options.body), resolve })), setTimeout() {} };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../qc-backend.js'), 'utf8'), sandbox);
   return { window: sandbox.window, requests };

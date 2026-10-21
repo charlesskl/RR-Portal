@@ -1,6 +1,6 @@
 """False-gated Toy-only maintenance restoration using the reviewed readonly diagnosis."""
 import copy,hashlib,importlib.util,json,os,pathlib,sys,traceback
-ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';RESTORE_PIN=False;REVIEWED_DNS_DIFF_PIN=False
+ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';RESTORE_PIN=True;REVIEWED_DNS_DIFF_PIN=True
 TARGET='dfcdf751cae42fdd1731729dd662fce041c28caf';TREE='d5a107e898fe35066416fa0431ccd92400467875'
 RELEASE_SHA='2db18fac4f09a6dc4ae64c07fc248e9cd575ed5e06eebabc77de58e1584254e7';DIAG_LIBRARY_SHA='caa05c2977970261fb480284d46c74254163602e963c1ba6193f5be284aa048b'
 FAILED=ROOT/'deploy/backups/batch-969-970-972-974-20261021-deploy-03'

@@ -1,25 +1,29 @@
-name: Factory Review 973 Read Only Initial Diagnosis
+name: Factory Review 973 Fixed Two Service Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [diagnose]}
+      mode: {type: choice, required: true, options: [deploy, verify]}
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: deploy-cloud
   queue: max
   cancel-in-progress: false
 env:
-  FACTORY_DIAG_WORKFLOW_PIN: 'true'
-  FACTORY_DIAG_HELPER_SHA256: 'dedd78cf2ac884d0482531daad5f7b890740ba9a74ab2f5f375942a258717bd3'
+  FACTORY_RELEASE_WORKFLOW_PIN: 'false'
+  FACTORY_SOURCE_MANIFEST_SHA256: 'f613e7c1e856de4e2c59b12dbc8cef23d50a2e9a25591ffb79d1c45273d811bb'
+  FACTORY_RELEASE_HELPER_SHA256: 'bd70a4ee321f220b61f53ef92ee818e0be2aa0c2c9fb9dd6468ed35606e216ee'
 jobs:
-  fixed-factory-review-diagnose:
+  fixed-factory-review-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 75
     steps:
-      - name: Validate fixed source and first attempt
+      - name: Validate exact ops source and first attempt
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_BRANCH: ${{ github.ref }}
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_ATTEMPT: ${{ github.run_attempt }}
@@ -27,10 +31,18 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$FACTORY_DIAG_WORKFLOW_PIN" = true && "$FACTORY_DIAG_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/factory-review-973-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose ]] || exit 1
+          [[ "$FACTORY_RELEASE_WORKFLOW_PIN" = true && "$FACTORY_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$FACTORY_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/factory-review-973-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(deploy|verify)$ ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Read sealed failure frames and current preflight facts
+          if [[ "$RELEASE_MODE" = deploy ]]; then
+            gh api "repos/$GH_REPO/actions/workflows/deploy.yml" > "$RUNNER_TEMP/factory-standard-workflow.json"
+            python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["state"]=="disabled_manually"' "$RUNNER_TEMP/factory-standard-workflow.json"
+            for state in queued in_progress waiting requested pending; do
+              gh api --method GET "repos/$GH_REPO/actions/workflows/deploy.yml/runs" -f status="$state" -f per_page=1 > "$RUNNER_TEMP/factory-standard-runs.json"
+              python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["total_count"]==0' "$RUNNER_TEMP/factory-standard-runs.json"
+            done
+          fi
+      - name: Run fixed factory-review release or read-only verification
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -43,26 +55,35 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 10m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,FACTORY_DIAG_WORKFLOW_PIN,FACTORY_DIAG_HELPER_SHA256
+          command_timeout: 70m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,FACTORY_RELEASE_WORKFLOW_PIN,FACTORY_RELEASE_HELPER_SHA256,FACTORY_SOURCE_MANIFEST_SHA256
           script: |
             set -euo pipefail
-            [[ "$FACTORY_DIAG_WORKFLOW_PIN" = true && "$FACTORY_DIAG_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/factory-review-973-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$FACTORY_RELEASE_WORKFLOW_PIN" = true && "$FACTORY_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$FACTORY_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/factory-review-973-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(deploy|verify)$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/factory-review-973-20261021:refs/remotes/origin/ops/factory-review-973-20261021 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/factory-review-973-20261021)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            factory_diag_tmp=$(mktemp -d /tmp/factory-973-diagnose.XXXXXX)
-            trap 'rm -rf "$factory_diag_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/factory-review-973-diagnose.py" > "$factory_diag_tmp/run.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/factory-review-973-release.py" > "$factory_diag_tmp/factory-release-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/factory-review-973-backup.py" > "$factory_diag_tmp/factory-review-backup-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$factory_diag_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$factory_diag_tmp/release-data-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$factory_diag_tmp/run.py" | cut -d ' ' -f1)" = "$FACTORY_DIAG_HELPER_SHA256" ]] || exit 1
-            [[ "$(sha256sum "$factory_diag_tmp/factory-release-library.py" | cut -d ' ' -f1)" = 8c7f870eddbdadb093c50761ba177d63b2cd37a3eab9a5a1b240efa18f010b3e ]] || exit 1
-            [[ "$(sha256sum "$factory_diag_tmp/factory-review-backup-library.py" | cut -d ' ' -f1)" = 587812a638756e0eb7e7bcf1cb5042a5f7531d1b3c0e3200be77f894627b9b39 ]] || exit 1
-            [[ "$(sha256sum "$factory_diag_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
-            [[ "$(sha256sum "$factory_diag_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            timeout --signal=TERM --kill-after=20s 8m python3 -B "$factory_diag_tmp/run.py" diagnose
+            factory_release_tmp=$(mktemp -d /tmp/factory-973-release.XXXXXX)
+            trap 'rm -rf "$factory_release_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/factory-review-973-release.py" > "$factory_release_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/factory-review-973-backup.py" > "$factory_release_tmp/factory-review-backup-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$factory_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$factory_release_tmp/release-data-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/factory-review-973-migration-compare.py" > "$factory_release_tmp/factory-review-migration-compare-library.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/factory-review-reviewed-files.json" > "$factory_release_tmp/factory-review-reviewed-files.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$factory_release_tmp/run.py" | cut -d ' ' -f1)" = "$FACTORY_RELEASE_HELPER_SHA256" ]] || exit 1
+            [[ "$(sha256sum "$factory_release_tmp/factory-review-backup-library.py" | cut -d ' ' -f1)" = 587812a638756e0eb7e7bcf1cb5042a5f7531d1b3c0e3200be77f894627b9b39 ]] || exit 1
+            [[ "$(sha256sum "$factory_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
+            [[ "$(sha256sum "$factory_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            [[ "$(sha256sum "$factory_release_tmp/factory-review-migration-compare-library.py" | cut -d ' ' -f1)" = fa4e6f29f9918985f7675c81e833815cff3f39df513ae554faad0fe0a025ad35 ]] || exit 1
+            [[ "$(sha256sum "$factory_release_tmp/factory-review-reviewed-files.json" | cut -d ' ' -f1)" = "$FACTORY_SOURCE_MANIFEST_SHA256" ]] || exit 1
+            factory_release_limit=18m
+            [[ "$RELEASE_MODE" != deploy ]] || factory_release_limit=65m
+            timeout --signal=TERM --kill-after=30s "$factory_release_limit" python3 -B "$factory_release_tmp/run.py" "$RELEASE_MODE"
+      - name: Report regular deployment restoration obligation
+        if: always()
+        shell: bash
+        run: |
+          echo 'MANUAL_ATTENTION: The release owner must restore deploy.yml to its saved original state and verify it. This read-only-token workflow does not change that setting.'

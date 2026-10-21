@@ -1,9 +1,9 @@
 """PR973 two-service factory-review deployment and sealed read-only verification. Draft gates false."""
 import contextlib,copy,datetime,html.parser,io,sqlite3,hashlib,importlib.util,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,time,traceback,urllib.request,urllib.error
-ROOT=pathlib.Path('/opt/rr-portal');BASE='6fc1143c0b39470d814caac553beaaf3bc2912e0';TARGET='7ce02db904cdd769ecd35148d50be15ec4fce210';TREE='109dc79b3552ad24a477bc64c9a6a79af21221a5'
-BRANCH='refs/heads/ops/factory-review-973-20261021';DEPLOY_PIN=True;VERIFY_PIN=False
+ROOT=pathlib.Path('/opt/rr-portal');BASE='6fc1143c0b39470d814caac553beaaf3bc2912e0';TARGET='';TREE=''
+BRANCH='refs/heads/ops/factory-review-973-20261021';DEPLOY_PIN=False;VERIFY_PIN=False
 BACKUP=ROOT/'deploy/backups/factory-review-973-20261021-backup';BACKUP_MANIFEST='ae39c5c0fcc005c587def098193b770afd922bc6f7a45972f03031665f1384c9';BACKUP_RESULT='f0226c0a16749974e9d5fa3c678d553892012384ec8237987ab2157d3498481e'
-DEPLOY=BACKUP.with_name('factory-review-973-20261021-deploy');VERIFY=BACKUP.with_name('factory-review-973-20261021-verify');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+DEPLOY=BACKUP.with_name('factory-review-973-20261021-deploy-02');VERIFY=BACKUP.with_name('factory-review-973-20261021-verify-02');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 CORE_SHA='587812a638756e0eb7e7bcf1cb5042a5f7531d1b3c0e3200be77f894627b9b39'
 COMPARATOR_SHA='fa4e6f29f9918985f7675c81e833815cff3f39df513ae554faad0fe0a025ad35'
 SOURCE_MANIFEST_SHA='f613e7c1e856de4e2c59b12dbc8cef23d50a2e9a25591ffb79d1c45273d811bb'
@@ -34,8 +34,11 @@ def operation(args,timeout=180,checkout=False):
 def source_manifest():
  p=pathlib.Path(__file__).with_name('factory-review-reviewed-files.json');need(p.is_file()and not p.is_symlink()and sha(p.read_bytes())==SOURCE_MANIFEST_SHA);v=json.loads(p.read_bytes());need(type(v)is dict and 0<len(v)<=30 and all(any(n.startswith(CORE.APP_PREFIX+part)for part in ('src/','tests/','pb_hooks/','pb_migrations/','README.md'))and CORE.OPS.L.safe_path(n)and re.fullmatch('[a-f0-9]{64}',h)for n,h in v.items()));return v
 
-def checked_source(revision,baseline,files,canonical=False):
+def preserved_source(revision,baseline):
  CORE.BASE=revision;need(CORE.source()==baseline['configuration']and CORE.dirty_snapshot()==baseline['preexistingFourDirty']and CORE.OPS.L.file_hash(ROOT/'.env.cloud.production')==baseline['environmentSHA256']and CORE.file_metadata(ROOT/'.env.cloud.production')==baseline['environmentFileMetadata'])
+
+def checked_source(revision,baseline,files,canonical=False):
+ preserved_source(revision,baseline)
  need(CORE.run(['git','rev-parse',TARGET+'^{tree}']).decode().strip()==TREE);changed=CORE.run(['git','diff','--name-only','-z','--no-ext-diff','--no-textconv',BASE,TARGET]).decode().strip('\0').split('\0');need(set(changed)==set(files));need(not set(changed)&set(baseline['preexistingFourDirty']))
  for n,h in files.items():
   need(sha(CORE.run(['git','show',TARGET+':'+n]))==h)
@@ -129,7 +132,7 @@ def deploy(result,before,files):
  global STAGE,DRAIN
  STAGE='initial-runtime-and-source';current,raw=CORE.runtime();need(current==before['runtime']and flags()==before['maintenanceInventory']);old_flags=flags()
  for service in CORE.SERVICES:maintenance('require_maintenance_cleared',service);bootstrap_ready(raw[service])
- checked_source(BASE,before,files);STAGE='fetch-exact-main';captured(['git','-c','core.hooksPath=/dev/null','fetch','--no-write-fetch-head','origin','main:refs/rr-portal-factory-973-main'],'fetch-main');need(CORE.run(['git','rev-parse','refs/rr-portal-factory-973-main']).decode().strip()==TARGET);CORE.run(['git','merge-base','--is-ancestor',BASE,TARGET]);checked_source(BASE,before,files)
+ preserved_source(BASE,before);STAGE='fetch-exact-main';captured(['git','-c','core.hooksPath=/dev/null','fetch','--no-write-fetch-head','origin','main:refs/rr-portal-factory-973-main'],'fetch-main');need(CORE.run(['git','rev-parse','refs/rr-portal-factory-973-main']).decode().strip()==TARGET);CORE.run(['git','merge-base','--is-ancestor',BASE,TARGET]);checked_source(BASE,before,files)
  STAGE='fast-forward-reviewed-source';operation(['git','-c','core.hooksPath=/dev/null','-c','merge.autoStash=false','merge','--ff-only','--no-autostash',TARGET],180,checkout=True);checked_source(TARGET,before,files,True);base=compose_base();tags={s:'rr-portal-'+s+'-973:'+TARGET for s in CORE.SERVICES};args,rendered=overlay(base,tags,'build-images-and-literal-env.private.yml');candidates={};proofs={};public={};preswitch={}
  for service in ('factory-review-test','factory-review'):
   STAGE=service+'-build-before-any-maintenance';need(CORE.runtime()[0]==current and flags()==old_flags);operation([*args,'build',service],1500);image=json.loads(captured(['docker','image','inspect',tags[service]],'candidate-image'))[0];candidates[service]={'image':image['Id'],'files':candidate(service,image,raw[service],base)};checked_source(TARGET,before,files,True);need(CORE.runtime()[0]==current and flags()==old_flags)

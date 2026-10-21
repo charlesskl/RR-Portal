@@ -1,0 +1,44 @@
+{
+  "status": "CHECKED",
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr987_review",
+  "reviewedAtUtc": "2026-10-21T10:36:56.675203+00:00",
+  "draftSHA256": "0320e3da42fc9e700a9d2e5b441f0062d12a6b73d69c1edd69f5e1b98dd69342",
+  "activeSHA256": "9e5594cde2491ce30a6d18f9406e1d249e91e89cb91bf009da44c3636e438749",
+  "workflowSHA256": "587b1d093aa2c6705a5bb2d2aeb6b1a3100c46b241314b0153a47def336603ff",
+  "planSHA256": "903ae3e0b05796306390eb51cd0488ae17781efe4614fa3ba310b0063a423bc3",
+  "opsParent": "27521fe10cb49578bea541d50eea21d3a93df22c",
+  "branch": "ops/batch-983-984-987-20261021",
+  "mode": "diagnose",
+  "readOnly": true,
+  "archiveManifestSHA256": "59a37eeb179739adedb72ac5f61ec82af7ef120a27df4b33dd99613ebee91092",
+  "archiveResultSHA256": "c9e8283ac106a004f1fdb673d48a7e3372427c5e5b8e64bc6038c0dd9ef89996",
+  "checks": [
+    "False-gated main rejects before any filesystem read and emits no output",
+    "Active helper differs only by AST-verified PIN False→True",
+    "Workflow byte-identical to previously reviewed fixed branch/attempt1/fingerprint/SHA/shared-concurrency generator",
+    "synthetic sealed failed archive: only basename/line/function + safe exception class; raw frames/source/secret omitted",
+    "changed trace bytes rejected by fixed manifest seal before any public diagnostic output"
+  ],
+  "remainingBlockers": [],
+  "authorizationScope": "Root may publish and dispatch only these exact reviewed read-only diagnose bytes against the fixed failed archive. Reviewer performed no GH/production/business calls.",
+  "files": {
+    "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose.py": {
+      "sha256": "0320e3da42fc9e700a9d2e5b441f0062d12a6b73d69c1edd69f5e1b98dd69342",
+      "bytes": 2377
+    },
+    "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose-active.py": {
+      "sha256": "9e5594cde2491ce30a6d18f9406e1d249e91e89cb91bf009da44c3636e438749",
+      "bytes": 2376
+    },
+    "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose-workflow.yml": {
+      "sha256": "587b1d093aa2c6705a5bb2d2aeb6b1a3100c46b241314b0153a47def336603ff",
+      "bytes": 3291
+    },
+    "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose-plan.json": {
+      "sha256": "903ae3e0b05796306390eb51cd0488ae17781efe4614fa3ba310b0063a423bc3",
+      "bytes": 597
+    }
+  }
+}

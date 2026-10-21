@@ -10,7 +10,7 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  QC_CANDIDATE_WORKFLOW_PIN: 'true'
+  QC_CANDIDATE_WORKFLOW_PIN: 'false'
   QC_CANDIDATE_HELPER_SHA256: '3d0d35558a8f3bdf4a23f4a33d0e46b64a1eaf45f5bd7c28948c85946e2916ab'
 jobs:
   fixed-qc-candidate-functional-check:

@@ -1,4 +1,4 @@
-"""Four-service private backup. Draft: execution gate is false.
+"""Four-service private backup v2. Draft: execution gate is false.
 
 Only filesystem copies, SQLite read transactions and read-only container execs.
 No HTTP, model calls, signals, maintenance changes, PostgreSQL or mail access.
@@ -11,7 +11,7 @@ BASE='97d563e93aca3d9e3c0bc512dd622d6a3002e710'
 BASE_TREE='ad906e8b24b81df8e7ade91d15c5e9ab4ab839ab'
 BRANCH='refs/heads/ops/batch-983-984-987-20261021'
 BACKUP_PIN=True
-OUT=ROOT/'deploy/backups/batch-983-984-987-20261021-backup'
+OUT=ROOT/'deploy/backups/batch-983-984-987-20261021-backup-v2'
 FACTORY='apps/PMC跟仓管/加工厂月度评审管理制度'
 RR='apps/工程部/工程啤办单'
 QC='apps/生产部/品质管理系统'
@@ -29,6 +29,7 @@ F=None;STAGE='entrypoint';RUNTIME_SERIAL=0
 def need(v,label):
  global STAGE
  if not v:STAGE=label;raise RuntimeError('BATCH_983_984_987_BACKUP_REJECTED')
+def safe_stage(v):return v if type(v)is str and re.fullmatch('[A-Za-z0-9_.-]{1,160}',v)else'unavailable'
 def enc(v):return json.dumps(v,ensure_ascii=True,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
 def sha(v):return hashlib.sha256(v).hexdigest()
 def read(p):return json.loads(p.read_bytes())
@@ -50,7 +51,7 @@ def ownership(tree,names):
 def db_metadata(tree,names):return{n:meta(tree/n)for n in names}
 def db_family_metadata(tree,names):return{n+x:meta(tree/(n+x))for n in names for x in('','-wal','-shm','-journal')if(tree/(n+x)).exists()}
 def process_environment(cid):
- blob=run(['docker','exec','--user','0',cid,'cat','/proc/1/environ']);need(blob.endswith(b'\0'),'complete-pid1-environment');v=F.envmap([x.decode()for x in blob.split(b'\0')if x]);need(v.pop('HOSTNAME',None)==cid[:12],'automatic-pid1-hostname');return v
+ blob=run(['docker','exec',cid,'cat','/proc/1/environ']);need(blob.endswith(b'\0'),'complete-pid1-environment');v=F.envmap([x.decode()for x in blob.split(b'\0')if x]);need(v.pop('HOSTNAME',None)==cid[:12],'automatic-pid1-hostname');return v
 def runtime(require_healthy=True):
  global RUNTIME_SERIAL
  ids=run(['docker','ps','-aq','--no-trunc']).decode().split();need(len(ids)==len(set(ids))==46 and all(re.fullmatch('[a-f0-9]{64}',x)for x in ids),'all-46-container-identities');records=json.loads(run(['docker','inspect',*ids]));need(type(records)is list and len(records)==46 and{r['Id']for r in records}==set(ids),'all-46-runtime-inspects');targets={};others={};raw={}
@@ -169,7 +170,7 @@ def backup(result):
 def main():
  need(BACKUP_PIN is True and sys.argv[1:]==['backup']and os.environ.get('RELEASE_BRANCH')==BRANCH and os.environ.get('RELEASE_ATTEMPT')=='1','false-draft-or-wrong-invocation');os.umask(0o077);OUT.mkdir(mode=0o700);initialize(OUT);signal.signal(signal.SIGTERM,lambda *_:need(False,'terminated'));result={'mode':'backup','base':BASE,'target':BASE,'tree':BASE_TREE,'success':False,'backupComplete':False,'businessWritesPerformed':False,'credentialsOrConfigurationChanged':False,'containerSignalsPerformed':False,'healthOrBusinessHTTPRequestsPerformed':False,'modelCallsPerformed':False,'otherServicesRequested':False,'secretOrRowsPrinted':False}
  try:backup(result)
- except BaseException as error:result.update(success=False,failedStage=STAGE,safeExceptionType=type(error).__name__);private('failure.private.txt',traceback.format_exc().encode())
+ except BaseException as error:result.update(success=False,failedStage=safe_stage(STAGE),factoryLibraryFailedStage=safe_stage(getattr(F,'STAGE',None)),dataOpsFailedStage=safe_stage(getattr(F.OPS,'STAGE',None)),sqliteLibraryFailedStage=safe_stage(getattr(F.OPS.L,'FAILED',None)),safeExceptionType=type(error).__name__);private('failure.private.txt',traceback.format_exc().encode())
  finally:private('first-result.json',result);F.OPS.L.seal(OUT);print(enc(dict(result,manifestSHA256=F.OPS.L.file_hash(OUT/'manifest.json'),resultSHA256=F.OPS.L.file_hash(OUT/'first-result.json'))).decode(),flush=True)
  return 0 if result['success']else 1
 if __name__=='__main__':

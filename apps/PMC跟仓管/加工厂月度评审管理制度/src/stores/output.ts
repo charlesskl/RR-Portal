@@ -25,10 +25,12 @@ export const useOutputStore = defineStore('output', () => {
       expand: 'factory',
       sort: 'year_month,factory',
     })
-    items.value = records.filter((item) => {
+    const visible = records.filter((item) => {
       const craft = (item as any).expand?.factory?.craft as Craft | undefined
       return !craft || canViewCraft(craft)
     })
+    items.value = visible
+    return visible
   }
   async function upsert(data: Partial<MonthlyOutput>) {
     // 依赖唯一索引 (factory, year_month)：存在则更新，否则创建

@@ -18,7 +18,9 @@ export const useFactoriesStore = defineStore('factories', () => {
     loading.value = true
     try {
       const records = await pb.collection('factories').getFullList<Factory>({ sort: 'name' })
-      items.value = records.filter((factory) => canViewCraft(factory.craft))
+      const visible = records.filter((factory) => canViewCraft(factory.craft))
+      items.value = visible
+      return visible
     } finally {
       loading.value = false
     }

@@ -30,7 +30,7 @@
       <a class="import-row" href="{{ url_for('po_import_detail', import_id=item.id) }}">
         <span class="file-type">{{ item.original_name.rsplit('.',1)[-1]|upper }}</span>
         <span><strong>{{ item.original_name }}</strong><small>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }} · SHA-256 {{ item.checksum[:12] }}…</small></span>
-        <span class="import-status {{ item.status }}">{{ {'queued':'排队中','processing':'提取中','needs_review':'需校对','failed':'失败'}.get(item.status,item.status) }}</span>
+        <span class="import-status {{ item.status }}">{{ {'queued':'排队中','processing':'提取中','retrying':'等待重试','needs_review':'需校对','failed':'失败'}.get(item.status,item.status) }}</span>
         <b>→</b>
       </a>
       {% endfor %}

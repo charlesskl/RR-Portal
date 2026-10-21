@@ -1,8 +1,8 @@
-name: Batch 969 970 972 974 Fixed Toy Configuration Diagnosis
+name: Batch 969 970 972 974 Restore Only Toy Entry
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [diagnose]}
+      mode: {type: choice, required: true, options: [restore-toy]}
 permissions:
   contents: read
 concurrency:
@@ -10,13 +10,13 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  BATCH_TOY_CONFIG_DIAG_WORKFLOW_PIN: 'true'
-  BATCH_TOY_CONFIG_DIAG_HELPER_SHA256: '4be163df390d2bb2369a76ae8c7c1add85274ae2782b708a1595409affd8fefa'
+  BATCH_TOY_RESTORE_WORKFLOW_PIN: 'false'
+  BATCH_TOY_RESTORE_HELPER_SHA256: '98222f065f199417a7f52ee28bc5e30a9165faee2a5ed59669a1922979e645ca'
   BATCH_RELEASE_LIBRARY_SHA256: '2db18fac4f09a6dc4ae64c07fc248e9cd575ed5e06eebabc77de58e1584254e7'
   BATCH_CORE_LIBRARY_SHA256: '4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5'
   BATCH_SOURCE_MANIFEST_SHA256: '7efb90de8b783dee9241c6e239d6a72cd9946dccad5f509d86cac62ac2041799'
 jobs:
-  fixed-readonly-toy-config-diagnose:
+  fixed-toy-entry-restore:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -30,10 +30,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$BATCH_TOY_CONFIG_DIAG_WORKFLOW_PIN" = true && "$BATCH_TOY_CONFIG_DIAG_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_RELEASE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-969-970-972-974-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^diagnose$ ]] || exit 1
+          [[ "$BATCH_TOY_RESTORE_WORKFLOW_PIN" = true && "$BATCH_TOY_RESTORE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_RELEASE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-969-970-972-974-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^restore-toy$ ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Read sealed partial release and inspect Toy configuration only
+      - name: Verify Toy evidence and restore only its entry
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -47,19 +47,21 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 18m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,BATCH_TOY_CONFIG_DIAG_WORKFLOW_PIN,BATCH_TOY_CONFIG_DIAG_HELPER_SHA256,BATCH_RELEASE_LIBRARY_SHA256,BATCH_CORE_LIBRARY_SHA256,BATCH_SOURCE_MANIFEST_SHA256
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,BATCH_TOY_RESTORE_WORKFLOW_PIN,BATCH_TOY_RESTORE_HELPER_SHA256,BATCH_RELEASE_LIBRARY_SHA256,BATCH_CORE_LIBRARY_SHA256,BATCH_SOURCE_MANIFEST_SHA256
           script: |
             set -euo pipefail
-            [[ "$BATCH_TOY_CONFIG_DIAG_WORKFLOW_PIN" = true && "$BATCH_TOY_CONFIG_DIAG_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_RELEASE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-969-970-972-974-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^diagnose$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$BATCH_TOY_RESTORE_WORKFLOW_PIN" = true && "$BATCH_TOY_RESTORE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_RELEASE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-969-970-972-974-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^restore-toy$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin ops/batch-969-970-972-974-20261021:refs/rr-portal-batch/969-974-ops >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/rr-portal-batch/969-974-ops)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
             batch_task_tmp=$(mktemp -d /tmp/batch-969-974-toy-config-diag.XXXXXX)
             trap 'rm -rf "$batch_task_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-toy-config-diagnose.py" > "$batch_task_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_task_tmp/run.py" | cut -d ' ' -f1)" = "$BATCH_TOY_CONFIG_DIAG_HELPER_SHA256" ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-toy-restore.py" > "$batch_task_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_task_tmp/run.py" | cut -d ' ' -f1)" = "$BATCH_TOY_RESTORE_HELPER_SHA256" ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-toy-config-diagnose.py" > "$batch_task_tmp/batch-toy-diagnostic-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_task_tmp/batch-toy-diagnostic-library.py" | cut -d ' ' -f1)" = caa05c2977970261fb480284d46c74254163602e963c1ba6193f5be284aa048b ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-release-05.py" > "$batch_task_tmp/batch-release-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_task_tmp/batch-release-library.py" | cut -d ' ' -f1)" = "$BATCH_RELEASE_LIBRARY_SHA256" ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$batch_task_tmp/batch-backup-library.py" 2>/dev/null || exit 1

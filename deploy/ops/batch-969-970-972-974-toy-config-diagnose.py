@@ -1,6 +1,6 @@
 """Fixed partial-release Toy configuration observation only. No repair or flag clearing."""
 import copy,hashlib,importlib.util,json,os,pathlib,re,sys,traceback
-ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';DIAG_PIN=True
+ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';DIAG_PIN=False
 RELEASE_SHA='2db18fac4f09a6dc4ae64c07fc248e9cd575ed5e06eebabc77de58e1584254e7'
 FAILED=ROOT/'deploy/backups/batch-969-970-972-974-20261021-deploy-03';FAILED_MANIFEST='964efbf2e6f32bdd7355c00db59a8cd7d06e58c523fef31f4aa72ec2dfadd109';FAILED_RESULT='d280456999159e3dc7482fc8fdc4878deb63e11fd566e9e2c39f279689b4a98e'
 OUT=ROOT/'deploy/backups/batch-969-970-972-974-20261021-toy-config-diagnose-01';R=None;STAGE='entrypoint';MISSING=object()

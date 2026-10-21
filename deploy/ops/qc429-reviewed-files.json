@@ -1,0 +1,15 @@
+{
+  ".github/workflows/factory-review-restore-contract.yml": "586bbe561788a9e28d6580bc5a4e7ee7c7234365700cbb0fb7bfb1dd336f3b93",
+  "apps/QA部/QC成品报告系统/Dockerfile": "a0c1fe5ea6d7bfa3ea970e5bca208f34b28b9c6ad01ef26fc9feba9b876bcc8d",
+  "apps/QA部/QC成品报告系统/ai_service.py": "98d1cf098242a1774e175a8c4c81edc123c95a72b49de0ca9156d0a4daf7664e",
+  "apps/QA部/QC成品报告系统/bailian_adapter.py": "c2fba172527798da7a04f1b6e49eabacc042537c58fa5a0772483334bcaeace1",
+  "apps/QA部/QC成品报告系统/docker-compose.yml": "7f91e9a9653ea66f52ac7ca0e9304ec31e4bbc2515ab95f6d1f2acbd9b9cf990",
+  "apps/QA部/QC成品报告系统/static/ai_inspection.js": "a25d685dccd2a7d82060a5ddd8683078ce483c7e3d1637929b1ceeb6d8d95065",
+  "apps/QA部/QC成品报告系统/templates/ai_inspection.html": "14b974ae4ac15c4841fab53a0bc59708d8bf60da8507fdf68b486b5f0f612dc2",
+  "apps/QA部/QC成品报告系统/templates/new_report.html": "1f0bb1e753dec91183ec303f944b191b54e5aa237077fb18be92f3d340c568a6",
+  "apps/QA部/QC成品报告系统/templates/po_review.html": "3a7d7957b823b8d37e5e3d783cf35edae2c10d3faaab9c85ebcdc728de969538",
+  "apps/QA部/QC成品报告系统/tests/test_ai_retry_ui.py": "61c0d6c7eae3e3302bf08e92d3de7818fab7f9d67306edf842b6d3fcddce2769",
+  "apps/QA部/QC成品报告系统/tests/test_ai_service.py": "a41e34ebbcf0913fcdb4fd3313a280b906154d99f2374051a746fb7fc4074a6c",
+  "apps/QA部/QC成品报告系统/tests/test_bailian_adapter.py": "512180822d0bde89e07fc7cacbefaa8f61208c2265f115f3dc58cb6bcf8735cf",
+  "docker-compose.cloud.yml": "b37599d88d8aaea17136576917a8808b6f9a02551fac3f7f90b5783729a36e23"
+}

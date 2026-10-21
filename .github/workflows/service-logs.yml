@@ -1,8 +1,8 @@
-name: Batch 969 970 972 974 Continue Indo Quote and Verify
+name: Batch 969 970 972 974 Sealed Data Diagnosis
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [continue, verify]}
+      mode: {type: choice, required: true, options: [diagnose]}
 permissions:
   contents: read
 concurrency:
@@ -10,15 +10,15 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  BATCH_CONTINUATION_WORKFLOW_PIN: 'true'
-  BATCH_CONTINUATION_HELPER_SHA256: '160d57a7dcd79ea356a8c906fc1a1c99bc5b4b7934285340537ce9cf299fd924'
+  BATCH_DATA_DIAG_WORKFLOW_PIN: 'false'
+  BATCH_DATA_DIAG_HELPER_SHA256: '1336bf611f65e3d83d38ae34968e8d4d874ee8697363dcecb77e7da6af42d222'
   BATCH_RELEASE_LIBRARY_SHA256: '2db18fac4f09a6dc4ae64c07fc248e9cd575ed5e06eebabc77de58e1584254e7'
   BATCH_CORE_LIBRARY_SHA256: '4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5'
   BATCH_SOURCE_MANIFEST_SHA256: '7efb90de8b783dee9241c6e239d6a72cd9946dccad5f509d86cac62ac2041799'
 jobs:
-  fixed-continuation-or-verify:
+  fixed-sealed-data-diagnosis:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 8
     steps:
       - name: Validate reviewed workflow, branch and first attempt
         shell: bash
@@ -30,10 +30,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$BATCH_CONTINUATION_WORKFLOW_PIN" = true && "$BATCH_CONTINUATION_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_RELEASE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-969-970-972-974-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(continue|verify)$ ]] || exit 1
+          [[ "$BATCH_DATA_DIAG_WORKFLOW_PIN" = true && "$BATCH_DATA_DIAG_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_RELEASE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-969-970-972-974-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^diagnose$ ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Continue only Indo and Quote or verify all four sealed services
+      - name: Summarize only fixed sealed archive differences
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -46,22 +46,20 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 18m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,BATCH_CONTINUATION_WORKFLOW_PIN,BATCH_CONTINUATION_HELPER_SHA256,BATCH_RELEASE_LIBRARY_SHA256,BATCH_CORE_LIBRARY_SHA256,BATCH_SOURCE_MANIFEST_SHA256
+          command_timeout: 6m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,BATCH_DATA_DIAG_WORKFLOW_PIN,BATCH_DATA_DIAG_HELPER_SHA256,BATCH_RELEASE_LIBRARY_SHA256,BATCH_CORE_LIBRARY_SHA256,BATCH_SOURCE_MANIFEST_SHA256
           script: |
             set -euo pipefail
-            [[ "$BATCH_CONTINUATION_WORKFLOW_PIN" = true && "$BATCH_CONTINUATION_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_RELEASE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-969-970-972-974-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(continue|verify)$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$BATCH_DATA_DIAG_WORKFLOW_PIN" = true && "$BATCH_DATA_DIAG_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_RELEASE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-969-970-972-974-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^diagnose$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin ops/batch-969-970-972-974-20261021:refs/rr-portal-batch/969-974-ops >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/rr-portal-batch/969-974-ops)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            batch_task_tmp=$(mktemp -d /tmp/batch-969-974-continuation.XXXXXX)
+            batch_task_tmp=$(mktemp -d /tmp/batch-969-974-data-diag.XXXXXX)
             trap 'rm -rf "$batch_task_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-continue.py" > "$batch_task_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_task_tmp/run.py" | cut -d ' ' -f1)" = "$BATCH_CONTINUATION_HELPER_SHA256" ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-host-config-compare.py" > "$batch_task_tmp/batch-host-config-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_task_tmp/batch-host-config-library.py" | cut -d ' ' -f1)" = bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-data-diagnose.py" > "$batch_task_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_task_tmp/run.py" | cut -d ' ' -f1)" = "$BATCH_DATA_DIAG_HELPER_SHA256" ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-release-05.py" > "$batch_task_tmp/batch-release-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_task_tmp/batch-release-library.py" | cut -d ' ' -f1)" = "$BATCH_RELEASE_LIBRARY_SHA256" ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$batch_task_tmp/batch-backup-library.py" 2>/dev/null || exit 1
@@ -76,4 +74,4 @@ jobs:
             [[ "$(sha256sum "$batch_task_tmp/internal-quote-readonly-library.py" | cut -d ' ' -f1)" = be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/portable-pdb-library.py" > "$batch_task_tmp/portable-pdb-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_task_tmp/portable-pdb-library.py" | cut -d ' ' -f1)" = cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5 ]] || exit 1
-            timeout --signal=TERM --kill-after=20s 15m python3 -B "$batch_task_tmp/run.py" "$RELEASE_MODE"
+            timeout --signal=TERM --kill-after=20s 4m python3 -B "$batch_task_tmp/run.py" "$RELEASE_MODE"

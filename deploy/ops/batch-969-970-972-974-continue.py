@@ -1,6 +1,6 @@
 """Only Indo/Quote immutable continuation and sealed all-four verification. Default false."""
 import copy,hashlib,importlib.util,json,os,pathlib,re,signal,sys,time,traceback
-ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';CONTINUE_PIN=False;VERIFY_PIN=True
+ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';CONTINUE_PIN=False;VERIFY_PIN=False
 TARGET='dfcdf751cae42fdd1731729dd662fce041c28caf';TREE='d5a107e898fe35066416fa0431ccd92400467875'
 RELEASE_SHA='2db18fac4f09a6dc4ae64c07fc248e9cd575ed5e06eebabc77de58e1584254e7';HOST_SHA='bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1'
 FAILED=ROOT/'deploy/backups/batch-969-970-972-974-20261021-deploy-03';FAILED_MANIFEST='964efbf2e6f32bdd7355c00db59a8cd7d06e58c523fef31f4aa72ec2dfadd109';FAILED_RESULT='d280456999159e3dc7482fc8fdc4878deb63e11fd566e9e2c39f279689b4a98e'

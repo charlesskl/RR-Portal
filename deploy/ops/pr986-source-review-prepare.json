@@ -1,0 +1,86 @@
+{
+  "backupDisposition": "CHECKED_BACKUP_ONLY",
+  "backupDraftSha256": "2fbf352f12e464886fe81954e38bc228f10c43f35f9cec453e801609c544be4d",
+  "backupGateFrozenFalse": true,
+  "allowedBackupPhases": [
+    "backup"
+  ],
+  "base": "556798afb260020ca8f990c66290177ad0bf3e44",
+  "baseTree": "e190beed13d0318a2f3fa2e5b2eb5acf6c6f4308",
+  "checkoutSourceBase": "556798afb260020ca8f990c66290177ad0bf3e44",
+  "runningSourceBase": "9b890cc016da403f929f8a7aaeddb878d3de24c5",
+  "librarySha256": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+  "dependencies": {
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9"
+  },
+  "independentBackupTests": {
+    "passed": 6,
+    "total": 6,
+    "script": "work/test-pr986-backup-independent.py",
+    "sha256": "8901a647a2912856c6e0f35bec82b8414e33e29d683b34ae8443f60fb7f2343a"
+  },
+  "sourceProof": "Checkout main/root tree must be exact BASE556/e190. Only calls to pinned legacy runtime_files temporarily use old RUNNING_BASE9b; original methods and BASE556 restored by finally on success and failures. Fresh sealed baseline and safe public receipt explicitly distinguish checkout and running trees, require both target proofs and all 44 unrelated containers.",
+  "readOnlyScope": "Fresh four portable WAL-aware SQLite snapshots, private actual environment/Config/PID1/mount/runtime evidence and storage files using the unchanged pinned generic factory backup library. No business HTTP/login, configuration update, business write, container signals or database restore.",
+  "actualPinReview": "The reviewed false-gated prepare/deploy/verify source is CHECKED. Actual execution pins and transformed helper/workflow bytes still require root independent plan review. This receipt does not assert a production release has happened.",
+  "releaseDisposition": "CHECKED_RELEASE_PHASES",
+  "productionOperationsPerformed": false,
+  "gitOperationsPerformed": false,
+  "findings": [],
+  "releaseGatesFrozenFalse": true,
+  "allowedReleasePhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "releaseDraftSha256": "3441d89e4ed33ef0ac2cfd20bfa1ab3618f92f5ae4904a61786707f604050688",
+  "independentReleaseTests": {
+    "passed": 16,
+    "total": 16,
+    "script": "work/test-pr986-release-independent.py",
+    "sha256": "084ef8283b0d44d5e37c23b47da6200c799d4628c2c0356e12387bdce23b2531",
+    "inheritedRegressionMethods": 12,
+    "newPR986BoundaryMethods": 4
+  },
+  "authorRegressionReexecuted": {
+    "passed": 8,
+    "total": 8,
+    "script": "work/test-pr986-local.py",
+    "sha256": "5630e1ab073b08ccb57e219e206a3ae37dbe7180a56b30423a1f467058f7cbd8"
+  },
+  "releaseScope": "Only factory-review-test then factory-review; preserve all 44 unrelated containers including the newly deployed PR982 internal-quote runtime. Actual Config/PID1 environment/HostConfig/Mounts from the fresh baseline are preserved, except exact reviewed production five AI variables, immutable source image and automatic Compose/hostname metadata.",
+  "productionAI": {
+    "provider": "qwen",
+    "model": "qwen3.8-max",
+    "base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "credentials": "Reuse existing QC company key privately on server; never print or commit"
+  },
+  "testAI": "Must remain disabled with empty API key, complete test literal environment retained; source rejects unexpected enabled/key state.",
+  "modelProbe": "Exactly one isolated candidate-image synthetic call per prepare; no prompt override or multi-sequence parameters. Original strict 40-field safe result validation remains unchanged. Complete result private, public receipt only success/status/elapsedMs/model/validationClass. Disposable tmpfs, read-only hooks, no business volumes or published ports; independent mock verified cleanup on success/failure.",
+  "newBoundariesChecked": [
+    "Fresh BASE556 checkout and RUNNING_BASE9b proofs distinct in sealed baseline; exact two sourceProof and two runtime target keys",
+    "Old-image recovery uses RUNNING_BASE only inside try/finally and restores CHECKOUT_BASE even when rejected",
+    "Exact manifest only permits reviewed analysis_ai.js path and hash; no other system source",
+    "Preserve production/test isolation; only five production AI variables may change",
+    "Source fetch precedes target-tree/blob checks; final target proof checks complete hooks/migrations/static image files",
+    "Inherited REAL/BLOB typed data and auxiliary-log retention guards, exact old image healthcheck/default environment/user compatibility, old-revision build cache and runtime recovery contracts remain enforced"
+  ],
+  "dataContract": "Fresh stopped-writer snapshots before each switch, exact complete data.db schema/typed rows/files/DB metadata; auxiliary schema and non-log rows strict, old retained log rows typed exact with only proved configured retention and new bounded-time logs. Never restore databases or skip business changes.",
+  "controllerFaultCoverage": [
+    "Closed capture failure restarts only original ID and preserves env",
+    "Public failure first restores own maintenance, stops failed candidate, verifies old image/full env/source and data before clearing",
+    "Unexplained business mutation retains scoped maintenance and current evidence without old-image/data restoration"
+  ],
+  "activationConditions": [
+    "Root must independently review actual phase/TARGET/TREE/one-file manifest/prior receipt seals/activated helper SHA before apply; only mechanical pin assignments may differ",
+    "Use fresh PR986 archives from current BASE556 and current all46 runtime; do not reuse stale PR981 pre-quote baseline",
+    "Exact approved PR986 helper must remain d1ea85714e5d21b23de3ae2476c4cb8cea041686d6a518d238fc1bf3f2f0031f after merge onto BASE556; preserve cumulative PR982 quote source",
+    "Serialize on deploy-cloud; disable ordinary all-site deployment around merge/scoped release and restore in finally; close phase execution gates after run",
+    "Do not broaden row/log/source/runtime exceptions if live guards fail; investigate and preserve evidence"
+  ],
+  "limitations": [
+    "Independent reviewer used local synthetic Docker/control-plane models and real local SQLite typed-data/log regression; performed no production, Git or external model operation",
+    "Earlier two real synthetic model results apply to the identical d1ea helper, but a fresh exact-image single synthetic acceptance remains mandatory in prepare",
+    "Post-reopen business activity is not proved absent; current rows are preserved and changes must not be automatically attributed or overwritten"
+  ]
+}

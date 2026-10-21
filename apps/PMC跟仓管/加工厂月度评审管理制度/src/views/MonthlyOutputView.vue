@@ -5,12 +5,14 @@ import { useFactoriesStore } from '../stores/factories'
 import { useOutputStore } from '../stores/output'
 import { useOrdersStore } from '../stores/orders'
 import { useAuthStore } from '../stores/auth'
+import { pb } from '../pb'
 import { allowedCrafts, allowedRegions } from '../utils/permissions'
 import { CRAFT_LABELS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 
 import { outputPeriod, outputAmounts, type OutputPeriod, type OutputPeriodMode } from '../utils/outputPeriod'
 import type { Order } from '../types/order'
 import type { MonthlyOutput } from '../types/output'
+import type { Factory } from '../types/factory'
 
 const month = ref(new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date()))
 const mode = ref<OutputPeriodMode>('month')
@@ -24,13 +26,21 @@ const period = computed(() => {
 })
 const loadedRange = ref<OutputPeriod | null>(null)
 const loadedOrders = ref<Order[]>([])
+const loadedFactories = ref<Factory[]>([])
 const loadedOutputs = ref<MonthlyOutput[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const message = ref('')
 let request = 0
-onBeforeUnmount(() => { request++ })
+const stopAuth = pb.authStore.onChange(() => {
+  // The page owns snapshots, so clearing only the shared stores is insufficient.
+  request++
+  clearSnapshot()
+  loading.value = false
+  error.value = '账号或权限已变更，请重新查询。'
+})
+onBeforeUnmount(() => { request++; stopAuth() })
 const singleMonth = computed(() => loadedRange.value?.start === loadedRange.value?.end)
 const rangeLabel = computed(() => !loadedRange.value ? '' : singleMonth.value ? loadedRange.value.start : `${loadedRange.value.start} 至 ${loadedRange.value.end}`)
 const ready = computed(() => !!loadedRange.value && !loading.value && !error.value && !period.value.error)
@@ -48,7 +58,7 @@ const regionFilter = ref<Region | ''>('')
 // 按厂区/部门/工厂名搜索过滤（受授权厂区限制）
 const filteredFactories = computed(() => {
   const kw = search.value.trim().toLowerCase()
-  return factories.items
+  return loadedFactories.value
     .filter((f) => {
       if (!myRegions.value.includes(regionOf(f))) return false
       if (!allowedCrafts().includes(f.craft)) return false
@@ -88,22 +98,26 @@ function exportExcel() {
 
 // Preserve the existing order-date/amount basis, using a completed request snapshot.
 const outputByFactory = computed(() => loadedRange.value ? outputAmounts(loadedOrders.value, loadedRange.value) : {})
-const total = computed(() => filteredFactories.value.reduce((sum, f) => sum + Math.round((outputByFactory.value[f.id] || 0) * 100), 0) / 100)
+const total = computed(() => filteredFactories.value.reduce((sum, f) => sum + (outputByFactory.value[f.id] || 0), 0))
 function sourceDocs(factoryId: string) {
   return loadedOutputs.value.filter(o => o.factory === factoryId && o.source_doc).sort((a,b) => a.year_month.localeCompare(b.year_month))
     .map(o => `${o.year_month}：${o.source_doc}`).join('\n')
 }
+function clearSnapshot() {
+  loadedRange.value = null; loadedOrders.value = []; loadedOutputs.value = []; loadedFactories.value = []; drafts.value = {}
+}
 async function load() {
   const id = ++request
   const range = period.value.range
-  loadedRange.value = null; loadedOrders.value = []; loadedOutputs.value = []; drafts.value = {}; error.value = ''; message.value = ''
+  clearSnapshot(); error.value = ''; message.value = ''
   if (!range || !auth.userId) { loading.value = false; return }
   loading.value = true
   try {
-    const [, outputs, records] = await Promise.all([
+    const [factoryRecords, outputs, records] = await Promise.all([
       factories.fetchAll(), output.fetchByRange(range.start, range.end), orders.fetchAll(undefined, { force: true }),
     ])
     if (id !== request) return
+    loadedFactories.value = factoryRecords
     loadedOrders.value = records
     loadedOutputs.value = outputs
     loadedRange.value = { ...range }

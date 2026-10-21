@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { outputPeriod, outputAmounts } from '../src/utils/outputPeriod'
 describe('output periods', () => {
+  it('preserves stored order amounts with fractional cents instead of rounding each order', () => {
+    const orders = [
+      {factory:'a',order_date:'2026-01-01',amount:.004},
+      {factory:'a',order_date:'2026-01-02',amount:.004},
+      {factory:'b',order_date:'2026-01-02',amount:12.3456},
+    ]
+    expect(outputAmounts(orders,{start:'2026-01',end:'2026-01'})).toEqual({a:.008,b:12.3456})
+  })
   it('resolves every quarter and a full year', () => {
     for (let q=1;q<=4;q++) expect(outputPeriod('quarter','2026-10','2025',q,'','')).toEqual({start:`2025-${String(q*3-2).padStart(2,'0')}`,end:`2025-${String(q*3).padStart(2,'0')}`})
     expect(outputPeriod('year','2026-10','2024',1,'','')).toEqual({start:'2024-01',end:'2024-12'})
@@ -20,6 +28,8 @@ describe('output periods', () => {
       {factory:'a',order_date:'2026-04-01',amount:100},
       {factory:'a',amount:100}, {factory:'b',order_date:'2026-02-12',amount:23.45},
     ]
-    expect(outputAmounts(orders,{start:'2026-01',end:'2026-03'})).toEqual({a:.3,b:23.45})
+    const totals = outputAmounts(orders,{start:'2026-01',end:'2026-03'})
+    expect(totals.a).toBeCloseTo(.3, 12)
+    expect(totals.b).toBe(23.45)
   })
 })

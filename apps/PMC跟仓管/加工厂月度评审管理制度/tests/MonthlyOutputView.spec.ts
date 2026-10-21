@@ -1,20 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import MonthlyOutputView from '../src/views/MonthlyOutputView.vue'
-const state = vi.hoisted(()=>({fetch:vi.fn(), range:vi.fn(), save:vi.fn(), factories:[
+const state = vi.hoisted(()=>({fetch:vi.fn(), range:vi.fn(), save:vi.fn(), factoryFetch:vi.fn(), factoryStore:null as any, authCallback:null as null | (()=>void), authUnsubscribe:vi.fn(), factories:[
   {id:'a',name:'甲厂',craft:'sewing',region:'hunan'},
   {id:'b',name:'乙厂',craft:'assembly',region:'dongguan'},
   {id:'x',name:'无权限工厂',craft:'injection',region:'heyuan'},
 ]}))
+vi.mock('../src/pb',()=>({pb:{authStore:{onChange:(callback:()=>void)=>{state.authCallback=callback;return state.authUnsubscribe}}}}))
 vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({userId:'admin',role:'admin'})}))
 vi.mock('../src/utils/permissions',()=>({allowedCrafts:()=>['sewing','assembly'],allowedRegions:()=>['hunan','dongguan']}))
 vi.mock('../src/stores/orders',()=>({useOrdersStore:()=>({fetchAll:state.fetch})}))
 vi.mock('../src/stores/output',()=>({useOutputStore:()=>({fetchByRange:state.range,upsert:state.save})}))
-vi.mock('../src/stores/factories',()=>({useFactoriesStore:()=>({items:state.factories,fetchAll:vi.fn()})}))
+vi.mock('../src/stores/factories',async()=>{
+  const { reactive } = await import('vue')
+  const store=reactive({items:state.factories,fetchAll:()=>state.factoryFetch()})
+  state.factoryStore=store
+  return {useFactoriesStore:()=>store}
+})
 vi.mock('../src/components/AppLayout.vue',()=>({default:{template:'<main><slot /></main>'}}))
 let wrapper: ReturnType<typeof mount>
 beforeEach(()=>{
   vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-21T05:00:00Z'));vi.clearAllMocks()
+  state.factoryStore.items=state.factories
+  state.factoryFetch.mockImplementation(async()=>{state.factoryStore.items=state.factories;return state.factories})
   state.fetch.mockResolvedValue([
     {factory:'a',order_date:'2026-01-01',amount:100.25},
     {factory:'a',order_date:'2026-03-31',amount:200.5},
@@ -32,6 +40,69 @@ beforeEach(()=>{
 afterEach(()=>{wrapper?.unmount();vi.useRealTimers();vi.restoreAllMocks()})
 async function setup(){wrapper=mount(MonthlyOutputView);await flushPromises();return wrapper}
 describe('产值期间查询',()=>{
+  it('clears its private snapshots immediately when authentication changes',async()=>{
+    const w=await setup()
+    expect(w.find('table').exists()).toBe(true)
+    state.authCallback!();await flushPromises()
+    expect(w.find('table').exists()).toBe(false)
+    expect(w.find('[role=alert]').text()).toContain('账号或权限已变更')
+    expect(w.find('button.ghost').attributes('disabled')).toBeDefined()
+    w.unmount()
+    expect(state.authUnsubscribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps fractional-cent order totals when saving a month and rounds only display',async()=>{
+    state.fetch.mockResolvedValue([
+      {factory:'a',order_date:'2026-10-01',amount:.004},
+      {factory:'a',order_date:'2026-10-02',amount:.004},
+      {factory:'b',order_date:'2026-10-03',amount:.004},
+    ])
+    const w=await setup()
+    expect(w.find('.period-summary').text()).toContain('0.01')
+    await w.findAll('tbody button')[0]!.trigger('click');await flushPromises()
+    expect(state.save).toHaveBeenCalledWith(expect.objectContaining({factory:'a',monthly_amount:.008}))
+  })
+  it('adds raw amounts across factories before formatting the displayed total',async()=>{
+    state.fetch.mockResolvedValue([
+      {factory:'a',order_date:'2026-10-01',amount:.004},
+      {factory:'b',order_date:'2026-10-02',amount:.004},
+    ])
+    const w=await setup()
+    expect(w.findAll('tbody .amount').map(td=>td.text())).toEqual(['0.00','0.00'])
+    expect(w.find('.period-summary').text()).toContain('0.01')
+    expect(w.find('tfoot').text()).toContain('0.01')
+  })
+  it('keeps the complete factory snapshot when a shared store receives an older response',async()=>{
+    const w=await setup()
+    const original = state.factories
+    let resolve!:(value:any)=>void
+    state.factoryFetch.mockImplementationOnce(()=>new Promise(r=>{resolve=r}))
+    await w.find('[aria-label="查询方式"]').setValue('quarter')
+    const current = state.factories.map(f=>({...f,name:f.id==='a'?'新甲厂':f.name}))
+    state.factoryFetch.mockImplementationOnce(async()=>{state.factoryStore.items=current;return current})
+    await w.find('[aria-label="查询方式"]').setValue('year');await flushPromises()
+    expect(w.find('tbody').text()).toContain('新甲厂')
+    // factories.fetchAll assigns its store before this page's request guard runs.
+    state.factoryStore.items = [{id:'stale',name:'旧查询工厂',craft:'sewing',region:'hunan'}]
+    resolve(state.factoryStore.items);await flushPromises()
+    expect(w.find('tbody').text()).toContain('新甲厂')
+    expect(w.find('tbody').text()).not.toContain('旧查询工厂')
+    state.factories = original
+  })
+  it('recovers a failed load on retry and permits a failed save to be retried',async()=>{
+    state.fetch.mockRejectedValueOnce(new Error('offline'))
+    const w=await setup()
+    expect(w.find('[role=alert]').text()).toContain('加载失败')
+    await w.findAll('.toolbar button')[0]!.trigger('click');await flushPromises()
+    expect(w.find('table').exists()).toBe(true)
+    state.save.mockRejectedValueOnce(new Error('save offline'))
+    await w.findAll('tbody button')[0]!.trigger('click');await flushPromises()
+    expect(w.find('[role=status]').text()).toContain('保存失败')
+    await w.findAll('tbody button')[0]!.trigger('click');await flushPromises()
+    expect(w.find('[role=status]').text()).toContain('已保存')
+    expect(state.save).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps monthly saving separate from quarter/year totals and filters the total',async()=>{
     const w=await setup()
     expect(w.find('.period-summary').text()).toContain('400.75')

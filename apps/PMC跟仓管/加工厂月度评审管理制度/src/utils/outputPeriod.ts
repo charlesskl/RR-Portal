@@ -17,12 +17,13 @@ export function outputPeriod(mode: OutputPeriodMode, month: string, year: string
   return { start: `${year}-${String(quarter * 3 - 2).padStart(2, '0')}`, end: `${year}-${String(quarter * 3).padStart(2, '0')}` }
 }
 export function outputAmounts(orders: { factory: string; order_date?: string; amount?: number }[], range: OutputPeriod) {
-  const cents: Record<string, number> = {}
+  // Order amounts can include fractional cents; preserve the stored amount until display.
+  const amounts: Record<string, number> = {}
   for (const order of orders) {
     const month = order.order_date?.slice(0, 7) || ''
     if (!/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(month) || month < range.start || month > range.end) continue
     const amount = Number(order.amount)
-    if (Number.isFinite(amount)) cents[order.factory] = (cents[order.factory] || 0) + Math.round(amount * 100)
+    if (Number.isFinite(amount)) amounts[order.factory] = (amounts[order.factory] || 0) + amount
   }
-  return Object.fromEntries(Object.entries(cents).map(([id, amount]) => [id, amount / 100]))
+  return amounts
 }

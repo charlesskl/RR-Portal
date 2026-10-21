@@ -1,0 +1,26 @@
+{
+  "disposition": "CHECKED_READONLY_DIAGNOSE",
+  "draftSHA256": "696863a140fa00d3758a202cd2a2256642aa55857b7172b6f30156bc2f625697",
+  "gateFrozenFalse": true,
+  "phase": "diagnose",
+  "target": "97d563e93aca3d9e3c0bc512dd622d6a3002e710",
+  "tree": "ad906e8b24b81df8e7ade91d15c5e9ab4ab839ab",
+  "dependencies": {
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9"
+  },
+  "independentTests": {
+    "passed": 5,
+    "total": 5,
+    "script": "work/test-pr986-log-diagnose-independent.py",
+    "scriptSHA256": "7c1687a399580aa94d8f723443382f8b875e3d7acbe92ab63eb9927d69f2c117"
+  },
+  "archiveBoundary": "Three exact fixed original backup/prepare/failed-deploy directories; original manifest/result and every file hash verified before and after. New private output directory only, never modify or reseal originals. Failed deploy outcome/stage/partial service completion explicitly pinned.",
+  "sqliteBoundary": "Only fixed sealed closed-before and after-start snapshot files via pinned immutable read-only SQLite connection plus immutable read-only ATTACH. SELECT/PRAGMA table_xinfo only, bounded progress deadline and row counts. No live database mutation, restore, cursor or sequence changes.",
+  "outputBoundary": "Exact archived audit keys with bool/int only; typed-log differences reported as counts under fixed column enums. Policy only two validated integers/types; no settings object, log ID/message/data/body/user strings. UTC times are generated from validated timestamps. Full environment/config/source contents stay private/in memory, only equality/health/image/source and count booleans published.",
+  "runtimeBoundary": "Read-only docker ps/inspect/exec tar and PID1 environ, git rev-parse, .env bytes+mode/uid/gid and maintenance inventory comparison. Checks expected partial runtime: test candidate, production original, all44 others baseline. No container signals, deployment, HTTP/login/provider request, config update or live business DB access.",
+  "evidenceBoundary": "Original candidate StartedAt unavailable is explicit; supplemental closed-to-after observation window is labeled and never substituted for original startup bound. Diagnosis success means observations collected, not that mismatch is accepted or production rollout is complete.",
+  "findings": [],
+  "activationCondition": "Root must independently bind exact transport/helper SHA and original state/archive seals; only mechanical PIN=False to PIN=True may change from reviewed source.",
+  "productionOperationsPerformedByReviewer": false,
+  "gitOperationsPerformedByReviewer": false
+}

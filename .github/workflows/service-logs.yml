@@ -2,7 +2,7 @@ name: PR 981 Factory AI Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [prepare]}
+      mode: {type: choice, required: true, options: [verify]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '2cf9e547029a81b2689f80278aca7be8ee36b84f5ce1e0dd0a74fd334e40a68b'
+  SCOPED_RELEASE_HELPER_SHA256: 'b4ad3e3030819cc3b9167a26c46b4a21b8ddc48aef51165a2a02025926a0565d'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-981-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(prepare)$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-981-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(verify)$ ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Build or switch only the two factory environments
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
@@ -48,15 +48,19 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-981-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(prepare)$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-981-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(verify)$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-981-20261021:refs/remotes/origin/ops/pr-981-20261021 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-981-20261021)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/pr981-backup.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr981-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr985-fix-probe.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = "$SCOPED_RELEASE_HELPER_SHA256" ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr981-release-library.py" > "$scoped_release_tmp/pr981-release-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr981-release-library.py" | cut -d ' ' -f1)" = 9ef765feed81c42d33a35017081935fc688ef42a1a8ab5096e2a167a791ed4c1 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr985-analysis-ai.js" > "$scoped_release_tmp/pr985-analysis-ai.js" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr985-analysis-ai.js" | cut -d ' ' -f1)" = d1ea85714e5d21b23de3ae2476c4cb8cea041686d6a518d238fc1bf3f2f0031f ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/factory-review-backup-library.py" > "$scoped_release_tmp/factory-review-backup-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/factory-review-backup-library.py" | cut -d ' ' -f1)" = 79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
@@ -69,4 +73,4 @@ jobs:
             [[ "$(sha256sum "$scoped_release_tmp/pr981-reviewed-files.json" | cut -d ' ' -f1)" = c12b68df8938e77d8edfaa3716cd1ab8e1c540d2dd08857c493b1c476b06cbc3 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr981-single-synthetic-probe.pb.js" > "$scoped_release_tmp/pr981-single-synthetic-probe.pb.js" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/pr981-single-synthetic-probe.pb.js" | cut -d ' ' -f1)" = e7271c30188768759f6944c84163c5b77f31e6a5b2fd3ccb00eb86d23993ee6e ]] || exit 1
-            timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"
+            timeout --signal=TERM --kill-after=20s 8m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

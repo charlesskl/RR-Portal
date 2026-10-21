@@ -22,6 +22,8 @@ x-qc-report-environment: &qc-report-environment
   REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/2
   QUEUE_REQUIRED: "true"
   RQ_QUEUE_NAME: qc-report-ai
+  # RQ's whole-job deadline must also cover file validation and result persistence.
+  RQ_JOB_TIMEOUT_SECONDS: ${QC_REPORT_RQ_JOB_TIMEOUT_SECONDS:-1200}
   OPENAI_API_KEY: ${QC_REPORT_OPENAI_API_KEY:-}
   OPENAI_BASE_URL: ${QC_REPORT_OPENAI_BASE_URL:-https://api.openai.com/v1}
   OPENAI_MODEL: ${QC_REPORT_OPENAI_MODEL:-gpt-5.6-terra}

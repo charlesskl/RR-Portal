@@ -19,6 +19,8 @@ from ai_service import (
     _mock_po_data,
 )
 from task_queue import enqueue
+from rq.job import Job
+from redis import Redis
 
 
 class FakeResponse:
@@ -154,6 +156,55 @@ class AIServiceContractTest(unittest.TestCase):
         self.assertEqual(kwargs["retry"].max, 3)
         self.assertEqual(kwargs["retry"].intervals, [10, 20, 40])
         self.assertEqual(kwargs["job_timeout"], 900)
+
+    def test_cloud_job_budget_keeps_headroom_around_one_request(self):
+        queue = Mock()
+        with patch("task_queue.get_queue", return_value=queue), patch.dict(
+            "os.environ",
+            {"OPENAI_TIMEOUT_SECONDS": "900", "RQ_JOB_TIMEOUT_SECONDS": "1200", "OPENAI_MAX_RETRIES": "2"},
+        ):
+            config = AIConfig.from_env()
+            enqueue("app.process_po_import_job", 9)
+        options = queue.enqueue.call_args.kwargs
+        self.assertEqual(config.timeout_seconds, 900)
+        self.assertEqual(options["job_timeout"], 1200)
+        self.assertGreater(options["job_timeout"], config.timeout_seconds)
+        # RQ retries are separate attempts with the same per-job deadline.
+        self.assertEqual(options["retry"].max, 2)
+
+    def test_cloud_http_request_uses_extended_budget_and_closes_response(self):
+        with patch.dict("os.environ", {"OPENAI_TIMEOUT_SECONDS": "900", "OPENAI_MAX_OUTPUT_TOKENS": "64000"}):
+            config = AIConfig.from_env()
+        service = AIService(config)
+        response = Mock()
+        response.headers = {"x-request-id": "req-budget"}
+        response.read.return_value = b'{"id":"resp-budget"}'
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        payload = service._payload(
+            system_prompt="system", user_content=[], schema_name="qc_po_extraction",
+            schema=PO_EXTRACTION_SCHEMA, prompt_version="test", schema_version="test",
+        )
+        with patch("ai_service.request.urlopen", return_value=response) as post:
+            decoded, request_id = service._post_responses(payload)
+        post.assert_called_once()
+        request_object = post.call_args.args[0]
+        self.assertEqual(json.loads(request_object.data)["max_output_tokens"], 64000)
+        self.assertEqual(post.call_args.kwargs["timeout"], 900)
+        self.assertEqual((decoded["id"], request_id), ("resp-budget", "req-budget"))
+        response.read.assert_called_once_with(5 * 1024 * 1024 + 1)
+        response.__exit__.assert_called_once_with(None, None, None)
+
+    def test_recreating_worker_does_not_rewrite_existing_job_timeout(self):
+        # This uses RQ's real persisted format without opening a Redis connection.
+        connection = Redis(host="127.0.0.1", port=1)
+        old_job = Job.create("app.process_po_import_job", args=[9], connection=connection, timeout=900, serializer="json")
+        stored = {key.encode(): value.encode() if isinstance(value, str) else str(value).encode() if isinstance(value, (int, float)) else value for key, value in old_job.to_dict().items()}
+        with patch.dict("os.environ", {"RQ_JOB_TIMEOUT_SECONDS": "1200"}):
+            restored = Job(connection=connection, serializer="json")
+            restored.restore(stored)
+        self.assertEqual(restored.timeout, 900)
+        self.assertEqual(restored.args, [9])
 
     def test_po_mismatch_cannot_be_silently_reported_as_no_visible_issue(self):
         data = {

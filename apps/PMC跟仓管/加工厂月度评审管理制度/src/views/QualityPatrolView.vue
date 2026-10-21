@@ -279,7 +279,7 @@ button { min-height: 44px; min-width: 44px; padding: 8px 14px; border: 1px solid
 .sheet-scroll { overflow: auto; max-height: 65vh; background: white; border: 1px solid #c8ccd5; }
 table { border-collapse: separate; border-spacing: 0; font-size: 14px; }
 th, td { padding: 12px; border-right: 1px solid #bfc4cc; border-bottom: 1px solid #bfc4cc; text-align: center; white-space: pre-wrap; }
-.patrol-table { min-width: 2300px; width: 100%; margin: 0; border-radius: 0; box-shadow: none; }
+.patrol-table { min-width: 2300px; width: 100%; margin: 0; border-radius: 0; box-shadow: none; overflow: visible; }
 .patrol-table thead { position: sticky; top: 0; z-index: 2; }
 .patrol-table thead th { background: #fff; }
 th { background: #f2f2f2; color: #202635; }

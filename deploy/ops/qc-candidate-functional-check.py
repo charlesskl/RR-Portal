@@ -1,7 +1,7 @@
 """Closed by default: two synthetic calls through the immutable candidate image."""
 import base64,hashlib,json,os,pathlib,re,signal,stat,subprocess,sys
 ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/qc-provider-429-20261021'
-FUNCTIONAL_PIN=False;TARGET='';TREE='';WORKER_IMAGE='';PREPARE_MANIFEST='';PREPARE_RESULT=''
+FUNCTIONAL_PIN=True;TARGET='b4c3763fe43e30c80c041c70e7a9f0750145d7b0';TREE='57085d6dcd242f154b4dbb199e54a71061abbd4d';WORKER_IMAGE='sha256:b6c79a60b27494caa916ff2a1a1f3bea6f8d1d2c89b6e5fd7458b6dd52fdff42';PREPARE_MANIFEST='8f4cb176c51843efdfa7833320a7e4269e403dbaa71589ca8605691085100f7c';PREPARE_RESULT='1ed3da0eadbd5bcdad7feb6dfc297af015c22afc2d6ac0a2838688cc9576265d'
 PREPARE=ROOT/'deploy/backups/qc-provider-429-20261021-prepare';OUT=ROOT/'deploy/backups/qc-provider-429-20261021-candidate-check'
 OWNER='qc429-candidate-functional';QC='apps/QA部/QC成品报告系统';STAGE='entry'
 PROVIDER_FIELDS=('OPENAI_API_KEY','OPENAI_BASE_URL','OPENAI_MODEL','OPENAI_API_FORMAT')

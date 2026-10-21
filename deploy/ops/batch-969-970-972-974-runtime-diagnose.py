@@ -1,6 +1,6 @@
 """Diagnose exact sealed pre-switch runtime rejection; read only."""
 import hashlib,importlib.util,json,os,pathlib,re,sys,traceback
-ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';DIAG_PIN=True
+ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';DIAG_PIN=False
 RELEASE_SHA='5776dcf97872c86e54aa4239cc2aba8160b40008c16fae545f4896a441e07287'
 TARGET='dfcdf751cae42fdd1731729dd662fce041c28caf';TREE='d5a107e898fe35066416fa0431ccd92400467875'
 FAILED=ROOT/'deploy/backups/batch-969-970-972-974-20261021-deploy'

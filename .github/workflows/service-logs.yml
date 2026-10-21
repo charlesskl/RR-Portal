@@ -1,4 +1,4 @@
-name: Batch 969 970 972 974 Sealed Runtime Diagnosis
+name: Batch 969 970 972 974 Fixed Restart Cause Diagnosis
 on:
   workflow_dispatch:
     inputs:
@@ -10,13 +10,13 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  BATCH_RUNTIME_DIAG_WORKFLOW_PIN: 'true'
-  BATCH_RUNTIME_DIAG_HELPER_SHA256: 'ee598176446112701e33121260d2516944a5bc51fc991d2177352a30146ebcc9'
+  BATCH_RESTART_CAUSE_DIAG_WORKFLOW_PIN: 'false'
+  BATCH_RESTART_CAUSE_DIAG_HELPER_SHA256: '14c721a5892d0d70fcaddb295a9c7692f4698de6218cf536e54ede4c271871e3'
   BATCH_RELEASE_LIBRARY_SHA256: '5776dcf97872c86e54aa4239cc2aba8160b40008c16fae545f4896a441e07287'
   BATCH_CORE_LIBRARY_SHA256: '4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5'
   BATCH_SOURCE_MANIFEST_SHA256: '7efb90de8b783dee9241c6e239d6a72cd9946dccad5f509d86cac62ac2041799'
 jobs:
-  fixed-readonly-runtime-diagnose:
+  fixed-readonly-restart-cause:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -30,10 +30,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$BATCH_RUNTIME_DIAG_WORKFLOW_PIN" = true && "$BATCH_RUNTIME_DIAG_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_RELEASE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$BATCH_RESTART_CAUSE_DIAG_WORKFLOW_PIN" = true && "$BATCH_RESTART_CAUSE_DIAG_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_RELEASE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-969-970-972-974-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^diagnose$ ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Read sealed failures and inspect current runtime only
+      - name: Read fixed restart events and bounded resources only
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -47,19 +47,21 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 18m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,BATCH_RUNTIME_DIAG_WORKFLOW_PIN,BATCH_RUNTIME_DIAG_HELPER_SHA256,BATCH_RELEASE_LIBRARY_SHA256,BATCH_CORE_LIBRARY_SHA256,BATCH_SOURCE_MANIFEST_SHA256
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,BATCH_RESTART_CAUSE_DIAG_WORKFLOW_PIN,BATCH_RESTART_CAUSE_DIAG_HELPER_SHA256,BATCH_RELEASE_LIBRARY_SHA256,BATCH_CORE_LIBRARY_SHA256,BATCH_SOURCE_MANIFEST_SHA256
           script: |
             set -euo pipefail
-            [[ "$BATCH_RUNTIME_DIAG_WORKFLOW_PIN" = true && "$BATCH_RUNTIME_DIAG_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_RELEASE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$BATCH_RESTART_CAUSE_DIAG_WORKFLOW_PIN" = true && "$BATCH_RESTART_CAUSE_DIAG_HELPER_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_RELEASE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_CORE_LIBRARY_SHA256" =~ ^[a-f0-9]{64}$ && "$BATCH_SOURCE_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
             [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-969-970-972-974-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^diagnose$ && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin ops/batch-969-970-972-974-20261021:refs/rr-portal-batch/969-974-ops >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/rr-portal-batch/969-974-ops)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            batch_task_tmp=$(mktemp -d /tmp/batch-969-974-runtime-diag.XXXXXX)
+            batch_task_tmp=$(mktemp -d /tmp/batch-969-974-restart-cause-diag.XXXXXX)
             trap 'rm -rf "$batch_task_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-runtime-diagnose.py" > "$batch_task_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_task_tmp/run.py" | cut -d ' ' -f1)" = "$BATCH_RUNTIME_DIAG_HELPER_SHA256" ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-restart-cause-diagnose.py" > "$batch_task_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_task_tmp/run.py" | cut -d ' ' -f1)" = "$BATCH_RESTART_CAUSE_DIAG_HELPER_SHA256" ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-runtime-diagnostic-library.py" > "$batch_task_tmp/batch-runtime-diagnostic-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_task_tmp/batch-runtime-diagnostic-library.py" | cut -d ' ' -f1)" = 760230a691c298a6c31e99fc69381a9cb96fe547b41555d104056aae8ac5a8ab ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-release-02.py" > "$batch_task_tmp/batch-release-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_task_tmp/batch-release-library.py" | cut -d ' ' -f1)" = "$BATCH_RELEASE_LIBRARY_SHA256" ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$batch_task_tmp/batch-backup-library.py" 2>/dev/null || exit 1

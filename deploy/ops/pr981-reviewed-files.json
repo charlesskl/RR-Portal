@@ -1,0 +1,9 @@
+{
+  ".env.example": "8afd29a000cebf4ec87015df4dc7d2d53a61e033a9a6346a7660d95951982266",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/README.md": "430589d287f5089829d071fb1f6d7459c4836305bb33ac6cb5ac6a9c601ba070",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/pb_hooks/analysis_ai.pb.js": "c63740b8740a14ae3c65c62faa814b211662927ecbac3e8c8f921b25d1f9fba5",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/pb_hooks/lib/analysis_ai.js": "c2ad7b8ac7a14a430826ce6fa8add22e78f747788284213076dc5d80300bbfb2",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/src/components/AnalysisAiPanel.vue": "7121afef7431b4c8247fdadf14030ed4a532fc2a5bc3e28376f98824b6f861fc",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/tests/analysisAiBackend.integration.mjs": "9cdf117887bf27664a7d21b97fa1232b71d10aa09964111795bf1884ab31477c",
+  "docker-compose.cloud.yml": "6db908a015783868b0d2a54e30ad8ad1a5e1973060c391906106cad4747e9689"
+}

@@ -11,9 +11,9 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  FACTORY_RELEASE_WORKFLOW_PIN: 'false'
+  FACTORY_RELEASE_WORKFLOW_PIN: 'true'
   FACTORY_SOURCE_MANIFEST_SHA256: 'f613e7c1e856de4e2c59b12dbc8cef23d50a2e9a25591ffb79d1c45273d811bb'
-  FACTORY_RELEASE_HELPER_SHA256: 'bd70a4ee321f220b61f53ef92ee818e0be2aa0c2c9fb9dd6468ed35606e216ee'
+  FACTORY_RELEASE_HELPER_SHA256: 'ef55cdfac463826965e54efb60b983fbf94cc6a027adc9faa5432bfc207c1d29'
 jobs:
   fixed-factory-review-release:
     runs-on: ubuntu-latest

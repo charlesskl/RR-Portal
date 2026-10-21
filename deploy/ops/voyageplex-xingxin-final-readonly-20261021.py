@@ -1,8 +1,8 @@
 """Observe one natural sync and one read-only queue search; never fetch or trigger sync."""
 import contextlib,datetime,hashlib,importlib.util,json,os,pathlib,re,signal,sqlite3,sys,time
-PIN=False;BRANCH='refs/heads/ops/voyageplex-size-fix-20261020';TARGET='6fc1143c0b39470d814caac553beaaf3bc2912e0'
+PIN=True;BRANCH='refs/heads/ops/voyageplex-size-fix-20261020';TARGET='6fc1143c0b39470d814caac553beaaf3bc2912e0'
 ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/voyageplex-xingxin-sections-20261021-02'
-HOST_SHA='e74006dba9ecba87968bebbd05cb85c4c740b8ab1fe6d64f3dbb6bfc6f7f99ab';CHILD_SHA='76f0cda4b77f1f897a65d4f99338d3afe387ceddd4fdb4f426f98d53e2a02041';S=None
+HOST_SHA='e74006dba9ecba87968bebbd05cb85c4c740b8ab1fe6d64f3dbb6bfc6f7f99ab';CHILD_SHA='64e581cbfc0847af3105aadd18171a51e8f1437dac71e78a2cf86ed0a3e2f915';S=None
 PROOF=ROOT/'deploy/backups/voyageplex-xingxin-sections-20261021-01';PROOF_MANIFEST='6c261d3f09c5865c77a184187955c42d3e9bd83d51521088de4ae99cbc4249cb';PROOF_RESULT='69a1d92f343e1454ca223043f15557a6b6d6d7a4cf18f8054d01f44f5f4aa58b'
 ORIGINAL_CURSOR=1545369827;SUCCESS_STATUSES={'pending','duplicate','confirmed','duplicate_confirmed'}
 def need(value):

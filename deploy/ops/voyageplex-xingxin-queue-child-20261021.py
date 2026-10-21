@@ -1,7 +1,7 @@
 """Disabled fixed-scope read-only UID queue observation. No FETCH or writes."""
 import hashlib,importlib.util,json,os,pathlib,re,resource,signal,sys,threading,time
 from datetime import datetime,timezone
-RUN_PIN=False
+RUN_PIN=True
 SCOPE='ops/voyageplex-size-fix-20261020'
 SOURCE_SHA='c6246781845d4cd40439d7286c9f3afcfae0dcafc4b106de780bd715e3b201a9'
 MIN_AFTER_UID=1545369827;MAX_UID=4294967295;UID_VALIDITY=1

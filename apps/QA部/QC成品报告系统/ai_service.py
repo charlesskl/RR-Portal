@@ -227,6 +227,7 @@ class AIConfig:
     max_image_bytes: int = 20 * 1024 * 1024
     max_total_image_bytes: int = 45 * 1024 * 1024
     max_photos: int = 80
+    api_format: str = "responses"
 
     @classmethod
     def from_env(cls) -> "AIConfig":
@@ -263,9 +264,12 @@ class AIConfig:
                 maximum=200 * 1024 * 1024,
             ),
             max_photos=_env_int("AI_MAX_PHOTOS", 80, minimum=1, maximum=200),
+            api_format=(os.getenv("OPENAI_API_FORMAT") or "responses").strip(),
         )
 
     def validate(self) -> None:
+        if self.api_format not in {"responses", "bailian_chat"}:
+            raise AIConfigurationError("OPENAI_API_FORMAT must be responses or bailian_chat")
         if not self.model:
             raise AIConfigurationError("OPENAI_MODEL cannot be empty")
         if not self.mock_mode and not self.api_key:
@@ -287,7 +291,8 @@ class AIConfig:
 
     @property
     def responses_url(self) -> str:
-        return f"{self.base_url.rstrip('/')}/responses"
+        endpoint = "chat/completions" if self.api_format == "bailian_chat" else "responses"
+        return f"{self.base_url.rstrip('/')}/{endpoint}"
 
 
 @dataclass(frozen=True)
@@ -994,7 +999,13 @@ class AIService:
             )
 
         safe_name = _safe_filename(filename, path.name)
-        if detected_mime.startswith("image/"):
+        if self.config.api_format == "bailian_chat" and source_kind == "spreadsheet":
+            from bailian_adapter import AdapterInputError, spreadsheet_text
+            try:
+                file_part = {"type": "input_text", "text": spreadsheet_text(content, path.suffix.lower())}
+            except AdapterInputError as exc:
+                raise AIInputError(str(exc)) from None
+        elif detected_mime.startswith("image/"):
             file_part: dict[str, Any] = {
                 "type": "input_image",
                 "image_url": _data_url(content, detected_mime),
@@ -1148,6 +1159,13 @@ class AIService:
         prompt_version: str,
         schema_version: str,
     ) -> dict[str, Any]:
+        if self.config.api_format == "bailian_chat":
+            from bailian_adapter import AdapterInputError, chat_payload
+            try:
+                return chat_payload(system_prompt=system_prompt, user_content=user_content, schema=schema,
+                                    model=self.config.model, max_output_tokens=self.config.max_output_tokens)
+            except AdapterInputError as exc:
+                raise AIInputError(str(exc)) from None
         return {
             "model": self.config.model,
             "store": False,
@@ -1175,6 +1193,10 @@ class AIService:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode(
             "utf-8"
         )
+        if self.config.api_format == "bailian_chat":
+            from bailian_adapter import request_limit
+            if len(body) > request_limit(self.config.base_url):
+                raise AIInputError("百炼请求超过当前接口字节上限，请拆分文件或照片；未截断内容。")
         headers = {
             "Authorization": f"Bearer {self.config.api_key}",
             "Content-Type": "application/json",
@@ -1235,6 +1257,12 @@ class AIService:
             raise AIResponseError(
                 "OpenAI returned an invalid response object", request_id=request_id
             )
+        if self.config.api_format == "bailian_chat":
+            from bailian_adapter import AdapterResponseError, normalize_response
+            try:
+                decoded = normalize_response(decoded)
+            except AdapterResponseError as exc:
+                raise AIResponseError(str(exc), request_id=request_id) from None
         return decoded, request_id
 
     def _live_result(
@@ -1252,7 +1280,7 @@ class AIService:
         return AIResult(
             data=copy.deepcopy(data),
             metadata=AIMetadata(
-                provider="openai",
+                provider="bailian" if self.config.api_format == "bailian_chat" else "openai",
                 model=model,
                 response_id=response_id,
                 request_id=request_id,

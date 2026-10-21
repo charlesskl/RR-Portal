@@ -9,6 +9,7 @@ import mimetypes
 import os
 import secrets
 import shutil
+import time
 import uuid
 from datetime import date, datetime, timezone
 from functools import wraps
@@ -40,7 +41,6 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
-    event,
     func,
     select,
     text,
@@ -52,21 +52,6 @@ from pdf_service import generate_report_pdf
 
 
 UTC = timezone.utc
-
-
-class TrustedPrefixMiddleware:
-    """Apply the Portal mount prefix only when it exactly matches configuration."""
-
-    def __init__(self, application, trusted_prefix: str):
-        self.application = application
-        self.trusted_prefix = trusted_prefix.rstrip("/")
-
-    def __call__(self, environ, start_response):
-        if environ.get("HTTP_X_FORWARDED_PREFIX", "").rstrip("/") == self.trusted_prefix:
-            environ["SCRIPT_NAME"] = self.trusted_prefix
-        return self.application(environ, start_response)
-
-
 PHOTO_CATEGORIES = {
     "product": "产品照片 / Product",
     "marking": "产品标识 / Marking",
@@ -683,20 +668,12 @@ def create_app(test_config: dict | None = None) -> Flask:
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=os.getenv("COOKIE_SECURE", "false").lower() == "true",
-        SESSION_COOKIE_PATH=os.getenv("SESSION_COOKIE_PATH", "/"),
-        PROXY_PREFIX=os.getenv("PROXY_PREFIX", ""),
         AUTO_CREATE_SCHEMA=os.getenv("AUTO_CREATE_SCHEMA", "true").lower() == "true",
         SEED_DATABASE=os.getenv("SEED_DATABASE", "true").lower() == "true",
         TESTING=False,
     )
     if test_config:
         app.config.update(test_config)
-    # 非测试环境必须使用显式配置的 SECRET_KEY，禁止带已知默认密钥运行
-    if app.config["SECRET_KEY"] == "dev-change-this-secret" and not app.config["TESTING"]:
-        raise RuntimeError("SECRET_KEY 未配置，拒绝启动（请通过环境变量设置）")
-
-    if app.config["PROXY_PREFIX"]:
-        app.wsgi_app = TrustedPrefixMiddleware(app.wsgi_app, app.config["PROXY_PREFIX"])
 
     Path(app.config["STORAGE_ROOT"]).mkdir(parents=True, exist_ok=True)
     db_url = app.config["DATABASE_URL"]
@@ -704,18 +681,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         db_url = db_url.replace("postgres://", "postgresql://", 1)
     if db_url.startswith("sqlite:///") and db_url != "sqlite:///:memory:":
         Path(db_url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
-    connect_args = {"check_same_thread": False, "timeout": 30} if db_url.startswith("sqlite") else {}
+    connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
     engine = create_engine(db_url, future=True, pool_pre_ping=True, connect_args=connect_args)
-    if db_url.startswith("sqlite"):
-        @event.listens_for(engine, "connect")
-        def configure_sqlite(connection, _record):
-            cursor = connection.cursor()
-            try:
-                cursor.execute("PRAGMA journal_mode=WAL")
-                cursor.execute("PRAGMA foreign_keys=ON")
-                cursor.execute("PRAGMA busy_timeout=30000")
-            finally:
-                cursor.close()
     app.extensions["db_engine"] = engine
     app.extensions["db_session"] = scoped_session(sessionmaker(bind=engine, autoflush=False, expire_on_commit=False))
     if app.config["AUTO_CREATE_SCHEMA"]:
@@ -724,35 +691,53 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.before_request
     def open_db_and_protect():
         g.db = app.extensions["db_session"]()
-        # ── 门户 SSO 免登：URL 带 sso_ticket 时验票建会话，随后跳回干净地址 ──
+        if "csrf_token" not in session:
+            session["csrf_token"] = secrets.token_urlsafe(24)
+        # 门户免登：任何路径带 sso_ticket 时先验票登录，再去掉票据回到原路径
         ticket = request.args.get("sso_ticket")
-        if ticket and not current_user():
+        if ticket:
             try:
                 claims = verify_portal_ticket(ticket)
-            except Exception:
-                g.db.rollback()  # 票据无效则回落到账号密码登录
-                return redirect(request.base_url)  # base_url 含 PROXY_PREFIX；request.path 会丢前缀
-            user = g.db.scalar(select(User).where(User.username == str(claims["sub"])))
+            except ValueError as exc:
+                flash(f"免登录失败：{exc}，请使用账号密码登录。", "error")
+                return redirect(url_for("login"))
+            username = str(claims["sub"]).strip().lower()
+            perms = claims.get("perms") or {}
+            desired_role = "admin" if perms.get("admin", "full") != "none" else "qc"
+            user = g.db.scalar(select(User).where(User.username == username))
             if user is None:
-                # 门户账号首次进入：自动建档；门户给了「系统管理」全部权限则设为管理员
                 user = User(
-                    username=str(claims["sub"]),
-                    name=str(claims.get("name") or claims["sub"]),
-                    role="admin" if (claims.get("perms") or {}).get("admin") == "full" else "qc",
+                    username=username,
+                    name=str(claims.get("name") or username),
+                    role=desired_role,
                     password_hash=generate_password_hash(secrets.token_urlsafe(24)),
+                    active=True,
                 )
                 g.db.add(user)
                 g.db.flush()
+            elif user.role != desired_role:
+                user.role = desired_role
             if not user.active:
-                abort(403, "账号已停用，请联系管理员")
+                flash("账号已停用。", "error")
+                return redirect(url_for("login"))
             session.clear()
             session["user_id"] = user.id
             session["csrf_token"] = secrets.token_urlsafe(24)
-            audit(g.db, "login", "user", user.id, "门户SSO免登")
+            session["portal_perms"] = perms
+            audit(g.db, "login", "user", user.id)
             g.db.commit()
-            return redirect(request.base_url)  # base_url 含 PROXY_PREFIX；request.path 会丢前缀
-        if "csrf_token" not in session:
-            session["csrf_token"] = secrets.token_urlsafe(24)
+            return redirect(request.path)
+        # 门户功能权限管控：仅对免登会话（带 portal_perms）生效
+        portal_perms = session.get("portal_perms")
+        if portal_perms is not None and request.endpoint:
+            for feature, endpoints in PORTAL_FEATURE_ENDPOINTS.items():
+                if request.endpoint in endpoints:
+                    level = portal_perms.get(feature, "full")
+                    if level == "none":
+                        abort(403, "当前账号没有此功能的使用权限（门户设置为：无权限）")
+                    if level == "view" and request.method not in {"GET", "HEAD"}:
+                        abort(403, "当前账号对此功能仅可查看，不能修改（门户设置为：仅查看）")
+                    break
         if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.endpoint != "static":
             supplied = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token")
             if supplied != session.get("csrf_token"):
@@ -782,30 +767,6 @@ def create_app(test_config: dict | None = None) -> Flask:
         with app.app_context():
             seed_database(app.extensions["db_session"]())
     return app
-
-
-def verify_portal_ticket(ticket: str) -> dict:
-    """校验门户签发的 SSO 票据（HS256 JWT，与门户/其它系统的 SSO_SECRET 一致）。"""
-    parts = str(ticket or "").split(".")
-    if len(parts) != 3:
-        raise ValueError("票据格式不正确")
-    secret = os.getenv("SSO_SECRET", "dev-sso-secret-change-me")
-    expected = hmac.new(secret.encode(), f"{parts[0]}.{parts[1]}".encode(), hashlib.sha256).digest()
-
-    def b64url_decode(seg: str) -> bytes:
-        return base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))
-
-    actual = b64url_decode(parts[2])
-    if not hmac.compare_digest(actual, expected):
-        raise ValueError("票据校验失败")
-    payload = json.loads(b64url_decode(parts[1]).decode("utf-8"))
-    if not payload.get("exp") or int(payload["exp"]) < int(datetime.now(UTC).timestamp() * 1000):
-        raise ValueError("票据已过期")
-    if payload.get("app") != "qc-report":
-        raise ValueError("票据不属于本系统")
-    if not payload.get("sub"):
-        raise ValueError("票据缺少账号")
-    return payload
 
 
 def current_user() -> User | None:
@@ -859,6 +820,28 @@ def audit(db, action: str, entity_type: str, entity_id: int | None, detail: str 
 def setting(db, key: str, default: str = "") -> str:
     item = db.get(Setting, key)
     return item.value if item else default
+
+
+AI_SETTING_ENV_KEYS = {
+    "ai_openai_api_key": "OPENAI_API_KEY",
+    "ai_openai_base_url": "OPENAI_BASE_URL",
+    "ai_openai_model": "OPENAI_MODEL",
+    "ai_openai_timeout_seconds": "OPENAI_TIMEOUT_SECONDS",
+    "ai_openai_max_output_tokens": "OPENAI_MAX_OUTPUT_TOKENS",
+}
+
+
+def apply_ai_settings(db) -> None:
+    """基础设置页里的 AI 配置优先于环境变量。
+
+    服务器部署的 env 只能由 GitHub 运维 workflow 改写，流程重；把 AI 配置
+    放进数据库设置后，管理员在「基础设置」页改完即刻生效，无需重新部署。
+    空值不覆盖，保留环境变量原值。
+    """
+    for key, env_name in AI_SETTING_ENV_KEYS.items():
+        value = setting(db, key, "").strip()
+        if value:
+            os.environ[env_name] = value
 
 
 def po_snapshot(db, po: PurchaseOrder) -> tuple[dict, dict]:
@@ -1168,6 +1151,7 @@ def process_po_import_job(import_id: int, application: Flask | None = None):
 
         from ai_service import AIService
 
+        apply_ai_settings(db)
         source_path = verified_storage_file(application.config["STORAGE_ROOT"], po_import.file_path, po_import.checksum)
         result = AIService().extract_po(source_path, filename=po_import.original_name, mime_type=po_import.mime_type)
         payload = result.data
@@ -1459,6 +1443,7 @@ def process_analysis_run_job(run_id: int, application: Flask | None = None):
             for slot in db.scalars(select(ReportPhotoSlot).where(ReportPhotoSlot.report_id == report.id).order_by(ReportPhotoSlot.sort_order, ReportPhotoSlot.id))
         ]
         reference = {**json_load(report.product_snapshot), "packing": json_load(report.packing_snapshot)}
+        apply_ai_settings(db)
         result = AIService().inspect_photos(photo_inputs, po_reference=reference, checklist=checklist)
         metadata = result.metadata
 
@@ -1609,8 +1594,6 @@ def build_unified_pdf_payload(db, report: Report, company_name: str, report_titl
         "result_reason": report.result_reason,
         "generated_at": utcnow().isoformat(),
         "overview": {
-            "inspection_stage": report.inspection_status,
-            "completed_pct": report.completed_pct,
             "customer": snapshot.get("customer_name", ""),
             "factory": snapshot.get("factory_name", ""),
             "country": snapshot.get("country", ""),
@@ -1662,6 +1645,44 @@ def build_unified_pdf_payload(db, report: Report, company_name: str, report_titl
             "request_id": latest_run.request_id,
         } if latest_run else {},
     }
+
+
+def _b64url_decode(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def verify_portal_ticket(ticket: str) -> dict:
+    """校验员工门户签发的 HS256 JWT 免登票据（与门户 SSO_SECRET 一致）。"""
+    parts = (ticket or "").split(".")
+    if len(parts) != 3:
+        raise ValueError("票据格式不正确")
+    secret = os.environ.get("SSO_SECRET", "dev-sso-secret-change-me")
+    expected = hmac.new(secret.encode(), f"{parts[0]}.{parts[1]}".encode(), hashlib.sha256).digest()
+    try:
+        actual = _b64url_decode(parts[2])
+        payload = json.loads(_b64url_decode(parts[1]))
+    except Exception as exc:
+        raise ValueError("票据无效") from exc
+    if not hmac.compare_digest(expected, actual):
+        raise ValueError("票据校验失败")
+    if not payload.get("exp") or time.time() * 1000 > payload["exp"]:
+        raise ValueError("票据已过期")
+    if payload.get("app") != "qc-report":
+        raise ValueError("票据不属于本系统")
+    if not payload.get("sub"):
+        raise ValueError("票据缺少账号")
+    return payload
+
+
+# 门户功能权限（none/view/full）→ 本系统端点的映射（仅对门户免登账号生效）
+PORTAL_FEATURE_ENDPOINTS = {
+    "upload": {"new_report", "new_manual_report", "api_create_po_import"},
+    "proofread": {"po_import_detail", "po_import_source", "confirm_po_item", "api_get_po_import", "api_update_po_fields"},
+    "inspect": {"inspection_workspace", "upload_slot_photos", "upload_photos", "delete_photo", "edit_report", "api_photo_update", "api_aql_calculate"},
+    "ai-draft": {"start_analysis_run", "get_analysis_run", "review_ai_finding"},
+    "finalize": {"save_signature", "finalize_report", "create_revision", "copy_report"},
+    "admin": {"admin", "audit_page", "api_customers", "api_customer_item", "api_products", "api_product_item", "api_orders", "api_order_item", "api_settings", "api_test_templates", "api_test_template_item", "api_photo_checklist_templates", "api_photo_checklist_template_item", "api_defect_categories", "api_defect_category_item", "api_aql_rules", "api_aql_rule_item"},
+}
 
 
 def register_routes(app: Flask):
@@ -1978,7 +1999,7 @@ def register_routes(app: Flask):
             required_done=required_done,
         )
 
-    @app.post("/reports/<int:report_id>/photo-slots/<int:slot_id>/photos", endpoint="upload_slot_photos_form")
+    @app.post("/reports/<int:report_id>/photo-slots/<int:slot_id>/photos")
     @app.post("/api/reports/<int:report_id>/photo-slots/<int:slot_id>/photos")
     @login_required
     def upload_slot_photos(report_id: int, slot_id: int):
@@ -3259,9 +3280,15 @@ def register_routes(app: Flask):
                     return redirect(url_for("admin"))
                 g.db.add(User(username=request.form["username"].strip().lower(), name=request.form["name"].strip(), role=request.form.get("role", "qc"), password_hash=generate_password_hash(password)))
             elif action == "settings":
-                for key in ("company_name", "report_title", "required_photo_categories"):
+                for key in ("company_name", "report_title", "required_photo_categories", *AI_SETTING_ENV_KEYS):
+                    if key not in request.form:
+                        continue  # 分表单提交，不动未包含的项
+                    value = request.form.get(key, "").strip()
+                    if key in AI_SETTING_ENV_KEYS and not value:
+                        # 空值保留原配置，避免误清空 AI 密钥
+                        continue
                     item = g.db.get(Setting, key) or Setting(key=key, value="")
-                    item.value = request.form.get(key, "").strip()
+                    item.value = value
                     g.db.add(item)
                 logo = request.files.get("logo")
                 if logo and logo.filename:

@@ -8,8 +8,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  READONLY_WORKFLOW_PIN: 'false'
-  READONLY_HELPER_SHA256: 'a1e0a2bfa3aa346ae311b27e7c52f1e13d8f16fc8c3bbd7d9b2d5e1b9547757d'
+  READONLY_WORKFLOW_PIN: 'true'
+  READONLY_HELPER_SHA256: 'e74006dba9ecba87968bebbd05cb85c4c740b8ab1fe6d64f3dbb6bfc6f7f99ab'
 jobs:
   observe:
     runs-on: ubuntu-latest
@@ -56,5 +56,5 @@ jobs:
             git show "$RELEASE_SHA:deploy/ops/voyageplex-mail-readonly-20261020-03.py" > "$xingxin_probe_tmp/mail-observation-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$xingxin_probe_tmp/mail-observation-library.py" | cut -d ' ' -f1)" = 2c5675ab534d1fcac5f28698e5418daf3ca0366b549c0c9b78fb58d95e95d4c0 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/voyageplex-xingxin-sections-child-20261021.py" > "$xingxin_probe_tmp/voyageplex-xingxin-sections-child-20261021.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$xingxin_probe_tmp/voyageplex-xingxin-sections-child-20261021.py" | cut -d ' ' -f1)" = 7000c2e3c5915a3703badfad409ced45d7f64596fd2071fac9f6103ead5964e2 ]] || exit 1
+            [[ "$(sha256sum "$xingxin_probe_tmp/voyageplex-xingxin-sections-child-20261021.py" | cut -d ' ' -f1)" = 22c6d39d28b99692d3d6f5d5f46afc47c45d7f477f41c97d2fa95218c451b526 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 8m python3 -B "$xingxin_probe_tmp/run.py" observe

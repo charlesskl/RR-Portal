@@ -1,9 +1,9 @@
 """Read current recovery state; only the unchanged blocked UID permits a bounded sections probe."""
 import contextlib,datetime,hashlib,importlib.util,json,os,pathlib,re,sqlite3,subprocess,sys
-PIN=False;BRANCH='refs/heads/ops/voyageplex-size-fix-20261020'
+PIN=True;BRANCH='refs/heads/ops/voyageplex-size-fix-20261020'
 ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/voyageplex-xingxin-sections-20261021-01';PRIOR=ROOT/'deploy/backups/voyageplex-size-fix-20261020-release'
 MANIFEST='1be739e39d1ab067bdaea80c245f2ed23923452191799ad302cd0b0bac782c53';RESULT='de20655ceccdcc0742a8ba1e9692c80a9e44d662a1b8059a2fdadde2cdea6805'
-LIB_SHA='2c5675ab534d1fcac5f28698e5418daf3ca0366b549c0c9b78fb58d95e95d4c0';CHILD_SHA='7000c2e3c5915a3703badfad409ced45d7f64596fd2071fac9f6103ead5964e2';SOURCE_SHA='c6246781845d4cd40439d7286c9f3afcfae0dcafc4b106de780bd715e3b201a9';DB=ROOT/'apps/船务部/VoyagePlex船务协同系统/data-runtime/voyageplex.db';UID=1545369828;M=None;COUNT=0
+LIB_SHA='2c5675ab534d1fcac5f28698e5418daf3ca0366b549c0c9b78fb58d95e95d4c0';CHILD_SHA='22c6d39d28b99692d3d6f5d5f46afc47c45d7f477f41c97d2fa95218c451b526';SOURCE_SHA='c6246781845d4cd40439d7286c9f3afcfae0dcafc4b106de780bd715e3b201a9';DB=ROOT/'apps/船务部/VoyagePlex船务协同系统/data-runtime/voyageplex.db';UID=1545369828;M=None;COUNT=0
 LOGS=tuple(stage+'-'+service+'-last24h.private.log'for stage in('before','after')for service in('voyageplex-api','voyageplex-parser'))
 KNOWN_ERRORS=('无法读取有效的邮件元数据','邮件正文读取失败，已保留收件时间供人工处理','邮箱连接或读取失败，请检查账号、授权码和网络','本轮邮箱读取超时，请稍后重试','邮箱读取正在进行，请稍后重试','邮件超过 40MiB')
 KINDS={'metadata','body_read','message_size','parse_timeout','parse_memory','parse_process','parse_result_size','parse_cancelled'}

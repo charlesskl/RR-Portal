@@ -5,7 +5,7 @@ Only Indo maintenance is cleared; the single observed factory data difference re
 import copy,hashlib,importlib.util,json,os,pathlib,re,signal,sys,traceback
 ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-977-978-979-20261021'
 BASE='b4c3763fe43e30c80c041c70e7a9f0750145d7b0';TARGET='9b890cc016da403f929f8a7aaeddb878d3de24c5';TREE='e322834bbbd43082854d8c564192c3ca1e097534'
-DEPLOY_PIN=False;VERIFY_PIN=False
+DEPLOY_PIN=True;VERIFY_PIN=False
 RESUME_SHA='38463f68e945bbf039433cf63ae20293fdbcb5c4d065c3be28713f3f3d70c507'
 FAILED_RESUME=ROOT/'deploy/backups/batch-977-978-979-20261021-resume'
 FAILED_RESUME_MANIFEST='84c4292c33750e70b0e4810bd38ba11dab95dd25ddf59be3abc187a9ac7d77a5';FAILED_RESUME_RESULT='b2b53525ded8f0921a9fc786f688b9e2560d68bf379b9636f75f33093cdb2b96'

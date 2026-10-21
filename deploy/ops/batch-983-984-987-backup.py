@@ -1,4 +1,4 @@
-"""Four-service private backup v2. Draft: execution gate is false.
+"""Four-service private backup v3. Draft: execution gate is false.
 
 Only filesystem copies, SQLite read transactions and read-only container execs.
 No HTTP, model calls, signals, maintenance changes, PostgreSQL or mail access.
@@ -11,7 +11,7 @@ BASE='97d563e93aca3d9e3c0bc512dd622d6a3002e710'
 BASE_TREE='ad906e8b24b81df8e7ade91d15c5e9ab4ab839ab'
 BRANCH='refs/heads/ops/batch-983-984-987-20261021'
 BACKUP_PIN=True
-OUT=ROOT/'deploy/backups/batch-983-984-987-20261021-backup-v2'
+OUT=ROOT/'deploy/backups/batch-983-984-987-20261021-backup-v3'
 FACTORY='apps/PMC跟仓管/加工厂月度评审管理制度'
 RR='apps/工程部/工程啤办单'
 QC='apps/生产部/品质管理系统'
@@ -19,6 +19,7 @@ APPS=(FACTORY,RR,QC)
 ORDER=('factory-review-test','factory-review','rr-production','qc')
 STORAGE={'factory-review-test':(FACTORY+'/pb_data_test','/pb/pb_data'),'factory-review':(FACTORY+'/pb_data','/pb/pb_data'),'rr-production':(RR+'/data','/app/data'),'qc':(QC+'/data','/app/data')}
 QC_COMPANIES={'dg-xingxin','dg-huadeng-a','dg-huadeng-b','dg-huajia','hy-huakang-a','hy-huakang-b','hy-huakang-c','hy-huakang-d','hy-huadeng','hy-huaxing','sy-huadeng','sy-xingxin','xs-huadeng'}
+QC_HISTORICAL_SQLITE={company+'/qc.db.bak.20260910-152122'for company in QC_COMPANIES}
 FIXED=('docker-compose.cloud.yml','nginx/nginx.cloud.conf','deploy/update-server.sh','deploy/service-maintenance.sh','.github/workflows/deploy.yml','.env.example',FACTORY+'/Dockerfile',FACTORY+'/.dockerignore',RR+'/Dockerfile.node',RR+'/.dockerignore',QC+'/Dockerfile',QC+'/.dockerignore')
 DEPS={'factory-review-backup-library.py':'79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666','release-data-ops-library.py':'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5','release-data-library.py':'d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9'}
 PRIOR_FACTORY_PREPARE=ROOT/'deploy/backups/pr-986-20261021-prepare'
@@ -113,7 +114,7 @@ def prior_factory_prepare():
 def capture(service,label):
  tree=ROOT/STORAGE[service][0];dest=OUT/(service+'-'+label);names=F.OPS.database_names(tree);before=ownership(tree,names);value=F.OPS.sqlite_capture(service,tree,dest);need(set(value['sqlite'])==set(names),'all-discovered-sqlite-copied')
  if service.startswith('factory-review'):need(set(names)=={'data.db','auxiliary.db'},'exact-factory-databases')
- elif service=='qc':need(set(names)=={company+'/qc.db'for company in QC_COMPANIES},'exact-13-company-databases')
+ elif service=='qc':need(set(names)=={company+'/qc.db'for company in QC_COMPANIES}|QC_HISTORICAL_SQLITE,'exact-13-active-13-historical-qc-databases')
  else:need(names==[]and(tree/'data.json').is_file(),'engineering-json-without-sqlite')
  value.update(metadata=db_metadata(tree,names),fileOwnership=ownership(tree,names),databaseFamilyMetadata=db_family_metadata(tree,names),observedUTC=datetime.datetime.now(datetime.timezone.utc).isoformat());need(value['fileOwnership']==before and F.OPS.L.non_database_inventory(tree,names)==value['files'],'stable-captured-files-and-mode-owners');private(service+'-'+label+'.private.json',value);return value,dest
 def strict_engineering_json(raw):
@@ -166,7 +167,7 @@ def backup(result):
  after,_=runtime();need(after==before and source()==configuration and dirty_snapshot()==dirty and flags()==maintenance,'unchanged-runtime-source-dirty-flags');b={'head':BASE,'tree':BASE_TREE,'runtime':before,'configuration':configuration,'preexistingFourDirty':dirty,'maintenanceInventory':maintenance,'environmentFileMetadata':envmeta,'environmentSHA256':sha((OUT/'environment.private').read_bytes()),'storage':captured,'sourceProof':proof,'startup':startup};environment_stable(dict(b,archive=OUT))
  for s in ORDER:
   tree=ROOT/STORAGE[s][0];names=list(captured[s]['sqlite']);need(F.OPS.L.non_database_inventory(tree,names)==captured[s]['files']and ownership(tree,names)==captured[s]['fileOwnership']and db_metadata(tree,names)==captured[s]['metadata'],'all-files-mode-owners-stable-through-backup')
- private('baseline.private.json',b);result.update(success=True,backupComplete=True,targetContainerCount=4,otherContainerCount=42,portableSQLiteCount=17,qcCompanyDatabaseCount=13,allFourRuntimeSourcesMatchBase=True,allPersistentDataFilesAndOwnershipArchived=True,allOriginalTypedRowsAndSchemaCaptured=True,databaseSnapshotsIndividuallyConsistentNotCrossDatabaseAtomic=True,all46ContainersUnchanged=True,environmentFileUnchanged=True,fourExistingDirtyFilesPreserved=True)
+ private('baseline.private.json',b);result.update(success=True,backupComplete=True,targetContainerCount=4,otherContainerCount=42,portableSQLiteCount=30,qcCompanyDatabaseCount=13,qcHistoricalDatabaseCount=13,allFourRuntimeSourcesMatchBase=True,allPersistentDataFilesAndOwnershipArchived=True,allOriginalTypedRowsAndSchemaCaptured=True,databaseSnapshotsIndividuallyConsistentNotCrossDatabaseAtomic=True,all46ContainersUnchanged=True,environmentFileUnchanged=True,fourExistingDirtyFilesPreserved=True)
 def main():
  need(BACKUP_PIN is True and sys.argv[1:]==['backup']and os.environ.get('RELEASE_BRANCH')==BRANCH and os.environ.get('RELEASE_ATTEMPT')=='1','false-draft-or-wrong-invocation');os.umask(0o077);OUT.mkdir(mode=0o700);initialize(OUT);signal.signal(signal.SIGTERM,lambda *_:need(False,'terminated'));result={'mode':'backup','base':BASE,'target':BASE,'tree':BASE_TREE,'success':False,'backupComplete':False,'businessWritesPerformed':False,'credentialsOrConfigurationChanged':False,'containerSignalsPerformed':False,'healthOrBusinessHTTPRequestsPerformed':False,'modelCallsPerformed':False,'otherServicesRequested':False,'secretOrRowsPrinted':False}
  try:backup(result)

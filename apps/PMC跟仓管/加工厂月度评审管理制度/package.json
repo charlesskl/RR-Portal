@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:analysis-backend": "node --test tests/analysisBackend.integration.mjs tests/analysisAiBackend.integration.mjs",
     "test:backend": "node --test tests/qualityPatrolBackend.integration.mjs",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:delivery-reminders-backend": "node --test tests/deliveryRemindersBackend.integration.mjs"
   },
   "dependencies": {
     "pdfjs-dist": "^6.1.200",

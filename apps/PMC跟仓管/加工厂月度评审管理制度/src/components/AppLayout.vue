@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
+import DeliveryReminder from './DeliveryReminder.vue'
 import { useAuthStore } from '../stores/auth'
 import { ROLE_LABELS } from '../constants/roles'
 import {
@@ -35,7 +36,7 @@ const auth = useAuthStore()
           <RouterLink v-if="auth.role && canViewUsers(auth.role)" to="/admin/users">用户</RouterLink>
         </nav>
       </aside>
-      <main><slot /></main>
+      <main><DeliveryReminder /><slot /></main>
     </div>
   </div>
 </template>

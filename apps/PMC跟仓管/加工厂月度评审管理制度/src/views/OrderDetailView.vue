@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted, watch } from 'vue'
+import { ref, computed, reactive, onMounted, watch, nextTick } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import { pb } from '../pb'
@@ -78,6 +78,7 @@ const delivery = reactive({
 })
 const delivSaving = ref(false)
 const delivSaved = ref(false)
+const deliveryError = ref('')
 function initDelivery(o: Order) {
   delivery.pmc = o.pmc ?? ''
   delivery.order_no = o.order_no ?? ''
@@ -87,14 +88,18 @@ function initDelivery(o: Order) {
 async function saveDelivery() {
   delivSaving.value = true
   delivSaved.value = false
-  await orders.update(id.value, {
-    pmc: delivery.pmc,
-    order_no: delivery.order_no,
-    actual_delivery_date: delivery.actual_delivery_date || undefined,
-    return_count: num(delivery.return_count),
-  })
-  delivSaving.value = false
-  delivSaved.value = true
+  deliveryError.value = ''
+  try {
+    const savedOrder = await orders.update(id.value, {
+      pmc: delivery.pmc,
+      order_no: delivery.order_no,
+      actual_delivery_date: delivery.actual_delivery_date || '',
+      return_count: num(delivery.return_count),
+    })
+    if (order.value) Object.assign(order.value, savedOrder)
+    delivSaved.value = true
+  } catch { deliveryError.value = '交付登记保存失败，请重试。' }
+  finally { delivSaving.value = false }
 }
 
 onMounted(async () => {
@@ -107,6 +112,11 @@ onMounted(async () => {
   form.delay_reason = o.delay_reason ?? ''
   initPrice(o)
   initDelivery(o)
+  if (route.query.reminder === 'delivery') {
+    await nextTick()
+    document.getElementById('delivery-registration')?.scrollIntoView({ block: 'center' })
+    document.querySelector<HTMLInputElement>('#delivery-registration input[type=date]')?.focus({ preventScroll: true })
+  }
 })
 
 // 空输入/NaN 归一为 undefined（不更新该数值字段），避免把 '' 发给数值字段
@@ -190,8 +200,10 @@ async function savePrice() {
         </form>
       </section>
 
-      <section class="card" v-if="order && canEdit">
+      <section id="delivery-registration" class="card" v-if="order && canEdit">
         <h3 class="sec-title">交期 / 客退</h3>
+        <p v-if="route.query.reminder === 'delivery'">请核实是否已交付：已交付请填写实际交货时间并保存；未交付请在下方“生产进度”补充延期原因。</p>
+        <p v-if="deliveryError" role="alert">{{ deliveryError }}</p>
         <form class="prog-form" @submit.prevent="saveDelivery">
           <label>下单PMC <input v-model="delivery.pmc" placeholder="下单跟单人" /></label>
           <label>订单号 <input v-model="delivery.order_no" placeholder="订单号" /></label>

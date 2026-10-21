@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  QC_BACKUP_WORKFLOW_PIN: 'false'
-  QC_BACKUP_HELPER_SHA256: 'b3b042788d75b4bb11f77641d1a5ecec34e40fe71c9bc7bb64c5b28597e559ec'
+  QC_BACKUP_WORKFLOW_PIN: 'true'
+  QC_BACKUP_HELPER_SHA256: '063ca0b80c23e96a3a25af18ee442ecf33b14e8cfb7f0754b19c153bcbe85428'
 jobs:
   fixed-qc-portable-backup:
     runs-on: ubuntu-latest

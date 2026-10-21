@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  BATCH_EXECUTION_WORKFLOW_PIN: 'true'
-  BATCH_EXECUTION_HELPER_SHA256: '6273469870b4e49e70136a8c953b58bfb40947fd7355debe6e6ac39de99ede43'
+  BATCH_EXECUTION_WORKFLOW_PIN: 'false'
+  BATCH_EXECUTION_HELPER_SHA256: 'a314e02e053df78d829a4b08034a9a482700664e2b5af50e5e5335f1d59c3299'
   BATCH_CORE_LIBRARY_SHA256: '4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5'
   BATCH_SOURCE_MANIFEST_SHA256: '7efb90de8b783dee9241c6e239d6a72cd9946dccad5f509d86cac62ac2041799'
 jobs:
@@ -57,7 +57,7 @@ jobs:
             umask 077
             batch_task_tmp=$(mktemp -d /tmp/batch-969-974-release.XXXXXX)
             trap 'rm -rf "$batch_task_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-release-04.py" > "$batch_task_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-969-970-972-974-release-05.py" > "$batch_task_tmp/run.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_task_tmp/run.py" | cut -d ' ' -f1)" = "$BATCH_EXECUTION_HELPER_SHA256" ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-backup-library.py" > "$batch_task_tmp/batch-backup-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_task_tmp/batch-backup-library.py" | cut -d ' ' -f1)" = "$BATCH_CORE_LIBRARY_SHA256" ]] || exit 1

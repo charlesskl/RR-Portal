@@ -8,7 +8,7 @@ TREE='f0a724fb72b06e9cea3dc5aa1baa8bed629f127d'
 BASE='9b890cc016da403f929f8a7aaeddb878d3de24c5'
 BRANCH='refs/heads/ops/pr-981-20261021'
 ROOT=pathlib.Path('/opt/rr-portal');APP='apps/PMC跟仓管/加工厂月度评审管理制度'
-BACKUP=ROOT/'deploy/backups/pr-981-20261021-backup';PREPARE=BACKUP.with_name('pr-981-20261021-prepare');DEPLOY=BACKUP.with_name('pr-981-20261021-deploy');VERIFY=BACKUP.with_name('pr-981-20261021-verify')
+BACKUP=ROOT/'deploy/backups/pr-981-20261021-backup';PREPARE=BACKUP.with_name('pr-981-20261021-prepare-02');DEPLOY=BACKUP.with_name('pr-981-20261021-deploy');VERIFY=BACKUP.with_name('pr-981-20261021-verify')
 BACKUP_MANIFEST='1f09e9e07ad438b8bcc61d2d48626af52da83e4e30b5c0a97e1857a89217e9cf';BACKUP_RESULT='f91ca497bc7fe74b263fce4ae244bcb5861e948de4cd3eae494713542630cfe3'
 PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 SERVICES=('factory-review-test','factory-review');ALLOW={ 'FACTORY_REVIEW_AI_'+x for x in ('PROVIDER','ENABLED','API_KEY','MODEL','BASE_URL')}
@@ -84,13 +84,17 @@ def model_probe(image,literal,raw):
    subprocess.run(['docker','rm','-f',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30);need(not run(['docker','ps','-aq','--filter','name=^/'+name+'$']).strip(),'isolated-probe-removed')
 
 def prep(result,b):
- runtime,raw=F.runtime();need(runtime==b['runtime']and flags()==b['maintenanceInventory'],'original-runtime-before-build');operation(['git','-c','core.hooksPath=/dev/null','fetch','--no-write-fetch-head','origin','main'],'fetch-reviewed-main');need(run(['git','rev-parse','origin/main']).decode().strip()==TARGET,'remote-target');source(b,BASE);need((ROOT/'.env.cloud.production').read_bytes()==(BACKUP/'environment.private').read_bytes(),'original-env-file');operation(['git','-c','core.hooksPath=/dev/null','merge','--ff-only',TARGET],'source-fast-forward');source(b,TARGET)
+ runtime,raw=F.runtime();need(runtime==b['runtime']and flags()==b['maintenanceInventory'],'original-runtime-before-build');operation(['git','-c','core.hooksPath=/dev/null','fetch','--no-write-fetch-head','origin','main'],'fetch-reviewed-main');need(run(['git','rev-parse','origin/main']).decode().strip()==TARGET,'remote-target');head=run(['git','rev-parse','HEAD']).decode().strip();need(head in{BASE,TARGET},'recoverable-source-head');source(b,head);need((ROOT/'.env.cloud.production').read_bytes()==(BACKUP/'environment.private').read_bytes(),'original-env-file')
+ if head==BASE:operation(['git','-c','core.hooksPath=/dev/null','merge','--ff-only',TARGET],'source-fast-forward')
+ source(b,TARGET)
  old=read(BACKUP/'compose-render.private.json');base=json.loads(run([*COMPOSE,'config','--format','json']));need({k:v for k,v in old.items()if k!='services'}=={k:v for k,v in base.items()if k!='services'}and set(old['services'])==set(base['services']),'compose-global-unchanged')
  for s in old['services']:
   a,c=copy.deepcopy(old['services'][s]),copy.deepcopy(base['services'][s])
   if s in SERVICES:a.pop('environment');c.pop('environment')
   need(a==c,'compose-other-config-unchanged')
- literal=intended();private('intended-environments.private.json',literal);tags={s:'rr-portal-'+s+'-981:'+TARGET for s in SERVICES};args=overlay(tags,literal,'build.private.yml',True);operation([*args,'build',*SERVICES],'build-candidates',3000);images={s:json.loads(run(['docker','image','inspect',tag]))[0]['Id']for s,tag in tags.items()};proofs={s:candidate(s,images[s],raw[s])for s in SERVICES};smoke=model_probe(images['factory-review'],literal,raw['factory-review']);runtime2,_=F.runtime();need(runtime2==runtime and flags()==b['maintenanceInventory'],'old-containers-serve-through-build');source(b,TARGET);need((ROOT/'.env.cloud.production').read_bytes()==(BACKUP/'environment.private').read_bytes()and F.file_metadata(ROOT/'.env.cloud.production')==b['environmentFileMetadata'],'env-file-unchanged-through-build');private('prepared.private.json',{'images':images,'proofs':proofs,'runtime':runtime,'target':TARGET,'tree':TREE});result.update(success=True,candidatesBuiltBeforeMaintenance=True,productionProvider='qwen',productionModel='qwen3.8-max',testConfigurationPreserved=True,providerCallsPerformed=True,syntheticProviderResult=smoke,images=images)
+ literal=intended();private('intended-environments.private.json',literal);tags={s:'rr-portal-'+s+'-981:'+TARGET for s in SERVICES};args=overlay(tags,literal,'build.private.yml',True)
+ for service in SERVICES:operation([*args,'build',service],'build-'+service,1800)
+ images={s:json.loads(run(['docker','image','inspect',tag]))[0]['Id']for s,tag in tags.items()};proofs={s:candidate(s,images[s],raw[s])for s in SERVICES};smoke=model_probe(images['factory-review'],literal,raw['factory-review']);runtime2,_=F.runtime();need(runtime2==runtime and flags()==b['maintenanceInventory'],'old-containers-serve-through-build');source(b,TARGET);need((ROOT/'.env.cloud.production').read_bytes()==(BACKUP/'environment.private').read_bytes()and F.file_metadata(ROOT/'.env.cloud.production')==b['environmentFileMetadata'],'env-file-unchanged-through-build');private('prepared.private.json',{'images':images,'proofs':proofs,'runtime':runtime,'target':TARGET,'tree':TREE});result.update(success=True,candidatesBuiltBeforeMaintenance=True,productionProvider='qwen',productionModel='qwen3.8-max',testConfigurationPreserved=True,providerCallsPerformed=True,syntheticProviderResult=smoke,images=images)
 
 def maintenance(fn,s):
  need(fn in{'maintenance_on','maintenance_off','wait_service_ready','require_maintenance_cleared'}and s in SERVICES,'scoped-maintenance');operation(['bash','-c','set -euo pipefail; source "$1"; "$2" "$3"','pr981',str(ROOT/'deploy/service-maintenance.sh'),fn,s],fn+'-'+s,330)
@@ -168,9 +172,9 @@ def deploy(result,b):
   for k in ALLOW:need(rendered['services']['factory-review']['environment'].get(k)==literal['factory-review'][k].replace('$','$$'),'persistent-production-ai-config')
   for s in SERVICES:
    global STAGE
-   STAGE='switch-'+s;old=raw[s];a=None;attempted=False;maintenance('maintenance_on',s)
+   STAGE='switch-'+s;old=raw[s];a=None;attempted=False
    try:
-    operation(['sleep','60'],'drain-'+s,70);operation(['docker','stop','--time','60',old['Id']],'stop-'+s,80);closed=json.loads(run(['docker','inspect',old['Id']]))[0];need(not closed['State']['Running'],'old-writer-stopped');a,ap=capture(s,'closed-before');attempted=True
+    maintenance('maintenance_on',s);operation(['sleep','60'],'drain-'+s,70);operation(['docker','stop','--time','60',old['Id']],'stop-'+s,80);closed=json.loads(run(['docker','inspect',old['Id']]))[0];need(not closed['State']['Running'],'old-writer-stopped');a,ap=capture(s,'closed-before');attempted=True
     operation([*args,'up','-d','--force-recreate','--no-build','--no-deps','--pull','never',s],'recreate-'+s,180);maintenance('wait_service_ready',s);now,newraw=F.runtime();new=newraw[s];contract(s,old,new,literal,p['images'][s],args);need(proof(p['images'][s],new['Id'])==p['proofs'][s],'running-source-and-assets');post,bp=capture(s,'after-start');same_data(a,post);logs=logs_retention(ap/'sqlite/auxiliary.db',bp/'sqlite/auxiliary.db',ap/'sqlite/data.db',bp/'sqlite/data.db',new['State']['StartedAt'],post['observedUTC']);private(s+'-log-audit.private.json',logs);need(logs['compatibleWithoutChangingRetainedRows'],'retained-logs-typed-identical-only-valid-additions-or-retention');need(now['others']==b['runtime']['others']and all(now['targets'][x]==runtime['targets'][x]for x in SERVICES if x!=s),'all-other-containers-unchanged');operation(['sleep','11'],'dns-grace-'+s,20);maintenance('maintenance_off',s);maintenance('require_maintenance_cleared',s);result.setdefault('public',{})[s]=public(s,p['proofs'][s]);runtime=now;completed.append(s);result['completedServices']=completed[:]
    except BaseException:
     # Keep evidence and current business records. Never restore SQLite or cursors.

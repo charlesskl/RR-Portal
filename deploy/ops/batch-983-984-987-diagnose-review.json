@@ -3,42 +3,46 @@
   "disposition": "CHECKED",
   "independent": true,
   "reviewer": "/root/pr987_review",
-  "reviewedAtUtc": "2026-10-21T10:36:56.675203+00:00",
-  "draftSHA256": "0320e3da42fc9e700a9d2e5b441f0062d12a6b73d69c1edd69f5e1b98dd69342",
-  "activeSHA256": "9e5594cde2491ce30a6d18f9406e1d249e91e89cb91bf009da44c3636e438749",
-  "workflowSHA256": "587b1d093aa2c6705a5bb2d2aeb6b1a3100c46b241314b0153a47def336603ff",
-  "planSHA256": "903ae3e0b05796306390eb51cd0488ae17781efe4614fa3ba310b0063a423bc3",
-  "opsParent": "27521fe10cb49578bea541d50eea21d3a93df22c",
+  "reviewedAtUtc": "2026-10-21T10:39:35.848332+00:00",
+  "draftSHA256": "58dbcf1ff2009fd7458c261c5793e58a00aa96edd466f744617923224b470dc6",
+  "activeSHA256": "346c7b6ae59b8defe95bb0b367e3a141c70b9f095e40a6281ddc3bb31d2515e2",
+  "workflowSHA256": "2a0b11d3d65ea27444f05402873085cbf3d79cce7032486e58519b9a0be50c4e",
+  "planSHA256": "bbf13f13363c74be0ea3efe90b0445ba6f0cd372ee715aaf4f0568e3ca23d39c",
+  "opsParent": "b8afb698d888879e278c26ad16a93404c51af912",
   "branch": "ops/batch-983-984-987-20261021",
   "mode": "diagnose",
   "readOnly": true,
   "archiveManifestSHA256": "59a37eeb179739adedb72ac5f61ec82af7ef120a27df4b33dd99613ebee91092",
   "archiveResultSHA256": "c9e8283ac106a004f1fdb673d48a7e3372427c5e5b8e64bc6038c0dd9ef89996",
   "checks": [
-    "False-gated main rejects before any filesystem read and emits no output",
-    "Active helper differs only by AST-verified PIN False→True",
-    "Workflow byte-identical to previously reviewed fixed branch/attempt1/fingerprint/SHA/shared-concurrency generator",
-    "synthetic sealed failed archive: only basename/line/function + safe exception class; raw frames/source/secret omitted",
-    "changed trace bytes rejected by fixed manifest seal before any public diagnostic output"
+    "Entire previous helper reconstructs byte-for-byte after removing only stderr classification block and public nonemptyStderr key",
+    "Workflow differs from attempt1 only by exact active helper SHA; new commit still requires GitHub run_attempt1",
+    "False-gated main still rejects before filesystem reads",
+    "Synthetic sealed archive: only three-digit numbered stderr files considered; empty and unmatched files omitted",
+    "Output stderr fields restricted to sequence/bytes/SHA256/allowlisted booleans; allfive classifications and allfalse negativecontrol verified; secret/raw stderr/path omitted",
+    "Manifest/result archive pins unchanged; draft/active/workflow match exact diagnosticAttempt2 plan; active is only PINFalse→True"
   ],
   "remainingBlockers": [],
-  "authorizationScope": "Root may publish and dispatch only these exact reviewed read-only diagnose bytes against the fixed failed archive. Reviewer performed no GH/production/business calls.",
+  "authorizationScope": "Root may publish once and dispatch only these exact reviewed diagnose-v2 bytes as a new commit/run attempt1 against the fixed failed archive. Original diagnose run must not be rerun. Reviewer performed no GH/production calls.",
   "files": {
     "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose.py": {
-      "sha256": "0320e3da42fc9e700a9d2e5b441f0062d12a6b73d69c1edd69f5e1b98dd69342",
-      "bytes": 2377
+      "sha256": "58dbcf1ff2009fd7458c261c5793e58a00aa96edd466f744617923224b470dc6",
+      "bytes": 2947
     },
     "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose-active.py": {
-      "sha256": "9e5594cde2491ce30a6d18f9406e1d249e91e89cb91bf009da44c3636e438749",
-      "bytes": 2376
+      "sha256": "346c7b6ae59b8defe95bb0b367e3a141c70b9f095e40a6281ddc3bb31d2515e2",
+      "bytes": 2946
     },
     "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose-workflow.yml": {
-      "sha256": "587b1d093aa2c6705a5bb2d2aeb6b1a3100c46b241314b0153a47def336603ff",
+      "sha256": "2a0b11d3d65ea27444f05402873085cbf3d79cce7032486e58519b9a0be50c4e",
       "bytes": 3291
     },
     "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose-plan.json": {
-      "sha256": "903ae3e0b05796306390eb51cd0488ae17781efe4614fa3ba310b0063a423bc3",
-      "bytes": 597
+      "sha256": "bbf13f13363c74be0ea3efe90b0445ba6f0cd372ee715aaf4f0568e3ca23d39c",
+      "bytes": 623
     }
-  }
+  },
+  "diagnosticAttempt": 2,
+  "previousReceiptPath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-983-984-987-diagnose-independent-review-attempt1.json",
+  "previousReceiptSHA256": "599f084d6b3f76fd25f58e84e73b6f2a95a62d6b27cdbe83aa86b5cec17ac472"
 }

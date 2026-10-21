@@ -21,5 +21,10 @@ def main():
  for name,line,fn in re.findall(r'File "([^"]+)", line (\d+), in ([A-Za-z_][A-Za-z0-9_]*)',text):
   name=pathlib.PurePosixPath(name).name;need(re.fullmatch('[A-Za-z0-9_.-]+',name)is not None);frames.append({'file':name,'line':int(line),'function':fn})
  need(frames);exception=text.splitlines()[-1].split(':',1)[0];need(exception in{'RuntimeError','ValueError','KeyError','TypeError','FileNotFoundError','PermissionError'})
- print(json.dumps({'mode':'diagnose','success':True,'archiveSealsVerified':True,'base':BASE,'frames':frames,'exceptionType':exception,'knownEvidencePresence':{n:(n in manifest)for n in['environment.private','target-inspect.private.json','compose-render.private.json','baseline.private.json']},'archiveFileCount':len(manifest),'businessWrites':False,'containerSignals':False,'configurationModified':False}),flush=True)
+ errors=[]
+ for n in sorted(manifest):
+  if re.fullmatch(r'\d{3}-stderr\.private',n):
+   p=ARCHIVE/n;need(p.stat().st_size<=1024**2);data=p.read_bytes()
+   if data:errors.append({'sequence':int(n[:3]),'bytes':len(data),'sha256':sha(p),'classifications':{key:pattern in data.lower()for key,pattern in {'permissionDenied':b'permission denied','missingExecutable':b'executable file not found','noSuchFile':b'no such file','containerNotRunning':b'container is not running','dockerDaemonUnavailable':b'cannot connect to the docker daemon'}.items()}})
+ print(json.dumps({'mode':'diagnose','success':True,'archiveSealsVerified':True,'base':BASE,'frames':frames,'exceptionType':exception,'knownEvidencePresence':{n:(n in manifest)for n in['environment.private','target-inspect.private.json','compose-render.private.json','baseline.private.json']},'nonemptyStderr':errors,'archiveFileCount':len(manifest),'businessWrites':False,'containerSignals':False,'configurationModified':False}),flush=True)
 if __name__=='__main__':main()

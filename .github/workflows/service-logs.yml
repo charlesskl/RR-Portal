@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '9e5594cde2491ce30a6d18f9406e1d249e91e89cb91bf009da44c3636e438749'
+  SCOPED_RELEASE_HELPER_SHA256: '346c7b6ae59b8defe95bb0b367e3a141c70b9f095e40a6281ddc3bb31d2515e2'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -56,5 +56,5 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/batch983-984-987-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/batch-983-984-987-diagnose.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 9e5594cde2491ce30a6d18f9406e1d249e91e89cb91bf009da44c3636e438749 ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 346c7b6ae59b8defe95bb0b367e3a141c70b9f095e40a6281ddc3bb31d2515e2 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

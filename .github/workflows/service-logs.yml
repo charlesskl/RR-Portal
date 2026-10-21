@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_BACKUP_WORKFLOW_PIN: 'false'
-  SCOPED_BACKUP_HELPER_SHA256: '5382098d2dea13fc790069182004d5b806eb863aa924def4690cc904d06d655c'
+  SCOPED_BACKUP_WORKFLOW_PIN: 'true'
+  SCOPED_BACKUP_HELPER_SHA256: 'c3b1fa14aabe5b3f9cc927fbb6a8a26815177fe73522be274a6b41442b007f8d'
 jobs:
   fixed-scoped-backup:
     runs-on: ubuntu-latest

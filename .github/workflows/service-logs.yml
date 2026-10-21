@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '451a295b808e715b16e038b7427c80202e3aa6f9a5563995e181b8a0bf059a77'
+  SCOPED_RELEASE_HELPER_SHA256: '2cf9e547029a81b2689f80278aca7be8ee36b84f5ce1e0dd0a74fd334e40a68b'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -68,5 +68,5 @@ jobs:
             git show "$RELEASE_SHA:deploy/ops/pr981-reviewed-files.json" > "$scoped_release_tmp/pr981-reviewed-files.json" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/pr981-reviewed-files.json" | cut -d ' ' -f1)" = c12b68df8938e77d8edfaa3716cd1ab8e1c540d2dd08857c493b1c476b06cbc3 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr981-single-synthetic-probe.pb.js" > "$scoped_release_tmp/pr981-single-synthetic-probe.pb.js" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr981-single-synthetic-probe.pb.js" | cut -d ' ' -f1)" = 55f17646a772f04ddd64a7c64804f665996a9b5865be4ebb0e1e09ffd746efcb ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr981-single-synthetic-probe.pb.js" | cut -d ' ' -f1)" = e7271c30188768759f6944c84163c5b77f31e6a5b2fd3ccb00eb86d23993ee6e ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

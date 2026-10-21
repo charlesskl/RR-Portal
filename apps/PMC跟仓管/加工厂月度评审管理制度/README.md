@@ -29,13 +29,14 @@ AI综合分析为主动调用，用户选择不超过180天的范围和可选工
 运维在服务器的 `.env.cloud.production` 配置专用变量，密钥不能使用 `VITE_` 前缀、不能提交到Git，也不要写进聊天或日志：
 
 ```dotenv
+FACTORY_REVIEW_AI_PROVIDER=openai
 FACTORY_REVIEW_AI_ENABLED=false
 FACTORY_REVIEW_AI_API_KEY=
 FACTORY_REVIEW_AI_MODEL=
 FACTORY_REVIEW_AI_BASE_URL=https://api.openai.com/v1
 ```
 
-开通服务后，配置支持 OpenAI Responses API 和严格结构化输出的模型ID、专用密钥，再将 ENABLED 改为 true 并重新创建 factory-review 容器。
+开通服务后，选择提供商（openai 或 qwen），配置对应的模型ID、专用密钥和地址，再将 ENABLED 改为 true 并重新创建 factory-review 容器。
 测试版对应 `FACTORY_REVIEW_TEST_AI_ENABLED/API_KEY/MODEL/BASE_URL`，必须独立配置，不继承正式密钥。
 管理员可在“动态分析中心 → AI综合分析 → AI服务配置入口”查看配置方法与刷新状态；不会返回或接收密钥。
 只配置变量不会证明模型可用：先在测试版使用合成数据完成真实模型验收，再统一部署两期。当前未开通服务时，不应宣称真实AI已上线。
@@ -45,7 +46,7 @@ FACTORY_REVIEW_AI_BASE_URL=https://api.openai.com/v1
 台账保留约30天，清理任务每天运行。每账号每分钟1次、北京时间每天20次；上游失败也占额度。AI请求45秒超时，无自动付费重试。
 浏览器只向自有后端提交日期、工厂和问题；服务端重新取证、校验模块/部门/厂区及原集合查看规则，再请求模型。模型调用前后重新校验账号和相关记录快照。工厂使用临时代号，联系人字段、照片和订单价格不进入模型请求；业务自由文本仍应按实际敏感程度管理。
 结果引用只能指向本次已授权证据；无效引用、未完成或异常输出不展示为成功。回答是当前快照的辅助判断，不自动修改业务数据。服务不可用时规则预警仍保留。
-请求使用 `store:false`，不代表供应商的零数据留存承诺。接入规范参考 [OpenAI结构化输出文档](https://developers.openai.com/api/docs/guides/structured-outputs) 和 [数据控制文档](https://developers.openai.com/api/docs/guides/your-data)。
+OpenAI 请求使用 `store:false`，不代表供应商的零数据留存承诺。接入规范参考 [OpenAI结构化输出文档](https://developers.openai.com/api/docs/guides/structured-outputs) 和 [数据控制文档](https://developers.openai.com/api/docs/guides/your-data)。
 
 ### 验证与回滚
 
@@ -76,3 +77,14 @@ AI后端集成测试只连接本机模拟上游，不调用真实模型，不使
 
 验证：`npm test -- tests/DeliveryReminder.spec.ts tests/OrderDeliveryRegistration.spec.ts`；
 `POCKETBASE_BINARY=/path/to/pocketbase-0.39.6 npm run test:delivery-reminders-backend`（只使用本机合成数据）。
+
+
+### 阿里云百炼千问3接入
+
+服务器 `.env.cloud.production` 设置 `FACTORY_REVIEW_AI_PROVIDER=qwen`、`FACTORY_REVIEW_AI_MODEL=qwen3-max`、`FACTORY_REVIEW_AI_ENABLED=true`，密钥填入 `FACTORY_REVIEW_AI_API_KEY`（不要提交代码、发到聊天或使用 VITE 环境变量）。模型须已在百炼账号开通。已有密钥还需确认变量名称正确并重新创建容器才能生效。
+
+`FACTORY_REVIEW_AI_BASE_URL` 留空时千问使用北京地址 `https://dashscope.aliyuncs.com/compatible-mode/v1`；也可使用百炼控制台提供的业务空间专属 BASE_URL。地址必须与密钥地域一致，不含 `/chat/completions`。原配置若仍是 OpenAI 地址，必须清空或改为百炼地址。测试版独立使用 `FACTORY_REVIEW_TEST_AI_PROVIDER/API_KEY/MODEL/BASE_URL/ENABLED`。
+
+适配 Chat Completions 非流式接口，关闭思考模式以使用 JSON Object 输出；服务器继续检查结构、长度及证据引用，拒绝截断或无效输出。仅点击分析时调用，每分钟1次、每天20次限制不变。未配置 provider 的旧部署仍走 OpenAI Responses。未使用真实业务数据进行付费接口测试。
+
+官方参考：[OpenAI兼容接口](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)、[结构化输出](https://help.aliyun.com/zh/model-studio/qwen-structured-output)。

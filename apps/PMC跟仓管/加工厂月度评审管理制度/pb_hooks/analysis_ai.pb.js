@@ -4,9 +4,10 @@ routerAdd('GET','/api/factory-review/analysis-ai/config', e => {
   try { user={role:e.auth.getString('role'),permissions:JSON.parse(e.auth.getString('permissions')||'null'),crafts:JSON.parse(e.auth.getString('crafts')||'null'),craft:e.auth.getString('craft')} } catch(_){throw new ForbiddenError('权限配置无效')}
   const scope=helpers.permissions(user)
   if(!scope.modules.length)throw new ForbiddenError('没有分析数据查看权限')
+  const provider=$os.getenv('FACTORY_REVIEW_AI_PROVIDER')||'openai'
   const enabled=$os.getenv('FACTORY_REVIEW_AI_ENABLED')==='true'
-  const configured=!!$os.getenv('FACTORY_REVIEW_AI_API_KEY')&&!!$os.getenv('FACTORY_REVIEW_AI_MODEL')
-  return e.json(200,{enabled:enabled&&configured,model:enabled&&configured?$os.getenv('FACTORY_REVIEW_AI_MODEL'):'',reason:!enabled?'AI服务尚未启用，请管理员完成配置':!configured?'AI模型或密钥尚未配置':'',dailyLimit:20,modules:scope.modules})
+  const configured=['openai','qwen'].includes(provider)&&!!$os.getenv('FACTORY_REVIEW_AI_API_KEY')&&!!$os.getenv('FACTORY_REVIEW_AI_MODEL')
+  return e.json(200,{provider,enabled:enabled&&configured,model:enabled&&configured?$os.getenv('FACTORY_REVIEW_AI_MODEL'):'',reason:!enabled?'AI服务尚未启用，请管理员完成配置':!configured?'AI模型或密钥尚未配置':'',dailyLimit:20,modules:scope.modules})
 },$apis.requireAuth('users'))
 
 routerAdd('POST','/api/factory-review/analysis-ai', e => {
@@ -22,7 +23,9 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
   if(!scope.modules.length||!scope.crafts.length||!scope.regions.length)throw new ForbiddenError('没有可分析的数据权限')
   const apiKey=$os.getenv('FACTORY_REVIEW_AI_API_KEY'),model=$os.getenv('FACTORY_REVIEW_AI_MODEL')
   if($os.getenv('FACTORY_REVIEW_AI_ENABLED')!=='true'||!apiKey||!model)throw new ApiError(503,'AI服务尚未配置，规则预警仍可使用')
-  const base=($os.getenv('FACTORY_REVIEW_AI_BASE_URL')||'https://api.openai.com/v1').replace(/\/$/,'')
+  const provider=$os.getenv('FACTORY_REVIEW_AI_PROVIDER')||'openai'
+  if(!['openai','qwen'].includes(provider))throw new ApiError(503,'AI服务提供商配置无效')
+  const base=($os.getenv('FACTORY_REVIEW_AI_BASE_URL')||(provider==='qwen'?'https://dashscope.aliyuncs.com/compatible-mode/v1':'https://api.openai.com/v1')).replace(/\/$/,'')
   // Only server configuration controls the destination. Loopback is for the isolated integration harness.
   if(!/^https:\/\/[^\s?#@]+$/.test(base)&&!($os.getenv('FACTORY_REVIEW_AI_LOCAL_TEST')==='true'&&/^http:\/\/127\.0\.0\.1:\d+\/v1$/.test(base)))throw new ApiError(503,'AI服务地址配置无效')
   const info=e.requestInfo(),factoryMap={},factories=[]
@@ -81,11 +84,11 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
     const row=new Record(tx.findCollectionByNameOrId('analysis_ai_usage'));row.set('owner',e.auth.id);row.set('started_at',started);row.set('minute_key',e.auth.id+':'+Math.floor(Date.now()/60000));tx.save(row)
   })
   let response
-  try{response=$http.send({url:base+'/responses',method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+apiKey},body:JSON.stringify(helpers.request(model,dataset,input.question)),timeout:45})}
+  try{response=$http.send({url:base+(provider==='qwen'?'/chat/completions':'/responses'),method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+apiKey},body:JSON.stringify(helpers.request(model,dataset,input.question,provider)),timeout:45})}
   catch(_){throw new ApiError(502,'AI服务连接失败或超时，请稍后重试；规则预警仍可使用')}
   if(response.statusCode!==200)throw new ApiError(502,'AI服务暂不可用，请管理员检查模型权限、额度及配置')
   let report
-  try{report=helpers.parseResponse(response.json,evidence)}catch(err){throw new ApiError(502,String(err.message))}
+  try{report=helpers.parseResponse(response.json,evidence,provider)}catch(err){throw new ApiError(502,String(err.message))}
   stillAuthorized()
   return e.json(200,{report,evidence:refs,coverage,model,generatedAt:new Date().toISOString(),start:input.start,end:input.end})
 },$apis.requireAuth('users'),$apis.bodyLimit(8192))

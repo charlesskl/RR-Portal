@@ -32,19 +32,20 @@ test('AI routes use server evidence, permission scope, quota and validated citat
   const flags=['--dir='+join(dir,'data'),'--migrationsDir='+migrations,'--hooksDir='+hooks]
   const run=args=>{const r=spawnSync(process.env.POCKETBASE_BINARY,[...args,...flags],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);assert.doesNotMatch(r.stdout+r.stderr,/^Error:/m)}
   run(['migrate','up']);run(['superuser','upsert','super@fixture.invalid',pass])
-  const inputDataset=payload=>JSON.parse(payload.input).dataset
+  const inputDataset=payload=>JSON.parse(payload.input || payload.messages[1].content).dataset
   let calls=[]
-  const upstream=httpServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const payload=JSON.parse(raw);calls.push(payload);const input=JSON.parse(payload.input);const first=input.dataset.evidence[0];
+  const upstream=httpServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const payload=JSON.parse(raw);calls.push(payload);assert.equal(req.url,payload.messages?'/v1/chat/completions':'/v1/responses');const input=JSON.parse(payload.input || payload.messages[1].content);const first=input.dataset.evidence[0];
     if(input.question==='revoke scope')await superuser.collection('users').update(clients.admin.authStore.record.id,{permissions:{'quality.view':false}});
     if(input.question==='move order region'){const order=input.dataset.evidence.find(e=>e.id.startsWith('orders:'));await superuser.collection('orders').update(order.id.split(':')[1],{region:'heyuan'})};
     if(input.question==='change evidence')await superuser.collection(first.id.split(':')[0]).update(first.id.split(':')[1],{evaluation:'changed during analysis'});
     const report={summary:'存在需要跟进的风险',limitations:['缺少完整产能数据'],findings:[{title:'优先核实整改',risk:'medium',analysis:'记录需人工复查',actions:['核实进度'],evidence_ids:[input.question==='bad citations'?'invented':first.id]}]};
     if(input.question==='provider failure'){res.writeHead(401);res.end('SECRET-UPSTREAM-ERROR');return}
+    if(payload.messages){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({choices:[{finish_reason:input.question==='incomplete'?'length':'stop',message:{content:JSON.stringify(report)}}]}));return}
     res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:input.question==='incomplete'?'incomplete':'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(report)}]}]}))
   });upstream.listen(0,'127.0.0.1');await once(upstream,'listening')
   const base='http://127.0.0.1:'+await port(),provider='http://127.0.0.1:'+upstream.address().port+'/v1'
   let child,log='';t.after(()=>{if(process.env.ANALYSIS_AI_TEST_LOG) return writeFile(process.env.ANALYSIS_AI_TEST_LOG,log)})
-  const start=async(enabled='true')=>{child=spawn(process.env.POCKETBASE_BINARY,['serve','--dev','--http='+base.slice(7),...flags],{env:{...process.env,FACTORY_REVIEW_AI_ENABLED:enabled,FACTORY_REVIEW_AI_API_KEY:'fixture-key',FACTORY_REVIEW_AI_MODEL:'fixture-model',FACTORY_REVIEW_AI_BASE_URL:provider,FACTORY_REVIEW_AI_LOCAL_TEST:'true'},stdio:['ignore','pipe','pipe']});child.stdout.on('data',b=>log+=b);child.stderr.on('data',b=>log+=b);for(let n=0;n<100;n++){try{await new PocketBase(base).health.check();return}catch{await new Promise(r=>setTimeout(r,50))}}throw new Error(log)}
+  const start=async(enabled='true',kind='openai')=>{child=spawn(process.env.POCKETBASE_BINARY,['serve','--dev','--http='+base.slice(7),...flags],{env:{...process.env,FACTORY_REVIEW_AI_PROVIDER:kind,FACTORY_REVIEW_AI_ENABLED:enabled,FACTORY_REVIEW_AI_API_KEY:'fixture-key',FACTORY_REVIEW_AI_MODEL:'fixture-model',FACTORY_REVIEW_AI_BASE_URL:provider,FACTORY_REVIEW_AI_LOCAL_TEST:'true'},stdio:['ignore','pipe','pipe']});child.stdout.on('data',b=>log+=b);child.stderr.on('data',b=>log+=b);for(let n=0;n<100;n++){try{await new PocketBase(base).health.check();return}catch{await new Promise(r=>setTimeout(r,50))}}throw new Error(log)}
   const stop=async()=>{if(child&&child.exitCode===null){const exited=once(child,'exit');child.kill();await exited}}
   t.after(async()=>{await stop();await new Promise(r=>upstream.close(r));await rm(dir,{recursive:true,force:true})})
   await start()
@@ -80,5 +81,12 @@ test('AI routes use server evidence, permission scope, quota and validated citat
     const count=calls.length;await assert.rejects(generate(clients.admin),code(429));assert.equal(calls.length,count)
   })
   await t.test('date and size limits reject invalid requests before external calls',async()=>{const before=calls.length;await assert.rejects(generate(clients.admin,{start:'2026-02-30'}),code(400));await assert.rejects(generate(clients.admin,{question:'x'.repeat(601)}),code(400));assert.equal(calls.length,before)})
+  await t.test('Qwen chat adapter preserves evidence validation and rejects truncated responses',async()=>{
+    await stop();await start('true','qwen');await reset()
+    const config=await clients.admin.send('/api/factory-review/analysis-ai/config',{method:'GET'});assert.equal(config.provider,'qwen')
+    const result=await generate(clients.admin);assert.ok(result.report.findings.length)
+    const payload=calls.at(-1);assert.equal(payload.enable_thinking,false);assert.equal(payload.stream,false);assert.equal(payload.response_format.type,'json_object');assert.equal(payload.max_tokens,4000);assert.match(payload.messages[0].content,/JSON/);assert.equal(payload.input,undefined)
+    for(const question of ['bad citations','incomplete','provider failure']){await reset();await assert.rejects(generate(clients.admin,{question}),code(502))}
+  })
   await t.test('missing service configuration returns explicit disabled status without outbound calls',async()=>{await stop();await start('false');const before=calls.length;const config=await clients.admin.send('/api/factory-review/analysis-ai/config',{method:'GET'});assert.equal(config.enabled,false);assert.ok(!JSON.stringify(config).includes('fixture-key'));await assert.rejects(generate(clients.admin),code(503));assert.equal(calls.length,before)})
 })

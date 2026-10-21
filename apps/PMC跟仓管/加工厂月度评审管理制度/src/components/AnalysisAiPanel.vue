@@ -42,8 +42,8 @@ function target(e:Evidence){
     <p>选择范围并提问后生成一次分析。发送所选范围内的授权业务明细及问题；工厂以代号传给模型，不读取联系人字段、照片和订单价格。AI建议需人工核实，不会修改业务记录。</p>
     <p v-if="config && !config.enabled" class="notice">{{config.reason}}。当前规则预警仍正常使用。</p>
     <details v-if="auth.role==='admin'"><summary>AI服务配置入口（管理员）</summary>
-      <p>当前支持OpenAI Responses API。请运维在服务器环境中填写以下配置并重新创建加工厂服务；这里不接收、不显示密钥。测试版使用独立的 TEST 配置，不共用正式密钥。</p>
-      <ul><li>FACTORY_REVIEW_AI_ENABLED=true：开通后启用</li><li>FACTORY_REVIEW_AI_API_KEY：专用API密钥</li><li>FACTORY_REVIEW_AI_MODEL：该账号可用、支持结构化输出的模型ID</li><li>FACTORY_REVIEW_AI_BASE_URL：默认 https://api.openai.com/v1</li></ul>
+      <p>支持阿里云百炼千问和OpenAI。请运维在服务器环境中填写以下配置并重新创建加工厂服务；这里不接收、不显示密钥。测试版使用独立的 TEST 配置，不共用正式密钥。</p>
+      <ul><li>FACTORY_REVIEW_AI_PROVIDER=qwen：阿里云百炼千问；openai：OpenAI</li><li>FACTORY_REVIEW_AI_ENABLED=true：开通后启用</li><li>FACTORY_REVIEW_AI_API_KEY：专用API密钥</li><li>FACTORY_REVIEW_AI_MODEL：百炼控制台可用的模型ID（如 qwen3-max）</li><li>FACTORY_REVIEW_AI_BASE_URL：千问默认北京地域 https://dashscope.aliyuncs.com/compatible-mode/v1；可填写控制台同地域的业务空间专属地址。OpenAI默认 https://api.openai.com/v1</li></ul>
       <p>完成后刷新配置状态，先用测试数据验证。每个账号每分钟最多1次、每天最多20次；仅在主动点击时调用，失败请求也占用调用额度。测试配置前缀为 FACTORY_REVIEW_TEST_AI_。</p>
       <button :disabled="busy" @click="loadConfig">刷新配置状态</button>
     </details>

@@ -946,10 +946,11 @@ services:
       # 对车缝核价对比系统的只读集成 API 密钥；未设置时集成接口一律返回 401
       - INTEGRATION_API_KEY=${FACTORY_REVIEW_INTEGRATION_API_KEY:-}
       # AI remains disabled until a dedicated service/model/key is configured.
+      - FACTORY_REVIEW_AI_PROVIDER=${FACTORY_REVIEW_AI_PROVIDER:-openai}
       - FACTORY_REVIEW_AI_ENABLED=${FACTORY_REVIEW_AI_ENABLED:-false}
       - FACTORY_REVIEW_AI_API_KEY=${FACTORY_REVIEW_AI_API_KEY:-}
       - FACTORY_REVIEW_AI_MODEL=${FACTORY_REVIEW_AI_MODEL:-}
-      - FACTORY_REVIEW_AI_BASE_URL=${FACTORY_REVIEW_AI_BASE_URL:-https://api.openai.com/v1}
+      - FACTORY_REVIEW_AI_BASE_URL=${FACTORY_REVIEW_AI_BASE_URL:-}
       - TZ=Asia/Shanghai
     volumes:
       - ./apps/PMC跟仓管/加工厂月度评审管理制度/pb_data:/pb/pb_data
@@ -983,10 +984,11 @@ services:
       - FACTORY_REVIEW_ADMIN_PASSWORD=${FACTORY_REVIEW_ADMIN_PASSWORD:-}
       # 测试版不开集成 API（密钥留空，集成接口一律 401）
       - INTEGRATION_API_KEY=
+      - FACTORY_REVIEW_AI_PROVIDER=${FACTORY_REVIEW_TEST_AI_PROVIDER:-openai}
       - FACTORY_REVIEW_AI_ENABLED=${FACTORY_REVIEW_TEST_AI_ENABLED:-false}
       - FACTORY_REVIEW_AI_API_KEY=${FACTORY_REVIEW_TEST_AI_API_KEY:-}
       - FACTORY_REVIEW_AI_MODEL=${FACTORY_REVIEW_TEST_AI_MODEL:-}
-      - FACTORY_REVIEW_AI_BASE_URL=${FACTORY_REVIEW_TEST_AI_BASE_URL:-https://api.openai.com/v1}
+      - FACTORY_REVIEW_AI_BASE_URL=${FACTORY_REVIEW_TEST_AI_BASE_URL:-}
       - TZ=Asia/Shanghai
     volumes:
       - ./apps/PMC跟仓管/加工厂月度评审管理制度/pb_data_test:/pb/pb_data

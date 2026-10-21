@@ -23,4 +23,9 @@
     <ProjectReference Include="..\..\src\IndoShipping.Infrastructure\IndoShipping.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="../../db/postgres_schema.sql" Link="db/postgres_schema.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../seed/hs-dictionary.json" Link="seed/hs-dictionary.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

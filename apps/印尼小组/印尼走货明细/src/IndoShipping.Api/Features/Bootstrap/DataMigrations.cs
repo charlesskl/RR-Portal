@@ -121,6 +121,7 @@ public static class DataMigrations
             ensureReceiptSpareQty.CommandText = "ALTER TABLE po_receipts ADD COLUMN IF NOT EXISTS spare_qty DECIMAL(18,4) NOT NULL DEFAULT 0;";
             await ensureReceiptSpareQty.ExecuteNonQueryAsync();
         }
+        await connection.ExecuteAsync(PurchaseReceiptQuantitySchema.SchemaSql);
 
         // 历史物料回填只执行一次（settings 一次性标记）：否则用户在字典页删除的条目
         // 会在每次重启后复活，与字典「删除」能力矛盾

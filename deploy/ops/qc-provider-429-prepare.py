@@ -3,7 +3,7 @@ Provider plan is private and pinned explicitly after the approved company prefli
 No provider requests, queue mutations, service switches or production env writes.
 """
 import copy,hashlib,importlib.util,json,os,pathlib,re,signal,stat,subprocess,sys,traceback,urllib.parse
-ROOT=pathlib.Path('/opt/rr-portal');BASE='25a76f71e556f77a8aadb031823b392832d2354a';TARGET='b4c3763fe43e30c80c041c70e7a9f0750145d7b0';TREE='57085d6dcd242f154b4dbb199e54a71061abbd4d';BRANCH='refs/heads/ops/qc-provider-429-20261021';PREPARE_PIN=True
+ROOT=pathlib.Path('/opt/rr-portal');BASE='25a76f71e556f77a8aadb031823b392832d2354a';TARGET='b4c3763fe43e30c80c041c70e7a9f0750145d7b0';TREE='57085d6dcd242f154b4dbb199e54a71061abbd4d';BRANCH='refs/heads/ops/qc-provider-429-20261021';PREPARE_PIN=False
 CORE_SHA='b3b042788d75b4bb11f77641d1a5ecec34e40fe71c9bc7bb64c5b28597e559ec';BACKUP=ROOT/'deploy/backups/qc-provider-429-20261021-backup';BACKUP_MANIFEST='7b218998ca5904e93f7c511a957c3f3ea351cb176698217220751e0f1621a096';BACKUP_RESULT='45e47bcf01d059e78ba7767f3f6ec741b9c70dd6a878f39a59e9082dd1756f50';MANIFEST_SHA='c1b73460d8de0dc8f1b23a4204ac98c192880df6b247e88e8a99ee4ce81653ef'
 KEY_SOURCE='QC_BAILIAN_API_KEY';BASE_SOURCE='PEISE_BAILIAN_BASE_URL';MODEL='qwen3.8-flash';API_FORMAT='bailian_chat';EXPECTED_BASE_URL='https://dashscope.aliyuncs.com/compatible-mode/v1'
 OUT=ROOT/'deploy/backups/qc-provider-429-20261021-prepare';CORE=None;STAGE='entry';FAILED_CHECK=None;SERIAL=0

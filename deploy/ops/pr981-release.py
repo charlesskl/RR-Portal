@@ -8,7 +8,7 @@ TREE='f0a724fb72b06e9cea3dc5aa1baa8bed629f127d'
 BASE='9b890cc016da403f929f8a7aaeddb878d3de24c5'
 BRANCH='refs/heads/ops/pr-981-20261021'
 ROOT=pathlib.Path('/opt/rr-portal');APP='apps/PMC跟仓管/加工厂月度评审管理制度'
-BACKUP=ROOT/'deploy/backups/pr-981-20261021-backup';PREPARE=BACKUP.with_name('pr-981-20261021-prepare-04');DEPLOY=BACKUP.with_name('pr-981-20261021-deploy');VERIFY=BACKUP.with_name('pr-981-20261021-verify')
+BACKUP=ROOT/'deploy/backups/pr-981-20261021-backup';PREPARE=BACKUP.with_name('pr-981-20261021-prepare-05');DEPLOY=BACKUP.with_name('pr-981-20261021-deploy');VERIFY=BACKUP.with_name('pr-981-20261021-verify')
 BACKUP_MANIFEST='1f09e9e07ad438b8bcc61d2d48626af52da83e4e30b5c0a97e1857a89217e9cf';BACKUP_RESULT='f91ca497bc7fe74b263fce4ae244bcb5861e948de4cd3eae494713542630cfe3'
 PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 SERVICES=('factory-review-test','factory-review');ALLOW={ 'FACTORY_REVIEW_AI_'+x for x in ('PROVIDER','ENABLED','API_KEY','MODEL','BASE_URL')}
@@ -69,8 +69,13 @@ def candidate(s,image,old):
  original=read(BACKUP/(s+'-image.private.json'));need(original['Id']==old['Image']and i['Config'].get('Healthcheck')==original['Config'].get('Healthcheck'),'candidate-image-healthcheck-preserved')
  need(dict(F.envmap(i['Config'].get('Env')or[]),**envs()[s])==envs()[s],'candidate-default-env-covered-by-old-runtime')
  return proof(image)
-def model_probe(image,literal,raw):
- hook=pathlib.Path(__file__).with_name('pr981-single-synthetic-probe.pb.js');need(hook.is_file()and sha(hook.read_bytes())=='3977f5c5d897991b24732470c546b808f30d19c635bc1fbe3f2a6be5d93520bd','synthetic-probe-hook-pin');networks=raw['NetworkSettings']['Networks'];need(len(networks)==1,'single-original-factory-network');network=next(iter(networks));nonce=secrets.token_hex(24);name='rr-pr981-synthetic-'+secrets.token_hex(6)
+def valid_probe_result(value):
+ if type(value)is not dict or set(value)!={'success','status','model','elapsedMs','diagnostics'}or type(value['success'])is not bool or type(value['status'])is not str or not re.fullmatch('[a-z0-9_]{1,100}',value['status'])or value['model']!='qwen3.8-max'or type(value['elapsedMs'])is not int or not 0<=value['elapsedMs']<=60000:return False
+ d=value['diagnostics'];kinds={'not_checked','missing','null','array','object','string','boolean','number','other'};enums={'responseJsonType':kinds,'contentType':kinds,'reportType':kinds,'finishReason':{'not_checked','missing','stop','length','content_filter','tool_calls','function_call','other'},'contentLengthClass':{'not_checked','not_string','empty','one_to_16384','up_to_65536','larger'},'findingsCountClass':{'not_checked','not_array','empty','one_to_eight','more_than_eight'},'validationClass':{'not_checked','valid','incomplete_response','refused_response','malformed_json','invalid_report_shape','invalid_finding_or_evidence','unexpected_exception'}};booleans={'hasChoices','hasFirstChoice','hasRefusal','hasReasoningContent','jsonParsed','summaryValid','findingsArray','limitationsValid','invalidTitle','invalidRisk','invalidAnalysis','invalidActions','invalidCitations'}
+ return type(d)is dict and set(d)==set(enums)|booleans and all(type(d[k])is str and d[k]in choices for k,choices in enums.items())and all(type(d[k])is bool for k in booleans)
+
+def model_probe(image,literal,raw,result):
+ hook=pathlib.Path(__file__).with_name('pr981-single-synthetic-probe.pb.js');need(hook.is_file()and sha(hook.read_bytes())=='55f17646a772f04ddd64a7c64804f665996a9b5865be4ebb0e1e09ffd746efcb','synthetic-probe-hook-pin');networks=raw['NetworkSettings']['Networks'];need(len(networks)==1,'single-original-factory-network');network=next(iter(networks));nonce=secrets.token_hex(24);name='rr-pr981-synthetic-'+secrets.token_hex(6)
  with tempfile.TemporaryDirectory(prefix='synthetic-',dir=OUT)as folder:
   d=pathlib.Path(folder);(d/'hooks').mkdir(mode=0o700);(d/'empty').mkdir(mode=0o700);(d/'empty/migrations').mkdir(mode=0o700);(d/'empty/public').mkdir(mode=0o700);F.OPS.L.private_write(d/'hooks/probe.pb.js',hook.read_bytes());env={k:literal['factory-review'][k]for k in ALLOW};env.update(AI_PROBE_ALLOW_ONCE='true',AI_PROBE_NONCE=nonce);need(all(not any(x in v for x in('\r','\n','\0'))for v in env.values()),'literal-probe-env');F.OPS.L.private_write(d/'env',(''.join(k+'='+v+'\n'for k,v in env.items())).encode());cid=None
   try:
@@ -80,7 +85,7 @@ def model_probe(image,literal,raw):
     p=subprocess.run(['docker','exec',cid,'wget','-q','-O','/dev/null','-T','1','http://127.0.0.1:18090/api/health'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=3)
     if p.returncode==0:ready=True;break
     time.sleep(1)
-   need(ready,'isolated-probe-ready');value=json.loads(run(['docker','exec',cid,'sh','-c','exec wget -q -O - -T 50 --header "X-Probe-Nonce: $AI_PROBE_NONCE" --post-data="" http://127.0.0.1:18090/probe'],timeout=55));need(type(value)is dict and set(value)=={'success','status','model','elapsedMs'}and type(value['success'])is bool and re.fullmatch('[a-z0-9_]{1,100}',value['status'])and value['model']=='qwen3.8-max'and type(value['elapsedMs'])is int,'bounded-safe-model-result');private('single-synthetic-provider-result.private.json',value);need(value['success']is True and value['status']=='validated','company-model-synthetic-validation');return value
+   need(ready,'isolated-probe-ready');value=json.loads(run(['docker','exec',cid,'sh','-c','exec wget -q -O - -T 50 --header "X-Probe-Nonce: $AI_PROBE_NONCE" --post-data="" http://127.0.0.1:18090/probe'],timeout=55));need(valid_probe_result(value),'bounded-safe-model-result');private('single-synthetic-provider-result.private.json',value);result['syntheticProviderResult']=value;result['providerCallAttempted']=True;need(value['success']is True and value['status']=='validated','company-model-synthetic-validation');return value
   finally:
    subprocess.run(['docker','rm','-f',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30);need(not run(['docker','ps','-aq','--filter','name=^/'+name+'$']).strip(),'isolated-probe-removed')
 
@@ -95,7 +100,7 @@ def prep(result,b):
   need(a==c,'compose-other-config-unchanged')
  literal=intended();private('intended-environments.private.json',literal);tags={s:'rr-portal-'+s+'-981:'+TARGET for s in SERVICES};args=overlay(tags,literal,'build.private.yml',True)
  for service in SERVICES:operation([*args,'build',service],'build-'+service,1800)
- images={s:json.loads(run(['docker','image','inspect',tag]))[0]['Id']for s,tag in tags.items()};proofs={s:candidate(s,images[s],raw[s])for s in SERVICES};smoke=model_probe(images['factory-review'],literal,raw['factory-review']);runtime2,_=F.runtime();need(runtime2==runtime and flags()==b['maintenanceInventory'],'old-containers-serve-through-build');source(b,TARGET);need((ROOT/'.env.cloud.production').read_bytes()==(BACKUP/'environment.private').read_bytes()and F.file_metadata(ROOT/'.env.cloud.production')==b['environmentFileMetadata'],'env-file-unchanged-through-build');private('prepared.private.json',{'images':images,'proofs':proofs,'runtime':runtime,'target':TARGET,'tree':TREE});result.update(success=True,candidatesBuiltBeforeMaintenance=True,productionProvider='qwen',productionModel='qwen3.8-max',testConfigurationPreserved=True,providerCallsPerformed=True,syntheticProviderResult=smoke,images=images)
+ images={s:json.loads(run(['docker','image','inspect',tag]))[0]['Id']for s,tag in tags.items()};proofs={s:candidate(s,images[s],raw[s])for s in SERVICES};smoke=model_probe(images['factory-review'],literal,raw['factory-review'],result);runtime2,_=F.runtime();need(runtime2==runtime and flags()==b['maintenanceInventory'],'old-containers-serve-through-build');source(b,TARGET);need((ROOT/'.env.cloud.production').read_bytes()==(BACKUP/'environment.private').read_bytes()and F.file_metadata(ROOT/'.env.cloud.production')==b['environmentFileMetadata'],'env-file-unchanged-through-build');private('prepared.private.json',{'images':images,'proofs':proofs,'runtime':runtime,'target':TARGET,'tree':TREE});result.update(success=True,candidatesBuiltBeforeMaintenance=True,productionProvider='qwen',productionModel='qwen3.8-max',testConfigurationPreserved=True,providerCallsPerformed=True,syntheticProviderResult=smoke,images=images)
 
 def maintenance(fn,s):
  need(fn in{'maintenance_on','maintenance_off','wait_service_ready','require_maintenance_cleared'}and s in SERVICES,'scoped-maintenance');operation(['bash','-c','set -euo pipefail; source "$1"; "$2" "$3"','pr981',str(ROOT/'deploy/service-maintenance.sh'),fn,s],fn+'-'+s,330)

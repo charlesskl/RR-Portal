@@ -409,14 +409,16 @@ RETURNING id",
     [HttpPost("{poId:int}/receipts/bulk")]
     public async Task<IActionResult> CreateBulkReceipt(int poId, [FromBody] BulkReceiptBody body)
     {
+        if ((body.items ?? new()).Any(x => (x.qty ?? 0) < 0))
+            return BadRequest(new { error = "入库数量不能小于 0" });
         if ((body.items ?? new()).Any(x => (x.spare_qty ?? 0) < 0))
             return BadRequest(new { error = "备品入数不能小于 0" });
         var requested = (body.items ?? new())
-            .Where(x => x.po_item_id > 0 && (x.qty ?? 0) > 0)
+            .Where(x => (x.qty ?? 0) > 0 || (x.spare_qty ?? 0) > 0)
             .GroupBy(x => x.po_item_id)
             .Select(g => new { PoItemId = g.Key, Qty = g.Sum(x => x.qty ?? 0), SpareQty = g.Sum(x => x.spare_qty ?? 0) })
             .ToList();
-        if (requested.Count == 0) return BadRequest(new { error = "请至少填写一项入库数量" });
+        if (requested.Count == 0) return BadRequest(new { error = "请至少填写一项入库数量或备品入数" });
 
         using var c = factory.Create();
         c.Open();
@@ -523,8 +525,9 @@ RETURNING id",
     {
         var receiptQty = body.qty ?? 0;
         var spareQty = body.spare_qty ?? 0;
-        if (receiptQty <= 0) return BadRequest(new { error = "入库数量必须大于 0" });
+        if (receiptQty < 0) return BadRequest(new { error = "入库数量不能小于 0" });
         if (spareQty < 0) return BadRequest(new { error = "备品入数不能小于 0" });
+        if (receiptQty == 0 && spareQty == 0) return BadRequest(new { error = "请填写入库数量或备品入数" });
 
         using var c = factory.Create();
         c.Open();
@@ -641,7 +644,13 @@ RETURNING id",
         }
         await c.ExecuteAsync("DELETE FROM po_receipts WHERE id=@receiptId", new { receiptId }, tx);
         await c.ExecuteAsync(
-            "UPDATE purchase_orders SET status='sent' WHERE id=@poId AND status='received'",
+            @"UPDATE purchase_orders po SET status='sent'
+              WHERE po.id=@poId AND po.status='received'
+                AND EXISTS (
+                    SELECT 1 FROM po_items i WHERE i.po_id=po.id
+                      AND COALESCE(i.purchase_qty, i.qty, 0) >
+                          COALESCE((SELECT SUM(r.qty) FROM po_receipts r WHERE r.po_item_id=i.id), 0)
+                )",
             new { poId = row.PoId }, tx);
         await this.WriteAsync(c, tx, "inventory", "delete_receipt", "po_receipt", receiptId,
             $"删除入库 {row.Qty:0.####}",

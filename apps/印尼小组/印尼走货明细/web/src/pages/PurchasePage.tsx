@@ -15,6 +15,7 @@ import { linkPurchaseLine, matchingLineSchedules } from '../utils/purchaseSchedu
 import { autoLinkPurchaseMaterials, planPurchaseNetWeight } from '../utils/purchaseNetWeight'
 import { purchaseLineDeliveryDate, purchaseLineSourceKey, purchaseOrderNumbers } from '../utils/purchaseOrderMerge'
 import { schedulePurchasePlaced, type ScheduleStatusRow } from '../utils/scheduleLineStatus'
+import { bulkReceiptLines, receiptQuantityError } from '../utils/purchaseReceipt'
 
 interface SchedRow extends ScheduleStatusRow {
   source?: string
@@ -491,7 +492,7 @@ export default function PurchasePage() {
   }
 
   function openBulkReceipt(po: PoSummary) {
-    const poItems = itemRows.filter(x => x.po_id === po.id && Number(x.shortage_qty ?? 0) > 0)
+    const poItems = itemRows.filter(x => x.po_id === po.id)
     setBulkReceiptPo(po)
     setBulkReceiptQty(Object.fromEntries(poItems.map(x => [x.id, 0])))
     setBulkReceiptSpareQty(Object.fromEntries(poItems.map(x => [x.id, 0])))
@@ -502,14 +503,11 @@ export default function PurchasePage() {
 
   async function saveBulkReceipt() {
     if (!bulkReceiptPo) return
-    const items = Object.entries(bulkReceiptQty)
-      .map(([po_item_id, qty]) => ({
-        po_item_id: Number(po_item_id),
-        qty: Number(qty) || 0,
-        spare_qty: Number(bulkReceiptSpareQty[Number(po_item_id)]) || 0,
-      }))
-      .filter(x => x.qty > 0)
-    if (!items.length) { message.warning('请至少填写一项本批入库数量'); return }
+    let items
+    try {
+      items = bulkReceiptLines(itemsByPo.get(bulkReceiptPo.id) || [], bulkReceiptQty, bulkReceiptSpareQty)
+    } catch (error) { message.warning((error as Error).message); return }
+    if (!items.length) { message.warning('请至少填写一项本批入库数量或备品入数'); return }
     await api.post(`/purchase/${bulkReceiptPo.id}/receipts/bulk`, {
       receipt_date: bulkReceiptDate.format('YYYY-MM-DD'),
       batch_no: bulkReceiptBatch,
@@ -1726,8 +1724,8 @@ export default function PurchasePage() {
               title: '操作', width: 190, fixed: 'right',
               render: (_v, po) => (
                 <Space size={4}>
-                  <Button size="small" type="primary" ghost disabled={Number(po.shortage_qty ?? 0) <= 0} onClick={() => openBulkReceipt(po)}>
-                    统一入库
+                  <Button size="small" type="primary" ghost disabled={!(itemsByPo.get(po.id)?.length)} onClick={() => openBulkReceipt(po)}>
+                    {Number(po.shortage_qty ?? 0) <= 0 ? '补录备品' : '统一入库'}
                   </Button>
                   <Button size="small" onClick={() => openEdit(po)}>编辑订单</Button>
                 </Space>
@@ -1905,7 +1903,7 @@ export default function PurchasePage() {
         destroyOnClose
       >
         <Typography.Paragraph type="secondary">
-          同一张采购单只登记一次日期、批次和备注；下方逐项填写本批实收数量，未到货的物料保持 0。
+          同一张采购单只登记一次日期、批次和备注；未到货的物料保持 0。已收齐物料仍可补录备品，本批入库填 0，备品单独累计、不抵扣欠数。
         </Typography.Paragraph>
         <Row gutter={12} style={{ marginBottom: 12 }}>
           <Col span={7}>
@@ -1929,14 +1927,14 @@ export default function PurchasePage() {
             (itemsByPo.get(bulkReceiptPo?.id || 0) || []).map(x => [x.id, Number(x.shortage_qty ?? 0)]),
           ))}>填入全部欠数</Button>
           <Button onClick={() => { setBulkReceiptQty({}); setBulkReceiptSpareQty({}) }}>全部清零</Button>
-          <Typography.Text type="secondary">只会提交数量大于 0 的物料</Typography.Text>
+          <Typography.Text type="secondary">仅提交本批入库或备品入数大于 0 的物料</Typography.Text>
         </Space>
         <Table
           rowKey="id"
           size="small"
           pagination={false}
           scroll={{ x: 1080, y: 420 }}
-          dataSource={(itemsByPo.get(bulkReceiptPo?.id || 0) || []).filter(x => Number(x.shortage_qty ?? 0) > 0)}
+          dataSource={itemsByPo.get(bulkReceiptPo?.id || 0) || []}
           columns={[
             { title: '货号', dataIndex: 'product_code', width: 120 },
             { title: '物料名称', dataIndex: 'material_name', width: 240, ellipsis: true },
@@ -1973,8 +1971,7 @@ export default function PurchasePage() {
         width={760}
         onCancel={() => { setReceiptItem(null); setReceiptRows([]); receiptForm.resetFields() }}
         onOk={saveReceipt}
-        okText={Number(receiptItem?.shortage_qty ?? 0) > 0 ? '确认本批入库' : '已全部入库'}
-        okButtonProps={{ disabled: Number(receiptItem?.shortage_qty ?? 0) <= 0 }}
+        okText={Number(receiptItem?.shortage_qty ?? 0) > 0 ? '确认本批入库' : '确认补录备品'}
         destroyOnClose
       >
         <Row gutter={12} style={{ marginBottom: 12 }}>
@@ -2007,7 +2004,7 @@ export default function PurchasePage() {
           </Col>
         </Row>
 
-        {Number(receiptItem?.shortage_qty ?? 0) > 0 && (
+        {receiptItem && (
           <Form form={receiptForm} layout="vertical">
             <Row gutter={12}>
               <Col span={6}>
@@ -2019,19 +2016,20 @@ export default function PurchasePage() {
                 <Form.Item
                   name="qty"
                   label="本批入库数量"
+                  dependencies={['spare_qty']}
                   rules={[
                     { required: true, message: '请输入数量' },
                     {
                       validator: async (_rule, value) => {
                         const qty = Number(value ?? 0)
                         const shortage = Number(receiptItem?.shortage_qty ?? 0)
-                        if (qty <= 0) throw new Error('数量必须大于 0')
-                        if (qty > shortage) throw new Error(`不能超过当前欠数 ${shortage}`)
+                        const error = receiptQuantityError(qty, Number(receiptForm.getFieldValue('spare_qty') ?? 0), shortage)
+                        if (error) throw new Error(error)
                       },
                     },
                   ]}
                 >
-                  <InputNumber min={0.0001} max={Number(receiptItem?.shortage_qty ?? 0)} style={{ width: '100%' }} />
+                  <InputNumber min={0} max={Math.max(Number(receiptItem?.shortage_qty ?? 0), 0)} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
               <Col span={6}>

@@ -66,6 +66,8 @@ jobs:
                   ;;
                 apps/QA部/QC成品报告系统/ai_service.py)
                   ;;
+                apps/生产部/品质管理系统/app.js|apps/生产部/品质管理系统/server/server.js)
+                  ;;
                 *)
                   echo "Unexpected branch-only blob larger than 50000 bytes: ${path:-<unknown>} ($size bytes)" >&2
                   exit 1

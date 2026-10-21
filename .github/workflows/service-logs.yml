@@ -1,8 +1,8 @@
-name: Batch 975 976 Single Synthetic Provider Probe
+name: QC Provider 429 Readonly Diagnostic
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [probe]}
+      mode: {type: choice, required: true, options: [diagnose]}
 permissions:
   contents: read
 concurrency:
@@ -10,10 +10,10 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_PROBE_WORKFLOW_PIN: 'false'
-  SCOPED_PROBE_HELPER_SHA256: '210607f95c92b3b5ff0a017c2a0056aa94e48b86c52a2c7e8fdc7e3a44e5fee9'
+  QC_DIAGNOSE_WORKFLOW_PIN: 'false'
+  QC_DIAGNOSE_HELPER_SHA256: '2dd9895ccdf616149dbe6a5ef7e273a83068f0cac29b8576af4ab45886b62e1f'
 jobs:
-  fixed-synthetic-provider-probe:
+  fixed-qc-provider-diagnostic:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -27,10 +27,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_PROBE_WORKFLOW_PIN" = true && "$SCOPED_PROBE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-975-976-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = probe ]] || exit 1
+          [[ "$QC_DIAGNOSE_WORKFLOW_PIN" = true && "$QC_DIAGNOSE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Validate worker limits and run one synthetic provider request
+      - name: Capture bounded private logs and one synthetic error diagnostic
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -44,19 +44,17 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 5m
-          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_PROBE_WORKFLOW_PIN,SCOPED_PROBE_HELPER_SHA256
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,QC_DIAGNOSE_WORKFLOW_PIN,QC_DIAGNOSE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_PROBE_WORKFLOW_PIN" = true && "$SCOPED_PROBE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-975-976-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = probe && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$QC_DIAGNOSE_WORKFLOW_PIN" = true && "$QC_DIAGNOSE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/qc-provider-429-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
-            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/batch-975-976-20261021:refs/remotes/origin/ops/batch-975-976-20261021 >/dev/null 2>&1 || exit 1
-            [[ "$(git rev-parse refs/remotes/origin/ops/batch-975-976-20261021)" = "$RELEASE_SHA" ]] || exit 1
+            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/qc-provider-429-20261021:refs/remotes/origin/ops/qc-provider-429-20261021 >/dev/null 2>&1 || exit 1
+            [[ "$(git rev-parse refs/remotes/origin/ops/qc-provider-429-20261021)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            scoped_probe_tmp=$(mktemp -d /tmp/batch-975-976-probe.XXXXXX)
-            trap 'rm -rf "$scoped_probe_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch-975-976-provider-probe.py" > "$scoped_probe_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_probe_tmp/run.py" | cut -d ' ' -f1)" = "$SCOPED_PROBE_HELPER_SHA256" ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/provider-probe-fragment.py" > "$scoped_probe_tmp/provider-probe-fragment.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_probe_tmp/provider-probe-fragment.py" | cut -d ' ' -f1)" = e81cdb9120f4b720264258729b72dc60486d4ea0f973c7a0c47052e2ed79b5bd ]] || exit 1
-            timeout --signal=TERM --kill-after=10s 2m python3 -B "$scoped_probe_tmp/run.py" probe
+            qc_diag_tmp=$(mktemp -d /tmp/qc-provider-429-diag.XXXXXX)
+            trap 'rm -rf "$qc_diag_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/qc-provider-429-diagnose.py" > "$qc_diag_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$qc_diag_tmp/run.py" | cut -d ' ' -f1)" = "$QC_DIAGNOSE_HELPER_SHA256" ]] || exit 1
+            timeout --signal=TERM --kill-after=10s 3m python3 -B "$qc_diag_tmp/run.py" diagnose

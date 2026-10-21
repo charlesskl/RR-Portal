@@ -1,9 +1,9 @@
 """Four-service immutable preparation, scoped switching and sealed verification. All gates false."""
 import ast,contextlib,copy,datetime,hashlib,importlib.util,json,os,pathlib,re,signal,sqlite3,stat,subprocess,sys,time,traceback,urllib.error,urllib.parse,urllib.request
-ROOT=pathlib.Path('/opt/rr-portal');BASE='7ce02db904cdd769ecd35148d50be15ec4fce210';TARGET='dfcdf751cae42fdd1731729dd662fce041c28caf';TREE='d5a107e898fe35066416fa0431ccd92400467875'
-BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';PREPARE_PIN=True;DEPLOY_PIN=False;VERIFY_PIN=False
+ROOT=pathlib.Path('/opt/rr-portal');BASE='7ce02db904cdd769ecd35148d50be15ec4fce210';TARGET='';TREE=''
+BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';PREPARE_PIN=False;DEPLOY_PIN=False;VERIFY_PIN=False
 CORE_SHA='4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5';SOURCE_MANIFEST_SHA='7efb90de8b783dee9241c6e239d6a72cd9946dccad5f509d86cac62ac2041799';EXPECTED_CHANGED_FILES=16
-BACKUP=ROOT/'deploy/backups/batch-969-970-972-974-20261021-backup-02';BACKUP_MANIFEST='5b5e544aa5fa2849ca7e2dc5583c803b694a214b7d2d1b8c818fe349bcdfb8f5';BACKUP_RESULT='5e6316717fb94d3b324e9071cbfa6fcfeedd03e8d484dc348882f6cde7db9afd'
+BACKUP=ROOT/'deploy/backups/batch-969-970-972-974-20261021-backup-02';BACKUP_MANIFEST='';BACKUP_RESULT=''
 PREPARE=BACKUP.with_name('batch-969-970-972-974-20261021-prepare');PREPARE_MANIFEST='';PREPARE_RESULT=''
 DEPLOY=BACKUP.with_name('batch-969-970-972-974-20261021-deploy');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 VERIFY=BACKUP.with_name('batch-969-970-972-974-20261021-verify')

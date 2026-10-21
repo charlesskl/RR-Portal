@@ -1,6 +1,6 @@
 """Fixed sealed-compose comparison only; never execute release phases."""
 import hashlib,importlib.util,json,os,pathlib,re,stat,sys,traceback
-ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';DIAG_PIN=True
+ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';DIAG_PIN=False
 RELEASE_SHA='68e38c2f8837703a81cf101c68d1a13b5c4d5ad93d22fe7ce7904643d190e066'
 TARGET='dfcdf751cae42fdd1731729dd662fce041c28caf';TREE='d5a107e898fe35066416fa0431ccd92400467875'
 FAILED=ROOT/'deploy/backups/batch-969-970-972-974-20261021-prepare'

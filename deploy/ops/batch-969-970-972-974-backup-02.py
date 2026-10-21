@@ -4,7 +4,7 @@ Store snapshots individually consistent; no cross-store atomic claim.
 """
 import contextlib,datetime,hashlib,importlib.util,io,json,os,pathlib,re,shutil,signal,sqlite3,stat,subprocess,sys,tarfile,traceback,urllib.parse
 ROOT=pathlib.Path('/opt/rr-portal');BASE='7ce02db904cdd769ecd35148d50be15ec4fce210'
-BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';BACKUP_PIN=False
+BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';BACKUP_PIN=True
 OUT=ROOT/'deploy/backups/batch-969-970-972-974-20261021-backup-02'
 DEPENDENCIES={'release-data-ops-library.py':'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5','release-data-library.py':'d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9','internal-quote-readonly-library.py':'be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69','portable-pdb-library.py':'cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5'}
 QC='apps/QA部/QC成品报告系统';TOY='apps/QA部/玩具质量管理系统';INDO='apps/印尼小组/印尼走货明细';QUOTE='apps/业务部/内部报价系统'

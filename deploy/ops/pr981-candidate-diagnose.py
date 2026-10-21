@@ -1,6 +1,6 @@
 """Read-only process metadata comparison; no environment values or service changes."""
 import pathlib,subprocess,json,os,sys,hashlib
-PIN=True
+PIN=False
 assert PIN and sys.argv[1:]==['verify']and os.environ.get('RELEASE_BRANCH')=='refs/heads/ops/pr-981-20261021'and os.environ.get('RELEASE_ATTEMPT')=='1'
 root=pathlib.Path('/opt/rr-portal/deploy/backups/pr-981-20261021-backup');manifest=json.loads((root/'manifest.json').read_bytes());assert hashlib.sha256((root/'manifest.json').read_bytes()).hexdigest()=='1f09e9e07ad438b8bcc61d2d48626af52da83e4e30b5c0a97e1857a89217e9cf';p=root/'factory-inspect.private.json';assert hashlib.sha256(p.read_bytes()).hexdigest()==manifest[p.name];old=json.loads(p.read_bytes());rows={}
 for service in('factory-review-test','factory-review'):

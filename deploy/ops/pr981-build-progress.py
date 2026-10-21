@@ -1,6 +1,6 @@
 """Read-only, bounded build progress; no signals, configuration changes or credentials."""
 import pathlib,json,re,os,sys,shutil
-PIN=True
+PIN=False
 assert PIN and sys.argv[1:]==['verify']and os.environ.get('RELEASE_BRANCH')=='refs/heads/ops/pr-981-20261021'and os.environ.get('RELEASE_ATTEMPT')=='1'
 root=pathlib.Path('/opt/rr-portal/deploy/backups/pr-981-20261021-prepare-02');logs=sorted(root.glob('*-build-factory-*.private.log'));assert 0<len(logs)<=2
 out=[]

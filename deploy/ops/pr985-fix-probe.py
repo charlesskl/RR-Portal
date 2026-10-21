@@ -2,7 +2,7 @@
 No merge, checkout, production configuration update or business container signals.
 """
 import pathlib,importlib.util,os,json,hashlib,sys,signal
-PIN=True
+PIN=False
 LIB_SHA='9ef765feed81c42d33a35017081935fc688ef42a1a8ab5096e2a167a791ed4c1'
 OUT=pathlib.Path('/opt/rr-portal/deploy/backups/pr-985-20261021-reviewed-prompt-probe')
 PREPARE_MANIFEST='08da1118751fd62d4c72c2136d9810b6c2ef2b2428bc038d0f2227557f76ede3'

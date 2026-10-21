@@ -1,6 +1,6 @@
 """Signal only the exact PR981 prepare02 helper; never signal a business container."""
 import pathlib,os,re,hashlib,signal,time,json,sys
-PIN=True
+PIN=False
 assert PIN and sys.argv[1:]==['verify']and os.environ.get('RELEASE_BRANCH')=='refs/heads/ops/pr-981-20261021'and os.environ.get('RELEASE_ATTEMPT')=='1'
 found=[]
 for p in pathlib.Path('/proc').iterdir():

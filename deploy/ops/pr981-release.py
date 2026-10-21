@@ -2,9 +2,9 @@
 No business CRUD or database restore. Model smoke contains synthetic evidence only.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,io,json,os,secrets,shutil,tempfile,pathlib,re,signal,stat,subprocess,sys,tarfile,time,urllib.error,urllib.request
-PHASE='prepare'
-TARGET='67385924fc40958701843411b3731d2eeb90b2ad'
-TREE='f0a724fb72b06e9cea3dc5aa1baa8bed629f127d'
+PHASE=''
+TARGET=''
+TREE=''
 BASE='9b890cc016da403f929f8a7aaeddb878d3de24c5'
 BRANCH='refs/heads/ops/pr-981-20261021'
 ROOT=pathlib.Path('/opt/rr-portal');APP='apps/PMC跟仓管/加工厂月度评审管理制度'

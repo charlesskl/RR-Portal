@@ -1,6 +1,6 @@
 """Read only the sealed PR981 failed build log; emit bounded redacted diagnostics."""
 import pathlib,json,re,hashlib,os,sys
-PIN=True
+PIN=False
 ROOT=pathlib.Path('/opt/rr-portal/deploy/backups/pr-981-20261021-prepare')
 assert PIN and sys.argv[1:]==['verify'] and os.environ.get('RELEASE_BRANCH')=='refs/heads/ops/pr-981-20261021' and os.environ.get('RELEASE_ATTEMPT')=='1'
 assert hashlib.sha256((ROOT/'manifest.json').read_bytes()).hexdigest()=='bec3677d1ee0ac76055b813825d776fba00f75a7c33fd567e07df4528a48878c'

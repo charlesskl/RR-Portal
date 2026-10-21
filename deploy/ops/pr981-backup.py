@@ -1,6 +1,6 @@
 """PR981: private read-only backup and safe effective AI configuration inventory."""
 import hashlib,importlib.util,json,os,pathlib,re,sys
-PIN=True
+PIN=False
 BASE='9b890cc016da403f929f8a7aaeddb878d3de24c5'
 BRANCH='refs/heads/ops/pr-981-20261021'
 OUT=pathlib.Path('/opt/rr-portal/deploy/backups/pr-981-20261021-backup')

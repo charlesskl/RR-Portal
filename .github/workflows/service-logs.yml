@@ -6,12 +6,12 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: pr981-readonly-progress
+  group: pr981-ownbuild-control
   queue: max
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '0c631cd89ee193cd9df18ab3277320bf687008630d67801c13cbfbf0866ea818'
+  SCOPED_RELEASE_HELPER_SHA256: '529ee7f0091da8b98264a138252156f91f9e0508e3c00d39264ad0b7ed7024b9'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -55,7 +55,7 @@ jobs:
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/pr981-backup.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr981-build-progress.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr981-stop-own-build.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = "$SCOPED_RELEASE_HELPER_SHA256" ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/factory-review-backup-library.py" > "$scoped_release_tmp/factory-review-backup-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/factory-review-backup-library.py" | cut -d ' ' -f1)" = 79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666 ]] || exit 1

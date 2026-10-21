@@ -5,6 +5,16 @@
   const uploadStatus = document.querySelector('#upload-queue-status');
   const uploadMessage = uploadStatus?.querySelector('[data-upload-message]');
   const retryButton = document.querySelector('#retry-upload-queue');
+  const activeRunStatuses = ['queued', 'processing', 'retrying'];
+  const showActiveRun = (status) => {
+    if (!activeRunStatuses.includes(status)) return;
+    section.dataset.runStatus = status;
+    button.disabled = true;
+    message.className = `analysis-message ${status}`;
+    message.innerHTML = status === 'retrying'
+      ? '<span class="spinner"></span><div><strong>等待重试</strong><span>本次分析暂未完成，系统将自动重试。请勿重复启动，完成后页面会自动刷新。</span></div>'
+      : '<span class="spinner"></span><div><strong>AI 正在分析照片</strong><span>识别清晰度、标签、条码、日期码、包装和可见缺陷…</span></div>';
+  };
 
   const poll = async () => {
     if (!section?.dataset.statusUrl) return;
@@ -15,10 +25,14 @@
         window.location.reload();
         return;
       }
+      showActiveRun(data.status);
     } catch (_) {}
     window.setTimeout(poll, 1800);
   };
-  if (['queued', 'processing'].includes(section?.dataset.runStatus)) window.setTimeout(poll, 800);
+  if (activeRunStatuses.includes(section?.dataset.runStatus)) {
+    showActiveRun(section.dataset.runStatus);
+    window.setTimeout(poll, 800);
+  }
 
   const DB_NAME = 'qc-photo-upload-queue';
   const STORE_NAME = 'pending-uploads';
@@ -235,6 +249,7 @@
   if (navigator.onLine) flushQueue(); else refreshQueueStatus();
 
   button?.addEventListener('click', async () => {
+    if (button.disabled || activeRunStatuses.includes(section?.dataset.runStatus)) return;
     button.disabled = true;
     message.className = 'analysis-message processing';
     message.innerHTML = '<span class="spinner"></span><div><strong>正在提交分析任务…</strong><span>请保持页面打开，系统完成后会自动刷新。</span></div>';
@@ -243,6 +258,7 @@
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '无法启动 AI 分析');
       section.dataset.statusUrl = window.QCUrls.analysisStatusUrl(section.dataset.statusBase, data.analysis_run_id);
+      showActiveRun(activeRunStatuses.includes(data.status) ? data.status : 'queued');
       window.setTimeout(poll, 500);
     } catch (error) {
       button.disabled = false;

@@ -17,11 +17,13 @@ import base64
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import socket
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from urllib import error, parse, request
@@ -98,12 +100,77 @@ class AIInputError(AIServiceError):
     """Raised when a local server-side file or reference payload is invalid."""
 
 
+_PROVIDER_ERROR_CODES = {
+    "insufficient_quota": "quota",
+    "billing_hard_limit_reached": "quota",
+    "rate_limit_exceeded": "rate_limit",
+    "invalid_api_key": "authentication",
+    "permission_denied": "permission",
+    "overloaded_error": "overloaded",
+    "server_error": "server",
+}
+_PROVIDER_ERROR_TYPES = {
+    "insufficient_quota": "quota",
+    "authentication_error": "authentication",
+    "permission_error": "permission",
+    "rate_limit_error": "rate_limit",
+    "overloaded_error": "overloaded",
+    "server_error": "server",
+    "invalid_request_error": "unknown",
+}
+_HTTP_ERROR_MESSAGES = {
+    "quota": "AI 服务报告额度不足，请联系管理员检查供应商账户。",
+    "authentication": "AI 服务授权被拒绝，请联系管理员检查服务器配置。",
+    "permission": "AI 服务访问权限不足，请联系管理员检查供应商权限。",
+    "rate_limit": "AI 服务请求受限，请等待后重试。",
+    "overloaded": "AI 服务繁忙，请稍后重试。",
+    "server": "AI 上游服务异常，请稍后重试。",
+    "unknown": "AI 服务请求失败，尚无法确定具体原因。",
+}
+
+
+def _safe_request_id(value: object, api_key: str | None = None) -> str | None:
+    if type(value) is not str or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", value):
+        return None
+    if api_key and api_key in value:
+        return None
+    return value
+
+
+def _retry_after_seconds(value: object, *, now: datetime | None = None) -> int | None:
+    """Read a bounded server delay without scheduling or shortening a retry."""
+    if type(value) is not str or len(value) > 128:
+        return None
+    value = value.strip()
+    if re.fullmatch(r"[0-9]{1,5}", value):
+        seconds = int(value)
+    else:
+        try:
+            deadline = parsedate_to_datetime(value)
+            if deadline.tzinfo is None:
+                return None
+            seconds = max(0, math.ceil((deadline - (now or datetime.now(timezone.utc))).total_seconds()))
+        except (TypeError, ValueError, OverflowError):
+            return None
+    # Do not clamp a longer server delay into an earlier retry.
+    return seconds if 0 <= seconds <= 86400 else None
+
+
 class AITransportError(AIServiceError):
     """Raised when the Responses API cannot be reached or returns HTTP failure."""
 
-    def __init__(self, message: str, *, request_id: str | None = None) -> None:
+    def __init__(
+        self, message: str, *, request_id: str | None = None,
+        http_status: int | None = None, provider_error_code: str | None = None,
+        provider_error_type: str | None = None, retry_after_seconds: int | None = None,
+    ) -> None:
         super().__init__(message)
-        self.request_id = request_id
+        self.request_id = _safe_request_id(request_id)
+        self.http_status = http_status if type(http_status) is int and 100 <= http_status <= 599 else None
+        self.provider_error_code = provider_error_code if type(provider_error_code) is str and provider_error_code in _PROVIDER_ERROR_CODES else None
+        self.provider_error_type = provider_error_type if type(provider_error_type) is str and provider_error_type in _PROVIDER_ERROR_TYPES else None
+        self.error_category = _PROVIDER_ERROR_CODES.get(self.provider_error_code, _PROVIDER_ERROR_TYPES.get(self.provider_error_type, "unknown"))
+        self.retry_after_seconds = retry_after_seconds if type(retry_after_seconds) is int and 0 <= retry_after_seconds <= 86400 else None
 
 
 class AIResponseError(AIServiceError):
@@ -1122,15 +1189,38 @@ class AIService:
         )
         try:
             with request.urlopen(req, timeout=self.config.timeout_seconds) as response:
-                request_id = response.headers.get("x-request-id") or "unknown"
+                request_id = _safe_request_id(response.headers.get("x-request-id"), self.config.api_key) or "unknown"
                 response_bytes = response.read(5 * 1024 * 1024 + 1)
         except error.HTTPError as exc:
-            request_id = exc.headers.get("x-request-id") if exc.headers else None
+            headers = exc.headers or {}
+            request_id = _safe_request_id(headers.get("x-request-id"), self.config.api_key)
+            retry_after = _retry_after_seconds(headers.get("Retry-After"))
+            provider_code = provider_type = None
+            try:
+                raw_error = exc.read(32 * 1024 + 1)
+                decoded_error = json.loads(raw_error) if len(raw_error) <= 32 * 1024 else None
+                detail = decoded_error.get("error") if isinstance(decoded_error, dict) else None
+                if isinstance(detail, dict):
+                    code, kind = detail.get("code"), detail.get("type")
+                    provider_code = code if type(code) is str and code in _PROVIDER_ERROR_CODES else None
+                    provider_type = kind if type(kind) is str and kind in _PROVIDER_ERROR_TYPES else None
+            except Exception:
+                # HTML, malformed/oversized JSON and read errors remain unknown.
+                pass
+            finally:
+                try:
+                    exc.close()
+                except Exception:
+                    pass
+            category = _PROVIDER_ERROR_CODES.get(provider_code, _PROVIDER_ERROR_TYPES.get(provider_type, "unknown"))
             raise AITransportError(
-                f"OpenAI request failed with HTTP {exc.code}", request_id=request_id
-            ) from exc
-        except (error.URLError, TimeoutError, socket.timeout, OSError) as exc:
-            raise AITransportError("OpenAI request could not be completed") from exc
+                f"{_HTTP_ERROR_MESSAGES[category]}（HTTP {exc.code}）",
+                request_id=request_id, http_status=exc.code,
+                provider_error_code=provider_code, provider_error_type=provider_type,
+                retry_after_seconds=retry_after,
+            ) from None
+        except (error.URLError, TimeoutError, socket.timeout, OSError):
+            raise AITransportError("AI 服务请求未能完成，请稍后重试。") from None
         if len(response_bytes) > 5 * 1024 * 1024:
             raise AIResponseError(
                 "OpenAI response exceeded the safety limit", request_id=request_id

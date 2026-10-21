@@ -16,18 +16,19 @@ test('delivery reminders match the responsible account and enforce scope without
   t.after(async()=>{if(child&&child.exitCode===null){const done=once(child,'exit');child.kill();await done}await rm(dir,{recursive:true,force:true})})
   const today=new Date(Date.now()+8*3600000).toISOString().slice(0,10)
   const later=new Date(Date.parse(today)+86400000).toISOString().slice(0,10)
-  const users=[['pmca','PMC甲',{}],['pmcb','PMC乙',{}],['dupa','同名',{}],['dupb','同名',{}],['denied','禁止查看',{'orders.view':false}],['readonly','只读',{'orders.edit':false}]]
+  const users=[['pmca','PMC甲',{}],['pmcb','PMC乙',{}],['dupa','同名',{}],['dupb','同名',{}],['denied','禁止查看',{'orders.view':false}],['readonly','只读',{'orders.edit':false}],['paging','分页PMC',{}]]
   const fixture=`migrate(app=>{
     const users=app.findCollectionByNameOrId('users');for(const name of ['display_name','role','craft'])users.fields.add(new TextField({name}));for(const name of ['permissions','crafts'])users.fields.add(new JSONField({name}));app.save(users);
     for(const [name,display,permissions] of ${JSON.stringify(users)}){const r=new Record(users);r.set('id',name.padEnd(15,'0'));r.setEmail(name+'@fixture.invalid');r.setPassword('Synthetic-Reminder-1234');r.set('display_name',display);r.set('role','buyer_assembly');r.set('crafts',['assembly']);r.set('permissions',Object.assign({'region.heyuan':false},permissions));app.save(r)}
-    const f=new Collection({name:'factories',type:'base',viewRule:'@request.auth.id != ""'});for(const name of ['name','region','craft'])f.fields.add(new TextField({name}));app.save(f);
-    for(const [name,region,craft] of [['allowed','hunan','assembly'],['region','heyuan','assembly'],['craft','hunan','sewing']]){const r=new Record(f);r.set('id',name.padEnd(15,'0'));r.set('name',name);r.set('region',region);r.set('craft',craft);app.save(r)}
-    const c=new Collection({name:'orders',type:'base',viewRule:'@request.auth.id != "" && product != "hidden"'});c.fields.add(new RelationField({name:'factory',maxSelect:1,collectionId:f.id}));c.fields.add(new RelationField({name:'created_by',maxSelect:1,collectionId:users.id}));for(const name of ['pmc','status','region','product','order_no','secret'])c.fields.add(new TextField({name}));for(const name of ['delivery_date','actual_delivery_date'])c.fields.add(new DateField({name}));app.save(c);
+    const f=new Collection({name:'factories',type:'base',viewRule:'@request.auth.id != "" && name != "hiddenFactory"'});for(const name of ['name','region','craft'])f.fields.add(new TextField({name}));app.save(f);
+    for(const [name,region,craft] of [['allowed','hunan','assembly'],['region','heyuan','assembly'],['craft','hunan','sewing'],['hiddenfactory','hunan','assembly']]){const r=new Record(f);r.set('id',name.padEnd(15,'0'));r.set('name',name==='hiddenfactory'?'hiddenFactory':name);r.set('region',region);r.set('craft',craft);app.save(r)}
+    const c=new Collection({name:'orders',type:'base',viewRule:'@request.auth.id != "" && product != "hidden"'});c.fields.add(new RelationField({name:'factory',maxSelect:1,collectionId:f.id}));c.fields.add(new RelationField({name:'created_by',maxSelect:1,collectionId:users.id}));for(const name of ['pmc','status','region','product','order_no','secret'])c.fields.add(new TextField({name}));c.fields.add(new BoolField({name:'is_deleted'}));for(const name of ['delivery_date','actual_delivery_date'])c.fields.add(new DateField({name}));app.save(c);
     const seed=(name,fields)=>{const r=new Record(c);r.set('id',name.padEnd(15,'0'));const value=Object.assign({factory:'allowed'.padEnd(15,'0'),pmc:'PMC甲',created_by:'pmcb'.padEnd(15,'0'),status:'placed',delivery_date:'${today}',product:name,secret:'DO-NOT-RETURN'},fields);for(const key in value)r.set(key,value[key]);app.save(r)};
     seed('today',{});seed('historical',{delivery_date:'2025-01-01'});seed('future',{delivery_date:'${later}'});seed('nodate',{delivery_date:''});
     seed('delivered',{status:'delivered'});seed('dated',{actual_delivery_date:'${today}'});seed('cancelled',{status:'cancelled'});seed('returned',{status:'returned'});
     seed('otherpmc',{pmc:'PMC乙',created_by:'pmca'.padEnd(15,'0')});seed('creator',{pmc:'',created_by:'pmca'.padEnd(15,'0')});seed('unknown',{pmc:'未匹配PMC',created_by:'pmca'.padEnd(15,'0')});
-    seed('duplicate',{pmc:'同名',created_by:'dupa'.padEnd(15,'0')});seed('region',{factory:'region'.padEnd(15,'0')});seed('managed',{region:'heyuan'});seed('craft',{factory:'craft'.padEnd(15,'0')});seed('hidden',{product:'hidden'});
+    seed('duplicate',{pmc:'同名',created_by:'dupa'.padEnd(15,'0')});seed('region',{factory:'region'.padEnd(15,'0')});seed('managed',{region:'heyuan'});seed('craft',{factory:'craft'.padEnd(15,'0')});seed('hidden',{product:'hidden'});seed('hiddenfactory',{factory:'hiddenfactory'.padEnd(15,'0')});
+    for(let i=0;i<501;i++){seed('deny'+String(i).padStart(6,'0'),{pmc:'分页PMC',factory:'region'.padEnd(15,'0')});seed('page'+String(i).padStart(6,'0'),{pmc:'分页PMC',delivery_date:'2025-01-01'})}
   },()=>{})`
   await writeFile(join(migrations,'1700000000_fixture.js'),fixture)
   for(const file of ['delivery_reminders.pb.js','lib/analysis_ai.js'])await copyFile(new URL('../pb_hooks/'+file,import.meta.url),join(hooks,file))
@@ -54,6 +55,32 @@ test('delivery reminders match the responsible account and enforce scope without
   await t.test('authentication, view/edit permissions and record rules apply',async()=>{
     for(const c of [new PocketBase(base),clients.denied,clients.readonly])await assert.rejects(c.send(endpoint,{method:'GET'}),e=>[401,403].includes(e.status))
     assert.deepEqual(await superuser.collection('orders').getFullList(),before)
+  })
+  await t.test('voided and soft-deleted orders never ask for delivery registration',async()=>{
+    const base={factory:id('allowed'),pmc:'PMC甲',created_by:id('pmca'),delivery_date:today,product:'作废订单'}
+    const voided=await superuser.collection('orders').create({...base,status:'voided'})
+    const deleted=await superuser.collection('orders').create({...base,status:'placed',is_deleted:true})
+    const r=await clients.pmca.send(endpoint,{method:'GET'})
+    assert.ok(!r.items.some(o=>o.id===voided.id),'voided order is excluded')
+    assert.ok(!r.items.some(o=>o.id===deleted.id),'soft-deleted order is excluded')
+    await superuser.collection('orders').delete(voided.id);await superuser.collection('orders').delete(deleted.id)
+  })
+  await t.test('500 visible items are counted after scope filtering and overflow remains reachable',async()=>{
+    const r=await clients.paging.send(endpoint,{method:'GET'})
+    assert.equal(r.items.length,500);assert.equal(r.hasMore,true)
+    assert.ok(r.items.every(o=>o.id.startsWith('page')))
+    assert.deepEqual(r.items.map(o=>o.id),r.items.map(o=>o.id).sort())
+    for(const item of r.items)await superuser.collection('orders').update(item.id,{actual_delivery_date:today})
+    const rest=await clients.paging.send(endpoint,{method:'GET'})
+    assert.equal(rest.items.length,1);assert.equal(rest.hasMore,false)
+    assert.ok(!r.items.some(o=>o.id===rest.items[0].id))
+  })
+  await t.test('invalid permission values and revoked department or region fail closed',async()=>{
+    for(const change of [{permissions:{'orders.view':1}},{permissions:[],crafts:['assembly']},{permissions:{},crafts:['invalid']},{permissions:{'region.hunan':false},crafts:['assembly']},{permissions:{},crafts:['sewing']}]){
+      await superuser.collection('users').update(id('pmcb'),change)
+      const r=await clients.pmcb.send(endpoint,{method:'GET'}).catch(e=>{assert.equal(e.status,403);return {items:[]}})
+      assert.deepEqual(r.items,[])
+    }
   })
   await t.test('registration stops reminders and changed account permissions take effect',async()=>{
     await superuser.collection('orders').update(id('today'),{actual_delivery_date:today})

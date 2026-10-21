@@ -14,7 +14,7 @@ routerAdd('GET', '/api/factory-review/delivery-reminders', e => {
   const matches = name ? e.app.findRecordsByFilter('users', 'display_name = {:name}', '', 2, 0, { name }) : []
   const uniqueName = matches.length === 1 && matches[0].id === e.auth.id
   const ownership = uniqueName ? '(pmc = {:name} || (pmc = "" && created_by = {:owner}))' : '(pmc = "" && created_by = {:owner})'
-  const filter = ownership + ' && delivery_date != "" && delivery_date <= {:end} && actual_delivery_date = "" && status != "delivered" && status != "cancelled" && status != "returned"'
+  const filter = ownership + ' && delivery_date != "" && delivery_date <= {:end} && actual_delivery_date = "" && is_deleted != true && status != "voided" && status != "delivered" && status != "cancelled" && status != "returned"'
   const info = e.requestInfo(), items = [], factoryCache = {}
   let hasMore = false
   for (let offset = 0; ; offset += 500) {

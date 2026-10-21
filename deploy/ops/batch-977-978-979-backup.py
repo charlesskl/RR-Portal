@@ -2,7 +2,7 @@
 All original environment and business data stay unchanged. Gate off.
 """
 import contextlib,copy,hashlib,importlib.util,json,os,pathlib,re,shutil,signal,stat,sys,traceback
-ROOT=pathlib.Path('/opt/rr-portal');BASE='b4c3763fe43e30c80c041c70e7a9f0750145d7b0';BRANCH='refs/heads/ops/batch-977-978-979-20261021';BACKUP_PIN=True
+ROOT=pathlib.Path('/opt/rr-portal');BASE='b4c3763fe43e30c80c041c70e7a9f0750145d7b0';BRANCH='refs/heads/ops/batch-977-978-979-20261021';BACKUP_PIN=False
 OUT=ROOT/'deploy/backups/batch-977-978-979-20261021-backup';QC='apps/QA部/QC成品报告系统';FACTORY='apps/PMC跟仓管/加工厂月度评审管理制度';INDO='apps/印尼小组/印尼走货明细'
 SERVICES=('factory-review','factory-review-test','qc-report','qc-report-worker','indo-shipping');STORAGE={'factory-review':FACTORY+'/pb_data','factory-review-test':FACTORY+'/pb_data_test','qc-report-data':QC+'/data','qc-report-storage':QC+'/storage'}
 IMAGES={'qc-report':'sha256:e442f0c577df8fbad4410ab655e3d4cc32f23b4fd63c88988815845dc3504452','qc-report-worker':'sha256:8a7abe630e49db8051be8ccc5be26a70a0b6d610410d16d701b9681841cca047'}

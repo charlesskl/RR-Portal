@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
-  SCOPED_RELEASE_HELPER_SHA256: 'f544966d013bf9d0b7aeaf5099df966e4a16b33b013cf6693943e1b2a9fc8e9b'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
+  SCOPED_RELEASE_HELPER_SHA256: 'd46bda8f59043a0e6967e92b81849d03a2eafbc4e835e471da46d2a7736cf892'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest

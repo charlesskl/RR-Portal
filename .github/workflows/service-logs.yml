@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  QC_CANDIDATE_AUDIT_WORKFLOW_PIN: 'false'
-  QC_CANDIDATE_AUDIT_HELPER_SHA256: 'e53ea8cdfdfb11c348f889371a28f2c589721f8959b69872ae3e2782a18112a6'
+  QC_CANDIDATE_AUDIT_WORKFLOW_PIN: 'true'
+  QC_CANDIDATE_AUDIT_HELPER_SHA256: '82ee88a3fd9cd72b7c33acedafcce98080ebf2e32795b5acdf0032e91384c857'
 jobs:
   fixed-qc-candidate-failure-probe:
     runs-on: ubuntu-latest

@@ -1,5 +1,5 @@
 """Read-only exact PR973 additive PocketBase migration comparator; closed snapshots only."""
-import contextlib,datetime,hashlib,json,sqlite3
+import contextlib,datetime,hashlib,json,re,sqlite3
 MIGRATION='1792537200_extend_patrol_template02.js'
 TEXT_FIELDS=(('responsibility_scope','text2707377328'),('responsible_supervisor','text1982967167'),('processing_fee_period','text3182212436'),('completion_details','text2269576956'))
 ADDED_FIELDS=[dict(autogeneratePattern='',help='',hidden=False,id=identifier,max=10000,min=0,name=name,pattern='',presentable=False,primaryKey=False,required=False,system=False,type='text')for name,identifier in TEXT_FIELDS]+[dict(help='',hidden=False,id='json1394067528',maxSize=100,name='processing_fee',presentable=False,required=False,system=False,type='json')]
@@ -10,8 +10,9 @@ def need(value):
 def encoded(value):return json.dumps(value,sort_keys=True,ensure_ascii=True,separators=(',',':'),allow_nan=False).encode()
 def digest(value):return hashlib.sha256(encoded(value)).hexdigest()
 def timestamp(value):
+ need(type(value)is str);match=re.fullmatch(r'(\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d)(?:\.(\d{1,9}))?(Z|[+-]\d\d:\d\d)',value);need(match is not None)
  try:
-  parsed=datetime.datetime.fromisoformat(value.replace('Z','+00:00'));need(parsed.tzinfo is not None);return parsed.astimezone(datetime.timezone.utc)
+  normalized=match[1]+('.'+match[2][:6].ljust(6,'0')if match[2]else'')+match[3];parsed=datetime.datetime.fromisoformat(normalized.replace('Z','+00:00'));need(parsed.tzinfo is not None);return parsed.astimezone(datetime.timezone.utc)
  except (ValueError,TypeError,AttributeError):need(False)
 def micros(value):
  delta=value-datetime.datetime(1970,1,1,tzinfo=datetime.timezone.utc);return(delta.days*86400+delta.seconds)*1000000+delta.microseconds

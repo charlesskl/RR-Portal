@@ -1,11 +1,11 @@
 """PR973 two-service factory-review deployment and sealed read-only verification. Draft gates false."""
 import contextlib,copy,datetime,html.parser,io,sqlite3,hashlib,importlib.util,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,time,traceback,urllib.request,urllib.error
 ROOT=pathlib.Path('/opt/rr-portal');BASE='6fc1143c0b39470d814caac553beaaf3bc2912e0';TARGET='7ce02db904cdd769ecd35148d50be15ec4fce210';TREE='109dc79b3552ad24a477bc64c9a6a79af21221a5'
-BRANCH='refs/heads/ops/factory-review-973-20261021';DEPLOY_PIN=True;VERIFY_PIN=False
+BRANCH='refs/heads/ops/factory-review-973-20261021';DEPLOY_PIN=False;VERIFY_PIN=True
 BACKUP=ROOT/'deploy/backups/factory-review-973-20261021-backup';BACKUP_MANIFEST='ae39c5c0fcc005c587def098193b770afd922bc6f7a45972f03031665f1384c9';BACKUP_RESULT='f0226c0a16749974e9d5fa3c678d553892012384ec8237987ab2157d3498481e'
-DEPLOY=BACKUP.with_name('factory-review-973-20261021-deploy-02');VERIFY=BACKUP.with_name('factory-review-973-20261021-verify-02');DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+DEPLOY=BACKUP.with_name('factory-review-973-20261021-deploy-02');VERIFY=BACKUP.with_name('factory-review-973-20261021-verify-02');DEPLOY_MANIFEST='efa24f18e839180f79f800071697a37b0092784539af961d6716e02bbd137765';DEPLOY_RESULT='e516d610a59455e18a5562d6f7c59105cd043b5c75b3ee981044f05339d0c25e'
 CORE_SHA='587812a638756e0eb7e7bcf1cb5042a5f7531d1b3c0e3200be77f894627b9b39'
-COMPARATOR_SHA='fa4e6f29f9918985f7675c81e833815cff3f39df513ae554faad0fe0a025ad35'
+COMPARATOR_SHA='39c2225d7cdaf74832d4f6a37820daa619f435afc70b18f70d0db756834b521d'
 SOURCE_MANIFEST_SHA='f613e7c1e856de4e2c59b12dbc8cef23d50a2e9a25591ffb79d1c45273d811bb'
 STAGE='preflight';CORE=None;OUT=None;ENV=None;DRAIN=None
 COMPOSE=['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production')]

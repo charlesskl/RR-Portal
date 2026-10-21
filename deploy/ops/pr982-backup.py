@@ -11,7 +11,7 @@ APP=ROOT/APP_PREFIX
 BASE='67385924fc40958701843411b3731d2eeb90b2ad'
 BASE_TREE='f0a724fb72b06e9cea3dc5aa1baa8bed629f127d'
 BRANCH='refs/heads/ops/pr-982-20261021'
-BACKUP_PIN=True
+BACKUP_PIN=False
 OUT=ROOT/'deploy/backups/pr-982-20261021-backup'
 DEPENDENCIES={
  'release-data-ops-library.py':'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5',

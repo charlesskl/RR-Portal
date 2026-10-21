@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '626f7b67fecadd2ced34cf576c7c615d633b06307e6b622542d95889302fa863'
+  SCOPED_RELEASE_HELPER_SHA256: '94f533e742ad4c9b4051928f05901214b03ef832a8fe14c887519c655f3af58e'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest

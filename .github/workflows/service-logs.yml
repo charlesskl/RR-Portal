@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  QC_RELEASE_WORKFLOW_PIN: 'true'
-  QC_RELEASE_HELPER_SHA256: '4370b0cfd3c34b0b9146edfdeb4a7fbceab02c1aa5a8f43a7c9aaeaa6c0b55b8'
+  QC_RELEASE_WORKFLOW_PIN: 'false'
+  QC_RELEASE_HELPER_SHA256: '588e14230f65642078364b9114e8bd5a35128061ad3c06a34afcdc70b6655549'
 jobs:
   fixed-qc-provider-release:
     runs-on: ubuntu-latest

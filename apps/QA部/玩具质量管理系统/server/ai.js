@@ -25,13 +25,22 @@ export function modelName() {
   return process.env.MOONSHOT_MODEL?.trim() || DEFAULT_MODEL;
 }
 
+function baseUrl() {
+  return (process.env.MOONSHOT_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
+}
+
 // Human-readable provider label stored on AI-generated drafts, derived from
 // the configured endpoint so data provenance stays accurate.
 export function providerName() {
-  const baseUrl = (process.env.MOONSHOT_BASE_URL || DEFAULT_BASE_URL).toLowerCase();
-  if (baseUrl.includes("dashscope")) return "aliyun-dashscope";
-  if (baseUrl.includes("openrouter")) return "openrouter";
-  return "moonshot";
+  let endpoint;
+  try { endpoint = new URL(baseUrl()); } catch { return "openai-compatible"; }
+  if (!["http:", "https:"].includes(endpoint.protocol)) return "openai-compatible";
+  const hostname = endpoint.hostname.toLowerCase().replace(/\.$/, "");
+  if (/^dashscope(?:-[a-z0-9]+)*\.aliyuncs\.com$/.test(hostname)) return "aliyun-dashscope";
+  const domainIs = (domain) => hostname === domain || hostname.endsWith(`.${domain}`);
+  if (domainIs("openrouter.ai")) return "openrouter";
+  if (domainIs("moonshot.cn") || domainIs("moonshot.ai")) return "moonshot";
+  return "openai-compatible";
 }
 
 function config() {
@@ -43,7 +52,7 @@ function config() {
   }
   return {
     apiKey,
-    baseUrl: (process.env.MOONSHOT_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ""),
+    baseUrl: baseUrl(),
     model: process.env.MOONSHOT_MODEL?.trim() || DEFAULT_MODEL,
   };
 }

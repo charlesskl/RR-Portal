@@ -1,7 +1,7 @@
 """Closed, read-only replay of one sealed synthetic candidate failure; no network/Docker."""
 import ast,base64,copy,hashlib,io,json,os,pathlib,re,socket,stat,subprocess,sys,types,zlib
 from unittest.mock import patch
-ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/qc-provider-429-20261021';PROBE_PIN=True
+ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/qc-provider-429-20261021';PROBE_PIN=False
 TARGET='b4c3763fe43e30c80c041c70e7a9f0750145d7b0';TREE='57085d6dcd242f154b4dbb199e54a71061abbd4d';IMAGE='sha256:b6c79a60b27494caa916ff2a1a1f3bea6f8d1d2c89b6e5fd7458b6dd52fdff42'
 ARCHIVE=ROOT/'deploy/backups/qc-provider-429-20261021-candidate-check';MANIFEST='347d8c0624be7dd070c4e0399413d4da87ae74baf97e04bb5b42cd7290ac1feb';RESULT='91baa345fe3d61b191cd23e093d75d2d46baeb0fea18f26a648aec218080b18c';OUT=ROOT/'deploy/backups/qc-provider-429-20261021-candidate-audit-02';QC='apps/QA部/QC成品报告系统'
 ERRORS={'AIConfigurationError','AIInputError','AITransportError','AIResponseError','AIValidationError','TimeoutError','functional_verification'}

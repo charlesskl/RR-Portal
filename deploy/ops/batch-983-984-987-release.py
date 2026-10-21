@@ -5,7 +5,7 @@ a time. Preserve literal environment, all business records and unrelated service
 Never restore databases, reset cursors, call models or authenticate to business APIs.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,signal,shutil,stat,subprocess,sys,tarfile,traceback,urllib.error,urllib.request
-PHASE='deploy'
+PHASE='verify'
 TARGET='73364c71ad44528db35197465e9cee0f3e4a2606'
 TREE='3275c7fadb9d14d0657196abf35c3a9f4a1906f4'
 SOURCE_MANIFEST_SHA='18c715dbf23b3a7fd73e8a0eb7d1e4295f7156e68e9946ef8b593178b6753381'
@@ -17,7 +17,7 @@ BACKUP=ROOT/'deploy/backups/batch-983-984-987-20261021-backup-v3'
 PREPARE=BACKUP.with_name('batch-983-984-987-20261021-prepare')
 DEPLOY=BACKUP.with_name('batch-983-984-987-20261021-deploy-resume-rrauth')
 VERIFY=BACKUP.with_name('batch-983-984-987-20261021-verify-resume-rrauth')
-BACKUP_MANIFEST='e62aba4d142b5636eaaf3b0da39a2f3e2c11999481a460bda867633c75a300ba';BACKUP_RESULT='0739ea4fc076600164a3120c5af771ed325dd19bfed411be0c21b25a471ed86c';PREPARE_MANIFEST='a98c6e90814ef8d2b75b91bc1197d18869080d0027cc921d19e2bc91e3d8bae5';PREPARE_RESULT='20de48d001617f3b6058ccffe0db965ae6d0d089ec1bb215b60cc004ddad42ca';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+BACKUP_MANIFEST='e62aba4d142b5636eaaf3b0da39a2f3e2c11999481a460bda867633c75a300ba';BACKUP_RESULT='0739ea4fc076600164a3120c5af771ed325dd19bfed411be0c21b25a471ed86c';PREPARE_MANIFEST='a98c6e90814ef8d2b75b91bc1197d18869080d0027cc921d19e2bc91e3d8bae5';PREPARE_RESULT='20de48d001617f3b6058ccffe0db965ae6d0d089ec1bb215b60cc004ddad42ca';DEPLOY_MANIFEST='3bead06e3fa8d08457f23ebc8dbac15fd82ab96430eb6452a86982dd27e3568b';DEPLOY_RESULT='104ca6c1ffb63e92d3f9d72a353981652ef68ce69c25748388e892be2d4a1ecd'
 FAILED_DEPLOY=BACKUP.with_name('batch-983-984-987-20261021-deploy')
 FAILED_DEPLOY_MANIFEST='5936f15eba0fa138e725fdce2a9fd5978db399de75389a8d891df1409e9b8e47'
 FAILED_DEPLOY_RESULT='94130ce746894c72a4b75e4fc4db1a1aa1d11ee67797431eb3e5e0874d7a395e'

@@ -1,4 +1,4 @@
-name: Batch 977 978 979 Resume Only Indo
+name: Batch 977 978 979 Finalize Existing Indo
 on:
   workflow_dispatch:
     inputs:
@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'b33871733df4d8483bcc6bc096e4a60fc884666541b12b45bc6dda9d72073265'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
+  SCOPED_RELEASE_HELPER_SHA256: '72d3461df5305042496dc52743c860bd3e04e936aac5c1f57c5ad96ae53a35cc'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -30,7 +30,7 @@ jobs:
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-977-978-979-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" =~ ^(deploy|verify)$ ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Prepare, switch and verify the three reviewed application scopes
+      - name: Verify existing five containers and clear only Indo maintenance
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -76,4 +76,7 @@ jobs:
             [[ "$(sha256sum "$scoped_release_tmp/batch-release-library.py" | cut -d ' ' -f1)" = c62a155b2b3b94c69f33f9f4d9aab4650b31747eea07243e486e9855b77127ac ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-977-978-979-indo-facts.json" > "$scoped_release_tmp/batch-977-978-979-indo-facts.json" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/batch-977-978-979-indo-facts.json" | cut -d ' ' -f1)" = adb7d9a60bff52d1b203ded3233a330375c4eddfb52336418313d696cad0eb74 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-977-978-979-resume-library.py" > "$scoped_release_tmp/batch-resume-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/batch-resume-library.py" | cut -d ' ' -f1)" = 38463f68e945bbf039433cf63ae20293fdbcb5c4d065c3be28713f3f3d70c507 ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/batch-977-978-979-reviewed-files.json" | cut -d ' ' -f1)" = 5a8d788ec323972c7f690e7e2823b186280d3017033302f6984fa16aa35b38ae ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

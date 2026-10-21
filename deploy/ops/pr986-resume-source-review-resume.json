@@ -1,0 +1,81 @@
+{
+  "allowedPhases": [
+    "resume",
+    "resume-verify"
+  ],
+  "checks": [
+    "four original archives, dependencies and failed-deploy/diagnostic evidence remain exact and sealed",
+    "fresh partial preflight validates old production and already-upgraded test source, full Config/PID1 env/HostConfig/mounts/labels",
+    "fresh production stopped-writer closed backup; test and other 44 inventory compared through snapshot",
+    "candidate runtime and exact reviewed source compared before clearing production-only maintenance",
+    "business data schema and typed rows, non-log auxiliary rows, files and metadata remain exact",
+    "retained log rows remain typed-identical; only configured retention may explain missing logs at sealed after-observation cutoff",
+    "new logs still require actual persisted candidate StartedAt through after-observation window",
+    "failure retains maintenance if current business data differs; safe rollback restores original image/environment without restoring databases",
+    "separate verify replays sealed closed-data/log contract, persistent configuration, source/public/runtime proofs"
+  ],
+  "dependencies": {
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "pr986-release-library.py": "3441d89e4ed33ef0ac2cfd20bfa1ab3618f92f5ae4904a61786707f604050688",
+    "pr986-reviewed-files.json": "41b2007efcf669f17d0f2061f2fd67cf6af99241c3abed1a05a802e38d04de40",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5"
+  },
+  "disposition": "CHECKED_PRODUCTION_RESUME_ONLY",
+  "draftSHA256": "ac45e77b05d0e9c790ca6ae6d2531817aac390f095a10a8140f1422784fc7f6d",
+  "findings": [],
+  "gatesFrozenFalse": true,
+  "mechanicalActivationBoundary": "Root must separately review exact phase-specific helper hash, transport/workflow SHA, target/tree, all prior archive seals, successful resume seals for resume-verify, and allowed execution scope before activation. This source receipt performs no production or Git operations.",
+  "originalSourceReviewFrozen": {
+    "path": "work/pr986-release-independent-review.json",
+    "sha256": "82ee6dc5d3291adfa3f71c5547dfa71800f1c3e02df343368ce002eba7ce8bb9"
+  },
+  "resolvedFindings": [
+    "verify replays both auxiliary/data SQLite file paths exactly",
+    "original-ID recovery requires unchanged original labels; recreated IDs require exact pinned compose labels",
+    "owned maintenance flag verified by path, private mode, empty bytes and original inventory",
+    "normal compose production five variables and complete normalized test declaration checked before candidate and in final verify"
+  ],
+  "retentionInterpretation": {
+    "arbitraryToleranceAdded": false,
+    "cutoffBasis": "sealed after-snapshot observedUTC minus unchanged configured maxDays",
+    "deletionActorOrExactDeletionTimesProven": false,
+    "newRowWindow": "actual persisted candidate StartedAt .. sealed after-snapshot observedUTC",
+    "primarySource": "PocketBase v0.39.6 base.go OnSettingsReload uses types.NowDateTime().AddDate and log_query.go DeleteOldLogs compares created <= cutoff"
+  },
+  "scope": {
+    "allowedProductionEnvironmentVariables": [
+      "FACTORY_REVIEW_AI_PROVIDER",
+      "FACTORY_REVIEW_AI_ENABLED",
+      "FACTORY_REVIEW_AI_API_KEY",
+      "FACTORY_REVIEW_AI_MODEL",
+      "FACTORY_REVIEW_AI_BASE_URL"
+    ],
+    "buildsPerformed": false,
+    "businessAPIMutationsPerformed": false,
+    "databaseRestorationOrSequenceResetPerformed": false,
+    "modelCallsPerformed": false,
+    "other44ContainersChanged": false,
+    "recreatedService": "factory-review",
+    "testServiceRecreated": false
+  },
+  "target": "97d563e93aca3d9e3c0bc512dd622d6a3002e710",
+  "tree": "ad906e8b24b81df8e7ade91d15c5e9ab4ab839ab",
+  "validation": {
+    "actualDiagnosisReview": {
+      "path": "work/pr986-diagnose-result-independent-review.json",
+      "sha256": "06d223ee74667747b1652ac5fba6f266cd8738ea68a70c0233d85c9d7a481130"
+    },
+    "authorTests": {
+      "passed": 12,
+      "path": "work/test-pr986-resume-local.py",
+      "sha256": "851f4d1dbd6e70e7be24f44e327873246f9e2217f73a8314646fb97d0e17f0f2"
+    },
+    "independentTests": {
+      "passed": 6,
+      "path": "work/test-pr986-resume-independent.py",
+      "sha256": "a8a6dd4148803e630deee76ca46bccb5b82e7e655e481df2ed805d2ef30f5736"
+    }
+  }
+}

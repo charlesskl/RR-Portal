@@ -2,7 +2,7 @@ name: PR 986 Factory Review Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [diagnose]}
+      mode: {type: choice, required: true, options: [resume]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'f2a3f011cd201a6a0639c18daee937aeb0fb699434cd99f2a1dc620f723a9424'
+  SCOPED_RELEASE_HELPER_SHA256: '1c15db6d19d50ebe117080c40abaca22f14c4ba7f70a96d8193c4d209b7fef47'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-986-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-986-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = resume ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed factory review diagnose
+      - name: Run only reviewed factory review resume
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,19 +48,29 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-986-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-986-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = resume && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-986-20261021:refs/remotes/origin/ops/pr-986-20261021 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-986-20261021)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/pr986-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr986-log-diagnose.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = f2a3f011cd201a6a0639c18daee937aeb0fb699434cd99f2a1dc620f723a9424 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr986-log-diagnose-context.json" > "$scoped_release_tmp/pr986-log-diagnose-context.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr986-log-diagnose-context.json" | cut -d ' ' -f1)" = 41bbcff49775a4562863f45933e2888f344136d65d3dbfa59ec6b0159196a38e ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr986-log-diagnose-source-review.json" > "$scoped_release_tmp/pr986-log-diagnose-source-review.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr986-log-diagnose-source-review.json" | cut -d ' ' -f1)" = 1210622194eee8620c8b9e84ca1059646775744259b0228e207088ae1dedfd6d ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr986-resume.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 1c15db6d19d50ebe117080c40abaca22f14c4ba7f70a96d8193c4d209b7fef47 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-host-config-library.py" > "$scoped_release_tmp/batch-host-config-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/batch-host-config-library.py" | cut -d ' ' -f1)" = bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/factory-review-backup-library.py" > "$scoped_release_tmp/factory-review-backup-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/factory-review-backup-library.py" | cut -d ' ' -f1)" = 79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr986-release-library.py" > "$scoped_release_tmp/pr986-release-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr986-release-library.py" | cut -d ' ' -f1)" = 3441d89e4ed33ef0ac2cfd20bfa1ab3618f92f5ae4904a61786707f604050688 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr986-resume-context-resume.json" > "$scoped_release_tmp/pr986-resume-context-resume.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr986-resume-context-resume.json" | cut -d ' ' -f1)" = 42602f5a0b42ad921d02a109aa6cde3b6c6c1f08ec6594af95184207876aa852 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr986-resume-source-review-resume.json" > "$scoped_release_tmp/pr986-resume-source-review-resume.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr986-resume-source-review-resume.json" | cut -d ' ' -f1)" = 26a63bd8df3b631dd40993b8eb4a7b5806594793c83da408f950ce98ab112821 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr986-reviewed-files.json" > "$scoped_release_tmp/pr986-reviewed-files.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr986-reviewed-files.json" | cut -d ' ' -f1)" = 41b2007efcf669f17d0f2061f2fd67cf6af99241c3abed1a05a802e38d04de40 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

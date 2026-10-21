@@ -1,6 +1,6 @@
 """One read-only OpenRouter key metadata GET; no AI request or config change."""
 import base64,datetime,hashlib,importlib.util,json,os,pathlib,re,sys
-ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/qc-provider-429-20261021';TARGET='25a76f71e556f77a8aadb031823b392832d2354a';AUDIT_PIN=False
+ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/qc-provider-429-20261021';TARGET='25a76f71e556f77a8aadb031823b392832d2354a';AUDIT_PIN=True
 LIBRARY_SHA='88eb0bab5eb7c6972fcdd926423ff035296617c53810165d7b1a06ff19d9db0e';OUT=ROOT/'deploy/backups/qc-provider-429-20261021-config-audit';D=None;STAGE='entry'
 def need(value):
  if not value:raise RuntimeError('QC_KEY_METADATA_AUDIT_REJECTED')

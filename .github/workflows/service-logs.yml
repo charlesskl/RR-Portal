@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  QC_AUDIT_WORKFLOW_PIN: 'false'
-  QC_AUDIT_HELPER_SHA256: '14d870f4630d63992d74e93b6d6c1522f7e9ca417c331d91e1ea74239682de78'
+  QC_AUDIT_WORKFLOW_PIN: 'true'
+  QC_AUDIT_HELPER_SHA256: 'd8c381d2fa0bc7ae1245ee32832fc14cd6a4c6e96733785b616976ed9ed730d7'
 jobs:
   fixed-qc-key-audit:
     runs-on: ubuntu-latest

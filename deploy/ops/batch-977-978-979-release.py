@@ -5,7 +5,7 @@ Never rebuild or recreate the four completed containers, restore data, or call A
 import contextlib,copy,datetime,hashlib,importlib.util,json,os,pathlib,re,signal,stat,sys,time,traceback
 ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-977-978-979-20261021'
 BASE='b4c3763fe43e30c80c041c70e7a9f0750145d7b0';TARGET='9b890cc016da403f929f8a7aaeddb878d3de24c5';TREE='e322834bbbd43082854d8c564192c3ca1e097534'
-DEPLOY_PIN=False;VERIFY_PIN=False
+DEPLOY_PIN=True;VERIFY_PIN=False
 RELEASE_SHA='c62a155b2b3b94c69f33f9f4d9aab4650b31747eea07243e486e9855b77127ac'
 FAILED=ROOT/'deploy/backups/batch-977-978-979-20261021-deploy';FAILED_MANIFEST='afd8656605cfa5c92acf1bd787262140599cc2efa6c0750161f46995b76c1a26';FAILED_RESULT='bbc4f7be2f9a991c3fee22653a41bf5cb91f0d75d9804e554c02882d02e7a118'
 RESUMED=FAILED.with_name('batch-977-978-979-20261021-resume');VERIFIED=FAILED.with_name('batch-977-978-979-20261021-verify-resumed');RESUMED_MANIFEST='';RESUMED_RESULT=''

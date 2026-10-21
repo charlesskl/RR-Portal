@@ -1,6 +1,6 @@
 """Fixed sealed archives only: no live DB, network, process or maintenance access."""
 import collections,contextlib,datetime,hashlib,importlib.util,json,os,pathlib,re,signal,sys,traceback
-ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';DIAG_PIN=False
+ROOT=pathlib.Path('/opt/rr-portal');BRANCH='refs/heads/ops/batch-969-970-972-974-20261021';DIAG_PIN=True
 TARGET='dfcdf751cae42fdd1731729dd662fce041c28caf';TREE='d5a107e898fe35066416fa0431ccd92400467875';RELEASE_SHA='2db18fac4f09a6dc4ae64c07fc248e9cd575ed5e06eebabc77de58e1584254e7'
 PREFIX=ROOT/'deploy/backups';OUT=PREFIX/'batch-969-970-972-974-20261021-data-diagnose-01';R=None;STAGE='entrypoint'
 ARCHIVES={

@@ -43,6 +43,7 @@ export default function ProductsPage() {
   const [savingDetail, setSavingDetail] = useState(false)
   const [activeTab, setActiveTab] = useState<'mold' | 'mat'>('mold')
   const [dicts, setDicts] = useState<Dictionaries>({ hs: [], suppliers: [], translations: [] })
+  const dictionaryRequestRef = useRef(0)
   const [drawerFull, setDrawerFull] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
   const currentProductCode = Form.useWatch('code', form)
@@ -58,7 +59,12 @@ export default function ProductsPage() {
     try { const { data } = await api.get<string[]>('/customers'); setCustomers(data || []) } catch {}
   }
   async function loadDicts() {
-    try { const { data } = await api.get<Dictionaries>('/dictionaries'); setDicts({ hs: data.hs || [], suppliers: data.suppliers || [], translations: data.translations || [] }) } catch {}
+    const request = ++dictionaryRequestRef.current
+    try {
+      const { data } = await api.get<Dictionaries>('/dictionaries')
+      if (request !== dictionaryRequestRef.current) return
+      setDicts({ hs: data.hs || [], suppliers: data.suppliers || [], translations: data.translations || [] })
+    } catch {}
   }
   useEffect(() => { loadCustomers(); loadDicts() }, [])
   useEffect(() => { loadList() }, [loadList])
@@ -424,7 +430,8 @@ export default function ProductsPage() {
                 onChange={setMaterials}
                 dicts={dicts}
                 onSuppliersChanged={(profile) => {
-                  // 档案保存已成功，先让当前显示和立即保存使用该结果，再刷新字典。
+                  // 档案保存已成功，先失效旧请求，再同步当前显示与立即保存使用的资料。
+                  dictionaryRequestRef.current++
                   setDicts(current => {
                     const matches = (entry: SupplierDict) => profile.id != null
                       ? entry.id === profile.id

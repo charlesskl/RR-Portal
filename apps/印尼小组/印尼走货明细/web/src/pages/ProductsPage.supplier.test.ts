@@ -59,6 +59,7 @@ describe('product supplier-profile save boundary', () => {
     let dicts: Dictionaries = { suppliers: [supplier, other], hs: [], translations: [] }
     let refreshes = 0
     const parent = compile(callback('onSuppliersChanged'), {
+      dictionaryRequestRef: { current: 0 },
       setDicts: (update: (current: Dictionaries) => Dictionaries) => { dicts = update(dicts) },
       loadDicts: () => { refreshes++; return new Promise<void>(() => {}) },
     })
@@ -80,6 +81,7 @@ describe('product supplier-profile save boundary', () => {
   it('appends a newly created profile without changing other archives', () => {
     let dicts: Dictionaries = { suppliers: [supplier], hs: [], translations: [] }
     const parent = compile(callback('onSuppliersChanged'), {
+      dictionaryRequestRef: { current: 0 },
       setDicts: (update: (current: Dictionaries) => Dictionaries) => { dicts = update(dicts) }, loadDicts: () => {},
     })
     const created = { keyword: 'new-supplier', full: 'New Supplier', customs: 'New Customs' }
@@ -112,4 +114,47 @@ describe('product supplier-profile save boundary', () => {
     assert.equal(payload.customsCompany, displayed)
     assert.equal(JSON.stringify(row), before)
   })
+  it('does not let an older dictionary response overwrite a committed profile', async () => {
+    const loadNode = find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'loadDicts')
+    for (const order of ['old-before-fresh', 'fresh-before-old', 'fresh-fails'] as const) {
+      let rows: Material[] = [{ id: 1, supplier: supplier.keyword, customs_company: supplier.customs }]
+      let dicts: Dictionaries = { suppliers: [supplier], hs: [], translations: [] }
+      const dictionaryRequestRef = { current: 0 }
+      type Response = { data: Dictionaries }
+      const requests: { resolve: (value: Response) => void; reject: (error: Error) => void }[] = []
+      const pendingLoads: Promise<void>[] = []
+      const setDicts = (next: Dictionaries | ((current: Dictionaries) => Dictionaries)) => {
+        dicts = typeof next === 'function' ? next(dicts) : next
+      }
+      const loader = compile(loadNode, {
+        dictionaryRequestRef, setDicts,
+        api: { get: () => new Promise<Response>((resolve, reject) => { requests.push({ resolve, reject }) }) },
+      })
+      const loadDicts = () => { const pending = loader(); pendingLoads.push(pending); return pending }
+      const parent = compile(callback('onSuppliersChanged'), { dictionaryRequestRef, setDicts, loadDicts })
+      const onSaved = compile(callback('onSaved'), {
+        i: 0, rows, onChange: (next: Material[]) => { rows = next }, supplierCustomsCompany, onSuppliersChanged: parent,
+      })
+      const oldLoad = loadDicts()
+      const committed = { ...supplier, customs: 'Committed New Customs' }
+      onSaved(committed, supplier)
+      assert.equal(requests.length, 2)
+      const oldResponse = { data: { suppliers: [supplier], hs: [], translations: [] } }
+      const freshResponse = { data: { suppliers: [committed], hs: [], translations: [] } }
+      if (order === 'old-before-fresh') {
+        requests[0].resolve(oldResponse); await oldLoad
+        assert.equal(dicts.suppliers[0].customs, committed.customs)
+        requests[1].resolve(freshResponse); await pendingLoads[1]
+      } else {
+        if (order === 'fresh-fails') requests[1].reject(new Error('Synthetic refresh unavailable'))
+        else requests[1].resolve(freshResponse)
+        await pendingLoads[1]
+        requests[0].resolve(oldResponse); await oldLoad
+      }
+      assert.equal(dicts.suppliers[0].customs, committed.customs)
+      const [payload] = await actualSave(rows, dicts)
+      assert.equal(payload.customsCompany, committed.customs)
+    }
+  })
+
 })

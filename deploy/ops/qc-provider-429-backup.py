@@ -2,7 +2,7 @@
 All original environment and business data stay unchanged. Gate off.
 """
 import contextlib,copy,hashlib,importlib.util,json,os,pathlib,re,shutil,signal,stat,sys,traceback
-ROOT=pathlib.Path('/opt/rr-portal');BASE='25a76f71e556f77a8aadb031823b392832d2354a';BRANCH='refs/heads/ops/qc-provider-429-20261021';BACKUP_PIN=True
+ROOT=pathlib.Path('/opt/rr-portal');BASE='25a76f71e556f77a8aadb031823b392832d2354a';BRANCH='refs/heads/ops/qc-provider-429-20261021';BACKUP_PIN=False
 OUT=ROOT/'deploy/backups/qc-provider-429-20261021-backup';QC='apps/QA部/QC成品报告系统';SERVICES=('qc-report','qc-report-worker');STORAGE={'qc-report-data':QC+'/data','qc-report-storage':QC+'/storage'}
 IMAGES={'qc-report':'sha256:194d90d3bef64f5d79cf89566cea6dbbbe5ba6cfee1c04778dfe7edc74471c54','qc-report-worker':'sha256:13be768463dc49fb063394df2c48bcd87b66509e858da362cf414b3c14a44b2b'}
 LEGACY='7ce02db904cdd769ecd35148d50be15ec4fce210';FIXED=('docker-compose.cloud.yml','nginx/nginx.cloud.conf','deploy/service-maintenance.sh',QC+'/Dockerfile',QC+'/.dockerignore')

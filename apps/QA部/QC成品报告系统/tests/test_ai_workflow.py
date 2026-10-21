@@ -23,6 +23,7 @@ from app import (
     Report,
     ReportPhotoSlot,
     ReportVersion,
+    Setting,
     TestResult,
     create_app,
     file_sha256,
@@ -160,6 +161,25 @@ class AIAssistedWorkflowTest(unittest.TestCase):
                 data[f"test_result_{test.id}"] = "FAIL" if test.name == failed_name else "N/A" if test.name == na_name else "PASS"
         response = self.client.post(f"/reports/{report_id}/inspection", data=data)
         self.assertEqual(response.status_code, 302)
+
+    def test_po_and_photo_workers_use_the_same_database_config(self):
+        db = self.app.extensions["db_session"]()
+        db.add(Setting(key="ai_openai_model", value="synthetic-worker-model"))
+        db.commit()
+        db.close()
+        with patch("ai_service.AIService", wraps=AIService) as service:
+            report_id = self.create_ai_report()
+            self.upload_required_slots(report_id)
+            response = self.client.post(
+                f"/api/reports/{report_id}/analysis-runs",
+                headers={"X-CSRF-Token": self.csrf()},
+            )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(service.call_count, 2)
+        for call in service.call_args_list:
+            self.assertEqual(call.args[0].model, "synthetic-worker-model")
+        run = self.client.get(f"/api/analysis-runs/{response.get_json()['analysis_run_id']}").get_json()
+        self.assertEqual(run["status"], "completed")
 
     def test_complete_ai_qc_flow_and_unified_immutable_pdf(self):
         report_id = self.create_ai_report()

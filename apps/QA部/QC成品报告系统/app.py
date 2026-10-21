@@ -10,10 +10,15 @@ import os
 import secrets
 import shutil
 import uuid
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlsplit
 
+from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from flask import (
     Flask,
     abort,
@@ -861,6 +866,126 @@ def setting(db, key: str, default: str = "") -> str:
     return item.value if item else default
 
 
+AI_SETTING_FIELDS = {
+    "ai_openai_base_url": "base_url",
+    "ai_openai_model": "model",
+    "ai_openai_api_format": "api_format",
+    "ai_openai_timeout_seconds": "timeout_seconds",
+    "ai_openai_max_output_tokens": "max_output_tokens",
+}
+AI_KEY_SETTING = "ai_openai_api_key_encrypted"
+AI_SETTING_KEYS = {*AI_SETTING_FIELDS, AI_KEY_SETTING}
+
+
+def _ai_origin(base_url: str) -> tuple[str, str, int | None]:
+    parsed = urlsplit(base_url)
+    return parsed.scheme.lower(), (parsed.hostname or "").lower(), parsed.port or (443 if parsed.scheme == "https" else 80)
+
+
+def _ai_key_cipher(application: Flask) -> Fernet:
+    secret = application.config["SECRET_KEY"]
+    if not secret or secret == "dev-change-this-secret":
+        raise ValueError("请先为服务器配置独立的 SECRET_KEY。")
+    secret = secret.encode() if isinstance(secret, str) else secret
+    # Domain separation keeps this encryption key independent of Flask sessions.
+    derived = HKDF(
+        algorithm=hashes.SHA256(), length=32, salt=None,
+        info=b"qc-report/ai-settings/fernet/v1",
+    ).derive(secret)
+    return Fernet(base64.urlsafe_b64encode(derived))
+
+
+def ai_runtime_config(db, application: Flask, *, values: dict | None = None):
+    """Resolve one immutable task-local config without modifying process env."""
+    from ai_service import AIConfig, AIConfigurationError
+
+    base = AIConfig.from_env()
+    if values is None:
+        values = dict(db.execute(select(Setting.key, Setting.value).where(Setting.key.in_(AI_SETTING_KEYS))).all())
+    overrides = {}
+    for key, field in AI_SETTING_FIELDS.items():
+        value = values.get(key, "").strip()
+        if value:
+            try:
+                overrides[field] = int(value) if field in {"timeout_seconds", "max_output_tokens"} else value
+            except ValueError:
+                raise AIConfigurationError("AI 超时和输出上限必须是整数。") from None
+    config = replace(base, **overrides)
+    if not 10 <= config.timeout_seconds <= 900:
+        raise AIConfigurationError("AI 超时必须为 10 至 900 秒。")
+    if not 1000 <= config.max_output_tokens <= 128000:
+        raise AIConfigurationError("AI 最大输出 Token 必须为 1000 至 128000。")
+    if not config.model or len(config.model) > 200 or any(ord(char) < 32 for char in config.model):
+        raise AIConfigurationError("AI 模型名称必须为 1 至 200 个有效字符。")
+    if len(config.base_url) > 2048 or any(char.isspace() or ord(char) < 32 for char in config.base_url):
+        raise AIConfigurationError("AI 接口地址无效。")
+    # Validate the URL/format before origin comparisons; never include credentials in errors.
+    try:
+        replace(config, api_key="validation-only").validate()
+    except ValueError:
+        raise AIConfigurationError("AI 接口地址无效。") from None
+    try:
+        origin = _ai_origin(config.base_url)
+        encrypted = values.get(AI_KEY_SETTING)
+        if encrypted:
+            payload = json.loads(_ai_key_cipher(application).decrypt(encrypted.encode()))
+            if tuple(payload["origin"]) != origin:
+                raise ValueError("key origin mismatch")
+            config = replace(config, api_key=payload["key"])
+        elif origin != _ai_origin(base.base_url):
+            raise ValueError("server key cannot be sent to a different origin")
+    except (InvalidToken, ValueError, KeyError, TypeError):
+        raise AIConfigurationError("AI 密钥与接口地址不匹配或无法解密，请重新填写密钥，或恢复服务器 AI 设置。") from None
+    return config
+
+
+def save_ai_settings(db, application: Flask, form) -> None:
+    """Validate the complete candidate before atomically saving nonempty overrides."""
+    from ai_service import AIConfig, AIConfigurationError
+
+    values = dict(db.execute(select(Setting.key, Setting.value).where(Setting.key.in_(AI_SETTING_KEYS))).all())
+    for key in AI_SETTING_FIELDS:
+        value = form.get(key, "").strip()
+        if value:
+            values[key] = value
+    new_key = form.get("ai_openai_api_key", "").strip()
+    if new_key:
+        if not new_key.isascii() or len(new_key) > 4096 or any(char.isspace() or ord(char) < 32 for char in new_key):
+            raise AIConfigurationError("API Key 格式无效，请重新粘贴完整密钥。")
+        # Determine the candidate URL without borrowing the server's credential.
+        base_url = values.get("ai_openai_base_url") or AIConfig.from_env().base_url
+        try:
+            payload = json.dumps({"key": new_key, "origin": _ai_origin(base_url)})
+            values[AI_KEY_SETTING] = _ai_key_cipher(application).encrypt(payload.encode()).decode()
+        except ValueError:
+            raise AIConfigurationError("AI 接口地址或服务器加密配置无效。") from None
+    candidate = ai_runtime_config(db, application, values=values)
+    candidate.validate()
+    for key, value in values.items():
+        item = db.get(Setting, key) or Setting(key=key, value="")
+        item.value = value
+        db.add(item)
+
+
+def ai_settings_view(db, application: Flask) -> dict:
+    """Only nonsecret values and credential presence may enter template context."""
+    from ai_service import AIConfig, AIConfigurationError
+
+    values = dict(db.execute(select(Setting.key, Setting.value).where(Setting.key.in_(AI_SETTING_KEYS))).all())
+    error = ""
+    try:
+        config = ai_runtime_config(db, application, values=values)
+    except AIConfigurationError as exc:
+        error = str(exc)
+        config = AIConfig.from_env()
+    return {
+        "values": {key: values.get(key) or str(getattr(config, field)) for key, field in AI_SETTING_FIELDS.items()},
+        "key_configured": bool(values.get(AI_KEY_SETTING) or config.api_key),
+        "has_overrides": bool(values),
+        "error": error,
+    }
+
+
 def po_snapshot(db, po: PurchaseOrder) -> tuple[dict, dict]:
     customer = db.get(Customer, po.customer_id)
     product = db.get(Product, po.product_id)
@@ -1169,7 +1294,7 @@ def process_po_import_job(import_id: int, application: Flask | None = None):
         from ai_service import AIService
 
         source_path = verified_storage_file(application.config["STORAGE_ROOT"], po_import.file_path, po_import.checksum)
-        result = AIService().extract_po(source_path, filename=po_import.original_name, mime_type=po_import.mime_type)
+        result = AIService(ai_runtime_config(db, application)).extract_po(source_path, filename=po_import.original_name, mime_type=po_import.mime_type)
         payload = result.data
         metadata = result.metadata
 
@@ -1459,7 +1584,7 @@ def process_analysis_run_job(run_id: int, application: Flask | None = None):
             for slot in db.scalars(select(ReportPhotoSlot).where(ReportPhotoSlot.report_id == report.id).order_by(ReportPhotoSlot.sort_order, ReportPhotoSlot.id))
         ]
         reference = {**json_load(report.product_snapshot), "packing": json_load(report.packing_snapshot)}
-        result = AIService().inspect_photos(photo_inputs, po_reference=reference, checklist=checklist)
+        result = AIService(ai_runtime_config(db, application)).inspect_photos(photo_inputs, po_reference=reference, checklist=checklist)
         metadata = result.metadata
 
         db.refresh(report)
@@ -3258,6 +3383,17 @@ def register_routes(app: Flask):
                     flash("密码至少需要 10 位。", "error")
                     return redirect(url_for("admin"))
                 g.db.add(User(username=request.form["username"].strip().lower(), name=request.form["name"].strip(), role=request.form.get("role", "qc"), password_hash=generate_password_hash(password)))
+            elif action == "ai_settings":
+                from ai_service import AIConfigurationError
+                try:
+                    save_ai_settings(g.db, app, request.form)
+                except AIConfigurationError as exc:
+                    g.db.rollback()
+                    flash(str(exc), "error")
+                    return redirect(url_for("admin"))
+            elif action == "ai_settings_reset":
+                for item in g.db.scalars(select(Setting).where(Setting.key.in_(AI_SETTING_KEYS))):
+                    g.db.delete(item)
             elif action == "settings":
                 for key in ("company_name", "report_title", "required_photo_categories"):
                     item = g.db.get(Setting, key) or Setting(key=key, value="")
@@ -3286,7 +3422,8 @@ def register_routes(app: Flask):
             defect_categories=list(g.db.scalars(select(DefectCategory).order_by(DefectCategory.sort_order, DefectCategory.id)).all()),
             photo_checklist_templates=list(g.db.scalars(select(PhotoChecklistTemplate).order_by(PhotoChecklistTemplate.sort_order, PhotoChecklistTemplate.id)).all()),
             users=list(g.db.scalars(select(User).order_by(User.username)).all()),
-            settings={item.key: item.value for item in g.db.scalars(select(Setting)).all()},
+            settings={item.key: item.value for item in g.db.scalars(select(Setting).where(~Setting.key.like("ai_openai_%"))).all()},
+            ai_settings=ai_settings_view(g.db, app),
         )
 
     @app.get("/admin/audit")

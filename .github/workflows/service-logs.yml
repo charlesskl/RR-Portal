@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  QC_PREPARE_WORKFLOW_PIN: 'false'
-  QC_PREPARE_HELPER_SHA256: '46ed834714a2414b51429065103779042c2e3d10eeb1b358e2c47f04271c4d81'
+  QC_PREPARE_WORKFLOW_PIN: 'true'
+  QC_PREPARE_HELPER_SHA256: '721f58bfa610853f140c3fff7f04adb9d8c370b64cf22bbab0381a749ec40934'
 jobs:
   fixed-qc-candidate-prepare:
     runs-on: ubuntu-latest

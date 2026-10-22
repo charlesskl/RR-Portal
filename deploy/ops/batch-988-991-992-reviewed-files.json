@@ -1,0 +1,12 @@
+{
+  "apps/PMC跟仓管/加工厂月度评审管理制度/pb_hooks/analysis_ai.pb.js": "1618ed768c7433ca16acca9fa9e3958c6e21964fb89e24dfe7435969d040f260",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/src/components/AnalysisAiPanel.vue": "b352049ec470c87278f7656ed4b1c53f57dcafe7ce70ee9cb02c20cf23bebf91",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/tests/AnalysisAiPanel.spec.ts": "79ce78c6a974690a8f909768fb6ea442e8962d48fe34c6a03556f02a7ef2ce56",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/tests/analysisAiBackend.integration.mjs": "c53b403699e7e684de46748c2940f86054eb817b09ae71ffd86e1283d5b62b3d",
+  "apps/业务部/内部报价系统/frontend/mixed-molds.js": "d0f70d40e5750e1c7c6c627c988e7de9174d568445b3c0433a74285548e44562",
+  "apps/业务部/内部报价系统/frontend/quote.html": "a81115d172cba67bbdc30b628ea0bd500b7a7fff01cc5e418318220d492047cf",
+  "apps/业务部/内部报价系统/frontend/styles.css": "3daaecca6c5395892228eac71ad6d3d2300ffc4be7f5b0fe656a26854311e066",
+  "apps/业务部/内部报价系统/frontend/summary.html": "9306b565ccc8b92a502aa90ebed1d080e7ce6e3f013f54b76c4f1b4badfcb883",
+  "apps/业务部/内部报价系统/tests/mixed-molding-parameters-api.test.js": "133f71072e5efaf29fb9c1dc54915872de141c70cdc7e544240fb44ad178dda8",
+  "apps/业务部/内部报价系统/tests/mixed-molding-parameters.test.js": "05c91801ee479421a08a149ac6dbda227ea9c2b1ac65e3572fa050477ddc6853"
+}

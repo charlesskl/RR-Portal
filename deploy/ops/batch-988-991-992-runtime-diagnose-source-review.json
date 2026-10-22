@@ -1,0 +1,52 @@
+{
+  "disposition": "CHECKED_READONLY_RUNTIME",
+  "independent": true,
+  "reviewer": "/root/pr984_review",
+  "reviewedAtUTC": "2026-10-22T06:50:54.188524+00:00",
+  "draftSHA256": "045effa64a93b7243df6d49fc516e26826566b0c45aa03749402196e50d74bac",
+  "transportSHA256": "dcbc933c1a22ff3787323d689e7db732531eb6cf1b600dfff3a50762ff773715",
+  "gateFrozenFalse": true,
+  "target": "26a009541efeb99588e84c289cfe8463f18f6f4a",
+  "tree": "603d8c20730da455cc33e3e186754e63a9af4ab0",
+  "dependencies": {},
+  "checks": [
+    "Read full118-line stdlib helper and full diagnostic transport; transport delta matches reviewed readonly log transport. Only PIN is activatable; fixed target26a/tree603 and known failed parent8409 remain pinned.",
+    "Exact successful backup2/prepare and failed deploy manifest/result seals are literal-bound. Full archives are private canonical regular files, every manifest entry digest checked before and after, including nested manifests. Candidate runtime is selected by sealed exact candidate CID/image/StartedAt from failed phase and immutable Config/HostConfig/Mounts equivalence across observations.",
+    "Only docker ps/inspect, readonly tar of expected application source files, git ref/head/tree and environment/maintenance metadata are read. No HTTP, database query, business command, model call, container signal/start/create/rebuild, configuration or business data change is introduced. Only new private diagnostic output is written.",
+    "Output compares original-to-candidate and original-to-recovered HostConfig by fixed technical field/type/hash, existing emptyDNS normalization separately, Mounts hashes/exact equality ignoring array order, Binds ordered and multiset equality. Safe raw values are limited to exact static quote source/destination options, one fixed network name, emptyDNS or emptyports; unknown values, environment and source contents remain suppressed.",
+    "Current two completed factory CIDs/images/StartedAt and full prepared source files must match original successful cutovers; quote must use recovered old immutable image/source. Exact43others, all46runtime stability, original configured environment maps, envfile mode/owner/hash and maintenance inventory are verified before and after. This does not relax the failed live deployment contract or infer its cause.",
+    "Transport uses separate diagnostic state and O_EXCL dispatch reservation, exact SHA/fingerprint/branch/first attempt, checked plan and canonical single receipt. Exact4published paths include restoring failed active29ac release to exact reviewed inertd6eb; failed state2/phase/archive/reservation stay untouched. Normal workflow must remain active and is never disabled or changed.",
+    "Failed deploy39734938059 canonical result digest revalidated: factory2 completed, quote complete-hostconfig-mounts failed and recoveredWithoutDataRestore=true. It is not accepted as a successful deploy prior seal and is not a basis for automatic rerun/verify."
+  ],
+  "offlineChecks": {
+    "independentHelperChecks": {
+      "passed": 3,
+      "failed": 0,
+      "coverage": [
+        "False gate rejects before umask/subprocess",
+        "Binds order and DNS normalization utility plus unknown sentinel suppression",
+        "Actual tar parser exact source bytes/hash and wrong digest rejects; only fake run"
+      ]
+    },
+    "independentTransportMetadata": {
+      "positivePassed": 1,
+      "negativePassed": 6,
+      "coverage": [
+        "wrong branch",
+        "wrong SHA",
+        "wrong event",
+        "wrong workflow path",
+        "attempt2",
+        "bool runID"
+      ]
+    },
+    "authorEvidence": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-988-991-992-runtime-diagnose-author-evidence.json",
+      "sha256": "370a3f070249cfcbdaa93d0ce123839a4f305174c56c7c3fc4bfbe703cee1286",
+      "reportedPassed": 5,
+      "independentRerunScope": "Three narrow utility/privacy/gate/source-parser checks; synthetic sealed archive coverage reviewed from author evidence without repeating a broader suite."
+    },
+    "realCommandsHTTPDatabaseOrGitHubCalls": false
+  },
+  "remainingBlockers": []
+}

@@ -1,8 +1,8 @@
-name: Batch Runtime Readonly Diagnosis
+name: Quote Continuation and Batch Verification
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [diagnose]}
+      mode: {type: choice, required: true, options: [deploy]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '79d158202fd9d32604ca2c669b90683800e5e707963faf313c04206b64d221f9'
+  SCOPED_RELEASE_HELPER_SHA256: '5644039e824e9632ea18219e60a16d9fb27881c9860a7533e34bf753200dcaf1'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-988-991-992-20261022 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-988-991-992-20261022 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed runtime collection diagnose
+      - name: Run only reviewed batch deploy
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,15 +48,33 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-988-991-992-20261022 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-988-991-992-20261022 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/batch-988-991-992-20261022:refs/remotes/origin/ops/batch-988-991-992-20261022 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/batch-988-991-992-20261022)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            scoped_release_tmp=$(mktemp -d /tmp/batch-runtime-scoped.XXXXXX)
+            scoped_release_tmp=$(mktemp -d /tmp/batch-988-991-992-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-runtime-diagnose.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 79d158202fd9d32604ca2c669b90683800e5e707963faf313c04206b64d221f9 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-runtime-diagnose-source-review.json" > "$scoped_release_tmp/batch-988-991-992-runtime-diagnose-source-review.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/batch-988-991-992-runtime-diagnose-source-review.json" | cut -d ' ' -f1)" = 611c917fdbec4eac0c492c809da69507e71f0fe10c56bd9b010572f79338450b ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-continue-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 5644039e824e9632ea18219e60a16d9fb27881c9860a7533e34bf753200dcaf1 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-backup-library.py" > "$scoped_release_tmp/batch-988-991-992-backup-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/batch-988-991-992-backup-library.py" | cut -d ' ' -f1)" = 08a98eb61829893d00be2f24e97629136929465a2d45e23ed38dbc45248db5df ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-continue-source-review-deploy.json" > "$scoped_release_tmp/batch-988-991-992-continue-source-review-deploy.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/batch-988-991-992-continue-source-review-deploy.json" | cut -d ' ' -f1)" = dc900f6665a50a6596aafbfffb245c326801077e45afcd67d2553b0f4182ec2a ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-release-library.py" > "$scoped_release_tmp/batch-988-991-992-release-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/batch-988-991-992-release-library.py" | cut -d ' ' -f1)" = d6eb0d297b7c394e3c1053e6b1bf11ab0302ae26501ac7fccfac331ad8513c1b ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-reviewed-files.json" > "$scoped_release_tmp/batch-988-991-992-reviewed-files.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/batch-988-991-992-reviewed-files.json" | cut -d ' ' -f1)" = c930e6c2275e2130cc7386e1422e9668937a2dba84cd1cee66144a662624c69e ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-runtime-diagnose.py" > "$scoped_release_tmp/batch-988-991-992-runtime-diagnose.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/batch-988-991-992-runtime-diagnose.py" | cut -d ' ' -f1)" = 045effa64a93b7243df6d49fc516e26826566b0c45aa03749402196e50d74bac ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-host-config-library.py" > "$scoped_release_tmp/batch-host-config-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/batch-host-config-library.py" | cut -d ' ' -f1)" = bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/factory-review-backup-library.py" > "$scoped_release_tmp/factory-review-backup-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/factory-review-backup-library.py" | cut -d ' ' -f1)" = 79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/internal-quote-readonly-library.py" > "$scoped_release_tmp/internal-quote-readonly-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/internal-quote-readonly-library.py" | cut -d ' ' -f1)" = be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

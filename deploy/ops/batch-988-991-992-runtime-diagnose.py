@@ -1,6 +1,6 @@
 """Fixed read-only sealed-runtime comparison. No HTTP, DB queries, writes or signals."""
 import copy,hashlib,io,json,os,pathlib,re,stat,subprocess,sys,tarfile
-PIN=True
+PIN=False
 TARGET='26a009541efeb99588e84c289cfe8463f18f6f4a'
 TREE='603d8c20730da455cc33e3e186754e63a9af4ab0'
 BASE='f50e23735af6e198721830e26e35e26162f09af0'

@@ -2,7 +2,7 @@
 Runtime-only dedicated integration token. No DB restore, migrations or model calls.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,secrets,signal,stat,subprocess,sys,tarfile,traceback,urllib.error,urllib.request
-PHASE='deploy'
+PHASE='verify'
 TARGET='f50e23735af6e198721830e26e35e26162f09af0'
 TREE='6f8cfbdf0e607ccdca59b0cc0c21c5d430ece5f2'
 SOURCE_MANIFEST_SHA='5e11343e462cbcae8d141ac3dae86556fcd977e151f633da5a786a6a6ae7ea41'
@@ -14,7 +14,7 @@ BACKUP=ROOT/'deploy/backups/qms-api-auth-20261021-backup'
 PREPARE=BACKUP.with_name('qms-api-auth-20261021-prepare')
 DEPLOY=BACKUP.with_name('qms-api-auth-20261021-deploy')
 VERIFY=BACKUP.with_name('qms-api-auth-20261021-verify')
-BACKUP_MANIFEST='f070511180e3a40e4e8b6d3877c942f9f0d1f117178dac11b6590848cb71a7ac';BACKUP_RESULT='8c3c09c98214437fa14982cc4bd15e637b60f25c628b5795d0f05cf5730db6c0';PREPARE_MANIFEST='95eb32ee924ea9df0e8a55800b9f73416b60d53ab0b0918460ecca499a2cdcbc';PREPARE_RESULT='3bacf5758cd3421a024ba88df3825af506ba6d21855aafd4736521acc11d371a';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+BACKUP_MANIFEST='f070511180e3a40e4e8b6d3877c942f9f0d1f117178dac11b6590848cb71a7ac';BACKUP_RESULT='8c3c09c98214437fa14982cc4bd15e637b60f25c628b5795d0f05cf5730db6c0';PREPARE_MANIFEST='95eb32ee924ea9df0e8a55800b9f73416b60d53ab0b0918460ecca499a2cdcbc';PREPARE_RESULT='3bacf5758cd3421a024ba88df3825af506ba6d21855aafd4736521acc11d371a';DEPLOY_MANIFEST='4fe3efb9e171a9d93c6d90464a7568c6c5eb56928ba8f9561ab624c207a607b1';DEPLOY_RESULT='b50d527816a5b3542148eae141fc0ef91d9b7a60f91909aa1a4b12d3835686c7'
 ORDER=('factory-review-test','factory-review','qc')
 TOKEN_KEYS=('QC_INSPECTIONS_READ_TOKEN','FACTORY_REVIEW_QMS_READ_TOKEN')
 SERVICE_TOKEN_KEYS={s:TOKEN_KEYS[0]if s=='qc'else TOKEN_KEYS[1]for s in ORDER}

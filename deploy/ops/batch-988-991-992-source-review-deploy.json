@@ -1,0 +1,94 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr984_review",
+  "reviewedAtUTC": "2026-10-22T06:25:16.806203+00:00",
+  "helperSHA256": "d6eb0d297b7c394e3c1053e6b1bf11ab0302ae26501ac7fccfac331ad8513c1b",
+  "helperGatesFrozen": true,
+  "base": "f50e23735af6e198721830e26e35e26162f09af0",
+  "baseTree": "6f8cfbdf0e607ccdca59b0cc0c21c5d430ece5f2",
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "dependencies": {
+    "batch-988-991-992-backup-library.py": "08a98eb61829893d00be2f24e97629136929465a2d45e23ed38dbc45248db5df",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "internal-quote-readonly-library.py": "be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69"
+  },
+  "transportSHA256": "83d7d23946148a93c57d28050ea9c968bd1eae0d49ba8401fce15dd40ed04ef0",
+  "scope": [
+    "factory-review-test",
+    "factory-review",
+    "internal-quote"
+  ],
+  "sourceManifestSHA256": "c930e6c2275e2130cc7386e1422e9668937a2dba84cd1cee66144a662624c69e",
+  "reviewedCandidateTree": "603d8c20730da455cc33e3e186754e63a9af4ab0",
+  "changedFileCount": 10,
+  "checks": [
+    "Complete QMS-derived lifecycle delta and all changed functions reviewed. Scope is exactly two factory services plus internal-quote, with43other containers preserved. QC/token/envfile mutation was removed; no model/auth/business write probes introduced.",
+    "PHASE/TARGET/TREE and six archive seals remain blank. Fixed SOURCE_MANIFEST_SHA and REVIEWED_TREE are reviewed literal pins, not activation gates. Manifest permits exactly10 reviewed factory/quote source files; backend/deps/migrations/compose remain fixed where required.",
+    "Prepare validates original runtime/source before build, builds only scoped services, verifies candidate image architecture/labels/source/full static assets, and advances source only from pinnedBASE to approved target by fast-forward. Output/archive creation and phase/target/tree/seal bindings remain fail closed.",
+    "All original environment file bytes/mode/owner and configured/PID1 literal environment are preserved, including dollar escaping in override. Full runtime contract checks image/labels/ports/resources/mounts and preserves43others plus not-yet-switched targets.",
+    "Deploy owns maintenance, drains/stops each old target, captures fresh closed data and replays startup guards before any candidate startup. Candidate starts with no-build/no-deps/pull-never; static/health checks use GET only, no credentials/model/business write probes.",
+    "PB SQLite business rows/schema and retained log rows follow existing strict closed-data/retention replay. Quote typed rows of every table, schema, startup checks, legacy SQLite/raw bytes, uploads, file mode and ownership remain exact.",
+    "Only quote_sections_id_seq may advance by exactly fresh closed quotes.rows multiplied by departments.rows for one verified existing startup execution. Historical PR959 identifies the reviewed contract and is not a numeric959 increment. Exact startup whole-source hash520519a4 and conflict fragment2dfa0c53 are bound and matched locally toBASE source.",
+    "Allowed sequence has called=true, integer/max2147483647/start1/increment1/min1/cache1/cyclefalse and exact identity ownership/dependency. Full schema and every other sequence state remain exact. Bounds/type checks reject overflow, reset, wrong increment/cycle/ownership, extra advance or row/schema drift.",
+    "Recovery replays closed evidence before any start/up. Missing/unsafe evidence preserves owned maintenance and refuses restart. Failed-candidate and recovered-old intervals are separately proven closed-to-failed plusN and failed-to-recovered plusN; no data restore or sequence reset masks drift.",
+    "Verify binds deployed CID/StartedAt/image/source/env and replays sealed closed evidence while preserving43others and maintenance flags. It does not claim a fresh live business comparison after users resume.",
+    "Finald6eb source differs from frozen1de only in backup dependency08a98 and backup-2 path. Exact reverse-byte comparison equals frozen1de, and every function AST is identical. Transport2 differs only in independent state2 and dispatch2 reservation filenames; prior failed attempt evidence is retained."
+  ],
+  "offlineChecks": {
+    "authorFixtureIndependentlyReadAndRerun": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-batch-988-991-992-release-author.py",
+      "sha256": "fe8d439f686c88138962a75b8726cce85b190e503f337cef923b88244e7f6152",
+      "testedHelperSHA256": "1de33d80b2cb121094a8bacb67306d5707be5fa92cc8caaf598c4d1ee2cfec2f",
+      "passed": 10,
+      "failed": 0,
+      "coverage": [
+        "blankgate zeroIO",
+        "precise one-startup sequence positive/negative matrix",
+        "legacy/uploads/ownership/SQLite exact",
+        "literal environment overlay",
+        "missing closed recovery refusesstart",
+        "failed candidate drift refusesrollback",
+        "two separate recovery sequence intervals",
+        "43others and other targets",
+        "quote actual HTML/cache URLs and anonymous401",
+        "manifest exact paths/count negatives"
+      ]
+    },
+    "independentAdditionalChecks": {
+      "passed": 3,
+      "failed": 0,
+      "coverage": [
+        "sequence overflow, calledfalse and identity/increment/cycle/dependency ownership negatives",
+        "unsafe closed replay recovery produces no start/clear",
+        "BASE startup wholehash and unique exact conflict fragment hash match source"
+      ]
+    },
+    "finalNarrowRebind": {
+      "helperSHA256": "d6eb0d297b7c394e3c1053e6b1bf11ab0302ae26501ac7fccfac331ad8513c1b",
+      "reverseByteEqualityToFrozen1de": true,
+      "allFunctionASTsIdentical": true,
+      "transport2OnlyTwoLiteralChanges": true
+    },
+    "authorFinalEvidence": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-988-991-992-release-author-review.json",
+      "sha256": "a4c98f1838279f8cfe845ac824f7a237c47bbc4cd157bece941bc3da706ab0cb"
+    },
+    "realGHProductionDockerPostgresOrHTTPCalls": false,
+    "onlyTemporarySyntheticFixturesAndLocalGitReads": true,
+    "priorFrameworkSuitesRerun": false
+  },
+  "boundaries": [
+    "Source review of inert frozen helpers only; no activation, dispatch, merge, deploy or production validation performed by this reviewer.",
+    "Database snapshots are individually consistent. PostgreSQL rows/schema use exported MVCC snapshot; sequence states are independently stable-bracketed and governed by the exact existing-startup exception.",
+    "freshLiveBusinessComparisonPerformed is false: verification replays sealed closed data and validates runtime/source, rather than claiming new multi-database atomicity after services resume."
+  ],
+  "remainingBlockers": []
+}

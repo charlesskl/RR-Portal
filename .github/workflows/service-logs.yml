@@ -2,7 +2,7 @@ name: Factory and Internal Quote Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [prepare]}
+      mode: {type: choice, required: true, options: [deploy]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '4d6e124084c42826d2d26607af8ab4123c00dd202c750145ce1e9114f7b13777'
+  SCOPED_RELEASE_HELPER_SHA256: '29ac6a1a6102c79001c5525255df500c3422d0ba154b54046ce2e4042adbdf93'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-988-991-992-20261022 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-988-991-992-20261022 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed batch prepare
+      - name: Run only reviewed batch deploy
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,7 +48,7 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-988-991-992-20261022 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-988-991-992-20261022 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/batch-988-991-992-20261022:refs/remotes/origin/ops/batch-988-991-992-20261022 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/batch-988-991-992-20261022)" = "$RELEASE_SHA" ]] || exit 1
@@ -56,13 +56,13 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/batch-988-991-992-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 4d6e124084c42826d2d26607af8ab4123c00dd202c750145ce1e9114f7b13777 ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 29ac6a1a6102c79001c5525255df500c3422d0ba154b54046ce2e4042adbdf93 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-backup-library.py" > "$scoped_release_tmp/batch-988-991-992-backup-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/batch-988-991-992-backup-library.py" | cut -d ' ' -f1)" = 08a98eb61829893d00be2f24e97629136929465a2d45e23ed38dbc45248db5df ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-reviewed-files.json" > "$scoped_release_tmp/batch-988-991-992-reviewed-files.json" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/batch-988-991-992-reviewed-files.json" | cut -d ' ' -f1)" = c930e6c2275e2130cc7386e1422e9668937a2dba84cd1cee66144a662624c69e ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-source-review-prepare.json" > "$scoped_release_tmp/batch-988-991-992-source-review-prepare.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/batch-988-991-992-source-review-prepare.json" | cut -d ' ' -f1)" = 8f36bc807c920619c007aa777221e051a8b89a9b04ebf66d0e7b6e8d7b095dea ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-source-review-deploy.json" > "$scoped_release_tmp/batch-988-991-992-source-review-deploy.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/batch-988-991-992-source-review-deploy.json" | cut -d ' ' -f1)" = 8f36bc807c920619c007aa777221e051a8b89a9b04ebf66d0e7b6e8d7b095dea ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-host-config-library.py" > "$scoped_release_tmp/batch-host-config-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/batch-host-config-library.py" | cut -d ' ' -f1)" = bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/factory-review-backup-library.py" > "$scoped_release_tmp/factory-review-backup-library.py" 2>/dev/null || exit 1

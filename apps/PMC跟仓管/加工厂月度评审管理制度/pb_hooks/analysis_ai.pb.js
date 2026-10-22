@@ -41,14 +41,21 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
     if(src.collection==='quality_patrols'&&['staff','lines','area'].includes(key))return JSON.parse(record.getString(key)||'null')
     return record.get(key)
   }
-  const params={};const factoryClause=factories.map((f,i)=>{params['f'+i]=f.id;return 'factory = {:f'+i+'}'}).join(' || ')
   for(const src of helpers.sources){
     if(!scope.modules.includes(src.module)){coverage.push({source:src.label,status:'未授权，未读取',count:0});continue}
     const monthly=src.date==='year_month',start=monthly?input.start.slice(0,7):input.start,end=monthly?input.end.slice(0,7):input.end+' 23:59:59.999Z'
-    let filter='('+factoryClause+') && '+src.date+' >= {:start} && '+src.date+' <= {:end}'
-    if(src.collection==='monthly_scores')filter+=' && status != "draft"'
-    const rows=e.app.findRecordsByFilter(src.collection,filter,src.date+',id',2001,0,Object.assign({},params,{start,end}))
-    if(rows.length>2000)throw new BadRequestError('范围内记录过多，请缩短时间或选择工厂后重试')
+    // PocketBase limits filter expressions. Keep each disjoint factory batch below
+    // that limit, but enforce the source record cap across all batches together.
+    const rows=[]
+    for(let offset=0;offset<factories.length;offset+=100){
+      const params={start,end}
+      const clause=factories.slice(offset,offset+100).map((f,i)=>{params['f'+i]=f.id;return 'factory = {:f'+i+'}'}).join(' || ')
+      let filter='('+clause+') && '+src.date+' >= {:start} && '+src.date+' <= {:end}'
+      if(src.collection==='monthly_scores')filter+=' && status != "draft"'
+      const batch=e.app.findRecordsByFilter(src.collection,filter,src.date+',id',2001-rows.length,0,params)
+      batch.forEach(r=>rows.push(r))
+      if(rows.length>2000)throw new BadRequestError('范围内记录过多，请缩短时间或选择工厂后重试')
+    }
     let count=0
     for(const r of rows){
       const f=factoryMap[r.getString('factory')],region=src.collection==='orders'?(r.getString('region')||f.getString('region')||'dongguan'):(f.getString('region')||'dongguan')

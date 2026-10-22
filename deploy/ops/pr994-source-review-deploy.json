@@ -1,0 +1,65 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr984_review",
+  "reviewedAtUTC": "2026-10-22T09:25:09.736404+00:00",
+  "helperSHA256": "e96352d3d9e47ad9f56ff2eaf7c069e2351f2d74a40cda5d2232e37dc42893ae",
+  "helperGatesFrozen": true,
+  "base": "26a009541efeb99588e84c289cfe8463f18f6f4a",
+  "baseTree": "603d8c20730da455cc33e3e186754e63a9af4ab0",
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "dependencies": {
+    "pr994-backup-library.py": "32ff59e2095af9825afc5b845a3332eeac8c1e07395b21fa31558b4960dd466b",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9"
+  },
+  "transportSHA256": "c31d851b29dd95951be23049c55cf61edf7a2edb23c1ebd3177dcea1642a86b3",
+  "reviewedPRHead": "fcb35ade2472dcacb8d04eddfc1f225bacc6f943",
+  "reviewedCandidateTree": "ef92d7ed70394780f0389578c8cc1b2b67a167a5",
+  "sourceManifestSHA256": "d1068164da88468d03ae569b7fd9fe352c59890883432726a949efa2c012db68",
+  "changedFileCount": 6,
+  "scope": [
+    "factory-review-test",
+    "factory-review"
+  ],
+  "otherContainerCount": 44,
+  "portableSQLiteCount": 4,
+  "checks": [
+    "Full factory-only R lifecycle and trim from frozenRd6 independently read. Finale963 differs from pre-manifest03dc only SOURCE_MANIFEST_SHA d106; all nine runtime activation fields remain blank. Exact5deps including frozenB32ff and4reviewed libraries match bytes.",
+    "Actual local finalhead fcb35/treeef92 has BASE26a as ancestor and exactly6frontend/test changed paths, each blob SHA matches pinned manifestd106. Actual manifest parser accepts this exact map. Hooks/migrations/package/dependencies/Docker/global files and their Git objects are unchanged.",
+    "Only two factory targets are built/switched/rolled back,44other containers including live quote/Postgres remain exact. Prepare preserves all46original containers/flags, original full literal env/PID1 and original OCI build args; immutable candidate image/defaults/source/assets and complete runtime HostConfig/Mounts/labels remain strict.",
+    "Fresh stopped closed4SQLite typedrows/schema/attachments/nonDBfiles/modeownership are compared to poststart. Businessdata and auxiliary nonlog tables exact; retained log rows typed-identical, removed logs only compatible with unchanged configured retention and new logs bounded to observed startup window. No log deletion actor/timing attribution.",
+    "Owned maintenance/drain/stop/recreate remains per-service with no-build/no-deps/pullnever after closed guards. Missing/unsafe closed evidence rejects restart; failed-candidate drift rejects rollback creation/clear; original immutable rollback image/source and44others remain proven before clearing maintenance. No data restore/reset/env mutation is introduced.",
+    "Full_contract, nanosecond timestamp/log policy/retention, env/PID1, owned/cleared flag critical function ASTs exactly equal frozenRd6. Quote/PG/sequence/token branches are removed, not replaced with permissive checks.",
+    "Only public GET health/index/assets and anonymous config401 are tested. No production bulk/risk import, authenticated write/login, AI/model request or business HTTP POST exists. Verify replays sealed before/after data plus current actual source/runtime and explicitly freshLiveBusinessComparisonPerformed=false.",
+    "Final application merge/phase target commit/tree must be checked by controller and exact phase plan; this inert source review is not evidence of a completed merge/deployment."
+  ],
+  "offlineChecks": {
+    "minimalSixAdapterFixturesPreviouslyIndependentlyReadAndRerun": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr994-adapters-author.py",
+      "passed": 6,
+      "failed": 0,
+      "scope": "factory-only trim/gates/runtime44/actual image writer/prior subset/overlay/data/recovery"
+    },
+    "finalNarrowChecks": [
+      "Reverse final manifest pin reproduces reviewed03dc SHA exactly",
+      "Local actual6Gitblobs/tree/ancestor/global-fixed objects exact",
+      "Actual frozen manifest parser accepts exact reviewed6map",
+      "8critical runtime/log/env/flag function ASTs unchanged fromRd6"
+    ],
+    "realProductionDockerDatabaseHTTPGitHubOrModelCalls": false,
+    "newFrameworkOrOldFullSuitesRepeated": false
+  },
+  "boundaries": [
+    "SQLite snapshots are individually consistent, not cross-database atomic.",
+    "Acceptance replays sealed closed data and validates current runtime/source; it does not freshly compare live business rows after users resume.",
+    "No actual paid model, production bulk import or authenticated business write is used as a smoke test."
+  ],
+  "remainingBlockers": []
+}

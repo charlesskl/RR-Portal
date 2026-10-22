@@ -10,10 +10,10 @@ import { orderRegion } from '../utils/orderRegion'
 import { analyze, chinaToday, type PatrolFact } from '../utils/dynamicAnalysis'
 export function useDynamicAnalysis() {
   const factories = ref<Factory[]>([]), patrols = ref<PatrolFact[]>([]), orders = ref<Order[]>([])
-  const loading = ref(false), errors = ref<string[]>([]), updated = ref(''), today = ref(chinaToday())
+  const loading = ref(false), errors = ref<string[]>([]), readFailed = ref(false), updated = ref(''), today = ref(chinaToday())
   let revision = 0, disposed = false
   const result = computed(() => analyze(patrols.value, orders.value, today.value))
-  function clear() { revision++; factories.value = []; patrols.value = []; orders.value = []; updated.value = ''; errors.value = []; loading.value = false }
+  function clear() { revision++; factories.value = []; patrols.value = []; orders.value = []; updated.value = ''; errors.value = []; readFailed.value = false; loading.value = false }
   async function refresh() {
     if (loading.value || disposed) return
     const user = pb.authStore.record, role = user?.role as Role | undefined
@@ -40,6 +40,7 @@ export function useDynamicAnalysis() {
       delivery ? pb.collection('orders').getFullList<Order>({ filter: orderScopeFilter({}, crafts, regions), fields: 'id,factory,region,product,order_no,status,delivery_date,actual_delivery_date,expand.factory.craft,expand.factory.region', expand: 'factory' }) : Promise.resolve([]),
     ])
     if (disposed || current !== revision) return
+    readFailed.value = settled.some(item => item.status === 'rejected')
     errors.value = []
     const [fs, ps, os] = settled
     factories.value = fs.status === 'fulfilled' ? fs.value.filter(f => crafts.includes(f.craft)) : []
@@ -60,5 +61,5 @@ export function useDynamicAnalysis() {
   let timer: ReturnType<typeof setInterval>
   onMounted(() => { void refresh(); timer = setInterval(onFocus, 60000); window.addEventListener('focus', onFocus) })
   onScopeDispose(() => { disposed = true; clear(); stopAuth(); clearInterval(timer); window.removeEventListener('focus', onFocus) })
-  return { factories, result, loading, errors, updated, refresh }
+  return { factories, result, loading, errors, readFailed, updated, refresh }
 }

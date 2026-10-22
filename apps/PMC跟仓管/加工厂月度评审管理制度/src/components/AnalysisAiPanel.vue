@@ -21,7 +21,7 @@ async function generate(){
   if(!config.value?.enabled||busy.value)return
   clear();const current=generation;busy.value=true;controller=new AbortController()
   try{const report=await pb.send<Report>('/api/factory-review/analysis-ai',{method:'POST',body:{start:start.value,end:end.value,factory:factory.value,question:question.value},signal:controller.signal});if(current===generation)result.value=report}
-  catch(e:any){if(current===generation)error.value=e?.response?.message||'AI分析失败，请稍后重试'}
+  catch(e:any){if(current===generation)error.value=e?.response?.message && e.response.message !== 'Something went wrong while processing your request.' ? e.response.message : 'AI分析请求处理失败，请缩小日期范围或选择单个工厂后重试；若仍失败，请联系管理员检查后端日志。'}
   finally{if(current===generation){busy.value=false;controller=null}}
 }
 watch([start,end,factory,question],()=>clear())

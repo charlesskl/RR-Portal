@@ -33,3 +33,11 @@ describe('AI analysis interaction',()=>{
     const w=mountPanel();await flushPromises();await w.find('button.primary').trigger('click');mocks.changed();resolve(response);await flushPromises();expect(w.find('.result').exists()).toBe(false);w.unmount()
   })
 })
+
+it('replaces opaque server errors with actionable Chinese guidance',async()=>{
+ mocks.send.mockImplementation(async(path:string)=>{if(path.endsWith('/config'))return {enabled:true};throw {response:{message:'Something went wrong while processing your request.'}}})
+ const w=mountPanel();await flushPromises();await w.find('button.primary').trigger('click');await flushPromises()
+ expect(w.text()).toContain('请缩小日期范围或选择单个工厂后重试')
+ expect(w.text()).not.toContain('Something went wrong')
+ w.unmount()
+})

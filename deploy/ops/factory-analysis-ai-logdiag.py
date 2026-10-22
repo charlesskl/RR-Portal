@@ -4,7 +4,7 @@ Only _logs request rows for the exact route/window are queried. No raw rows,
 error text, headers, users, query strings, vendor responses or inspect are saved.
 """
 import contextlib,datetime,hashlib,json,math,os,pathlib,re,sqlite3,stat,subprocess,sys
-PIN=True
+PIN=False
 TARGET='f50e23735af6e198721830e26e35e26162f09af0'
 TREE='6f8cfbdf0e607ccdca59b0cc0c21c5d430ece5f2'
 BRANCH='refs/heads/ops/factory-analysis-ai-log-20261022-2'

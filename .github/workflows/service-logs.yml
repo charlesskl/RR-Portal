@@ -2,7 +2,7 @@ name: Factory Analysis AI Readonly Logs
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [diagnose]}
+      mode: {type: choice, required: true, options: [closed]}
 permissions:
   contents: read
 concurrency:
@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '5018c9d6acf809b3438ae226af14adbd4e8701c6aa647027b1ee791437593ffc'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
+  SCOPED_RELEASE_HELPER_SHA256: '24e2a0e4f2d7b0f9a339823d35442c1e1685ae4ada0184727e5bb1c07ce6cfaf'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/factory-analysis-ai-log-20261022-3 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/factory-analysis-ai-log-20261022-3 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = closed ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed log collection diagnose
+      - name: Run only reviewed log collection closed
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,7 +48,7 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/factory-analysis-ai-log-20261022-3 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/factory-analysis-ai-log-20261022-3 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = closed && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/factory-analysis-ai-log-20261022-3:refs/remotes/origin/ops/factory-analysis-ai-log-20261022-3 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/factory-analysis-ai-log-20261022-3)" = "$RELEASE_SHA" ]] || exit 1
@@ -56,7 +56,5 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/factory-analysis-log-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/factory-analysis-ai-logdiag-3.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 5018c9d6acf809b3438ae226af14adbd4e8701c6aa647027b1ee791437593ffc ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/factory-analysis-ai-log-source-review.json" > "$scoped_release_tmp/factory-analysis-ai-log-source-review.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/factory-analysis-ai-log-source-review.json" | cut -d ' ' -f1)" = 37116aaf53514d2dea8363f7ef34fae98ed354c0d3ba6af8d3895c6745f60c64 ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 24e2a0e4f2d7b0f9a339823d35442c1e1685ae4ada0184727e5bb1c07ce6cfaf ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

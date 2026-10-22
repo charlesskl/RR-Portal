@@ -2,7 +2,7 @@ name: QMS API Permissions Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [closed]}
+      mode: {type: choice, required: true, options: [prepare]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'ec0d15b34b76cbcfec8a4f79b98aeee6798a87192f197c9d80563c09ca132209'
+  SCOPED_RELEASE_HELPER_SHA256: '70a75bc7619f3419294eceb03c287ff810fe29ae90e6c9d30c0d624616854c6e'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/qms-api-auth-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = closed ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/qms-api-auth-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed batch closed
+      - name: Run only reviewed batch prepare
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,13 +48,27 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/qms-api-auth-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = closed && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/qms-api-auth-20261021 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/qms-api-auth-20261021:refs/remotes/origin/ops/qms-api-auth-20261021 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/qms-api-auth-20261021)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/qms-api-auth-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/qms-api-auth-backup.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = ec0d15b34b76cbcfec8a4f79b98aeee6798a87192f197c9d80563c09ca132209 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/qms-api-auth-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 70a75bc7619f3419294eceb03c287ff810fe29ae90e6c9d30c0d624616854c6e ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch-host-config-library.py" > "$scoped_release_tmp/batch-host-config-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/batch-host-config-library.py" | cut -d ' ' -f1)" = bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/factory-review-backup-library.py" > "$scoped_release_tmp/factory-review-backup-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/factory-review-backup-library.py" | cut -d ' ' -f1)" = 79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/qms-api-auth-backup-library.py" > "$scoped_release_tmp/qms-api-auth-backup-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/qms-api-auth-backup-library.py" | cut -d ' ' -f1)" = ec0d15b34b76cbcfec8a4f79b98aeee6798a87192f197c9d80563c09ca132209 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/qms-api-auth-reviewed-files.json" > "$scoped_release_tmp/qms-api-auth-reviewed-files.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/qms-api-auth-reviewed-files.json" | cut -d ' ' -f1)" = 5e11343e462cbcae8d141ac3dae86556fcd977e151f633da5a786a6a6ae7ea41 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/qms-api-auth-source-review-prepare.json" > "$scoped_release_tmp/qms-api-auth-source-review-prepare.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/qms-api-auth-source-review-prepare.json" | cut -d ' ' -f1)" = 1bf22b81f164f4687fdb74bf9c6dae398e90fc6857c05c4cb0f4a285cb38da12 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

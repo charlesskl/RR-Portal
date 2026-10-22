@@ -1,0 +1,18 @@
+{
+  ".github/workflows/factory-review-restore-contract.yml": "c50853d1cbd60e24ad11243b77d0296bebed512faf6744648328d01b99aa83da",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/pb_hooks/qms_inspections.pb.js": "629f442ea9d59c2981f3a773a213ead04009d6493553c66b7b57377bbfb7cdc4",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/tests/qmsInspections.spec.ts": "6906222c63198886bd5f266aa2bd5932ec8e1096fa43e3e63d9b375c67b893e5",
+  "apps/生产部/品质管理系统/ai-ocr.js": "a2e2af999ebf74c960783ba88e813a4206096ccc9231e453fc33e5b1aa8340c1",
+  "apps/生产部/品质管理系统/app-safety.test.js": "0263b63b4e19caf88b517ab9c101e605a600f173f1fceb2240b11139d9f7f5a3",
+  "apps/生产部/品质管理系统/app.js": "4a80c07d6f88dc2a656665204724b13e42d10db358125c1d303a3edc03d38046",
+  "apps/生产部/品质管理系统/frontend-auth.test.js": "8b80588c8c9c484a2e43f2fd27bc5d08546b38679ccb651eee7d45cb11436ec8",
+  "apps/生产部/品质管理系统/ocr-batch.test.js": "8a57ee2ed80ada54c67ae3abdb241ee6f88aaadb304afa565dbed9eda82b9fcc",
+  "apps/生产部/品质管理系统/qc-backend.js": "c5b44a87b18fc606d494a7ee96126e28506987cb51811bcc4f29fee2b2a712a0",
+  "apps/生产部/品质管理系统/server/api-auth.test.js": "ad3fcb54f6227b3ab6688d93210d96ca38aefc43a0b1d7c8fb8ed8f403a56870",
+  "apps/生产部/品质管理系统/server/auth.js": "6661934f3d873d6758b89e377842cc5e70942c3b510a49812c235f6928da3300",
+  "apps/生产部/品质管理系统/server/export.test.js": "b0aaf1a20ab74bd4733f93486a007d8bcda4bf714f35de477cbd667a822b57cd",
+  "apps/生产部/品质管理系统/server/record-sync.test.js": "23d5205320bcfd825f43418b33b438047715007d5c060897368565f084c493e4",
+  "apps/生产部/品质管理系统/server/server.js": "f1e363c52ad327e1104e94e8b15451e729ae92241490eea34466ed2e235b86ec",
+  "apps/生产部/品质管理系统/sso.js": "688cca022b6ba2d90ca50bf09fbcb7df688c50cdc830f778b13c0c52b3ae03cb",
+  "docker-compose.cloud.yml": "a0ab4437dfc3d8883ea4d8c5866a1fcfc88d715e264c00b3269620618e605873"
+}

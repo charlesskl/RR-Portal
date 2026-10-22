@@ -1,0 +1,128 @@
+{
+  "allExecutionGatesBlank": true,
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "authorReviewSHA256": "5d6c0a0b98b18551e8cc913aa5d94cccf53480997989ccacda2ebb00efe48581",
+  "base": "73364c71ad44528db35197465e9cee0f3e4a2606",
+  "baseTree": "3275c7fadb9d14d0657196abf35c3a9f4a1906f4",
+  "blankGateAssignments": [
+    "PHASE",
+    "TARGET",
+    "TREE",
+    "SOURCE_MANIFEST_SHA",
+    "BACKUP_MANIFEST",
+    "BACKUP_RESULT",
+    "PREPARE_MANIFEST",
+    "PREPARE_RESULT",
+    "DEPLOY_MANIFEST",
+    "DEPLOY_RESULT"
+  ],
+  "checks": [
+    "Each dependency is hash-checked before its own module execution; release also prevalidates all transitive dependency pins before loading helpers. Exact BASE733/tree3275 and three-service scope are bound.",
+    "Backup default UID reads PID1 environ; exact NUL/env/automatic-hostname guards; all46 inspect with other43 preserved and canonical exclusive writer roots.",
+    "Backup covers actual4 factory plus fixed13 active13 historical QC SQLite, all schema/typed rows/nonDB/files and main mode/owners; individual consistency only.",
+    "Existing startup schema/seed region remains byte-exact across source revisions; startup rejects missing schema/columns or seed-triggering empty counts. No native login, password upgrade, session-file initialization or model requests.",
+    "Factory current image and actual hooks/migrations/built frontend bind full prior sealed prepare archive, with original OCI build args reused.",
+    "Prepare fastforwards only reviewed exact source+compose, builds all3 while original46 serve, installs no token and preserves entire env bytes.",
+    "Deploy appends or reuses only paired dedicated token names, atomic mode/owner-preserving environment replacement; all other original bytes retained.",
+    "Runtime overlays override whole original literal env with dollar escaping and only each service own token field; token excluded from build env/default image configs.",
+    "Immutable image/full Config/Host/Mount/PID1/source/static proofs; own maintenance drain60, stop60, fresh closed copies and repeated stopped-runtime check before scoped no-build/no-deps up.",
+    "Strict all30 SQLite equality with factory observed log retention/window exception, unchanged attachments/nonDB/mode/owner, other43 and other2 runtime unchanged.",
+    "Failed candidate data drift prevents old-image restart; missing/unsafe closed snapshot prevents restart; no data restore. Failure can retain own maintenance.",
+    "Verify replays sealed cutover typed data evidence, no fresh live business attribution; exact current source/runtime and two-key env rechecked.",
+    "Only local GET public/integration probes; Bearer token never follows redirects or reaches native login/model/write routes; all13 whitelisted inspection responses and anonymous/service bootstrap401, export/AI/session401.",
+    "Public QC index plus app/qc-backend/sso/AI/style/echarts bytes bind candidate proof.",
+    "Only the exact factory-review-restore-contract.yml workflow path is additionally eligible for a separately hash-pinned reviewed manifest; no other workflow path allowed. This source guard change does not approve its workflow contents or any dispatch."
+  ],
+  "dependencies": {
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "qms-api-auth-backup-library.py": "ec0d15b34b76cbcfec8a4f79b98aeee6798a87192f197c9d80563c09ca132209",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5"
+  },
+  "disposition": "CHECKED",
+  "helperGatesFrozen": true,
+  "helperSHA256": "893ba7f1dbb63df6b716c50bbfaf910a094021d51b72d5c131fe3d9acab3c6f0",
+  "independent": true,
+  "limitations": [
+    "TARGET/TREE/changed-file manifest are intentionally blank and require later concrete reviewed binding; this source review does not authorize a dispatch.",
+    "SQLite snapshots are individually consistent, never cross-database atomic.",
+    "Database companion WAL/SHM lifecycle may vary; strict logical DB data, main metadata and all nonDB ownership are enforced."
+  ],
+  "narrowWorkflowScopeRevision": {
+    "authorCurrentFullSuite": {
+      "authorReviewSHA256": "5d6c0a0b98b18551e8cc913aa5d94cccf53480997989ccacda2ebb00efe48581",
+      "failed": 0,
+      "independentlyRepeated": false,
+      "passed": 16
+    },
+    "changedExpressionOnly": "Exact additional manifest path .github/workflows/factory-review-restore-contract.yml and its fixed scope label; all other helper bytes unchanged.",
+    "currentHelperSHA256": "893ba7f1dbb63df6b716c50bbfaf910a094021d51b72d5c131fe3d9acab3c6f0",
+    "oldReceiptCopies": [
+      {
+        "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/qms-api-auth-release-source-review-48b71150.json",
+        "sha256": "395e9e23724e6ff03f0fc62c8ca2643d4bb1e2b62d8128f7dc80876a3cdfa03e"
+      },
+      {
+        "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/qms-api-auth-ops-independent-review-48b71150.json",
+        "sha256": "e6046623dbd484bd0620b786f6682c75d5366d3742d147446a3dfe37f25a6904"
+      }
+    ],
+    "previousHelperSHA256": "48b711500c57d0f402d9d8f9c897c0bcc2730628b20653ec4c36279d2eff3428",
+    "priorIndependent3AndAuthor15NotRepeated": true,
+    "priorIndependent3AndAuthor15RerunOnHelperSHA256": "48b711500c57d0f402d9d8f9c897c0bcc2730628b20653ec4c36279d2eff3428",
+    "reversePatchReproducesPreviousBytes": true,
+    "sourceReviewed": true,
+    "testedOnCurrentHelper": {
+      "command": "python3 work/test-qms-api-auth-release-author.py Contracts.test_reviewed_manifest_accepts_only_exact_ci_workflow_exception",
+      "coverage": [
+        "Exact workflow path accepted with app+compose entries",
+        "deploy.yml rejected",
+        "similarly named factory-review-restore-contract-extra.yml rejected",
+        "other workflow rejected",
+        "../ traversal rejected"
+      ],
+      "failed": 0,
+      "logSHA256": "d44af14e45afb6ddbc8ef07f8ab7c23c1631ca739101e83e33a400cfaf077b8a",
+      "passed": 1,
+      "testFileSHA256": "7808f3a7d7f16abf0a0a3fe30824fdbbc553fb3d0a691c9b615e2ae5f7c4ffe8"
+    }
+  },
+  "otherContainerCount": 43,
+  "portableSQLiteCount": 30,
+  "productionOrGithubActionsPerformed": false,
+  "remainingBlockingFindings": [],
+  "reviewer": "pr987_review (independent of author pr983_review)",
+  "scope": [
+    "factory-review-test",
+    "factory-review",
+    "qc"
+  ],
+  "sourceEditedByReviewer": false,
+  "status": "CHECKED",
+  "tests": {
+    "authorRerunFailed": 0,
+    "authorRerunLogSHA256": "f22600a8234d6983ffc6376503bc7b2f163a0e8157bb7f23f89b6f033a0c108c",
+    "authorTestFileSHA256": "f61eb74c625cf527f2e21f3fb3e8ff6c1e9f2f50b7d40e0f98fab7d5d78ddce7",
+    "authorTestsIndependentlyRerun": 15,
+    "currentHelperNarrowTestLogSHA256": "d44af14e45afb6ddbc8ef07f8ab7c23c1631ca739101e83e33a400cfaf077b8a",
+    "currentHelperNarrowTestsPassed": 1,
+    "independentFailed": 0,
+    "independentLogSHA256": "482f15d345d3facf0b65cb384e770c5abd71c744c9b85e2e88b8ecd56152d45b",
+    "independentPassed": 3,
+    "independentTestFile": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-qms-api-auth-ops-independent.py",
+    "independentTestFileSHA256": "db644dafeb4331ca00876985fbe71becfa0d2a006f7d8c1bd72da8ec7e0955df",
+    "noProductionNetworkOrGithubIO": true,
+    "testedHelperSHA256": "48b711500c57d0f402d9d8f9c897c0bcc2730628b20653ec4c36279d2eff3428"
+  },
+  "withdrawnNonFindings": [
+    {
+      "claim": "jc absence might seed on startup",
+      "disposition": "Withdrawn after full control-flow read: getDb calls seedIfEmpty; replaceUsers/ensureSuperAdmin is reached only when users count is zero, already rejected by startup guard."
+    }
+  ]
+}

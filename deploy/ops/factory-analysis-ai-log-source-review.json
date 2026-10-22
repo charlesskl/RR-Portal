@@ -1,0 +1,93 @@
+{
+  "disposition": "CHECKED_READONLY_LOGS",
+  "status": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr984_review",
+  "reviewedAtUTC": "2026-10-22T01:09:38.915435+00:00",
+  "draftSHA256": "ceeb3c5831f2efbdc170a505f8209062f885065b43b0c8d14fa0a0bd48fc6544",
+  "transportSHA256": "ae7ac6b7f83dd9f39650a47582a2a00cb419e8801589b8d68e3e9daaa7bbe25b",
+  "gateFrozenFalse": true,
+  "scope": "One read-only, fixed-window factory-review analysis-ai error-log collection; no configuration, model call, repair, production user action, or existing release-state changes authorized by this review.",
+  "source": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-logdiag.py",
+  "transport": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-transport.py",
+  "target": "f50e23735af6e198721830e26e35e26162f09af0",
+  "tree": "6f8cfbdf0e607ccdca59b0cc0c21c5d430ece5f2",
+  "branch": "refs/heads/ops/factory-analysis-ai-log-20261022",
+  "route": "/api/factory-review/analysis-ai",
+  "window": {
+    "startUTCInclusive": "2026-10-22T00:40:00Z",
+    "endUTCExclusive": "2026-10-22T00:50:00Z",
+    "Beijing": "2026-10-22 08:40 inclusive to08:50 exclusive"
+  },
+  "checks": [
+    "Read full frozen collector and transport. Collector PIN remains literal False; false-gate preflight precedes output-directory creation or subprocess/database access.",
+    "Only exact canonical main target/tree and uniquely labeled factory-review runtime are observed; docker ps/inspect uses a fixed projection excluding Env. Mounts are validated in memory and removed before the runtime projection is returned.",
+    "Sealed pre-cutover auxiliary.db is pinned by the actual successful QMS deploy manifest/result hashes and selected snapshot hash, canonical deploy success/target/tree, private archive mode and non-symlink paths. Selected manifest/result/snapshot hashes are checked again after collection.",
+    "Live auxiliary.db uses SQLite URI mode=ro, query_only=ON, memory temp storage and one read transaction. Sealed snapshot additionally uses immutable=1. No SQL INSERT/UPDATE/DELETE, source/config changes, HTTP/model calls, container signals, rebuild or restart exists in collector.",
+    "Only _logs route/window matches with recognized method and integer status300..599 are selected, at most100 rows per source. Start is inclusive/end exclusive, extra path suffixes do not match, query strings are never returned, oversized data bodies are not materialized into the result.",
+    "Raw request data/error objects are processed only in memory. Result contains fixed route, validated timestamps/status/method/level/duration, SHA256 identities, byte counts and finite message/type/identifier/class allowlists. Stack frames allow only analysis_ai.pb.js or analysis_ai.js and bounded integer coordinates. No raw users, headers, token, question, business detail, upstream URL/body, arbitrary exception text or arbitrary path is emitted.",
+    "Safe failures expose only constant stage/type enums; bounded final safe result omits whole final records above120000 bytes and reports omission count. Only sanitized result and its manifest are newly written under an exclusive private0700 directory using0600/O_EXCL/O_NOFOLLOW files.",
+    "Transport fixed P/A library hashes, isolated c163feff parent and diagnostic branch, exact3 published files, exact independent source/T hashes and explicit checked plan review are enforced before nonforce ops-only push. Normal deployment workflow is never disabled or modified.",
+    "Dispatch has an O_EXCL reservation and persistent attempted marker before its sole invocation; no automatic redispatch. It requires exact current main/ops SHA, normal workflow active/no active normal runs, fixed phase/branch/attempt1/workflow/fingerprint/hash, and bounded discovery/polling.",
+    "Read requires exact first-attempt run metadata, one canonical safe result, target/tree/seal hashes and action outcome agreement. Private action log is bounded; only safe receipt metadata is printed. Old QMS branch/state and main/protection/containers are not mutation targets.",
+    "Narrow final revision is exactly line108: combine only non-None error/details/message keys in memory, keep scalar for a single key and None when no keys. This prevents null/generic error from hiding details; all existing finite classification/output constraints remain unchanged."
+  ],
+  "offlineChecks": {
+    "transportFinalControls": {
+      "passed": 3,
+      "failed": 0,
+      "cases": [
+        "fake exact3-file plan and onlyPIN activation with generated workflow guards",
+        "mismatched source-review hash rejected before writes",
+        "valid metadata accepted; retry/wrong run/branch/SHA rejected"
+      ]
+    },
+    "collectorControls": {
+      "passed": 4,
+      "failed": 0,
+      "cases": [
+        "false gate rejects with zero command/output/config IO",
+        "real synthetic SQLite immutable and live-read-only exact route/window/status/method/100 cap plus secret filtering and unchanged DB bytes",
+        "selected canonical deploy seals accept exact snapshot and reject modified snapshot",
+        "fixed classifier message/type/two-file frames only with arbitrary error/URL/business markers absent"
+      ]
+    },
+    "realGHOrProductionCalls": false,
+    "modelOrNetworkCalls": false,
+    "helperSourceStateOpsMutations": false,
+    "existingFrameworkOrSourceSuitesRerun": false,
+    "finalNarrowRevision": {
+      "passed": 1,
+      "failed": 0,
+      "cases": [
+        "real SQLite details-only, null error with details, generic error plus object details, message-only and all-null keys; fixed classification retained, no secret/business/query leakage, DB bytes unchanged"
+      ],
+      "previousUnchangedChecksReused": true
+    }
+  },
+  "evidence": {
+    "actualDeployRunId": 39701890287,
+    "actualDeployManifestSHA256": "4fe3efb9e171a9d93c6d90464a7568c6c5eb56928ba8f9561ab624c207a607b1",
+    "actualDeployResultSHA256": "b50d527816a5b3542148eae141fc0ef91d9b7a60f91909aa1a4b12d3835686c7",
+    "authorReview": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-logdiag-author-review.json",
+      "sha256": "f514e0e707519fb2d5b1950251e4134c60058821f734aa121631d0b7268b1c6e"
+    }
+  },
+  "boundaries": [
+    "Logs are filtered and capped, so an empty or truncated result does not disprove the incident. Current container started after the requested window may require sealed historical persistent logs.",
+    "Only the selected prior manifest/result/snapshot bytes are rehashed; the collector explicitly does not claim to rehash the entire deployment archive.",
+    "The live database is observed in a read transaction while the application may continue writing; no global business-data freeze or repair is performed.",
+    "The hook replaces upstream connection/non200 response details with fixed messages; the collector does not claim to recover exact provider response/status or a root cause absent from retained logs."
+  ],
+  "blockers": [],
+  "revision": {
+    "previousDraftSHA256": "31092f7fd8a9a7f93df730e126bf31a35fa61288c5726fa35534fbf48fd8310f",
+    "onlyCollectorLineChanged": 108,
+    "priorReviewPreserved": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-source-review-31092f7-frozen.json",
+      "sha256": "eca7c2bbeecc5e64c73d63c4924525b73ffaa642a2810d818dc2f542900fa990"
+    },
+    "actualRetainedPocketBaseLogFieldShapeNotYetObserved": true
+  }
+}

@@ -211,6 +211,8 @@ function lookupMaterialPrice(material, grade, prices) {
         key === 'machine_model' ? String(value).replace(/\s+/g,'').toUpperCase() : Number.isFinite(Number(value)) ? String(Number(value)) : String(value)))];
     return {value:values.length === 1 ? values[0] : '', conflict:values.length > 1};
   }
+  const catalogMoldParameterKey = part => String(part.mold_no || '').trim()
+    ? 'mold:' + String(part.mold_no).trim() : 'part:' + part.id;
   function updateCatalogMoldField(root, part, key, value) {
     if (!['machine_model','target'].includes(key)) throw new Error('不支持的共用模具参数');
     const peers = catalogMoldParts(root, part);
@@ -219,6 +221,14 @@ function lookupMaterialPrice(material, grade, prices) {
     // temporarily looks conflicting and would clear the first row's machine.
     if (key === 'machine_model') for (const peer of peers)
       peer.machine = catalogMachineReference(root, peer)?.normal || '';
+    // Keep explicit molding edits separate from synchronized engineering defaults.
+    // One entry per mold also applies to new parts added to that same mold later.
+    if (root.parts_catalog) {
+      const parameters = root.parts_catalog.mold_parameters ||= {};
+      const entry = parameters[catalogMoldParameterKey(part)] ||= {};
+      entry[key] = value;
+      if (key === 'machine_model') entry.machine = peers[0].machine;
+    }
   }
   function catalogMachinePrice(root, part) {
     if (part.machine_price != null && part.machine_price !== '') return Number(part.machine_price);
@@ -381,7 +391,13 @@ function lookupMaterialPrice(material, grade, prices) {
             (Array.isArray(engineering?.mixed_imported_parts) && owned && !sourceIds.has(p.id))) deleted.add(p.id);
       }
       copy.parts_catalog.parts = copy.parts_catalog.parts.filter(p => !deleted.has(p.id)).map(p => ({...p, ...(engineering?.mixed_part_edits?.[p.id] || {})}));
-      copy.parts_catalog.parts.forEach(p => { p.note = cleanImportedMoldNote(p.note); });
+      copy.parts_catalog.parts.forEach(p => {
+        p.note = cleanImportedMoldNote(p.note);
+        const parameters = copy.parts_catalog.mold_parameters?.[catalogMoldParameterKey(p)];
+        for (const key of ['machine_model', 'machine', 'target']) {
+          if (parameters && Object.hasOwn(parameters, key)) p[key] = parameters[key];
+        }
+      });
       for (const id of Object.keys(copy.parts_catalog.selections || {})) copy.parts_catalog.selections[id] = copy.parts_catalog.selections[id].filter(r => !deleted.has(r.part_id));
     }
     return copy;

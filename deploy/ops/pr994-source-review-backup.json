@@ -1,0 +1,60 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr984_review",
+  "reviewedAtUTC": "2026-10-22T09:19:21.833528+00:00",
+  "helperSHA256": "32ff59e2095af9825afc5b845a3332eeac8c1e07395b21fa31558b4960dd466b",
+  "helperGatesFrozen": true,
+  "base": "26a009541efeb99588e84c289cfe8463f18f6f4a",
+  "baseTree": "603d8c20730da455cc33e3e186754e63a9af4ab0",
+  "allowedPhases": [
+    "backup"
+  ],
+  "dependencies": {
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9"
+  },
+  "transportSHA256": "c31d851b29dd95951be23049c55cf61edf7a2edb23c1ebd3177dcea1642a86b3",
+  "scope": [
+    "factory-review-test",
+    "factory-review"
+  ],
+  "otherContainerCount": 44,
+  "portableSQLiteCount": 4,
+  "checks": [
+    "Complete148-line frozen backup and exact B08 delta read; only two factory services are targets,46containers fully inspected and44others including quote/Postgres preserved. No PostgreSQL/quote sequence/library/query path remains; three transitive dependency hashes checked before import.",
+    "Exactly two canonical disjoint RW /pb/pb_data binds and exclusive writer ownership are required; all46mount roots resolve strictly and overlaps/aliases reject. Both target configured and PID1 environments are captured; every container full Config/HostConfig hash, mounts/image/identity/StartedAt/restarts/health are preserved before/after.",
+    "All four portable SQLite typed rows/schema plus attachments/nonDB bytes and DB/file mode/uid/gid ownership are captured. Exact data.db+auxiliary.db inventories reject extra/missing DBs. Existing4dirty files/global configs/env full bytes-mode-owner/maintenance flags remain unchanged. Private artifacts stay exclusive0600 inside0700 sealed output.",
+    "Prior prepared archiveb0002877/result0f815ba7 is fully sealed and bound BASE26a/tree603. Select only both factory image/fullbuiltfile proofs from its3service record, retain exact original2OCI build arguments; running immutable images and full built sources must equal those proofs.",
+    "Actual F.runtime_files is sole exclusive writer of factory image diagnostics. Entire new backup loop passes with pinned F/L; negative control that reintroduces prewrite raises FileExistsError. No oldfailed batch state or archive is reused as new output.",
+    "Backup only performs local filesystem/SQLite readonly capture plus Docker inspect/PID1/source tar/git reads. No HTTP, bulk endpoint, AI/model, container lifecycle signal, business write or configuration change is introduced.",
+    "Transport c31d delta from reviewed T2 binds newBASE/branch/state/prefix/two-service scope, removesquote dependency, keeps exact source/plan/prior/dispatch reservation/SHA/host fingerprint/first attempt/canonical receipt and normal workflow controls. Backup planning does not require unfinished application manifest."
+  ],
+  "offlineChecks": {
+    "minimalFixturesIndependentlyReadAndRerun": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr994-adapters-author.py",
+      "sha256": "fd5dcde7867378221608d76ab1bd47435e117b86c9a27b6faa3eb14b20cdb115",
+      "passed": 6,
+      "failed": 0,
+      "coverage": [
+        "both blank gates zeroIO/noQuotePGfunctions",
+        "prior3-to2 sealed subset/originalbuildargs",
+        "runtime2targets44others/no quotePID1/mountRWreject",
+        "whole backup actualF/L O_EXCL positive/oldnegative",
+        "literal2service overlay and protectedquote among44",
+        "factory data/files/owner drift and unsafe recovery rejects"
+      ]
+    },
+    "authorReviewSHA256": "5ab367d1647016597b12b363189a818d9841bb1920441147e5f6dc215e07c2a1",
+    "frozenAuthorLogSHA256": "7af64fa7f23cef5523267040189aeb8d32ea5baba68dfd249fd62e1482bea84b",
+    "realDockerHTTPDatabasePostgresGitHubOrModelCalls": false,
+    "onlyTemporarySyntheticFixtures": true,
+    "oldFullFrameworkSuitesRepeated": false
+  },
+  "boundaries": [
+    "Backup SQLite copies are individually consistent, not cross-database atomic.",
+    "Release/manifest/controller final approval is separate; this receipt authorizes only review of frozen backup source and no execution by this reviewer."
+  ],
+  "remainingBlockers": []
+}

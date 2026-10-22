@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 const m=vi.hoisted(()=>({create:vi.fn(async(body:any)=>({id:body.issue_key,...body})),update:vi.fn(),list:vi.fn(async()=>[{id:'saved',issue_key:'already',status:'resolved'}])}))
 vi.mock('../src/pb',()=>({pb:{collection:()=>({getFullList:m.list,create:m.create,update:m.update}),authStore:{record:{id:'owner'},onChange:()=>()=>{}}}}))
-vi.mock('../src/composables/useDynamicAnalysis',async()=>{const {ref}=await import('vue');return {useDynamicAnalysis:()=>({factories:ref([]),loading:ref(false),errors:ref([]),updated:ref(''),refresh:vi.fn(),result:ref({issues:[['old','2026-09-01','delivery'],['boundary','2026-09-02','delivery'],['already','2026-08-01','delivery'],['grade','2026-08-01','grade']].map(([key,date,kind])=>({key,date,kind,factory:'f',level:'high'}))})})}})
+vi.mock('../src/composables/useDynamicAnalysis',async()=>{const {ref}=await import('vue');return {useDynamicAnalysis:()=>({factories:ref([]),loading:ref(false),errors:ref([]),readFailed:ref(false),updated:ref(''),refresh:vi.fn(),result:ref({issues:[['old','2026-09-01','delivery'],['boundary','2026-09-02','delivery'],['already','2026-08-01','delivery'],['grade','2026-08-01','grade']].map(([key,date,kind])=>({key,date,kind,factory:'f',level:'high'}))})})}})
 import Panel from '../src/components/DynamicAnalysisPanel.vue'
 afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();vi.clearAllMocks()})
 it('confirms exact eligible count and writes only owner followups, skipping resolved and boundary rows',async()=>{

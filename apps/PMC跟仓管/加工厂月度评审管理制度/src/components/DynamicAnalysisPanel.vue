@@ -10,7 +10,7 @@ import { overdueMoreThan50, resolveRiskBatch } from '../utils/analysisBulkResolv
 import { chinaToday } from '../utils/dynamicAnalysis'
 import type { AnalysisIssue } from '../utils/dynamicAnalysis'
 const props = defineProps<{ compact?: boolean; factoryId?: string }>()
-const { factories, result, loading, errors, updated, refresh } = useDynamicAnalysis()
+const { factories, result, loading, errors, readFailed, updated, refresh } = useDynamicAnalysis()
 const kind = ref(''), level = ref(''), factoryFilter = ref(''), statusFilter = ref('')
 const states = ref<RecordModel[]>([]), statusError = ref(''), saving = ref(''), stateReady = ref(false)
 const bulkBusy = ref(false), bulkMessage = ref(''), bulkDone = ref(0)
@@ -23,7 +23,7 @@ async function loadStates() {
     if (current === generation) { states.value = list; stateReady.value = true }
   } catch { if (current === generation) statusError.value = '跟进状态读取失败，请确认后台已部署最新迁移后重试；风险分析仍可查看。' }
 }
-const stop = pb.authStore.onChange(() => { generation++; states.value = []; stateReady.value = false; if (pb.authStore.record) void loadStates() })
+const stop = pb.authStore.onChange(() => { generation++; states.value = []; stateReady.value = false; bulkMessage.value = ''; bulkDone.value = 0; if (pb.authStore.record) void loadStates() })
 onMounted(() => { if (!props.compact) void loadStates() })
 onScopeDispose(() => { generation++; stop() })
 const stateMap = computed(() => new Map(states.value.map(s => [s.issue_key, s])))
@@ -49,7 +49,7 @@ const scoped = computed(() => result.value.issues.filter(i => !props.factoryId |
 const visible = computed(() => scoped.value.filter(i => (!kind.value || i.kind === kind.value) && (!level.value || i.level === level.value) && (!factoryFilter.value || i.factory === factoryFilter.value) && (!statusFilter.value || status(i.key) === statusFilter.value)))
 const oldRisks = computed(() => scoped.value.filter(i => overdueMoreThan50(i, chinaToday()) && status(i.key) !== 'resolved'))
 async function resolveOldRisks() {
-  if (bulkBusy.value || saving.value || loading.value || errors.value.length || !stateReady.value) return
+  if (bulkBusy.value || saving.value || loading.value || readFailed.value || !stateReady.value) return
   const items = [...oldRisks.value], owner = pb.authStore.record?.id, current = generation
   if (!owner || !items.length) return
   if (!window.confirm(`将当前${props.factoryId ? '工厂' : '全部授权工厂'}范围内逾期超过50天的 ${items.length} 项风险标为“已解决”？仅修改本账号的跟进状态，不受下方筛选条件影响，不修改订单交付或整改记录。`)) return
@@ -65,6 +65,7 @@ async function resolveOldRisks() {
     if (active()) {
       states.value = [...snapshot.values()]
       bulkMessage.value = `已成功标记 ${outcome.done} 项。` + (outcome.failed ? '部分请求失败，已停止；请刷新跟进状态后重试，已保存的项目会跳过。' : '原始业务记录保持不变。')
+      if (outcome.failed) { stateReady.value = false; statusError.value = '部分跟进状态保存失败，已停止。请刷新跟进状态后重试。' }
     }
   } finally { bulkBusy.value = false }
 }
@@ -87,7 +88,7 @@ const target = computed(() => ({ path: '/analysis', query: props.factoryId ? { f
       <details><summary>分析规则与数据缺口</summary><p>整改有描述且计划日期早于今天、未登记有效完成日期时提示；最近两次巡查评级由A向D下降时提示；订单交期早于今天且未登记交付时提示（排除已交付、已取消、已退回订单）。逾期至少7天或评级降至D列为重点关注。日期按北京时间计算，评级变化不会推断为质量不合格。</p><p>授权范围内：{{ result.missingPatrolDates }} 条未完成整改缺少有效计划日期，{{ result.missingOrderDates }} 条未交付订单缺少有效交期，无法判断是否逾期。源数据错误请进入原始记录修正。</p></details>
       <p>跟进状态仅当前账号可见。“已解决”代表个人跟进标记；源数据仍触发规则时，预警继续保留。下方为规则预警；上方AI分析需配置服务后主动生成。</p>
       <p v-if="statusError" class="error" role="alert">{{ statusError }} <button :disabled="bulkBusy" @click="loadStates">刷新跟进状态</button></p>
-      <div class="bulk-actions"><p>当前{{ factoryId ? '工厂' : '全部授权工厂' }}范围内，逾期超过50天且尚未标为已解决：{{ oldRisks.length }} 项（不受下方筛选影响）。</p><button :disabled="bulkBusy || !!saving || loading || !!errors.length || !stateReady || !oldRisks.length" @click="resolveOldRisks">{{ bulkBusy ? `正在标记，已完成 ${bulkDone} 项…` : '逾期超过50天批量标为已解决' }}</button><p v-if="bulkMessage" role="status">{{ bulkMessage }}</p></div>
+      <div class="bulk-actions"><p>当前{{ factoryId ? '工厂' : '全部授权工厂' }}范围内，逾期超过50天且尚未标为已解决：{{ oldRisks.length }} 项（不受下方筛选影响）。</p><button :disabled="bulkBusy || !!saving || loading || readFailed || !stateReady || !oldRisks.length" @click="resolveOldRisks">{{ bulkBusy ? `正在标记，已完成 ${bulkDone} 项…` : '逾期超过50天批量标为已解决' }}</button><p v-if="bulkMessage" role="status">{{ bulkMessage }}</p></div>
       <div class="filters">
         <label v-if="!factoryId">工厂<select v-model="factoryFilter"><option value="">全部有预警工厂</option><option v-for="id in [...new Set(scoped.map(i => i.factory))]" :key="id" :value="id">{{ name(id) }}</option></select></label>
         <label>问题类型<select v-model="kind"><option value="">全部</option><option value="correction">整改逾期</option><option value="grade">评级下降</option><option value="delivery">交期延期</option></select></label>

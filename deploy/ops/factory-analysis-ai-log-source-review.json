@@ -3,16 +3,16 @@
   "status": "CHECKED",
   "independent": true,
   "reviewer": "/root/pr984_review",
-  "reviewedAtUTC": "2026-10-22T01:09:38.915435+00:00",
-  "draftSHA256": "ceeb3c5831f2efbdc170a505f8209062f885065b43b0c8d14fa0a0bd48fc6544",
-  "transportSHA256": "ae7ac6b7f83dd9f39650a47582a2a00cb419e8801589b8d68e3e9daaa7bbe25b",
+  "reviewedAtUTC": "2026-10-22T01:13:39.460952+00:00",
+  "draftSHA256": "d8a50d3daf195ea893be8e2763598ec4fb271774c846f12bc15d65ffe67b0804",
+  "transportSHA256": "5462ccffea993e16b36aff9c030447726454a5e41b6b3c5c8e4a6f71eae76fb8",
   "gateFrozenFalse": true,
-  "scope": "One read-only, fixed-window factory-review analysis-ai error-log collection; no configuration, model call, repair, production user action, or existing release-state changes authorized by this review.",
+  "scope": "Explicit second isolated read-only log diagnostic after sealed first-attempt pre-SQL failure; only branch/output/state/review/reservation/parent constants and Python3.9 timestamp compatibility changed. No config/model/container/business writes.",
   "source": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-logdiag.py",
-  "transport": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-transport.py",
+  "transport": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-transport2.py",
   "target": "f50e23735af6e198721830e26e35e26162f09af0",
   "tree": "6f8cfbdf0e607ccdca59b0cc0c21c5d430ece5f2",
-  "branch": "refs/heads/ops/factory-analysis-ai-log-20261022",
+  "branch": "refs/heads/ops/factory-analysis-ai-log-20261022-2",
   "route": "/api/factory-review/analysis-ai",
   "window": {
     "startUTCInclusive": "2026-10-22T00:40:00Z",
@@ -27,10 +27,12 @@
     "Only _logs route/window matches with recognized method and integer status300..599 are selected, at most100 rows per source. Start is inclusive/end exclusive, extra path suffixes do not match, query strings are never returned, oversized data bodies are not materialized into the result.",
     "Raw request data/error objects are processed only in memory. Result contains fixed route, validated timestamps/status/method/level/duration, SHA256 identities, byte counts and finite message/type/identifier/class allowlists. Stack frames allow only analysis_ai.pb.js or analysis_ai.js and bounded integer coordinates. No raw users, headers, token, question, business detail, upstream URL/body, arbitrary exception text or arbitrary path is emitted.",
     "Safe failures expose only constant stage/type enums; bounded final safe result omits whole final records above120000 bytes and reports omission count. Only sanitized result and its manifest are newly written under an exclusive private0700 directory using0600/O_EXCL/O_NOFOLLOW files.",
-    "Transport fixed P/A library hashes, isolated c163feff parent and diagnostic branch, exact3 published files, exact independent source/T hashes and explicit checked plan review are enforced before nonforce ops-only push. Normal deployment workflow is never disabled or modified.",
+    "Transport fixed P/A library hashes, isolated d2af406ebb4a3a670b80daec821a73c4b004c56b parent and second diagnostic branch, exact3 published files, exact independent source/T hashes and explicit checked plan review are enforced before nonforce ops-only push. Normal deployment workflow is never disabled or modified.",
     "Dispatch has an O_EXCL reservation and persistent attempted marker before its sole invocation; no automatic redispatch. It requires exact current main/ops SHA, normal workflow active/no active normal runs, fixed phase/branch/attempt1/workflow/fingerprint/hash, and bounded discovery/polling.",
     "Read requires exact first-attempt run metadata, one canonical safe result, target/tree/seal hashes and action outcome agreement. Private action log is bounded; only safe receipt metadata is printed. Old QMS branch/state and main/protection/containers are not mutation targets.",
-    "Narrow final revision is exactly line108: combine only non-None error/details/message keys in memory, keep scalar for a single key and None when no keys. This prevents null/generic error from hiding details; all existing finite classification/output constraints remain unchanged."
+    "Narrow final revision is exactly line108: combine only non-None error/details/message keys in memory, keep scalar for a single key and None when no keys. This prevents null/generic error from hiding details; all existing finite classification/output constraints remain unchanged.",
+    "Final attempt2 delta exactly: helper BRANCH and OUT suffix-2 plus iso fraction normalization; transport STATE2, BRANCH-2, PARENT first-attempt ops d2af406e, SOURCE_REVIEW2 and reservation2. No query/classification/privacy/transport-control changes.",
+    "Python3.9.6 regression independently reproduces old9-digit ValueError; final normalizes1..9 fractional digits to6 by padding/truncation before parsing, accepts offsets/no-fraction and rejects>9. current() is byte-for-byte identical, so output preserves original Docker startedAt string."
   ],
   "offlineChecks": {
     "transportFinalControls": {
@@ -63,6 +65,18 @@
         "real SQLite details-only, null error with details, generic error plus object details, message-only and all-null keys; fixed classification retained, no secret/business/query leakage, DB bytes unchanged"
       ],
       "previousUnchangedChecksReused": true
+    },
+    "attempt2NarrowRegression": {
+      "passed": 1,
+      "failed": 0,
+      "python": "3.9.6",
+      "old9NanosecondValueErrorReproduced": true,
+      "final9NanosecondAndOffsetAndShortAndNoFractionAccepted": true,
+      "precisionOver9Rejected": true,
+      "currentFunctionRawStartedAtUnchanged": true,
+      "exactOnly3HelperAnd5TransportChangesProved": true,
+      "previousUnchangedPrivacyAndTransportChecksReused": true,
+      "realGHProductionNetworkOrModelCalls": false
     }
   },
   "evidence": {
@@ -78,16 +92,46 @@
     "Logs are filtered and capped, so an empty or truncated result does not disprove the incident. Current container started after the requested window may require sealed historical persistent logs.",
     "Only the selected prior manifest/result/snapshot bytes are rehashed; the collector explicitly does not claim to rehash the entire deployment archive.",
     "The live database is observed in a read transaction while the application may continue writing; no global business-data freeze or repair is performed.",
-    "The hook replaces upstream connection/non200 response details with fixed messages; the collector does not claim to recover exact provider response/status or a root cause absent from retained logs."
+    "The hook replaces upstream connection/non200 response details with fixed messages; the collector does not claim to recover exact provider response/status or a root cause absent from retained logs.",
+    "Time parsing truncates fractional precision beyond6 digits for Python3.9 compatibility; original current-runtime startedAt string remains unchanged. No logs from this new attempt have yet been collected by the reviewer."
   ],
   "blockers": [],
   "revision": {
-    "previousDraftSHA256": "31092f7fd8a9a7f93df730e126bf31a35fa61288c5726fa35534fbf48fd8310f",
-    "onlyCollectorLineChanged": 108,
-    "priorReviewPreserved": {
-      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-source-review-31092f7-frozen.json",
-      "sha256": "eca7c2bbeecc5e64c73d63c4924525b73ffaa642a2810d818dc2f542900fa990"
-    },
-    "actualRetainedPocketBaseLogFieldShapeNotYetObserved": true
+    "attempt": 2,
+    "explicitNewAttemptNotRerun": true,
+    "previousFailedRunId": 39704168111,
+    "previousFailureStage": "current-container-before",
+    "previousFailureType": "ValueError",
+    "previousFailureOccurredBeforeSQLReads": true,
+    "previousAttemptArtifactsPreserved": [
+      {
+        "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-logdiag-attempt1-frozen.py",
+        "sha256": "ceeb3c5831f2efbdc170a505f8209062f885065b43b0c8d14fa0a0bd48fc6544"
+      },
+      {
+        "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-transport.py",
+        "sha256": "ae7ac6b7f83dd9f39650a47582a2a00cb419e8801589b8d68e3e9daaa7bbe25b"
+      },
+      {
+        "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-source-review.json",
+        "sha256": "2c968d07ea7e81eebebbce3a14c52b1a2525e8e32c53049f96daf7187cc95e74"
+      },
+      {
+        "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-state.json",
+        "sha256": "01cc1e0bc6f0019a9263f99a672a1570cafdccbde4cd35cc5e4f58f87487247e"
+      },
+      {
+        "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-dispatch.reservation.json",
+        "sha256": "cd69ccd921fdebfcaa798c0bfcf1853091ff5dd01e3359504c23efc7ccec41f5"
+      },
+      {
+        "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-39704168111-result.json",
+        "sha256": "e4fa37a44d8f84646ccd6e787c41efd452d57b90d7950b16d5bfcb9ace5f2b5e"
+      }
+    ],
+    "newParent": "d2af406ebb4a3a670b80daec821a73c4b004c56b",
+    "newStatePath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-state2.json",
+    "newReservationPath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-dispatch2.reservation.json",
+    "newOutputPath": "/opt/rr-portal/deploy/backups/factory-analysis-ai-log-20261022-2"
   }
 }

@@ -7,9 +7,9 @@ import contextlib,datetime,hashlib,json,math,os,pathlib,re,sqlite3,stat,subproce
 PIN=True
 TARGET='f50e23735af6e198721830e26e35e26162f09af0'
 TREE='6f8cfbdf0e607ccdca59b0cc0c21c5d430ece5f2'
-BRANCH='refs/heads/ops/factory-analysis-ai-log-20261022'
+BRANCH='refs/heads/ops/factory-analysis-ai-log-20261022-2'
 ROOT=pathlib.Path('/opt/rr-portal')
-OUT=ROOT/'deploy/backups/factory-analysis-ai-log-20261022'
+OUT=ROOT/'deploy/backups/factory-analysis-ai-log-20261022-2'
 ARCHIVE=ROOT/'deploy/backups/qms-api-auth-20261021-deploy'
 MANIFEST_SHA='4fe3efb9e171a9d93c6d90464a7568c6c5eb56928ba8f9561ab624c207a607b1'
 RESULT_SHA='b50d527816a5b3542148eae141fc0ef91d9b7a60f91909aa1a4b12d3835686c7'
@@ -75,7 +75,7 @@ def current():
 
 def iso(value):
  need(type(value)is str and re.fullmatch(r'\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d(?:\.\d{1,9})?(?:Z|[+-]\d\d:\d\d)',value)is not None,'valid-iso-time')
- t=datetime.datetime.fromisoformat(value.replace('Z','+00:00')).astimezone(datetime.timezone.utc);return t
+ normalized=re.sub(r'\.(\d{1,9})',lambda m:'.'+m.group(1)[:6].ljust(6,'0'),value);t=datetime.datetime.fromisoformat(normalized.replace('Z','+00:00')).astimezone(datetime.timezone.utc);return t
 
 def classify(error):
  raw=error.encode()if type(error)is str else enc(error)if error is not None else b''

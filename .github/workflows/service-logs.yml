@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '97c4c6362f68d1aae2eb59edb89545de4f6ccfaa1954fa8275bf99639538365c'
+  SCOPED_RELEASE_HELPER_SHA256: '1c7352cefbd34e14669be5437804eaa71e4376ec17e9b5bf6d0080e7d5b46510'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -56,9 +56,9 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/batch-988-991-992-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-backup.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 97c4c6362f68d1aae2eb59edb89545de4f6ccfaa1954fa8275bf99639538365c ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 1c7352cefbd34e14669be5437804eaa71e4376ec17e9b5bf6d0080e7d5b46510 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-988-991-992-source-review-backup.json" > "$scoped_release_tmp/batch-988-991-992-source-review-backup.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/batch-988-991-992-source-review-backup.json" | cut -d ' ' -f1)" = 6496476f5f416eeafff4a20ca175bdea0e571cbe799448fcfb09514c364ad765 ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/batch-988-991-992-source-review-backup.json" | cut -d ' ' -f1)" = 966a6db4e516fa786959e8345ac03a0a32b0fc7516665d7c42ed47a0de5afd9d ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/factory-review-backup-library.py" > "$scoped_release_tmp/factory-review-backup-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/factory-review-backup-library.py" | cut -d ' ' -f1)" = 79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/internal-quote-readonly-library.py" > "$scoped_release_tmp/internal-quote-readonly-library.py" 2>/dev/null || exit 1

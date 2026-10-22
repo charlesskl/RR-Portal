@@ -2,8 +2,8 @@
   "disposition": "CHECKED",
   "independent": true,
   "reviewer": "/root/pr984_review",
-  "reviewedAtUTC": "2026-10-22T06:18:46.317867+00:00",
-  "helperSHA256": "1158d61b985c3af47954449d71322de7f0b72fecbb8610eabf6bc3c94d82bfe9",
+  "reviewedAtUTC": "2026-10-22T06:25:16.801987+00:00",
+  "helperSHA256": "08a98eb61829893d00be2f24e97629136929465a2d45e23ed38dbc45248db5df",
   "helperGatesFrozen": true,
   "base": "f50e23735af6e198721830e26e35e26162f09af0",
   "baseTree": "6f8cfbdf0e607ccdca59b0cc0c21c5d430ece5f2",
@@ -16,7 +16,7 @@
     "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
     "internal-quote-readonly-library.py": "be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69"
   },
-  "transportSHA256": "1604477870cb31f2f8aca7ae8ac309c6519f746f1e412880421f00e12e35d7b9",
+  "transportSHA256": "83d7d23946148a93c57d28050ea9c968bd1eae0d49ba8401fce15dd40ed04ef0",
   "scope": [
     "factory-review-test",
     "factory-review",
@@ -30,7 +30,9 @@
     "All6discovered SQLite are typed/schema captured with DB mode-owner and family metadata. Complete quote legacy raw bytes and uploads/fileownership are separately archived/compared. All PostgreSQL base tables including extras are captured;required18tables are a minimum,not an exclusion list;all typed row counts/hashes/original-column hashes are required.",
     "Quote startup guard rejects seeds,recyclecleanup,missing entitlements/reference rows,costing basis,row rewrites,required columns/indexes or unstable sequences. Backup permits no sequence exception and does not claim MVCC coverage of sequence state;release-specific exactstartupdelta is reviewed separately.",
     "Before/after allruntime/source/fourdirty/env bytes-mode-owner/maintenance/files/uploads checks preserve existing state;all private records remain0600/sealed0700 and safe public result contains only status/count/hash/stage metadata. No HTTP/model/signal/maintenance/main/state mutation is introduced.",
-    "Transport keeps checked exact plan,prior seals,onephase/firstattempt/fingerprint/concurrency/reservation/read-result controls. New source-manifest SHA c930e6... and candidate tree603d8c... are literal pinned,with only factory/quote paths;SOURCE_MANIFEST_SHA is a fixed reviewed constant rather than an activation gate."
+    "Transport keeps checked exact plan,prior seals,onephase/firstattempt/fingerprint/concurrency/reservation/read-result controls. New source-manifest SHA c930e6... and candidate tree603d8c... are literal pinned,with only factory/quote paths;SOURCE_MANIFEST_SHA is a fixed reviewed constant rather than an activation gate.",
+    "New backup differs from preserved1158 by exactly the factory image private-write conditional and new backup-2 output directory. Actual pinned F.runtime_files owns PB image diagnostics; quote diagnostic remains captured. Reverse those two lines and bytes/hash equal frozen1158. No data/snapshot/startup guard is relaxed.",
+    "Transport2 differs from frozen transport1 by exactly state2 and dispatch2 reservation filenames. Original state/attempt/reservation are not reset; no new action was performed by this reviewer."
   ],
   "offlineChecks": {
     "authorFixtureIndependentlyReadAndRerun": {
@@ -45,7 +47,8 @@
         "same-snapshot read-only PG wrapper plus restoration",
         "46runtime/43others/ROmount/alias negatives",
         "complete quote Docker COPY source selection"
-      ]
+      ],
+      "sourceBeforeFinalWriterFix": true
     },
     "independentAdditionalChecks": {
       "passed": 2,
@@ -57,11 +60,30 @@
     },
     "realGHProductionDockerPostgresOrHTTPCalls": false,
     "onlyTemporarySyntheticFixturesAndLocalGitReads": true,
-    "priorFrameworkSuitesRerun": false
+    "priorFrameworkSuitesRerun": false,
+    "actualFactoryWriterRegression": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-batch-988-991-992-backup.py",
+      "sha256": "ca8e3f8900bd61434bafc3ab792eff093bff3f5903c7fa537360e39a9fed1781",
+      "passed": 1,
+      "failed": 0,
+      "name": "test_actual_factory_runtime_writer_full_backup_loop_and_old_negative_control",
+      "details": "Independently reran full three-service backup loop using actual pinned F.runtime_files and actual O_EXCL private_write, with external inputs faked. New08a98 succeeds and captures all3 image records; frozen1158 negative control raises FileExistsError."
+    },
+    "authorFinalEvidence": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-988-991-992-backup-2-author-evidence.json",
+      "sha256": "47d9bb5429bf36872f4ced3ba6b21da1a325f34085263659d47dc8c23801b8b0",
+      "reportedPassed": 7,
+      "independentRerun": "original6 on1158 plus targeted actualwriter1 on08a98; unchanged logic proven by exact two-line reverse-byte comparison"
+    }
   },
   "boundaries": [
     "Database snapshots are individually consistent,not cross-database atomic. PostgreSQL logical rows/schema and dump use one exportedMVCC snapshot;sequence state is separately observed and bracketed.",
     "Startup may issue existing physical SQL/upserts;this guard proves no business row seed/delete/change is needed. Any release-only allowed sequence advance must be exact and independently checked."
   ],
-  "remainingBlockers": []
+  "remainingBlockers": [],
+  "supersedesSourceReview": {
+    "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/batch-988-991-992-backup-source-review-attempt1-frozen.json",
+    "sha256": "6496476f5f416eeafff4a20ca175bdea0e571cbe799448fcfb09514c364ad765",
+    "reason": "First read-only run revealed duplicate image diagnostic O_EXCL write. Original failed attempt/state/reservation remain preserved; this receipt binds only the new backup-2 source and transport2."
+  }
 }

@@ -11,7 +11,7 @@ BASE='f50e23735af6e198721830e26e35e26162f09af0'
 BASE_TREE='6f8cfbdf0e607ccdca59b0cc0c21c5d430ece5f2'
 BRANCH='refs/heads/ops/batch-988-991-992-20261022'
 BACKUP_PIN=True
-OUT=ROOT/'deploy/backups/batch-988-991-992-20261022-backup'
+OUT=ROOT/'deploy/backups/batch-988-991-992-20261022-backup-2'
 FACTORY='apps/PMC跟仓管/加工厂月度评审管理制度'
 QUOTE='apps/业务部/内部报价系统'
 APPS=(FACTORY,QUOTE)
@@ -166,7 +166,7 @@ def backup(result):
  dbsize=int(run(['docker','exec','-i',before['databaseContainer'],'sh','-c',PG_SHELL],b"BEGIN READ ONLY; SELECT COALESCE(sum(pg_total_relation_size(c.oid)),0) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='internal_quote'; COMMIT;\n",45));need(dbsize>=0 and shutil.disk_usage(OUT).free>2*(dbsize+sum(p.stat().st_size for roots in EXPECTED_ROOTS.values()for source,_ in roots for p in(ROOT/source).rglob('*')if p.is_file()))+1024**3,'enough-private-backup-space')
  for s in ORDER:
   actual=F.envmap(raw[s]['Config']['Env']);process=process_environment(raw[s]['Id']);image=json.loads(run(['docker','image','inspect',raw[s]['Image']]))[0];need(image['Id']==raw[s]['Image'],'original-immutable-image')
-  private(s+'-image.private.json',image)
+  if not s.startswith('factory-review'):private(s+'-image.private.json',image)
   private(s+'-literal-configured-environment.private.json',actual);private(s+'-literal-process-environment.private.json',process);private(s+'-declared-compose-environment.private.json',render['services'][s].get('environment',{}));captured[s],dest=capture(s,'baseline');startup[s]=startup_guard(s,captured[s],dest);proof[s]=application_proof(s,before['targets'][s],BASE)
  after,_=runtime();need(after==before and source()==configuration and dirty_snapshot()==dirty and flags()==maintenance,'unchanged-runtime-source-dirty-flags');b={'head':BASE,'tree':BASE_TREE,'runtime':before,'configuration':configuration,'preexistingFourDirty':dirty,'maintenanceInventory':maintenance,'environmentFileMetadata':envmeta,'environmentSHA256':sha((OUT/'environment.private').read_bytes()),'storage':captured,'sourceProof':proof,'startup':startup};environment_stable(dict(b,archive=OUT))
  for s in ORDER:

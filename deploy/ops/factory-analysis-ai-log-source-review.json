@@ -3,16 +3,16 @@
   "status": "CHECKED",
   "independent": true,
   "reviewer": "/root/pr984_review",
-  "reviewedAtUTC": "2026-10-22T01:19:47.381153+00:00",
-  "draftSHA256": "24e2a0e4f2d7b0f9a339823d35442c1e1685ae4ada0184727e5bb1c07ce6cfaf",
-  "transportSHA256": "774fabda5ef8509ee3f35fc601d867a84eb6cbb97a00654076950b54011ff79e",
+  "reviewedAtUTC": "2026-10-22T01:23:14.081239+00:00",
+  "draftSHA256": "0b3860dc95b6e620b846e57b19ae90fb3e2b33635f1fe48dcf2633d9bf09a4c9",
+  "transportSHA256": "c3858dddf225991490b6f00e932cce9f9c6f7443e61155022c52c4f87ed5448d",
   "gateFrozenFalse": true,
-  "source": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-logdiag-3.py",
-  "transport": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-transport3.py",
+  "source": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-logdiag-4.py",
+  "transport": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-transport4.py",
   "target": "f50e23735af6e198721830e26e35e26162f09af0",
   "tree": "6f8cfbdf0e607ccdca59b0cc0c21c5d430ece5f2",
-  "branch": "refs/heads/ops/factory-analysis-ai-log-20261022-3",
-  "scope": "Attempt3 isolated read-only log observation of production/test factory-review services, expanded fixed window, fixed route variants and numeric log coverage/retention; no repair, configuration, model calls or container/business mutations.",
+  "branch": "refs/heads/ops/factory-analysis-ai-log-20261022-4",
+  "scope": "Explicit fourth isolated read-only log diagnostic. Fixed route/window candidates are retained regardless of status/method; status/method are sanitized to finite values/types before output. No config, model, container or business mutations.",
   "services": [
     "factory-review",
     "factory-review-test"
@@ -24,25 +24,26 @@
     "BeijingEndExclusive": "2026-10-22 09:05"
   },
   "checks": [
-    "Read complete collector delta against frozen attempt2 and T3 against T2. T3 is exactly six constant/path replacements: state3, helper-3, branch-3, parent ee79967cc49cb617ade59c39f49d6236363441c2, sourceReview3, reservation3. All publishing, plan/hash/source-review, first-attempt, unique-dispatch, active-normal-workflow, exact-three-file and canonical-result controls are unchanged.",
-    "Collector remains literal PIN=False. Prior iso/classify/regular/digest/bounded/private/run functions are AST-identical to reviewed attempt2, retaining Python3.9 nanosecond compatibility and fixed error allowlists/private output guards. Previous helper and prior source reviews remain preserved.",
-    "Only two fixed services and fixed compose data bind paths are accepted. Docker observation remains ps plus inspect projection excluding Env; mounts are validated then removed from returned runtime data. Exact main source/tree and before/after runtime identity guards remain.",
-    "Prior deploy manifest/result hashes unchanged. Exactly four selected sealed databases (production/test auxiliary.db and data.db) are verified against manifest before queries and rehashed afterwards. Live SQLite connections use mode=ro/query_only and memory temp storage/read transactions; sealed sources additionally use immutable=1.",
-    "Logs use fixed00:25..01:05 UTC window, six finite bare/production-prefixed/test-prefixed analysis/config route labels, recognized methods and integer HTTP200..599 only. Failed analysis records rank first, then other failures, then successful metadata;100-row cap per source and120000-byte final output budget are explicit.",
-    "Successful2xx rows do not select error/details/message from SQLite and return only validated metadata. Failure rows project only those three fields in memory, within the existing size cap, then pass unchanged fixed classifiers. No raw query/header/user/question/business/provider response, arbitrary path, error text or identifier is emitted.",
-    "Coverage adds only total/window/valid-JSON counts, validated earliest/latest times, presence counts for fixed eight keys, integer200..599 status counts and six fixed route counts. Retention reads only _params settings projected maxDays/minLevel integers with bounds and row-presence Boolean; no full settings or business rows are returned.",
-    "Service+hashed-log-ID dedup prevents production/test ID collisions, preserves per-source provenance, and rejects inconsistent safe representations. Current instance incident/window coverage boundaries and cross-database non-atomic observation are explicit. No HTTP/model invocation, config change, signal/restart/rebuild, cursor reset or old-state mutation exists in collector."
+    "Complete attempt3-to4 delta reviewed. T4 is exactly six constant/path replacements (state4/helper4/branch4/parent a1b6ae3f3ebd542ab5563356a47d596f6a5a27c2/sourceReview4/reservation4); all prior plan/hash/three-file/dispatch/first-attempt/canonical-result and normal-workflow controls are identical.",
+    "Collector PIN=False remains frozen. Only logs function and collect safe-result ordering change; all other functions including readonly/retention/sealed/source/current/iso/classify/private/main and their read-only/privacy guards are AST-identical to attempt3.",
+    "WHERE now contains fixed window and six fixed route variants only. No status/method clause or Python predicate discards a matching route candidate. Existing100-row source cap and120000-byte final cap remain explicit; non-success analysis candidates sort before configuration and successful metadata.",
+    "Only strict JSON integer0..999 is emitted as status, otherwise null; statusFieldType is restricted to fixed JSON-type enum. Only fixed allowed method strings are emitted, otherwise null; methodFieldType is the same finite enum. Arbitrary raw status/method values cannot be returned.",
+    "Only strict integer200..299 is successful metadata. SQL CASE tests success explicitly and falls through to fixed error/details/message projection for every other status, including null/missing/noninteger; SQL three-valued NULL cannot suppress candidate classification. Python uses the same strict-int success predicate.",
+    "Numeric status aggregates cover0..999 and windowInvalidStatusCount equals total window rows minus valid integer-status counts. No arbitrary raw status key or value is emitted.",
+    "Frozen dual-service/window/archive contracts are unchanged: production/test fixed binds, sealed selected auxiliary+data DBs with4hashes, source/runtime before-after checks, mode=ro/query_only/read transaction and sealed immutable, two bounded numeric retention fields and safe log coverage aggregates.",
+    "Raw errors/headers/query/user/questions/business/provider content remain memory-only. Existing fixed message/type/identifier/technical-class/two-file numeric-stack classifiers, output budget, exclusive private result/manifest files and no HTTP/model/config/container/business write constraints remain unchanged."
   ],
   "offlineChecks": {
-    "passed": 3,
+    "passed": 2,
     "failed": 0,
     "cases": [
-      "Real synthetic production/test SQLite fixtures:130 early config200 rows do not hide later analysis500; fixed routes/window boundaries/status200..599,100 cap, aggregate counts and bounded numeric retention pass;2xx has no error fields.",
-      "Four real synthetic sealed database files plus live read-only databases: collect preserves service-scoped dedup and two-source provenance, boundary reporting and all original bytes; secret/business/query markers absent from complete encoded result; changing fourth selected data.db causes seal rejection.",
-      "Exact T3 constant-only transformation and unchanged iso/classifier/private/source-read helpers proved by text/AST comparisons. No production/GH/network/model calls or helper/state/ops writes."
+      "Targeted real SQLite13 route candidates retain status0/null/secretstring/negative/float/bool/strict2xx/999/>999/object/array/missing and unknown/null/object/missing methods. Exactly two strict2xx records are metadata-only;all11 others classify fixed known messages. Safe integer/method/type outputs, aggregates, secret/business/query exclusion and unchanged DB bytes pass.",
+      "Exact six-constant T3-toT4 transformation and function AST comparison prove only logs and collect ordering changed. Prior IO/read-only/classifier/seal/retention/iso/main safeguards remain byte/AST-equivalent; no existing full framework rerun."
     ],
     "previousUnchangedSecurityAndTransportChecksReused": true,
-    "existingFrameworkOrSourceSuitesRerun": false
+    "realGHOrProductionCalls": false,
+    "networkOrModelCalls": false,
+    "sourceHelperStateOpsMutations": false
   },
   "priorReviewEvidence": [
     {
@@ -56,6 +57,10 @@
     {
       "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-transport2.py",
       "sha256": "5462ccffea993e16b36aff9c030447726454a5e41b6b3c5c8e4a6f71eae76fb8"
+    },
+    {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-source-review3.json",
+      "sha256": "37116aaf53514d2dea8363f7ef34fae98ed354c0d3ba6af8d3895c6745f60c64"
     }
   ],
   "validationBoundaries": [
@@ -63,8 +68,37 @@
     "Four sources are separately observed read transactions, not a global point-in-time database snapshot. Only selected archive evidence is rehashed, not the entire release archive.",
     "100-record-per-source and final byte limits can omit records; counts/limited flags/outputRecordsOmitted remain explicit. Empty retained logs cannot disprove the incident or distinguish deletion, retention, disabled logging and missing historical coverage without further evidence.",
     "Coverage/retention values describe observed log availability and settings; they do not prove the exact cause/time/actor of missing rows. Hook-replaced upstream error details cannot be reconstructed.",
-    "No real model request, production login, business write or configuration change is performed or inferred by this review."
+    "No real model request, production login, business write or configuration change is performed or inferred by this review.",
+    "Logged status is an internal observed field;0/nonstandard/null does not by itself establish the actual HTTP or upstream provider response. Actual root-cause conclusions require the new safe error classifications."
   ],
   "blockers": [],
-  "remainingBlockers": []
+  "remainingBlockers": [],
+  "observedPriorCollection": {
+    "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/factory-analysis-ai-log-39705094998-result.json",
+    "sha256": "865957b8109cc6758b1e90d7d715ddfd1cbd661680465e63d9aa45f2f9e6e030",
+    "runId": 39705094998,
+    "success": true,
+    "manifestSHA256": "14ce1e5f0d80d3b4272bcaf0cf1981bd3536d8d27ebf6f86729afe756909c860",
+    "resultSHA256": "b9f67e890bae0701c4ecfa4743e21cb88576bf4563d367d00fb5695caa53dabe",
+    "formalSealed": {
+      "analysisRouteCount": 2,
+      "configRouteCount": 3,
+      "matchingCount": 3,
+      "windowLogsCount": 582,
+      "includedIntegerStatusCounts": {
+        "200": 580
+      }
+    },
+    "formalLive": {
+      "analysisRouteCount": 2,
+      "configRouteCount": 5,
+      "matchingCount": 5,
+      "windowLogsCount": 851,
+      "includedIntegerStatusCounts": {
+        "200": 847,
+        "401": 2
+      }
+    },
+    "interpretation": "Prior status/method filtering omitted two formal analysis-route candidates. Exact status/method values are unknown until the new bounded diagnostic; no status0 or upstream-cause conclusion is claimed."
+  }
 }

@@ -6,11 +6,14 @@ import type { RecordModel } from 'pocketbase'
 import { useDynamicAnalysis } from '../composables/useDynamicAnalysis'
 import { pb } from '../pb'
 import { regionOf } from '../constants/roles'
+import { overdueMoreThan50, resolveRiskBatch } from '../utils/analysisBulkResolve'
+import { chinaToday } from '../utils/dynamicAnalysis'
 import type { AnalysisIssue } from '../utils/dynamicAnalysis'
 const props = defineProps<{ compact?: boolean; factoryId?: string }>()
 const { factories, result, loading, errors, updated, refresh } = useDynamicAnalysis()
 const kind = ref(''), level = ref(''), factoryFilter = ref(''), statusFilter = ref('')
 const states = ref<RecordModel[]>([]), statusError = ref(''), saving = ref(''), stateReady = ref(false)
+const bulkBusy = ref(false), bulkMessage = ref(''), bulkDone = ref(0)
 let generation = 0
 async function loadStates() {
   const current = ++generation
@@ -23,10 +26,11 @@ async function loadStates() {
 const stop = pb.authStore.onChange(() => { generation++; states.value = []; stateReady.value = false; if (pb.authStore.record) void loadStates() })
 onMounted(() => { if (!props.compact) void loadStates() })
 onScopeDispose(() => { generation++; stop() })
-const status = (key: string) => states.value.find(s => s.issue_key === key)?.status || 'pending'
+const stateMap = computed(() => new Map(states.value.map(s => [s.issue_key, s])))
+const status = (key: string) => stateMap.value.get(key)?.status || 'pending'
 async function save(issue: AnalysisIssue, next: string) {
   const owner = pb.authStore.record?.id, current = generation
-  if (!owner || saving.value || !stateReady.value) return
+  if (!owner || saving.value || bulkBusy.value || !stateReady.value) return
   saving.value = issue.key; statusError.value = ''
   try {
     const existing = states.value.find(s => s.issue_key === issue.key)
@@ -43,6 +47,27 @@ function changeStatus(issue: AnalysisIssue, event: Event) {
 }
 const scoped = computed(() => result.value.issues.filter(i => !props.factoryId || i.factory === props.factoryId))
 const visible = computed(() => scoped.value.filter(i => (!kind.value || i.kind === kind.value) && (!level.value || i.level === level.value) && (!factoryFilter.value || i.factory === factoryFilter.value) && (!statusFilter.value || status(i.key) === statusFilter.value)))
+const oldRisks = computed(() => scoped.value.filter(i => overdueMoreThan50(i, chinaToday()) && status(i.key) !== 'resolved'))
+async function resolveOldRisks() {
+  if (bulkBusy.value || saving.value || loading.value || errors.value.length || !stateReady.value) return
+  const items = [...oldRisks.value], owner = pb.authStore.record?.id, current = generation
+  if (!owner || !items.length) return
+  if (!window.confirm(`将当前${props.factoryId ? '工厂' : '全部授权工厂'}范围内逾期超过50天的 ${items.length} 项风险标为“已解决”？仅修改本账号的跟进状态，不受下方筛选条件影响，不修改订单交付或整改记录。`)) return
+  bulkBusy.value = true; bulkDone.value = 0; bulkMessage.value = ''; statusError.value = ''
+  const snapshot = new Map(stateMap.value)
+  const active = () => current === generation && pb.authStore.record?.id === owner
+  try {
+    const outcome = await resolveRiskBatch(items, active, async issue => {
+      const existing = snapshot.get(issue.key)
+      const row = existing ? await pb.collection('analysis_followups').update(existing.id, { status: 'resolved' }) : await pb.collection('analysis_followups').create({ owner, issue_key: issue.key, status: 'resolved' })
+      if (active()) snapshot.set(issue.key, row)
+    }, done => { if (active()) bulkDone.value = done })
+    if (active()) {
+      states.value = [...snapshot.values()]
+      bulkMessage.value = `已成功标记 ${outcome.done} 项。` + (outcome.failed ? '部分请求失败，已停止；请刷新跟进状态后重试，已保存的项目会跳过。' : '原始业务记录保持不变。')
+    }
+  } finally { bulkBusy.value = false }
+}
 const name = (id: string) => factories.value.find(f => f.id === id)?.name || '未知工厂'
 function source(issue: AnalysisIssue) {
   const f = factories.value.find(f => f.id === issue.factory)
@@ -61,7 +86,8 @@ const target = computed(() => ({ path: '/analysis', query: props.factoryId ? { f
       <AnalysisAiPanel :factories="factories" :factory-id="factoryId" />
       <details><summary>分析规则与数据缺口</summary><p>整改有描述且计划日期早于今天、未登记有效完成日期时提示；最近两次巡查评级由A向D下降时提示；订单交期早于今天且未登记交付时提示（排除已交付、已取消、已退回订单）。逾期至少7天或评级降至D列为重点关注。日期按北京时间计算，评级变化不会推断为质量不合格。</p><p>授权范围内：{{ result.missingPatrolDates }} 条未完成整改缺少有效计划日期，{{ result.missingOrderDates }} 条未交付订单缺少有效交期，无法判断是否逾期。源数据错误请进入原始记录修正。</p></details>
       <p>跟进状态仅当前账号可见。“已解决”代表个人跟进标记；源数据仍触发规则时，预警继续保留。下方为规则预警；上方AI分析需配置服务后主动生成。</p>
-      <p v-if="statusError" class="error" role="alert">{{ statusError }} <button @click="loadStates">刷新跟进状态</button></p>
+      <p v-if="statusError" class="error" role="alert">{{ statusError }} <button :disabled="bulkBusy" @click="loadStates">刷新跟进状态</button></p>
+      <div class="bulk-actions"><p>当前{{ factoryId ? '工厂' : '全部授权工厂' }}范围内，逾期超过50天且尚未标为已解决：{{ oldRisks.length }} 项（不受下方筛选影响）。</p><button :disabled="bulkBusy || !!saving || loading || !!errors.length || !stateReady || !oldRisks.length" @click="resolveOldRisks">{{ bulkBusy ? `正在标记，已完成 ${bulkDone} 项…` : '逾期超过50天批量标为已解决' }}</button><p v-if="bulkMessage" role="status">{{ bulkMessage }}</p></div>
       <div class="filters">
         <label v-if="!factoryId">工厂<select v-model="factoryFilter"><option value="">全部有预警工厂</option><option v-for="id in [...new Set(scoped.map(i => i.factory))]" :key="id" :value="id">{{ name(id) }}</option></select></label>
         <label>问题类型<select v-model="kind"><option value="">全部</option><option value="correction">整改逾期</option><option value="grade">评级下降</option><option value="delivery">交期延期</option></select></label>
@@ -72,7 +98,7 @@ const target = computed(() => ({ path: '/analysis', query: props.factoryId ? { f
       <article v-for="issue in visible" :key="issue.key" :class="{ high: issue.level === 'high' }">
         <header><h3>{{ name(issue.factory) }} · {{ issue.title }}</h3><strong>{{ issue.level === 'high' ? '重点关注' : '关注' }}</strong></header>
         <p>{{ issue.evidence }}</p><p class="muted">建议：{{ issue.suggestion }}</p>
-        <footer><RouterLink :to="source(issue)">查看原始记录 →</RouterLink><label>我的跟进<select :value="status(issue.key)" :disabled="!!saving || !stateReady" @change="changeStatus(issue, $event)"><option value="pending">待处理</option><option value="following">跟进中</option><option value="resolved">已解决</option></select></label></footer>
+        <footer><RouterLink :to="source(issue)">查看原始记录 →</RouterLink><label>我的跟进<select :value="status(issue.key)" :disabled="bulkBusy || !!saving || !stateReady" @change="changeStatus(issue, $event)"><option value="pending">待处理</option><option value="following">跟进中</option><option value="resolved">已解决</option></select></label></footer>
       </article>
     </template>
   </section>

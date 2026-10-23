@@ -2227,7 +2227,8 @@ function filterRecords() {
         const selCls   = _selectedIds.has(r.id) ? 'row-selected' : '';
         const isApproved = recStatus(r) === 'approved';
         const isRejected = recStatus(r) === 'rejected';
-        const editBtn = (can('editRecord') || (isRejected && can('createRecord'))) && !isApproved
+        /* 未审核通过（待审核/已退回）的记录：任何账号都可编辑；已审核锁定 */
+        const editBtn = !isApproved
           ? `<button class="action-btn" onclick="openEditModal(${r.id})">编辑</button>`
           : '';
         const rejBadge = isRejected
@@ -3453,9 +3454,12 @@ function openAddModal() {
 }
 
 function openEditModal(id) {
-  if (!can('editRecord')) { showToast('当前账号无权限执行此操作', 'error'); return; }
   const r = state.records.find(x => x.id === id);
   if (!r) return;
+  /* 未审核通过的记录任何账号都可编辑；已审核锁定的仍需先反审核退回 */
+  if (recStatus(r) === 'approved' && !can('editRecord')) {
+    showToast('该记录已通过审核并锁定，需先由审核人「反审核」退回后才能修改', 'error'); return;
+  }
   editingId = id;
   setText('modalTitle', '编辑验货记录');
   /* 编辑时隐藏模式切换，始终显示单条面板 */
@@ -5003,7 +5007,7 @@ function renderReviewPage() {
   }
 
   const canReview = can('reviewRecord');
-  const canEdit   = can('editRecord') || can('createRecord');
+  const canEdit   = true;   /* 未审核通过的记录任何账号都可编辑（下方 st!=='approved' 兜底已审核锁定） */
   const rows = list.map(r => {
     const st  = recStatus(r);
     const sm  = REVIEW_STATUS_META[st];

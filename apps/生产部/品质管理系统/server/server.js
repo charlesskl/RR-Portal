@@ -896,11 +896,15 @@ function authorizeRecordBatch(db, input, ids, user, replace = false) {
     const reviewChanged = current && REVIEW_FIELDS.some(col => String(record[col] || '') !== String(current[col] || ''));
     const resubmission = current && statusOf(current) === 'rejected' && nextStatus === 'pending' && businessChanged;
     if (!replace && !current) Auth.requirePermission(user, 'records', 'e');
-    if (!replace && current && businessChanged) Auth.requirePermission(user, 'records', 'a');
+    /* 未审核通过的记录放开编辑：任何可录入账号都能改（records.e）；已审核由下行 review.a 兜底 */
+    if (!replace && current && businessChanged) {
+      if (statusOf(current) === 'approved') Auth.requirePermission(user, 'review', 'a');
+      else Auth.requirePermission(user, 'records', 'e');
+    }
     if (current && businessChanged && statusOf(current) === 'approved') Auth.requirePermission(user, 'review', 'a');
     if ((!current && (nextStatus !== 'pending' || REVIEW_FIELDS.slice(1).some(col => record[col]))) ||
         current && reviewChanged && !resubmission) Auth.requirePermission(user, 'review', 'a');
-    if (resubmission) Auth.requirePermission(user, 'records', 'a');
+    if (resubmission) Auth.requirePermission(user, 'records', 'e');   /* 退回后重新提交同样放开 */
     // Unchanged rows may carry an old client-side audit display. Business edits
     // retain the database's audit fields unless a real review is being made.
     if (current && !businessChanged && !reviewChanged && !replace) return null;

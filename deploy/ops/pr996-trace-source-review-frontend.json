@@ -1,0 +1,55 @@
+{
+  "status": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr996_frontend_review",
+  "reviewedAtUTC": "2026-10-23T03:11:08.854856+00:00",
+  "helperSHA256": "7d1fde8fdf9abb621609f6962a8dcc6948c1bebf44a9e400e203b0a0ce138b67",
+  "gateFrozenFalse": true,
+  "actualFailedRun": 39892794253,
+  "failedArchive": "/opt/rr-portal/deploy/backups/pr-996-20261023-02-backup",
+  "failedManifestSHA256": "029638a279ec4746bdf97419f4c34ea31cd0c407d47874536a56e7af3f218fbd",
+  "failedResultSHA256": "c669e95c6f99c3a9ff905e31b49b0b93840b93d19ff2d6329516834e2a02de00",
+  "base": "6742f820c0a43388e274b867a2825a42548b5cea",
+  "branch": "refs/heads/ops/pr-996-20261023-trace-01",
+  "newPrivateOutput": "/opt/rr-portal/deploy/backups/pr-996-20261023-trace-01",
+  "authorReceipt": {
+    "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-trace-diagnostic-author-v2-ops.json",
+    "sha256": "189d234d432e7672c37a5864d912d989098c24822fbeb1c59c2291204b903152"
+  },
+  "checks": [
+    "Full frozen helper source read; exact corrected7d1fde hash and false DIAGNOSTIC_PIN checked. Frozen v2 differs from rejected old8497 only by using real newline rather than literal backslash-n in the Docker inspect format; AST constant and actual generated command have6 newline characters, seven allowlisted JSON fields and no Env/Config.",
+    "False gate precedes any read, umask or process operation and requires only fixed branch, CLI backup argument, first attempt and40hex workflow SHA. No valid enabled main or production operation was executed by reviewer. Result intentionally reports mode diagnose rather than PG backup/deployment.",
+    "Reads only fixed failedB2 private manifest/result/trace and sealed target-inspect. Strict0700 parent/0600 regular no-symlink stable files, exact known manifest/result SHA, canonical duplicate-key rejection, specific failed source/base/tree/type/stage and all no-mutation flags prevent arbitrary archive/path input. Trace and original target inspect SHA must be in sealed manifest.",
+    "Trace parser never evals traceback, emits no source lines or exception messages. Only fixed filename basenames/functions/line integers and allowlisted exception class names can be printed; unknown frame content is replaced with a count. Synthetic hostile path/function/body/credential strings were not emitted.",
+    "Docker inspect is limited to sealed original indo container ID and exactly Id/Image/Running/StartedAt/RestartCount/OOMKilled/Health.Status before and after. Current metadata must equal sealed original healthy runtime and remain unchanged. Only program-source tar command is exact three DLL/PDB pairs, whole wwwroot, schemaSQL and static HS seed, with no database/data/env path.",
+    "Tar bytes are streamed in64KiB chunks, hashed/count only, bounded128MiB and120seconds. Source contents are never saved or printed. Overflow/timeout closes pipe and terminates/kills only local docker client process; no docker stop/kill/restart or application signal command exists. Independent synthetic overflow and timeout tests confirm these branches.",
+    "Only new exclusive0700 diagnostic output directory with0600 result+manifest is written after evidence extraction. Failed archive and state/OPS remain unchanged. No PostgreSQL, authenticated HTTP, model/mail, business/config write, container lifecycle, source update, deployment or restore command exists.",
+    "Diagnostic success means safe traceback extraction succeeded; programTarProbe may separately be rejected, nonzero, oversized or timed out and remains explicit in output. No repair/root-cause or full-program byte claim is made if those probe fields do not establish it."
+  ],
+  "offlineChecks": {
+    "independentFixtures": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr996-trace-diagnostic-independent-frontend.py",
+      "sha256": "f37dace1bd90fee827eeaac8ad2d3d2c347c460e121a49545d4a5cb4c58de6e8",
+      "passed": 5,
+      "failed": 0,
+      "logPath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-trace-diagnostic-independent-tests-frontend.log",
+      "logSHA256": "9f997580c6ee281596e5eca235516424ae8e3a318736e06bdfe8e2e2e7846469"
+    },
+    "authorFixturesIndependentlyReadAndRerun": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr996-trace-diagnostic-ops.py",
+      "sha256": "12682e6561dfc73bb19b607238245d02940ab48aacb6dac19f8c5fe7cbac5a9d",
+      "passed": 7,
+      "failed": 0,
+      "logPath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-trace-diagnostic-author-tests-independent-rerun-frontend.log",
+      "logSHA256": "5fa30198b0c043b8808f119f9ad53ccdded0678bcd6777c0cdcc7da72e562222"
+    },
+    "noNetworkOrRealDocker": true,
+    "productionOrGitHubActionsPerformed": false,
+    "stateOrOPSModified": false
+  },
+  "boundaries": [
+    "Covers exact inert helper only; transport/workflow/activation need separate independent review.",
+    "Wait for actual sealed frames/probe result before claiming root cause or designing final backup3 correction."
+  ],
+  "remainingBlockers": []
+}

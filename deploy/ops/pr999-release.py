@@ -2,9 +2,9 @@
 No environment changes, DB restore, authenticated writes or model calls.
 """
 import copy,hashlib,importlib.util,io,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,traceback,urllib.error,urllib.request
-PHASE='verify'
-TARGET='69e37c71354935a4eaae825af2a1fddeee2090a9'
-TREE='d0053e7f662089359f0afb4e239cff36687b9a3b'
+PHASE=''
+TARGET=''
+TREE=''
 SOURCE_MANIFEST_SHA='dceec84e6fcef3e94da9b53593f5d69da05f1ad5827aa6fda5f747d32e496cb8'
 BASE='dacf295b539ebd696c9bae38d9551e276e3d88ad'
 BASE_TREE='1c718952aa72752af8eed4e08575bf3fd06a9e80'
@@ -14,7 +14,7 @@ BACKUP=ROOT/'deploy/backups/pr-999-20261023-backup'
 PREPARE=BACKUP.with_name('pr-999-20261023-prepare')
 DEPLOY=BACKUP.with_name('pr-999-20261023-deploy')
 VERIFY=BACKUP.with_name('pr-999-20261023-verify')
-BACKUP_MANIFEST='4a16365ad5d922c7556dc33baccba347be3eba5c8c69f263c58f63a1a069f3aa';BACKUP_RESULT='09ea82323a6bc277d07c28389ecce49c7f8098a588007d1e4976947147dd222c';PREPARE_MANIFEST='0cf80dacfa89bd1f182c7b08c04e89b90f6faf07cc51e06695cf91241b526a7b';PREPARE_RESULT='bd0d5b5b12aba77f488159dd1cf5de90492cd6344fcf3bb55bb52d7a7b84f459';DEPLOY_MANIFEST='a78b01e2aacf11d1388905917cdce9beab97d2c0a045a2ea62b31b616c9f00b0';DEPLOY_RESULT='97044ce5f9d6bdbcd888e38fb423eb888eb9fb42fa6962583f9a18160e5f25b5'
+BACKUP_MANIFEST='';BACKUP_RESULT='';PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 ORDER=('indo-shipping',)
 CUSTOMER_MIGRATION_SOURCE_SHA='9eb6b0dd5bb86f7dd7dbb24a47668ace5fd9fb91a00f1aa18450c8d748eabbcf'
 REVIEWED_PATHS=('db/postgres_schema.sql', 'src/IndoShipping.Api/Controllers/MaterialAlertsController.cs', 'src/IndoShipping.Api/Controllers/MaterialsController.cs', 'src/IndoShipping.Api/Controllers/ProductsController.cs', 'src/IndoShipping.Api/Controllers/PurchaseOrdersController.Merge.cs', 'src/IndoShipping.Api/Controllers/PurchaseOrdersController.cs', 'src/IndoShipping.Api/Controllers/SchedulesController.cs', 'src/IndoShipping.Api/Features/Bootstrap/DataMigrations.cs', 'src/IndoShipping.Api/Features/Bootstrap/ScheduleCustomerSchema.cs', 'src/IndoShipping.Api/Features/Purchasing/PurchaseCustomerIsolation.cs', 'src/IndoShipping.Api/Features/Purchasing/PurchaseCustomerValidation.cs', 'src/IndoShipping.Api/Features/Schedules/ScheduleLineHistory.cs', 'src/IndoShipping.Domain/Entities/Schedule.cs', 'src/IndoShipping.Infrastructure/Persistence/AppDbContext.cs', 'tests/IndoShipping.Api.Tests/CustomerIsolationWriteIntegrationTests.cs', 'tests/IndoShipping.Api.Tests/MaterialCompletionIntegrationTests.cs', 'tests/IndoShipping.Api.Tests/PurchaseCustomerIsolationTests.cs', 'tests/IndoShipping.Api.Tests/PurchaseOrderMergeTests.cs', 'tests/IndoShipping.Api.Tests/ScheduleCustomerIntegrationTests.cs', 'tests/IndoShipping.Api.Tests/ScheduleLineHistoryTests.cs', 'tests/IndoShipping.Api.Tests/ScheduleLineIntegrationTests.cs', 'web/src/deployment.test.ts', 'web/src/pages/MoldingPosPage.tsx', 'web/src/pages/ProductsPage.supplier.test.ts', 'web/src/pages/ProductsPage.tsx', 'web/src/pages/PurchasePage.tsx', 'web/src/pages/SchedulesPage.tsx', 'web/src/pages/SchedulesPage.upload.test.ts', 'web/src/pages/ShipmentsPage.tsx', 'web/src/utils/engineeringImport.ts', 'web/src/utils/purchaseContractWorkbook.test.ts', 'web/src/utils/purchaseContractWorkbook.ts', 'web/src/utils/purchaseCustomer.test.ts', 'web/src/utils/purchaseCustomer.ts', 'web/src/utils/purchaseCustoms.ts', 'web/src/utils/purchaseMaterialSelection.ts', 'web/src/utils/purchaseNetWeight.ts', 'web/src/utils/purchaseOrderMergeFlow.test.ts', 'web/src/utils/purchaseSavePermissions.test.ts', 'web/src/utils/purchaseScheduleLink.test.ts', 'web/src/utils/purchaseScheduleLink.ts', 'web/src/utils/scheduleImport.ts', 'web/src/utils/spinMasterImport.test.ts')

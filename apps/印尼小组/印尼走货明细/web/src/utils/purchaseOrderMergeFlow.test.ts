@@ -46,8 +46,9 @@ describe('purchase merge page flow', () => {
     expect(c.items.map((it: typeof lines[number]) => it.source_delivery_date)).toEqual(['2026-10-23', '2026-10-24'])
     c.order = { id: 1, po_no: '20269001', supplier: 'Supplier', order_date: '2026-10-19', delivery_date: '2026-12-01', items: c.items }
     const { ws } = await runInContext('buildContractSheet(order)', c)
-    expect(ws.H10.v).toContain('交货：2026-12-01')
-    expect(ws.H11.v).toContain('交货：2026-12-01')
+    expect(ws.H10.v).toBe('数量：10pcs')
+    expect(ws.H11.v).toBe('数量：10pcs')
+    expect(ws.A15.v).toContain('2026年12月1日')
     expect(ws.G13.v).toBe(20)
   })
   it('allows different order dates, opens confirmation without writing, then sends the selected target and IDs', async () => {
@@ -73,7 +74,7 @@ describe('purchase merge page flow', () => {
     expect(c.setMergeOrdersOpen).not.toHaveBeenCalled()
     expect(c.message.warning).toHaveBeenCalled()
   })
-  it('exports each source/date separately, with unchanged amounts and source notes', async () => {
+  it('keeps source rows and amounts but exports quantity-only notes and the whole-order date', async () => {
     const line = { product_code: '35874', material_name: 'FSC', spec: 'same', purchase_qty: 20200, ship_unit: 'PCE' }
     const c = context({ order: {
       id: 1, po_no: '20269001', supplier: 'Supplier', order_date: '2026-10-19', delivery_date: '2026-11-01',
@@ -86,9 +87,9 @@ describe('purchase merge page flow', () => {
     expect(ws.G10.v).toBe(1616)
     expect(ws.G11.v).toBe(1414)
     expect(ws.G13.v).toBe(3030)
-    expect(ws.H10.v).toContain('交货：2026-10-23')
-    expect(ws.H11.v).toContain('来源：20269002')
-    expect(ws.A15.v).toContain('按各明细')
-    expect(ws['!rows'][9].hpt).toBe(78)
+    expect(ws.H10.v).toBe('数量：20200pcs')
+    expect(ws.H11.v).toBe('数量：20200pcs')
+    expect(ws.A15.v).toContain('2026年11月1日')
+    expect(ws['!rows'][9].hpt).toBe(45)
   })
 })

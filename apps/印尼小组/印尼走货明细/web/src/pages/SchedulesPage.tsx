@@ -1,21 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  App, Button, Card, Drawer, Empty, Input, Modal, Popconfirm, Space, Table, Tabs, Tag, Tooltip, Typography,
+  App, Button, Card, Drawer, Empty, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Tooltip, Typography,
 } from 'antd'
 import dayjs from 'dayjs'
 import { api } from '../api/client'
-import { scheduleSheetToRawGrid } from '../utils/scheduleImport'
+import { parseScheduleWorkbook } from '../utils/scheduleImport'
+import { purchaseItemCodes } from '../utils/purchaseCustoms'
 import { scheduleLineKey, scheduleManualPlaced, toggleScheduleManual, scheduleAutoPlaced,
   scheduleActualProduction, scheduleProductionOverride, schedulePurchasePlaced } from '../utils/scheduleLineStatus'
 
 interface ScheduleSummary {
   id: number
+  customer?: string
   week_label?: string
   upload_date?: string
   row_count?: number
 }
 interface ScheduleDetail {
   id: number
+  customer?: string
   week_label?: string
   upload_date?: string
   raw_rows?: string
@@ -29,7 +32,7 @@ interface SchedRow {
   endCustomer?: string
   code?: string
   productName?: string
-  orderNo?: string        // TOMY PO
+  orderNo?: string        // 订单 PO
   customerPO?: string
   orderDate?: string      // 接单期
   qty?: number
@@ -44,6 +47,15 @@ interface Diff {
   removed?: SchedRow[]
   changed?: { from?: SchedRow; to?: SchedRow }[]
 }
+interface ScheduleUploadDraft {
+  session: number
+  request: number
+  open: boolean
+  phase: 'idle' | 'parsing' | 'ready' | 'uploading'
+  rows: SchedRow[]
+  customer: string
+  weekLabel: string
+}
 
 export default function SchedulesPage() {
   const { message } = App.useApp()
@@ -55,6 +67,18 @@ export default function SchedulesPage() {
   const [showUpload, setShowUpload] = useState(false)
   const [weekLabel, setWeekLabel] = useState('')
   const [uploadRows, setUploadRows] = useState<SchedRow[]>([])
+  const [customerFilter, setCustomerFilter] = useState<string>()
+  const [uploadCustomer, setUploadCustomer] = useState('')
+  const [uploadSessionId, setUploadSessionId] = useState(0)
+  const [parsing, setParsing] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const uploadDraftRef = useRef<ScheduleUploadDraft>({
+    session: 0, request: 0, open: false, phase: 'idle', rows: [], customer: '', weekLabel: '',
+  })
+  const [customers, setCustomers] = useState<string[]>([])
+  const customerNames = [...new Set(['TOMY', 'Spin Master', ...customers, ...rows.map(r => r.customer || 'TOMY')])]
+  const customerOptions = customerNames.map(value => ({ label: value, value }))
+  const visibleRows = customerFilter ? rows.filter(r => (r.customer || 'TOMY') === customerFilter) : rows
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function load() {
@@ -65,6 +89,8 @@ export default function SchedulesPage() {
     } finally { setLoading(false) }
   }
   useEffect(() => { load() }, [])
+  useEffect(() => { api.get<string[]>('/customers').then(({ data }) => setCustomers(data || [])).catch(() => {}) }, [])
+  useEffect(() => () => { uploadDraftRef.current.open = false; uploadDraftRef.current.request++ }, [])
 
   async function openDetail(id: number) {
     setOpenId(id); setDetail(null)
@@ -75,106 +101,90 @@ export default function SchedulesPage() {
       message.error('加载失败: ' + (e?.message ?? e))
     }
   }
-
+  function resetUploadContext(open: boolean, customer = '') {
+    const session = uploadDraftRef.current.session + 1
+    uploadDraftRef.current = { session, request: 0, open, phase: 'idle', rows: [], customer, weekLabel: '' }
+    setUploadSessionId(session)
+    setShowUpload(open); setUploadRows([]); setUploadCustomer(customer); setWeekLabel('')
+    setParsing(false); setUploading(false)
+  }
+  function openUpload() {
+    if (uploadDraftRef.current.phase !== 'uploading') resetUploadContext(true, customerFilter || '')
+  }
+  function closeUpload() {
+    const draft = uploadDraftRef.current
+    if (draft.session === uploadSessionId && draft.phase !== 'uploading') resetUploadContext(false)
+  }
+  function changeUploadCustomer(value?: string) {
+    const draft = uploadDraftRef.current
+    if (!draft.open || draft.session !== uploadSessionId || draft.phase === 'uploading') return
+    draft.request++; draft.phase = 'idle'; draft.rows = []; draft.customer = value || ''
+    setUploadCustomer(draft.customer); setUploadRows([]); setParsing(false)
+  }
+  function changeUploadWeekLabel(value: string) {
+    const draft = uploadDraftRef.current
+    if (!draft.open || draft.session !== uploadSessionId || draft.phase === 'uploading') return
+    draft.weekLabel = value
+    setWeekLabel(value)
+  }
   async function parseFile(file: File) {
+    const draft = uploadDraftRef.current
+    if (!draft.open || draft.session !== uploadSessionId || draft.phase === 'uploading') return
+    const session = draft.session, request = ++draft.request, customer = draft.customer
+    const current = () => uploadDraftRef.current.open && uploadDraftRef.current.session === session
+      && uploadDraftRef.current.request === request
+    draft.phase = 'parsing'; draft.rows = []
+    setUploadRows([])
+    setParsing(true)
     try {
       const XLSX = await import('xlsx')
-      const buf = await file.arrayBuffer()
-      const wb = XLSX.read(buf, { type: 'array', cellDates: true, cellStyles: true })
-      // Scan all sheets whose name ends in "总排期" (KIK总排期 / RRM总排期 etc.)
-      const targetSheets = wb.SheetNames.filter(n => /总排期$/.test(n))
-      if (!targetSheets.length) {
-        message.error('未找到"XXX总排期" sheet（如 KIK总排期 / RRM总排期）')
-        return
-      }
-      const customerName = 'TOMY'  // legacy default
-      const all: SchedRow[] = []
-      for (const sn of targetSheets) {
-        const source = sn.replace(/总排期$/, '').trim() || sn
-        const ws = wb.Sheets[sn]
-        const grid = scheduleSheetToRawGrid(ws, XLSX.utils)
-        // Find header row: contains "货号" and "数量"
-        let hdrIdx = 0
-        for (let r = 0; r < Math.min(5, grid.length); r++) {
-          const j = (grid[r] || []).map((c: any) => String(c ?? '').replace(/\s+/g, '')).join('|')
-          if (j.includes('货号') && j.includes('数量')) { hdrIdx = r; break }
-        }
-        const headers = (grid[hdrIdx] || []).map((c: any) => String(c ?? '').replace(/\s+/g, ''))
-        const colOf = (...kws: string[]) => {
-          for (const k of kws) { const i = headers.findIndex(h => h.includes(k)); if (i >= 0) return i }
-          return -1
-        }
-        const cOrderDate = colOf('接单期')
-        const cCountry   = colOf('国家', 'Country')
-        const cEndCust   = colOf('第三客户', 'EndCustomer')
-        const cTomyPO    = colOf('TOMYPO', 'TOMY PO')
-        const cCustPO    = colOf('CUSTOMERPO', 'Customer PO')
-        const cCode      = colOf('货号', 'ItemNo')
-        const cName      = colOf('产品名称', '品名', 'ProductName')
-        const cQty       = colOf('数量', 'Qty')
-        const cCtnQty    = colOf('总箱数', 'TotalCartons')
-        const cUnitPrice = colOf('单价USD', '单价', 'UnitPrice')
-        const cEta       = colOf('PO走货期', '船期', 'ETA')
-        const cInsp      = colOf('验货期', 'InspectionDate')
-        if (cCode < 0 || cQty < 0) {
-          console.warn(`[sched] sheet ${sn} 未找到 货号/数量 列`)
-          continue
-        }
-        for (let i = hdrIdx + 1; i < grid.length; i++) {
-          const row = grid[i] || []
-          const code = String(row[cCode] ?? '').trim()
-          if (!code) continue
-          all.push({
-            source,
-            customer: customerName,
-            country:     cCountry  >= 0 ? String(row[cCountry] ?? '').trim() : '',
-            endCustomer: cEndCust  >= 0 ? String(row[cEndCust] ?? '').trim() : '',
-            code,
-            productName: cName >= 0 ? String(row[cName] ?? '').trim() : '',
-            orderNo:     cTomyPO   >= 0 ? String(row[cTomyPO] ?? '').trim() : '',
-            customerPO:  cCustPO   >= 0 ? String(row[cCustPO] ?? '').trim() : '',
-            orderDate:   cOrderDate>= 0 ? fmtDate(row[cOrderDate]) : '',
-            qty:         cQty      >= 0 ? (Number(row[cQty])      || 0) : 0,
-            cartons:     cCtnQty   >= 0 ? (Number(row[cCtnQty])   || 0) : 0,
-            unitPrice:   cUnitPrice>= 0 ? (Number(row[cUnitPrice])|| 0) : 0,
-            eta:         cEta      >= 0 ? fmtDate(row[cEta])  : '',
-            inspDate:    cInsp     >= 0 ? fmtDate(row[cInsp]) : '',
-          })
-        }
-      }
-      if (!all.length) { message.warning('未识别到排期资料（需在"XXX总排期"sheet 中含 货号/数量 列）'); return }
-      setUploadRows(all)
-      if (!weekLabel) setWeekLabel(suggestWeekLabel())
-      message.success(`已解析整份排期 ${all.length} 条；下单状态以系统实际采购单为准`)
+      const bytes = await file.arrayBuffer()
+      if (!current()) return
+      const wb = XLSX.read(bytes, { type: 'array', cellDates: false })
+      const parsed = parseScheduleWorkbook(wb, XLSX.utils, customer)
+      if (!current()) return
+      draft.phase = 'ready'; draft.rows = parsed.rows; draft.customer = parsed.customer
+      setUploadRows(parsed.rows)
+      setUploadCustomer(parsed.customer)
+      if (!draft.weekLabel) { draft.weekLabel = suggestWeekLabel(); setWeekLabel(draft.weekLabel) }
+      message.success(`已识别 ${parsed.customer} 排期 ${parsed.rows.length} 条；仅导入总排期主表`)
     } catch (e: any) {
+      if (!current()) return
+      draft.phase = 'idle'
       message.error('解析失败: ' + (e?.message ?? e))
-    }
-  }
-
-  function fmtDate(v: any): string {
-    if (!v) return ''
-    if (v instanceof Date) return dayjs(v).format('YYYY-MM-DD')
-    const s = String(v).trim()
-    if (!s) return ''
-    const d = dayjs(s)
-    return d.isValid() ? d.format('YYYY-MM-DD') : s
+    } finally { if (current()) setParsing(false) }
   }
 
   async function upload() {
-    if (!weekLabel.trim()) { message.warning('请填写周次标签'); return }
-    if (!uploadRows.length) { message.warning('请先选 Excel'); return }
+    const draft = uploadDraftRef.current
+    // The visible confirmation must still describe this session's parsed draft.
+    // An old modal callback cannot submit a later session or a replacement file.
+    if (!draft.open || draft.session !== uploadSessionId || draft.phase === 'uploading') return
+    if (draft.phase !== 'ready' || draft.rows !== uploadRows || draft.customer !== uploadCustomer
+      || draft.weekLabel !== weekLabel) return
+    if (!draft.weekLabel.trim()) { message.warning('请填写周次标签'); return }
+    if (!draft.rows.length) { message.warning('请先选 Excel'); return }
+    const session = draft.session, request = draft.request
+    const current = () => uploadDraftRef.current.open && uploadDraftRef.current.session === session
+      && uploadDraftRef.current.request === request
+    draft.phase = 'uploading'
+    setUploading(true)
     try {
       await api.post('/schedules', {
-        week_label: weekLabel.trim(),
+        customer: draft.customer,
+        week_label: draft.weekLabel.trim(),
         upload_date: dayjs().format('YYYY-MM-DD'),
-        raw_rows: uploadRows,
+        raw_rows: draft.rows,
       })
-      message.success(`已上传 ${uploadRows.length} 行`)
-      setShowUpload(false); setUploadRows([]); setWeekLabel('')
+      if (!current()) return
+      message.success(`已上传 ${draft.rows.length} 行`)
+      resetUploadContext(false)
       load()
     } catch (e: any) {
+      if (!current()) return
+      draft.phase = 'ready'
       message.error('上传失败: ' + (e?.message ?? e))
-    }
+    } finally { if (current()) setUploading(false) }
   }
 
   return (
@@ -187,11 +197,13 @@ export default function SchedulesPage() {
         <Tag>白色 = 已下单 / 无变化</Tag>
       </div>
       <Card
-        title={`排期管理 — 共 ${rows.length} 个周次`}
+        title={`排期管理 — 共 ${visibleRows.length} 个周次`}
         extra={
           <Space>
+            <Select allowClear showSearch placeholder="全部客户" style={{ width: 180 }}
+              value={customerFilter} options={customerOptions} onChange={setCustomerFilter} />
             <Button onClick={load}>🔄 刷新</Button>
-            <Button type="primary" onClick={() => setShowUpload(true)}>📥 上传新周次</Button>
+            <Button type="primary" onClick={openUpload}>📥 上传新周次</Button>
           </Space>
         }
       >
@@ -199,10 +211,11 @@ export default function SchedulesPage() {
           rowKey="id"
           size="small"
           loading={loading}
-          dataSource={rows}
+          dataSource={visibleRows}
           pagination={{ defaultPageSize: 50, showSizeChanger: true }}
           columns={[
             { title: '#', dataIndex: 'id', width: 70 },
+            { title: '客户', dataIndex: 'customer', width: 140, render: v => v || 'TOMY' },
             { title: '周次', dataIndex: 'week_label', width: 200, render: (v) => <Tag color="blue">{v}</Tag> },
             { title: '上传日期', dataIndex: 'upload_date', width: 130, render: (v) => v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '' },
             { title: '行数', dataIndex: 'row_count', width: 90, align: 'right' },
@@ -217,7 +230,7 @@ export default function SchedulesPage() {
       <Drawer
         open={openId !== null}
         width={drawerFull ? '100vw' : '80vw'}
-        title={detail ? `周次 — ${detail.week_label}` : '加载中…'}
+        title={detail ? `${detail.customer || 'TOMY'} · 周次 — ${detail.week_label}` : '加载中…'}
         onClose={() => { setOpenId(null); setDetail(null); setDrawerFull(false) }}
         destroyOnClose
         extra={
@@ -233,21 +246,32 @@ export default function SchedulesPage() {
         open={showUpload}
         title="上传新周次排期"
         width={780}
-        onCancel={() => { setShowUpload(false); setUploadRows([]); setWeekLabel('') }}
+        onCancel={closeUpload}
         onOk={upload}
         okText="上传"
+        confirmLoading={uploading}
+        okButtonProps={{ disabled: parsing || !uploadRows.length }}
+        closable={!uploading} maskClosable={!uploading} keyboard={!uploading}
         destroyOnClose
       >
         <Space direction="vertical" style={{ width: '100%' }}>
           <Space>
+            <span>客户：</span>
+            <Select allowClear showSearch placeholder="从文件识别客户（TOMY 模板默认 TOMY）" style={{ width: 360 }}
+              value={uploadCustomer || undefined} options={customerOptions}
+              disabled={uploading} onChange={changeUploadCustomer} />
+          </Space>
+          <Space>
             <span>周次标签：</span>
-            <Input value={weekLabel} onChange={(e) => setWeekLabel(e.target.value)} placeholder="例如 W23 / 2026-W23 / 2026-06-08" style={{ width: 280 }} />
-            <Button onClick={() => fileRef.current?.click()}>📂 选 Excel</Button>
+            <Input value={weekLabel} disabled={uploading} onChange={(e) => changeUploadWeekLabel(e.target.value)} placeholder="例如 W23 / 2026-W23 / 2026-06-08" style={{ width: 280 }} />
+            <Button disabled={uploading} onClick={() => fileRef.current?.click()}>📂 选 Excel</Button>
+            {parsing && <Typography.Text type="secondary">正在读取文件…</Typography.Text>}
             <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
+              disabled={uploading}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) parseFile(f); e.target.value = '' }} />
           </Space>
           <Typography.Text type="secondary">
-            导入 KIK/RRM 总排期的全部资料；单元格底色不用于判断下单状态，采购、生产及物料追踪均以系统内实际单据为准。
+            支持 TOMY 的 KIK/RRM 总排期及 Spin Master 接单总排期；仅覆盖同一客户的同周次，不覆盖其他客户。完整货号不拆分，下单状态不依赖单元格底色。
           </Typography.Text>
           {uploadRows.length > 0 && (
             <Table
@@ -258,12 +282,13 @@ export default function SchedulesPage() {
               scroll={{ x: 1500, y: 320 }}
               columns={[
                 { title: '#', width: 45, render: (_v, _r, i) => i + 1 },
+                { title: '客户', dataIndex: 'customer', width: 110 },
                 { title: '来源', dataIndex: 'source', width: 70 },
                 { title: '国家', dataIndex: 'country', width: 80 },
                 { title: '第三客户', dataIndex: 'endCustomer', width: 130, ellipsis: true },
-                { title: '货号', dataIndex: 'code', width: 100 },
+                { title: '货号', dataIndex: 'code', width: 200 },
                 { title: '品名', dataIndex: 'productName', width: 200, ellipsis: true },
-                { title: 'TOMY PO', dataIndex: 'orderNo', width: 110 },
+                { title: '订单 PO', dataIndex: 'orderNo', width: 110 },
                 { title: 'CUST PO', dataIndex: 'customerPO', width: 110 },
                 { title: '数量', dataIndex: 'qty', width: 80, align: 'right' },
                 { title: '总箱数', dataIndex: 'cartons', width: 80, align: 'right' },
@@ -315,7 +340,7 @@ function DetailView({ detail }: { detail: ScheduleDetail }) {
         // 合并同名后 tomy_po 可能是 "o1; o2"、货号 "a / b"，拆开做交叉对，保证合并单也能匹配
         for (const x of data) {
           const pos = String(x.tomy_po || '').split(/\s*[;；]\s*/).map(s => s.trim()).filter(Boolean)
-          const codes = String(x.product_code || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean)
+          const codes = purchaseItemCodes(x.product_code, rawRows.map(r => r.code))
           for (const po of pos) for (const c of codes) set.add(`${po}|${c}`)
         }
         setPlacedKeys(set)
@@ -364,7 +389,7 @@ function DetailView({ detail }: { detail: ScheduleDetail }) {
 
   // 切换手动标记并持久化
   async function toggleManual(r: SchedRow) {
-    if (!r.orderNo || !r.code) { message.warning('该行缺少 TOMY PO 或 货号，无法标记'); return }
+    if (!r.orderNo || !r.code) { message.warning('该行缺少订单 PO 或货号，无法标记'); return }
     const k = placedKeyOf(r)
     if (!k) { message.warning('请刷新排期后再标记'); return }
     const removing = scheduleManualPlaced(r, manualKeys)
@@ -398,8 +423,8 @@ function DetailView({ detail }: { detail: ScheduleDetail }) {
     return override ?? isPlaced(r)
   }, [isActualProductionPlaced, isPlaced, productionManual])
   async function toggleProductionManual(r: SchedRow) {
-    if (!r.orderNo || !r.code) { message.warning('该行缺少 TOMY PO 或货号，无法标记'); return }
-    if (isActualProductionPlaced(r)) { message.warning('该 TOMY PO 已生成真实生产单，不能手动取消'); return }
+    if (!r.orderNo || !r.code) { message.warning('该行缺少订单 PO 或货号，无法标记'); return }
+    if (isActualProductionPlaced(r)) { message.warning('该订单 PO 已生成真实生产单，不能手动取消'); return }
     const k = placedKeyOf(r)
     if (!k) { message.warning('请刷新排期后再标记'); return }
     const nextValue = !isProductionPlaced(r)
@@ -444,7 +469,7 @@ function DetailView({ detail }: { detail: ScheduleDetail }) {
 
   return (
     <>
-      <Input.Search allowClear placeholder="搜索 货号 / 品名 / TOMY PO / CUST PO / 第三客户" style={{ maxWidth: 420, marginBottom: 12 }}
+      <Input.Search allowClear placeholder="搜索 货号 / 品名 / 订单 PO / CUST PO / 第三客户" style={{ maxWidth: 420, marginBottom: 12 }}
         onChange={(e) => setQ(e.target.value)} onSearch={setQ} />
       <Tabs
         items={[
@@ -576,7 +601,7 @@ function SchedRowsTable({ rows, highlight, statusOf, changedFields, isPlaced, is
         { title: '第三客户', dataIndex: 'endCustomer', width: 140, ellipsis: true },
         { title: '货号', dataIndex: 'code', width: 100 },
         { title: '品名', dataIndex: 'productName', width: 200, ellipsis: true, onCell: cellHi('productName'), render: cellTip('productName') },
-        { title: 'TOMY PO', dataIndex: 'orderNo', width: 120 },
+        { title: '订单 PO', dataIndex: 'orderNo', width: 120 },
         { title: 'CUST PO', dataIndex: 'customerPO', width: 110 },
         { title: '数量', dataIndex: 'qty', width: 80, align: 'right', onCell: cellHi('qty'), render: cellTip('qty') },
         { title: '总箱数', dataIndex: 'cartons', width: 80, align: 'right' },
@@ -650,7 +675,7 @@ function ChangedTable({ changed }: { changed: { from?: SchedRow; to?: SchedRow }
         { title: '#', width: 50, render: (_v, _r, i) => i + 1 },
         { title: '货号', width: 110, render: (_v, r) => r.to?.code ?? r.from?.code },
         { title: '客户', width: 90, render: (_v, r) => r.to?.customer ?? r.from?.customer },
-        { title: 'TOMY PO', width: 120, render: (_v, r) => r.to?.orderNo ?? r.from?.orderNo },
+        { title: '订单 PO', width: 120, render: (_v, r) => r.to?.orderNo ?? r.from?.orderNo },
         { title: 'CUST PO', width: 120, render: (_v, r) => r.to?.customerPO ?? r.from?.customerPO },
         {
           title: '变化',

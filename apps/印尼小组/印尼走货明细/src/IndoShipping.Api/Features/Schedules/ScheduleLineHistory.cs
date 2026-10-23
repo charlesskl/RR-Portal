@@ -11,7 +11,7 @@ namespace IndoShipping.Api.Features.Schedules;
 // Match occurrences one-to-one, keeping exact old lines before pairing edits.
 public static class ScheduleLineHistory
 {
-    public sealed record Snapshot(int Id, string? Label, DateTime? Uploaded, string? Raw);
+    public sealed record Snapshot(int Id, string? Label, DateTime? Uploaded, string? Raw, string Customer = "TOMY");
     public sealed record Difference(List<JsonObject> added, List<JsonObject> removed, List<object> changed);
     public sealed record View(Snapshot Snapshot, List<JsonObject> Rows, Difference Diff);
     public sealed record StoredLine(string Id, bool LegacyPlacedEligible, bool LegacyProductionEligible);
@@ -124,7 +124,7 @@ public static class ScheduleLineHistory
     public static List<View> Build(IEnumerable<Snapshot> snapshots, Ledger? ledger = null)
     {
         var views = new List<View>();
-        var previous = new List<JsonObject>();
+        var previousByCustomer = new Dictionary<string, List<JsonObject>>(StringComparer.OrdinalIgnoreCase);
         var prepared = snapshots.OrderBy(Period).ThenBy(x => x.Id).Select(s => (Snapshot: s, Rows: Parse(s.Raw))).ToList();
         var newReplacementLines = new HashSet<JsonObject>(ReferenceEqualityComparer.Instance);
         var usedIds = new HashSet<string>(ledger?.UsedIds ?? []);
@@ -162,26 +162,31 @@ public static class ScheduleLineHistory
         }
         // A newly backfilled adjacent period can extend an already anchored line backwards.
         // Only unique exact matches qualify; replacement tombstones and established IDs are barriers.
-        for (var i = prepared.Count - 2; i >= 0; i--)
+        foreach (var customerPeriods in prepared.GroupBy(p => p.Snapshot.Customer, StringComparer.OrdinalIgnoreCase))
         {
-            var current = prepared[i];
-            var next = prepared[i + 1];
-            if (ledger?.Snapshots.ContainsKey(current.Snapshot.Id) == true) continue;
-            var distance = Period(next.Snapshot) - Period(current.Snapshot);
-            if (distance <= TimeSpan.Zero || distance > TimeSpan.FromDays(7)) continue;
-            foreach (var row in current.Rows.Where(r => LineKey(r).Length == 0))
+            var periods = customerPeriods.ToList();
+            for (var i = periods.Count - 2; i >= 0; i--)
             {
-                bool Exact(JsonObject other) => Signature(other, Identity) == Signature(row, Identity) && !Modified(other, row);
-                var candidates = next.Rows.Where(Exact).ToList();
-                if (candidates.Count != 1 || LineKey(candidates[0]).Length == 0 || current.Rows.Count(Exact) != 1) continue;
-                var id = LineKey(candidates[0]);
-                // Do not shift a known identity boundary between two otherwise identical orders.
-                if (i > 0 && prepared[i - 1].Rows.Any(r => LineKey(r).Length > 0 && LineKey(r) != id && Exact(r))) continue;
-                row["_scheduleLineId"] = id;
+                var current = periods[i];
+                var next = periods[i + 1];
+                if (ledger?.Snapshots.ContainsKey(current.Snapshot.Id) == true) continue;
+                var distance = Period(next.Snapshot) - Period(current.Snapshot);
+                if (distance <= TimeSpan.Zero || distance > TimeSpan.FromDays(7)) continue;
+                foreach (var row in current.Rows.Where(r => LineKey(r).Length == 0))
+                {
+                    bool Exact(JsonObject other) => Signature(other, Identity) == Signature(row, Identity) && !Modified(other, row);
+                    var candidates = next.Rows.Where(Exact).ToList();
+                    if (candidates.Count != 1 || LineKey(candidates[0]).Length == 0 || current.Rows.Count(Exact) != 1) continue;
+                    var id = LineKey(candidates[0]);
+                    // Do not shift a known identity boundary between two otherwise identical orders.
+                    if (i > 0 && periods[i - 1].Rows.Any(r => LineKey(r).Length > 0 && LineKey(r) != id && Exact(r))) continue;
+                    row["_scheduleLineId"] = id;
+                }
             }
         }
         foreach (var (snapshot, rows) in prepared)
         {
+            var previous = previousByCustomer.GetValueOrDefault(snapshot.Customer) ?? [];
             var pairs = Pair(previous, rows.Where(r => !newReplacementLines.Contains(r)).ToList());
             var remaining = new HashSet<JsonObject>(previous, ReferenceEqualityComparer.Instance);
             remaining.ExceptWith(pairs.Values);
@@ -222,7 +227,7 @@ public static class ScheduleLineHistory
                 row["_legacyProductionEligible"] = productionOwners[Field(row, "orderNo")].Contains(LineKey(row));
             }
             views.Add(new(snapshot, rows, new(added, previous.Where(remaining.Contains).ToList(), changed)));
-            previous = rows;
+            previousByCustomer[snapshot.Customer] = rows;
         }
         return views;
     }

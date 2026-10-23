@@ -711,6 +711,7 @@ public partial class MaterialAlertsController(ISqlConnectionFactory factory) : C
         var text = source.Trim();
         var exact = knownCodes.FirstOrDefault(x => string.Equals(x, text, StringComparison.OrdinalIgnoreCase));
         if (exact is not null) return exact;
+        if (text.Contains('/')) return null; // Composite item number: never use a shared prefix BOM.
         return knownCodes.Where(x => !string.IsNullOrWhiteSpace(x) && text.StartsWith(x, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(x => x.Length).FirstOrDefault();
     }

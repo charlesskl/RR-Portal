@@ -93,6 +93,9 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
         public List<Dictionary<string, object?>>? materials { get; set; }
     }
 
+    [HttpPut("bulk/by-code")]
+    public Task<IActionResult> BulkReplaceByCode([FromQuery] string code, [FromBody] BulkBody body) => BulkReplace(code, body);
+
     [HttpPut("bulk/{code}")]
     public async Task<IActionResult> BulkReplace(string code, [FromBody] BulkBody body)
     {

@@ -12,6 +12,7 @@ import { combinePurchaseContracts, formatPurchaseContractFonts, formatPurchaseCo
 import PurchaseMaterialPicker from '../components/PurchaseMaterialPicker'
 import { purchaseMaterialBucket, purchaseMaterialLine, purchaseSelectionSource, purchaseSelectionSupplier, type PurchaseMaterialChoice } from '../utils/purchaseMaterialSelection'
 import { linkPurchaseLine, matchingLineSchedules } from '../utils/purchaseScheduleLink'
+import { assertPurchaseCustomer, purchaseLineCustomers, purchaseScheduleCustomer, type PurchaseCustomerProduct } from '../utils/purchaseCustomer'
 import { autoLinkPurchaseMaterials, planPurchaseNetWeight } from '../utils/purchaseNetWeight'
 import { purchaseLineDeliveryDate, purchaseLineSourceKey, purchaseOrderNumbers } from '../utils/purchaseOrderMerge'
 import { schedulePurchasePlaced, type ScheduleStatusRow } from '../utils/scheduleLineStatus'
@@ -307,7 +308,7 @@ function contractUnitLabel(unit: string | undefined): string {
   return labels[code] || unit || ''
 }
 
-function applyQuotePrices(sourceItems: PoItem[], quotes: QuoteRow[], supplier: string, overwrite: boolean) {
+function applyQuotePrices(sourceItems: PoItem[], quotes: QuoteRow[], supplier: string, overwrite: boolean, knownCodes: string[] = []) {
   let hit = 0
   const normalizedSupplier = supplier.trim()
   if (!normalizedSupplier) return { items: sourceItems, hit }
@@ -331,10 +332,9 @@ function applyQuotePrices(sourceItems: PoItem[], quotes: QuoteRow[], supplier: s
         && !!quoteName
         && (quoteName === matName || (!!matName && matName.includes(quoteName)))
     })
-    const purchaseCodes = new Set(String(it.product_code ?? '')
-      .split(/\s*\/\s*|[,，;]/)
-      .map(normalizeCode)
-      .filter(Boolean))
+    const purchaseCodes = new Set(String(it.product_code || '').split(/[,，;]/)
+      .flatMap(code => purchaseItemCodes(code, [...knownCodes, ...quotes.map(quoteCode)]))
+      .map(normalizeCode))
     const codeGroups = [
       nameGroup.filter(q => purchaseCodes.has(quoteCode(q))),
       nameGroup.filter(q => quoteCode(q) === '共用'),
@@ -389,6 +389,7 @@ export default function PurchasePage() {
   const [drawerFull, setDrawerFull] = useState(false)
   const [schedRows, setSchedRows] = useState<SchedRow[]>([])
   const [productCodes, setProductCodes] = useState<string[]>([])
+  const [purchaseProducts, setPurchaseProducts] = useState<PurchaseCustomerProduct[]>([])
   const [schedPickerOpen, setSchedPickerOpen] = useState(false)
   const [lineScheduleLink, setLineScheduleLink] = useState<{ index: number; original: PoItem } | null>(null)
   const [lineLinkRows, setLineLinkRows] = useState<SchedRow[]>([])
@@ -404,6 +405,7 @@ export default function PurchasePage() {
     label: [row.source, row.orderNo, row.productName].filter(Boolean).join(' · '),
   })), [materialSelection])
   const [schedPickerFilter, setSchedPickerFilter] = useState('')
+  const [schedCustomer, setSchedCustomer] = useState<string>()
   const [pickerSelKeys, setPickerSelKeys] = useState<React.Key[]>([])
   const [placedSet, setPlacedSet] = useState<Set<string>>(new Set())  // 自动 PO + 货号匹配
   const [manualPlacedSet, setManualPlacedSet] = useState<Set<string>>(new Set())
@@ -601,14 +603,16 @@ export default function PurchasePage() {
   }
   async function loadProductCodes() {
     try {
-      const { data } = await api.get<{ code?: string }[]>('/products', { params: { includeInactive: true } })
+      const { data } = await api.get<PurchaseCustomerProduct[]>('/products', { params: { includeInactive: true } })
       setProductCodes((data || []).map(p => p.code || '').filter(Boolean))
+      setPurchaseProducts(data || [])
     } catch {}
   }
   // 把带客户后缀的排期货号(如 47669TSCA)解析到货号库的基础货号(47669)
   const resolveProductCode = useCallback((code?: string): string => {
     const c = (code || '').trim()
     if (!c || productCodes.includes(c)) return c
+    if (c.includes('/')) return c // 斜杠组合是完整货号，不能降级匹配前缀。
     const noTail = c.replace(/[A-Za-z]+$/, '')
     if (noTail && productCodes.includes(noTail)) return noTail
     const digits = (c.match(/^\d+/) || [])[0]
@@ -618,11 +622,8 @@ export default function PurchasePage() {
   }, [productCodes])
   async function loadLatestSchedule() {
     try {
-      const { data: list } = await api.get<{ id: number }[]>('/schedules')
-      if (!list?.length) return
-      const top = list[0]
-      const { data: det } = await api.get<{ raw_rows?: string }>(`/schedules/${top.id}`)
-      const parsed = det.raw_rows ? JSON.parse(det.raw_rows) as SchedRow[] : []
+      const { data } = await api.get<{ raw_rows?: string }>('/schedules/latest')
+      const parsed = data.raw_rows ? JSON.parse(data.raw_rows) : []
       setSchedRows(Array.isArray(parsed) ? parsed : [])
     } catch {}
   }
@@ -632,7 +633,7 @@ export default function PurchasePage() {
       const { data } = await api.get<{ tomy_po?: string; product_code?: string }[]>('/purchase/placed-keys')
       for (const x of data) {
         const pos = String(x.tomy_po || '').split(/\s*[;；]\s*/).map(s => s.trim()).filter(Boolean)
-        const codes = String(x.product_code || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean)
+        const codes = purchaseItemCodes(x.product_code, productCodes)
         for (const po of pos) for (const c of codes) set.add(`${po}|${c}`)
       }
     } catch {}
@@ -642,7 +643,8 @@ export default function PurchasePage() {
       setManualPlacedSet(new Set(Array.isArray(data) ? data : []))
     } catch {}
   }
-  useEffect(() => { load(); loadLatestSchedule(); loadProductCodes(); loadPlaced() }, [])
+  useEffect(() => { load(); loadLatestSchedule(); loadProductCodes() }, [])
+  useEffect(() => { loadPlaced() }, [productCodes])
 
   function pickFromSchedule(r: SchedRow) {
     setMaterialSelection({ mode: 'append', schedules: [r] })
@@ -651,16 +653,13 @@ export default function PurchasePage() {
   async function openLineScheduleLink(index: number) {
     const original = items[index]
     if (!original?.product_code?.trim()) { message.warning('请先填写该行货号'); return }
-    if (original.product_code.includes('/')) { message.warning('多货号合并行请先拆分，再分别关联排期'); return }
     setLineScheduleLink({ index, original }); setLineLinkSelection(null); setLineLinkSearch('')
     setLineLinkRows([]); setLineLinkRevision(''); setLineLinkLoading(true)
     try {
-      const { data: list } = await api.get<{ id: number; week_label?: string }[]>('/schedules')
-      if (!list.length) { message.info('暂无排期可关联'); return }
-      const { data } = await api.get<{ raw_rows?: string | SchedRow[] }>(`/schedules/${list[0].id}`)
+      const { data } = await api.get<{ raw_rows?: string | SchedRow[]; schedules: { customer: string; week_label?: string }[] }>('/schedules/latest')
       const parsed = typeof data.raw_rows === 'string' ? JSON.parse(data.raw_rows) : data.raw_rows
       if (!Array.isArray(parsed)) throw new Error('排期数据格式无效')
-      setLineLinkRows(parsed); setLineLinkRevision(list[0].week_label || String(list[0].id))
+      setLineLinkRows(parsed); setLineLinkRevision(data.schedules.map(s => `${s.customer} ${s.week_label || ''}`).join(' / '))
     } catch { message.error('排期加载失败，请关闭后重试'); }
     finally { setLineLinkLoading(false) }
   }
@@ -670,7 +669,7 @@ export default function PurchasePage() {
     const { index, original } = lineScheduleLink
     if (items[index] !== original) { message.warning('明细已变化，请重新打开关联排期'); return }
     try {
-      const linked = linkPurchaseLine(original, lineLinkRows[lineLinkSelection], lineLinkRows, items, String(form.getFieldValue('po_no') || ''))
+      const linked = linkPurchaseLine(original, lineLinkRows[lineLinkSelection], lineLinkRows, items, String(form.getFieldValue('po_no') || ''), purchaseProducts, resolveProductCode)
       setItems(current => current.map((item, i) => i === index ? linked : item))
       setMergeUndo(null); setLineScheduleLink(null)
       message.success('已关联排期并带入走货期，数量和单价未改变；请保存采购单')
@@ -687,6 +686,12 @@ export default function PurchasePage() {
     setMaterialSelection({ mode: 'append', schedules: picks })
   }
 
+  function materialChoiceCustomer(choice: PurchaseMaterialChoice) {
+    const schedule = choice.groupKey == null ? undefined : materialSelection?.schedules?.[Number(choice.groupKey)]
+    return schedule ? purchaseScheduleCustomer(schedule) : assertPurchaseCustomer(
+      purchaseLineCustomers([{ product_code: choice.productCode }], [], purchaseProducts, resolveProductCode))
+  }
+
   async function confirmMaterials(choices: PurchaseMaterialChoice[]): Promise<boolean> {
     if (!materialSelection) return false
     if (materialSelection.mode !== 'append') return generateBySupplier(choices)
@@ -694,8 +699,10 @@ export default function PurchasePage() {
     let supplier: string
     try {
       supplier = purchaseSelectionSupplier(choices, currentSupplier)
+      assertPurchaseCustomer(choices.map(materialChoiceCustomer),
+        purchaseLineCustomers(items, schedRows, purchaseProducts, resolveProductCode))
       const existingSources = items.flatMap(item => String(item.tomy_po || '').split(/\s*[;；]\s*/).filter(Boolean).flatMap(orderNo => {
-        const codes = String(item.product_code || '').split(/\s*\/\s*/).filter(Boolean)
+        const codes = purchaseItemCodes(item.product_code, productCodes)
         const matches = schedRows.filter(row => row.orderNo?.trim() === orderNo.trim()
           && codes.some(code => resolveProductCode(row.code) === resolveProductCode(code)))
         return matches.length ? matches.map(row => row.source?.trim() || 'RRI') : [undefined]
@@ -738,6 +745,7 @@ export default function PurchasePage() {
         title: `确认批量下单：${orderCount} 张草稿采购单`,
         content: <Space direction="vertical" style={{ width: '100%' }}>
           <div>已选 {materialCount} 条物料，{suppliers.length} 家供应商：{suppliers.join('、')}。未勾选的物料不会下单。</div>
+          <div>不同客户、采购来源和供应商会分别生成采购单，编号沿用现有主体流水。</div>
           <div>下单车间代号（HS=兴信 / HD=华登 / HB=华登B / HK=华康）</div>
           <Input aria-label="批量下单车间代号" defaultValue={wcode} onChange={e => { wcode = e.target.value }} />
         </Space>,
@@ -759,20 +767,23 @@ export default function PurchasePage() {
       message.warning('所选物料存在未填写供应商的记录，请先在货号库补齐。')
       return false
     }
+    let customers: string[]
+    try { customers = choices.map(materialChoiceCustomer) }
+    catch (error) { message.warning((error as Error).message); return false }
     const orderDate = dayjs().format('YYYY-MM-DD')
-    // bucket: 来源分区 + supplierName。RRI/RRM 不可因供应商相同而合并到同一张 PO。
+    // 同供应商仍按客户及采购主体分单；客户隔离不改变现有编号规则。
     const buckets = new Map<string, { sched: SchedRow; mat: any }[]>()
     const codeCount = new Set(choices.map(c => c.productCode)).size
     let matCount = 0
-    for (const choice of choices) {
+    for (const [choiceIndex, choice] of choices.entries()) {
       const savedSchedule = materialSelection?.schedules?.[Number(choice.groupKey)]
       {
-          const sr: SchedRow = { ...savedSchedule, code: choice.productCode, qty: choice.quantity }
+          const sr: SchedRow = { ...savedSchedule, customer: customers[choiceIndex], code: choice.productCode, qty: choice.quantity }
           const m = choice.material
           const sup = (m.supplier || '').trim() || '(无供应商)'
           if (m.active === false) continue
           matCount++
-          const bucketKey = purchaseMaterialBucket(sr.source, sup, materialSelection?.mode === 'separate' ? choice.groupKey : undefined)
+          const bucketKey = purchaseMaterialBucket(sr.source, sup, materialSelection?.mode === 'separate' ? choice.groupKey : undefined, sr.customer)
           if (!buckets.has(bucketKey)) buckets.set(bucketKey, [])
           buckets.get(bucketKey)!.push({ sched: sr, mat: m })
       }
@@ -862,7 +873,7 @@ export default function PurchasePage() {
         tomy_po: [...(it._pos as Set<string>)].filter(Boolean).join('; '),
         notes: '',
       }))
-      const priced = applyQuotePrices(items, autoQuotes, supplier, false)
+      const priced = applyQuotePrices(items, autoQuotes, supplier, false, productCodes)
       quoteHits += priced.hit
       try {
         await api.post('/purchase', {
@@ -908,7 +919,7 @@ export default function PurchasePage() {
   async function loadPurchaseMaterialCandidates(poItems: PoItem[]) {
     const linked = await loadPurchaseMaterials(poItems)
     const codes = [...new Set(poItems.filter(it => !linked.has(Number(it.material_id)))
-      .flatMap(it => purchaseItemCodes(it.product_code)))]
+      .flatMap(it => [it.product_code?.trim() || '', ...purchaseItemCodes(it.product_code, productCodes)]).filter(Boolean))]
     const fallback = (await Promise.all(codes.map(code =>
       api.get<Material[]>('/materials', { params: { code } }).then(r => r.data)))).flat()
     const profiles = codes.length ? (await api.get<Dictionaries>('/dictionaries')).data.suppliers || [] : []
@@ -960,8 +971,8 @@ export default function PurchasePage() {
       const savedItems = detail.items || []
       const linked = await loadPurchaseMaterials(savedItems)
       const fallbackCodes = [...new Set(savedItems.flatMap(item =>
-        item.material_id == null || !linked.has(Number(item.material_id)) || purchaseItemCodes(item.product_code).length > 1
-          ? purchaseItemCodes(item.product_code) : [],
+        item.material_id == null || !linked.has(Number(item.material_id)) || purchaseItemCodes(item.product_code, [...linked.values()].map(m => m.product_code)).length > 1
+          ? [item.product_code?.trim() || '', ...purchaseItemCodes(item.product_code, productCodes)].filter(Boolean) : [],
       ))]
       const fallbackMaterials = (await Promise.all(fallbackCodes.map(code =>
         api.get<Material[]>('/materials', { params: { code } }).then(r => r.data),
@@ -1035,7 +1046,7 @@ export default function PurchasePage() {
         const mat = it.material_id == null ? undefined : materials.get(Number(it.material_id))
         const wasLegacyUnitLayout = !it.ship_unit && !!mat?.unit_kg && it.purchase_unit === mat.unit_kg
         const schedule = schedRows.find(s =>
-          String(it.product_code || '').split(/\s*\/\s*/).includes(String(s.code || ''))
+          purchaseItemCodes(it.product_code, productCodes).includes(String(s.code || ''))
           && (!it.tomy_po || String(it.tomy_po).split(/\s*[;，]\s*/).includes(String(s.orderNo || '')))
         )
         return restoreSavedSpoilage({
@@ -1082,7 +1093,7 @@ export default function PurchasePage() {
     if (creating && v.supplier) {
       try {
         const { data: quotes } = await api.get<QuoteRow[]>('/quotes/blob', { skipErrorToast: true } as any)
-        const priced = applyQuotePrices(saveItems, Array.isArray(quotes) ? quotes : [], v.supplier, false)
+        const priced = applyQuotePrices(saveItems, Array.isArray(quotes) ? quotes : [], v.supplier, false, productCodes)
         saveItems = priced.items
         quoteHits = priced.hit
         if (quoteHits) setItems(saveItems)
@@ -1257,7 +1268,6 @@ export default function PurchasePage() {
     const XLSX = await import('xlsx-js-style')
     const v = po || form.getFieldsValue()
     const contractItems = po ? (po.items ?? []) : items
-    const hasMergeSources = contractItems.some(it => it.source_po_no != null)
     const poNo = v.po_no || String(po?.id ?? editing?.id)
     const supplier = v.supplier || ''
     // 实体由 PO 号前缀推断（IRRM→华登全球 / IRRI→华登实业 / 年份→华胜益）
@@ -1308,8 +1318,6 @@ export default function PurchasePage() {
         unit: it.ship_unit || 'PCE',
         nameEn: material?.name_en || '',
         materialCode: material?.material_code || '',
-        sourcePo: it.source_po_no || '',
-        deliveryDate: purchaseLineDeliveryDate(it, v.delivery_date),
         totalShipQty: 0,
         totalAmount: 0,
         totalPurchaseQty: 0,
@@ -1343,7 +1351,6 @@ export default function PurchasePage() {
       const contractUnit = contractUnitLabel(m.unit)
       // D/F/G 由下方统一写入：数量沿用单位精度，单价按原金额反算。
       const remark = '数量：' + Number(m.totalPurchaseQty.toFixed(2)) + 'pcs'
-        + (hasMergeSources ? `\n交货：${m.deliveryDate || '待确认'}\n来源：${m.sourcePo || poNo}` : '')
       rows.push([m.code, m.matName, m.spec, '', contractUnit, '', '', remark, m.nameEn, m.materialCode])
     }
     rows.push(['以下空白！', '按工程签板生产！', '', '', '', '', '', ''])
@@ -1352,7 +1359,7 @@ export default function PurchasePage() {
     rows.push(['', '', '', '', '大写', meta.currency === 'RMB' ? '人民币' : '美金', numToChinese(totalAmount), ''])
     // 交货说明紧接大写金额，避免中间出现无边框的空白格。
     const notesStart = rows.length
-    rows.push([hasMergeSources ? '1. 按各明细备注中的交货日期交货；待确认日期须另行确认。' : '1.  ' + deliveryDateCN + '前交货', ...PAD(7)])
+    rows.push(['1.  ' + deliveryDateCN + '前交货', ...PAD(7)])
     rows.push([meta.priceIncludesVAT ? '2.单价已含 13 %增值税，月结 90 天；' : '2.单价为美金单价，月结 90 天；', ...PAD(7)])
     rows.push(['3、货物及部件质量符合国外现行最新标准', ...PAD(7)])
     rows.push(PAD(8))
@@ -1375,7 +1382,7 @@ export default function PurchasePage() {
     const lastItemExcelRow = itemStart + mergedRows.length
     for (let r = itemStart; r < itemStart + mergedRows.length; r++) {
       const item = mergedRows[r - itemStart]
-      setPurchaseContractLineAmounts(ws, r + 1, item.totalShipQty, item.totalAmount, shipQuantityDigits(item.unit))
+      setPurchaseContractLineAmounts(ws, r + 1, item.totalShipQty, item.totalAmount, shipQuantityDigits(item.unit), item.unit)
     }
     const totalAddr = XLSX.utils.encode_cell({ r: sumRow, c: 6 })
     const totalFormula = mergedRows.length
@@ -1398,7 +1405,7 @@ export default function PurchasePage() {
     ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 16 }, { wch: 10 }, { wch: 8 }, { wch: 20 }, { wch: 13 }, { wch: 18 }, { wch: 32 }, { wch: 16 }]
     const rowH: any[] = [{ hpt: 30 }, { hpt: 18 }, { hpt: 18 }, { hpt: 24 }, { hpt: 10 }, { hpt: 22 }, { hpt: 22 }, { hpt: 10 }, { hpt: 26 }]
     // 所有物料明细行使用相同行高；多行名称/规格仍可完整换行显示。
-    for (let r = itemStart; r < itemStart + mergedRows.length; r++) rowH[r] = { hpt: hasMergeSources ? 78 : 45 }
+    for (let r = itemStart; r < itemStart + mergedRows.length; r++) rowH[r] = { hpt: 45 }
     rowH[itemStart + mergedRows.length] = { hpt: 24 }
     ws['!rows'] = rowH
 
@@ -1539,7 +1546,7 @@ export default function PurchasePage() {
       const codes = new Set<string>(), tps = new Set<string>()
       for (const it of rows) {
         qq += it.qty || 0; oq += it.ordered_qty || 0; mq += it.material_qty || 0; sp += it.spoilage_qty || 0; pq += it.purchase_qty || 0
-        splitSet(it.product_code, /\s*\/\s*/).forEach(x => codes.add(x))
+        purchaseItemCodes(it.product_code, productCodes).forEach(x => codes.add(x))
         splitSet(it.tomy_po, /\s*[;；]\s*/).forEach(x => tps.add(x))
       }
       base.qty = qq; base.ordered_qty = oq; base.material_qty = mq; base.spoilage_qty = sp; base.purchase_qty = pq
@@ -1571,7 +1578,7 @@ export default function PurchasePage() {
       const { data: quotes } = await api.get<QuoteRow[]>('/quotes/blob')
       const supplier = form.getFieldValue('supplier') as string ?? ''
       if (!supplier) { message.warning('请先填供应商'); return }
-      const priced = applyQuotePrices(items, Array.isArray(quotes) ? quotes : [], supplier, true)
+      const priced = applyQuotePrices(items, Array.isArray(quotes) ? quotes : [], supplier, true, productCodes)
       setItems(priced.items)
       message.success(`已套用报价：${priced.hit}/${items.length} 行`)
     } catch {
@@ -1823,7 +1830,7 @@ export default function PurchasePage() {
       <Modal title="合并采购单" open={mergeOrdersOpen} confirmLoading={mergingOrders}
         okText="确认合并" cancelText="取消" onOk={mergeOrders}
         onCancel={() => { if (!mergingOrders) setMergeOrdersOpen(false) }}>
-        <p>支持不同下单日期；仅合并同供应商、同币种、同采购主体的草稿，已有入库、出库或走货关联的单据不可合并。</p>
+        <p>支持不同下单日期；仅合并同客户、同供应商、同币种、同采购主体的草稿。客户无法确认，或已有入库、出库、走货关联的单据不可合并。</p>
         <p>保留所选单号及其下单日期，其余采购单归档。明细数量、价格、排期关联、原下单日期及各自交货日期保留。</p>
         <Select style={{ width: '100%' }} value={mergeTarget} onChange={setMergeTarget} disabled={mergingOrders}
           options={selectedOrders.map(po => ({ value: po.id, label: `保留单号：${po.po_no}` }))} />
@@ -2192,14 +2199,17 @@ export default function PurchasePage() {
 
       <Modal
         open={schedPickerOpen}
-        title={`从排期选 TOMY PO 下单（未下单 ${schedRows.filter(r => !isSchedulePlaced(r)).length} 行 · 已选 ${pickerSelKeys.length} 行）`}
+        title={`从排期选订单下单（已选 ${pickerSelKeys.length} 行）`}
         width="80vw"
         onCancel={() => { setSchedPickerOpen(false); setPickerSelKeys([]) }}
         footer={null}
         destroyOnClose
       >
         <Space style={{ marginBottom: 8 }} wrap>
-          <Input.Search allowClear placeholder="搜索 货号/品名/TOMY PO/第三客户" style={{ width: 320 }}
+          <Select allowClear placeholder="全部客户" style={{ width: 170 }} value={schedCustomer}
+            options={[...new Set(schedRows.map(r => r.customer || 'TOMY'))].map(value => ({ label: value, value }))}
+            onChange={value => { setSchedCustomer(value); setPickerSelKeys([]) }} />
+          <Input.Search allowClear placeholder="搜索 货号/品名/订单 PO/第三客户" style={{ width: 320 }}
             onSearch={setSchedPickerFilter} onChange={(e) => !e.target.value && setSchedPickerFilter('')} />
           <Checkbox checked={hidePlaced} onChange={(e) => setHidePlaced(e.target.checked)}>隐藏已有采购记录的排期（含部分下单）</Checkbox>
           <Button type="primary" disabled={!pickerSelKeys.length}
@@ -2223,10 +2233,11 @@ export default function PurchasePage() {
             preserveSelectedRowKeys: true,   // 跨搜索/翻页保留勾选，可一次选多个货号的行
           }}
           dataSource={schedRows.map((r, i) => ({ ...r, _origIdx: i })).filter(r => {
+            if (schedCustomer && (r.customer || 'TOMY') !== schedCustomer) return false
             if (hidePlaced && isSchedulePlaced(r)) return false  // 隐藏已下单
             if (!schedPickerFilter) return true
             const s = schedPickerFilter.toLowerCase()
-            return ((r.code || '') + (r.productName || '') + (r.orderNo || '') + (r.endCustomer || ''))
+            return ((r.customer || '') + (r.code || '') + (r.productName || '') + (r.orderNo || '') + (r.endCustomer || ''))
               .toLowerCase().includes(s)
           })}
           pagination={{ pageSize: 30 }}
@@ -2237,13 +2248,14 @@ export default function PurchasePage() {
               title: '操作', width: 60, fixed: 'left',
               render: (_v, r) => <Button size="small" type="link" onClick={() => pickFromSchedule(r)}>选物料</Button>,
             },
+            { title: '客户', dataIndex: 'customer', width: 110 },
             { title: '来源', dataIndex: 'source', width: 70 },
             { title: '国家', dataIndex: 'country', width: 80 },
             { title: '第三客户', dataIndex: 'endCustomer', width: 140, ellipsis: true },
             { title: '货号', dataIndex: 'code', width: 100 },
             { title: '品名', dataIndex: 'productName', width: 200, ellipsis: true },
             {
-              title: 'TOMY PO', dataIndex: 'orderNo', width: 130,
+              title: '订单 PO', dataIndex: 'orderNo', width: 130,
               render: (v, r) => v ? (isSchedulePlaced(r) ? <Tag color="default">{v} · 已下</Tag> : <Tag color="blue">{v}</Tag>) : '',
             },
             { title: 'CUST PO', dataIndex: 'customerPO', width: 130 },

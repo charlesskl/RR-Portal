@@ -33,6 +33,38 @@ public sealed class PurchaseOrderMergeTests
     public void Currency_aliases_are_normalized(string value, string expected) =>
         Assert.Equal(expected, PurchaseOrdersController.MergeCurrency(value));
 
+    [Theory]
+    [InlineData("UPDATE products SET customer='Spin Master' WHERE code='35875'", "不同客户")]
+    [InlineData("DELETE FROM products WHERE code='35875'", "客户未能确认")]
+    [InlineData("UPDATE po_items SET product_code='35874 / 35875' WHERE id=1; UPDATE products SET customer='Spin Master' WHERE code='35875'", "不同客户")]
+    public async Task Merge_rejects_mixed_or_unknown_customers_without_changes(string setup, string error)
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        await f.Db.ExecuteAsync(setup);
+        var before = await f.Items();
+        var rejected = Assert.IsType<ConflictObjectResult>(await f.Controller.Merge(new() { ids = [1, 2], target_id = 1 }));
+        Assert.Contains(error, JsonSerializer.SerializeToElement(rejected.Value).GetProperty("error").GetString());
+        Assert.Equal(before, await f.Items());
+        Assert.Equal(0, await f.Db.ExecuteScalarAsync<int>("SELECT count(*) FROM purchase_orders WHERE merged_into_id IS NOT NULL OR merge_revision>0"));
+        Assert.Equal(0, await f.Db.ExecuteScalarAsync<int>("SELECT count(*) FROM audit_logs"));
+    }
+
+    [Fact]
+    public async Task Merge_resolves_full_spin_codes_and_old_schedule_customer()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        await f.Db.ExecuteAsync("""
+            UPDATE po_items SET product_code='94704/1099803/6077834' WHERE id=1;
+            UPDATE po_items SET product_code='97282/1099235/6077462' WHERE id=2;
+            INSERT INTO products(code,customer) VALUES ('94704/1099803/6077834','SPIN MASTER');
+            INSERT INTO schedules(customer,raw_rows) VALUES ('Spin Master',
+                '[{"code":"97282/1099235/6077462","orderNo":"TOMY2"}]');
+            """);
+        var before = await f.Items();
+        Assert.IsType<OkObjectResult>(await f.Controller.Merge(new() { ids = [1, 2], target_id = 1 }));
+        Assert.Equal(before, await f.Items());
+    }
+
     [Fact]
     public async Task Merge_moves_original_items_without_repricing_and_retains_history()
     {
@@ -368,6 +400,10 @@ public sealed class PurchaseOrderMergeTests
                     invoice_price numeric,product_use text,formula_name text,carton_group text,material_snapshot jsonb,carton_no text);
                 CREATE TABLE audit_logs(user_id int,username text,module text,action text,entity_type text,entity_id text,
                     summary text,details jsonb,ip_address text);
+                CREATE TABLE products(code text PRIMARY KEY,customer text);
+                CREATE TABLE tool_materials(material_id int PRIMARY KEY);
+                CREATE TABLE schedules(customer text NOT NULL DEFAULT 'TOMY',raw_rows jsonb);
+                INSERT INTO products(code,customer) VALUES ('35874','TOMY'),('35875','TOMY'),('35876','TOMY');
                 INSERT INTO purchase_orders(id,po_no,supplier,order_date,delivery_date,notes) VALUES
                     (1,'20269001','Supplier','2026-10-19','2026-10-23','first'),
                     (2,'20269002','Supplier','2026-10-19','2026-10-28','second'),

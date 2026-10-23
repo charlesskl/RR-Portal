@@ -30,6 +30,7 @@ public static class DataMigrations
 
         await connection.ExecuteAsync(PurchasePricePrecision.SchemaSql);
         await connection.ExecuteAsync(PurchaseMergeSchema.SchemaSql);
+        await connection.ExecuteAsync(ScheduleCustomerSchema.SchemaSql);
 
         // Bootstrap existing schedules once, then retain each subsequent upload's BOM.
         await connection.ExecuteAsync(MaterialTrackingHistory.SchemaSql);

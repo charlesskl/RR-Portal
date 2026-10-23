@@ -1,5 +1,6 @@
 using Dapper;
 using IndoShipping.Api.Auditing;
+using IndoShipping.Api.Features.Purchasing;
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
 
@@ -77,6 +78,14 @@ public partial class PurchaseOrdersController
             var currencies = items.Select(i => MergeCurrency((string?)i.currency)).Distinct().ToArray();
             if (currencies.Length != 1 || currencies[0].Length == 0)
                 return Reject("采购明细币种必须一致，且不能含未知币种");
+            // Enforce customer isolation on the server, including older orders
+            // which predate the customer-aware purchase picker.
+            try
+            {
+                await PurchaseCustomerValidation.ValidateAsync(c, tx, items.Select(item =>
+                    new PurchaseCustomerValidation.Line((string?)item.product_code, (string?)item.tomy_po, (int?)item.material_id)));
+            }
+            catch (InvalidOperationException ex) { return Reject(ex.Message); }
             var poNos = orders.Select(p => (string)p.po_no).ToArray();
             var occupied = await c.ExecuteScalarAsync<bool>("""
                 SELECT EXISTS(SELECT 1 FROM po_receipts r JOIN po_items i ON i.id=r.po_item_id WHERE i.po_id=ANY(@ids))

@@ -1,8 +1,10 @@
 using System.Text.Json;
 using Dapper;
 using IndoShipping.Api.Auditing;
+using IndoShipping.Api.Features.Purchasing;
 using IndoShipping.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
+using Npgsql;
 
 namespace IndoShipping.Api.Controllers;
 
@@ -190,6 +192,8 @@ public partial class PurchaseOrdersController(ISqlConnectionFactory factory) : C
         using var tx = c.BeginTransaction();
         try
         {
+            var customerError = await ValidateCustomerError(c, tx, body.items ?? []);
+            if (customerError is not null) { tx.Rollback(); return Conflict(new { error = customerError }); }
             var id = await c.ExecuteScalarAsync<int>(@"
 INSERT INTO purchase_orders(po_no, supplier, status, order_date, delivery_date, notes)
 VALUES (@po_no, @supplier, @status, @order_date, @delivery_date, @notes)
@@ -235,6 +239,11 @@ VALUES (@id, @pc, @mid, @mname, @qty, @price, @cur, @notes,
             tx.Commit();
             return Ok(new { ok = true, id });
         }
+        catch (PostgresException ex) when (ex.SqlState == "55P03")
+        {
+            tx.Rollback();
+            return Conflict(new { error = "货号或排期正在被修改，未保存采购单，请刷新后重试" });
+        }
         catch { tx.Rollback(); throw; }
     }
 
@@ -251,7 +260,7 @@ VALUES (@id, @pc, @mid, @mname, @qty, @price, @cur, @notes,
             DateTime? previousDate = previous == null ? null : (DateTime?)previous.delivery_date;
             var applyDeliveryDate = body.apply_delivery_date_all || previousDate?.Date != body.delivery_date?.Date;
             var oldDeliveryDates = (await c.QueryAsync(@"
-                SELECT i.id, i.source_po_no,
+                SELECT i.id, i.source_po_no, i.product_code, i.tomy_po, i.material_id,
                     CASE WHEN i.has_delivery_date_override THEN i.delivery_date_override
                          WHEN i.source_po_no IS NOT NULL THEN i.source_delivery_date ELSE @previousDate END AS delivery_date
                 FROM po_items i WHERE i.po_id=@id ORDER BY i.id FOR UPDATE",
@@ -263,6 +272,20 @@ VALUES (@id, @pc, @mid, @mname, @qty, @price, @cur, @notes,
                       status = body.status ?? "draft", order_date = body.order_date,
                       delivery_date = body.delivery_date, notes = body.notes ?? "", body.merge_revision }, tx);
             if (n == 0) { tx.Rollback(); return Conflict(new { error = "采购单不存在或已发生合并，请关闭后重新打开，避免覆盖合并明细" }); }
+            // Quantity/date/notes edits of legacy lines retain their original identity.
+            // Adding or relinking a line must establish the customer's identity for
+            // both the existing order and the proposed contents under the item locks.
+            var identitiesChanged = (body.items ?? []).Any(it => !oldDeliveryDates.Any(old =>
+                it.id == (int)old.id && (it.product_code ?? "") == ((string?)old.product_code ?? "") &&
+                (it.tomy_po ?? "") == ((string?)old.tomy_po ?? "") && it.material_id == (int?)old.material_id));
+            if (identitiesChanged)
+            {
+                var existing = oldDeliveryDates.Select(old => new PoItemBody {
+                    product_code = (string?)old.product_code, tomy_po = (string?)old.tomy_po,
+                    material_id = (int?)old.material_id });
+                var customerError = await ValidateCustomerError(c, tx, (body.items ?? []).Concat(existing));
+                if (customerError is not null) { tx.Rollback(); return Conflict(new { error = customerError }); }
+            }
             var existingIds = (await c.QueryAsync<int>(
                 "SELECT id FROM po_items WHERE po_id=@id FOR UPDATE", new { id }, tx)).ToHashSet();
             var keptIds = new List<int>();
@@ -346,7 +369,24 @@ RETURNING id",
             tx.Commit();
             return Ok(new { ok = true, id });
         }
+        catch (PostgresException ex) when (ex.SqlState == "55P03")
+        {
+            tx.Rollback();
+            return Conflict(new { error = "货号或排期正在被修改，未保存采购单，请刷新后重试" });
+        }
         catch { tx.Rollback(); throw; }
+    }
+
+    private static async Task<string?> ValidateCustomerError(System.Data.IDbConnection c,
+        System.Data.IDbTransaction tx, IEnumerable<PoItemBody> items)
+    {
+        try
+        {
+            await PurchaseCustomerValidation.ValidateAsync(c, tx,
+                items.Select(it => new PurchaseCustomerValidation.Line(it.product_code, it.tomy_po, it.material_id)));
+            return null;
+        }
+        catch (InvalidOperationException ex) { return ex.Message; }
     }
 
     private static object ItemParameters(int poId, int? itemId, PoItemBody it) => new

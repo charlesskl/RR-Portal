@@ -32,12 +32,12 @@ function compile(node: ts.Node, bindings: Record<string, unknown>) {
 }
 const saveNode = find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'save')
 const supplier: SupplierDict = { id: 7, keyword: 'fixture-supplier', full: 'Fixture Supplier', customs: 'Previous Customs' }
-async function actualSave(materials: Material[], dicts: Dictionaries) {
+async function actualSave(materials: Material[], dicts: Dictionaries, code = 'fixture', checkCalls?: (calls: { url: string; data: unknown }[]) => void) {
   const calls: { url: string; data: unknown }[] = []
   const noop = () => {}
   const save = compile(saveNode, {
-    form: { validateFields: async () => ({ code: 'fixture', name: 'Edited product' }) },
-    editing: { code: 'fixture' }, setSavingDetail: noop,
+    form: { validateFields: async () => ({ code, name: 'Edited product' }) },
+    editing: { code }, setSavingDetail: noop,
     api: {
       put: async (url: string, data: unknown) => { calls.push({ url, data }); return { data: {} } },
       post: async () => ({ data: {} }), get: async () => ({ data: { materials: [], moldings: [] } }),
@@ -47,12 +47,32 @@ async function actualSave(materials: Material[], dicts: Dictionaries) {
     loadDicts: noop, setCreating: noop, loadList: noop, setMaterials: noop, setMoldings: noop, setEditing: noop,
   })
   await save()
+  checkCalls?.(calls)
   const bulk = calls.find(call => call.url.startsWith('/materials/bulk/'))
   assert.ok(bulk)
   return (bulk.data as { materials: Record<string, unknown>[] }).materials
 }
 
 describe('product supplier-profile save boundary', () => {
+  it('saves complete slash-containing SKU materials through the query endpoint without changing material values', async () => {
+    const code = 'SYNTHETIC/200/300'
+    const rows: Material[] = [{ id: 42, name_zh: 'Synthetic material', spec: 'S1', supplier: supplier.keyword,
+      unit_kg: 'KGM', net_per_pc: 0.123456789, usage_qty: 1 / 3 }]
+    const before = JSON.stringify(rows)
+    const payload = await actualSave(rows, { suppliers: [supplier], hs: [], translations: [] }, code, calls => {
+      assert.deepEqual(calls.map(call => call.url), [
+        `/products/by-code?code=${encodeURIComponent(code)}`,
+        `/materials/bulk/by-code?code=${encodeURIComponent(code)}`,
+      ])
+      const request = new URL(calls[1].url, 'http://fixture.invalid')
+      assert.equal(request.pathname, '/materials/bulk/by-code')
+      assert.equal(request.searchParams.get('code'), code)
+    })
+    assert.equal(payload[0].id, 42)
+    assert.equal(payload[0].netPerPc, 0.123456789)
+    assert.equal(payload[0].usage_qty, 1 / 3)
+    assert.equal(JSON.stringify(rows), before)
+  })
   it('uses a successfully saved profile immediately, before dictionary refresh completes', async () => {
     let rows: Material[] = [{ id: 1, supplier: supplier.keyword, customs_company: supplier.customs, name_zh: 'Manually edited name', unit_kg: 'TNE', net_per_pc: 0.1234 }]
     const other: SupplierDict = { id: 8, keyword: 'other-alias', full: supplier.full, customs: 'Other Customs' }

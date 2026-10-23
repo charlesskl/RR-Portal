@@ -60,11 +60,39 @@ describe('采购导出计算精度', () => {
     expect(restored.D2.v).toBe(roundedQuantity)
     expect(restored.D2.z).toBe(`0.${'#'.repeat(digits)}`)
     expect(Number(restored.F2.v)).toBeCloseTo(price, 6)
-    expect(restored.F2.z).toBe('0.00')
-    expect(XLSX.utils.format_cell(restored.F2)).toBe(price.toFixed(2))
+    expect(restored.F2.z).toBe('0.0000')
+    expect(XLSX.utils.format_cell(restored.F2)).toBe(price.toFixed(4))
     expect(restored.G2.f).toBe('ROUND(D2*F2,2)')
     expect(Number((Number(restored.D2.v) * Number(restored.F2.v)).toFixed(2))).toBe(expected)
     expect(restored.G2.v).toBe(expected)
+  })
+
+  it.each([
+    ['KGM', 87, 168, '87.00', '1.9310'],
+    ['KG', 10.8, 25.5, '10.80', '2.3611'],
+    [' kg ', 13.5, 102, '13.50', '7.5556'],
+    ['千克', 32.5, 292, '32.50', '8.9846'],
+    ['公斤', 0, 0, '0.00', '0.0000'],
+  ])('%s 数量在单张和合并导出中固定两位，单价四位但不改变金额', (unit, quantity, amount, quantityText, priceText) => {
+    const ws = XLSX.utils.aoa_to_sheet([['合同'], ['', '', '', '', unit, '', '']])
+    setPurchaseContractLineAmounts(ws, 2, quantity, amount, 2, unit)
+    const single = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(single, ws, '合同')
+    const combined = combinePurchaseContracts([{ entity: 'HSY', ws }, { entity: 'HSY', ws }])
+    for (const [book, name, offsets] of [[single, '合同', [0]], [combined, '华胜益', [0, 4]]] as const) {
+      const sheet = XLSX.read(XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer', cellNF: true }).Sheets[name]
+      for (const offset of offsets) {
+        const row = 2 + offset
+        expect(XLSX.utils.format_cell(sheet[`D${row}`])).toBe(quantityText)
+        expect(XLSX.utils.format_cell(sheet[`F${row}`])).toBe(priceText)
+        expect(sheet[`D${row}`].t).toBe('n')
+        expect(sheet[`D${row}`].v).toBe(quantity)
+        expect(sheet[`F${row}`].v).toBe(quantity ? amount / quantity : 0)
+        expect(sheet[`G${row}`].v).toBe(amount)
+        expect(sheet[`G${row}`].f).toBe(`ROUND(D${row}*F${row},2)`)
+        expect(roundPurchaseContractAmount(Number(sheet[`D${row}`].v) * Number(sheet[`F${row}`].v))).toBe(amount)
+      }
+    }
   })
 
   it('数量舍入为零时保留原金额且留空无法计算的单价', () => {
@@ -89,8 +117,8 @@ describe('采购导出计算精度', () => {
     for (const offset of [0, 7]) {
       expect(exported[`D${2 + offset}`].v).toBe(0.0081)
       expect(exported[`D${3 + offset}`].v).toBe(0.002)
-      expect(XLSX.utils.format_cell(exported[`F${2 + offset}`])).toBe('199506.17')
-      expect(XLSX.utils.format_cell(exported[`F${3 + offset}`])).toBe('707000.00')
+      expect(XLSX.utils.format_cell(exported[`F${2 + offset}`])).toBe('199506.1728')
+      expect(XLSX.utils.format_cell(exported[`F${3 + offset}`])).toBe('707000.0000')
       const amounts = [2, 3].map(row => {
         const r = row + offset
         expect(exported[`G${r}`].f).toBe(`ROUND(D${r}*F${r},2)`)

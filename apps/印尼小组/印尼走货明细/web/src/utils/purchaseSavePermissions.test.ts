@@ -42,7 +42,7 @@ async function saveWithLookup(failure?: { status: number; path: string }, materi
   const message = { info: vi.fn(), warning: vi.fn(), error: vi.fn(), success: vi.fn() }
   const setItems = vi.fn()
   const context = createContext({
-    api, message, items, setItems, autoLinkPurchaseMaterials, purchaseItemCodes, dayjs,
+    api, message, items, setItems, autoLinkPurchaseMaterials, purchaseItemCodes, dayjs, productCodes: [original.product_code],
     form: { validateFields: async () => ({ po_no: 'SYNTHETIC-PO', supplier: material.supplier,
       order_date: '2026-10-13', delivery_date: '2026-10-28' }) },
     creating: true, editing: { id: 0 }, setCreating: vi.fn(), setEditing: vi.fn(), load: vi.fn(),
@@ -54,6 +54,22 @@ async function saveWithLookup(failure?: { status: number; path: string }, materi
 }
 
 describe('purchase save with optional material lookup permissions', () => {
+  it('uses full SKU quotes without borrowing another pack or the family-code price', () => {
+    const code = '94704/1099803/6077834'
+    const sibling = '94704/1099803/6077835'
+    const context = createContext({ purchaseItemCodes })
+    runInContext(executable, context)
+    context.items = [{ product_code: code, material_name: 'Box', spec: 'S1', purchase_qty: 10, price: 0 }]
+    context.quotes = ['94704', sibling, code].map((productCode, index) => ({
+      productCode, matName: 'Box', spec: 'S1', supplier: 'Supplier', unitPrice: index + 1, minQty: 0,
+    }))
+    context.codes = [code, sibling, '94704']
+    const result = runInContext("applyQuotePrices(items, quotes, 'Supplier', true, codes)", context)
+    expect(result.hit).toBe(1)
+    expect(result.items[0].price).toBe(3)
+    context.quotes = context.quotes.slice(0, 2)
+    expect(runInContext("applyQuotePrices(items, quotes, 'Supplier', true, codes)", context).hit).toBe(0)
+  })
   it('links a unique material with access while preserving quantities, price and saved values', async () => {
     const result = await saveWithLookup()
     expect(result.api.post).toHaveBeenCalledTimes(1)

@@ -39,4 +39,26 @@ describe('purchase line schedule association', () => {
     expect(linked.tomy_po).toBe(newSchedule.orderNo)
     expect(linkPurchaseLine(linked, newSchedule, [schedule, newSchedule], [linked], 'IRRMHS0066')).toEqual(linked)
   })
+  it('recognizes multiple full Spin SKUs in an existing merged HSY line', () => {
+    const first = '94704/1099803/6077834', second = '97282/1099235/6077462'
+    const selected = { code: first, orderNo: 'NEW', source: 'Spin Master', customer: 'Spin Master' }
+    const history = [selected, { ...selected, orderNo: 'OLD1' }, { ...selected, code: second, orderNo: 'OLD2' }]
+    const target = { ...line, product_code: first }
+    const merged = { product_code: first + ' / ' + second, tomy_po: 'OLD1; OLD2' }
+    const products = [first, second].map(code => ({ code, customer: 'Spin Master' }))
+    expect(linkPurchaseLine(target, selected, history, [target, merged], '2026900171', products))
+      .toEqual({ ...target, tomy_po: 'NEW' })
+    // Unknown order origins remain blocked; never infer them from SKU fragments.
+    expect(() => linkPurchaseLine(target, selected, history.slice(0, 2), [target, merged], '2026900171', products))
+      .toThrow('来源未能确认')
+  })
+  it('uses the existing suffix resolver for a legacy order absent from the latest schedule', () => {
+    const selected = { code: '47669TSCA', orderNo: 'NEW', source: 'KIK', customer: 'TOMY' }
+    const target = { ...line, product_code: selected.code, tomy_po: 'OLD' }
+    const resolve = (code: string) => code === selected.code ? '47669' : code
+    expect(linkPurchaseLine(target, selected, [selected], [target], 'IRRIHS0405',
+      [{ code: '47669', customer: 'TOMY' }], resolve)).toEqual({ ...target, tomy_po: 'NEW' })
+    expect(() => linkPurchaseLine(target, selected, [selected], [target], 'IRRIHS0405',
+      [{ code: '47669', customer: 'Spin Master' }], resolve)).toThrow('客户不一致')
+  })
 })

@@ -10,7 +10,7 @@ const norm = (value?: string) => (value || '').trim().toLocaleLowerCase()
 function resolveMaterial(original: WeightLine, materials: Material[], supplier: string, profiles: SupplierDict[]): { material?: Material; reason: string; matchedBy: string } {
   const unique = [...new Map(materials.filter(m => m.id != null).map(m => [Number(m.id), m])).values()]
     const fail = (reason: string) => ({ reason, matchedBy: '' })
-    const codes = purchaseItemCodes(original.product_code)
+    const codes = purchaseItemCodes(original.product_code, unique.map(m => m.product_code))
     if (codes.length > 1) return fail('多货号合并行，请先取消合并，再分别回填净重')
     let material = unique.find(m => Number(m.id) === Number(original.material_id))
     let matchedBy = '已有物料关联'

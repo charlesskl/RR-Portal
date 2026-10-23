@@ -3,7 +3,7 @@ Outputs only allowlisted filenames/functions/line numbers and exception types.
 Never prints traceback source lines, exception messages, secrets or business rows.
 """
 import hashlib,json,os,pathlib,re,select,stat,subprocess,sys,time
-DIAGNOSTIC_PIN=True
+DIAGNOSTIC_PIN=False
 ROOT=pathlib.Path('/opt/rr-portal')
 BRANCH='refs/heads/ops/pr-996-20261023-trace-01'
 BASE='6742f820c0a43388e274b867a2825a42548b5cea'

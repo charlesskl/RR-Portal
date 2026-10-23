@@ -2,9 +2,9 @@
 No environment changes, DB restore, authenticated writes or model calls.
 """
 import copy,hashlib,importlib.util,io,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,traceback,urllib.error,urllib.request
-PHASE='verify'
-TARGET='094f17602e4fe614c28ddc38e6db9fda6a2bb165'
-TREE='1b3a86eb68435babca7415a24d01c1b2d3648916'
+PHASE=''
+TARGET=''
+TREE=''
 SOURCE_MANIFEST_SHA='8575bf24d3597a09b185dfb377f938d777faff99176a6ed91d01f71f273f5595'
 BASE='2de4be7bdb0fa983dc86259701a3c4f3ddd14234'
 BASE_TREE='d41d5f98f97ee0cd34b0a868fb7283f57841ee4e'
@@ -14,7 +14,7 @@ BACKUP=ROOT/'deploy/backups/pr-997-20261023-backup'
 PREPARE=BACKUP.with_name('pr-997-20261023-prepare')
 DEPLOY=BACKUP.with_name('pr-997-20261023-deploy')
 VERIFY=BACKUP.with_name('pr-997-20261023-verify')
-BACKUP_MANIFEST='3d123d46c565becb162515495c2d20a25c04baaa1554d38a90a83e0a5bc65ed3';BACKUP_RESULT='dad35d6be6c77b65061d9c5d09633b640fb0003b57d203caaf6595fd0b0172df';PREPARE_MANIFEST='e08262c98ad3eca676c4700712e39cf4a25f33d34de62741f97c0dec8964d4d2';PREPARE_RESULT='31a136e50767b5760ee32e0ea2ce6b19a19c0f7fe4376395ae17112286faf4ff';DEPLOY_MANIFEST='e58a626633fde8c1a1a56ef2307cb9227de831c2e6ed510a067beee35fbe23b4';DEPLOY_RESULT='095e7c5041bcf26a6db26d60ffbc870c11985bcf32985e559bb088d1ff5cbf57'
+BACKUP_MANIFEST='';BACKUP_RESULT='';PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 ORDER=('internal-quote',)
 QUOTE_STARTUP_SHA='520519a44f8954a07745d8416be3cdd1bf7e15591c3328abc1382a18946ae517'
 QUOTE_CONFLICT_FRAGMENT=b'  await prepare(`INSERT INTO quote_sections (quote_id, dept)\n    SELECT q.id, d.code FROM quotes q CROSS JOIN departments d\n    ON CONFLICT (quote_id, dept) DO NOTHING`).run();'

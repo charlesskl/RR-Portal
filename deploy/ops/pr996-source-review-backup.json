@@ -1,0 +1,61 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr996_frontend_review",
+  "reviewedAtUTC": "2026-10-23T02:47:14.169876+00:00",
+  "helperSHA256": "cc535c925270794317bc75e3b950bfa3bd3933aa5a89503640c6b21dc589f698",
+  "helperGatesFrozen": true,
+  "base": "6742f820c0a43388e274b867a2825a42548b5cea",
+  "baseTree": "ce652db9eb263e09d24a3f44ef0c48a5c1f7b79e",
+  "allowedPhases": [
+    "backup"
+  ],
+  "dependencies": {
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "qc-source-library.py": "4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5",
+    "portable-pdb-library.py": "cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5"
+  },
+  "transportSHA256": "863c4251bf8ed82c3e9d62a27572f24b1365e90dae3172e5ec7465bf21bf86a1",
+  "scope": [
+    "indo-shipping"
+  ],
+  "targetContainerCount": 1,
+  "otherContainerCount": 45,
+  "totalContainerCount": 46,
+  "portableSQLiteCount": 0,
+  "postgresSchemaCount": 1,
+  "checks": [
+    "Read full frozen B and T; five transitive dependency hashes checked before imports. B BACKUP_PIN=False, F backup/deploy/verify gates=False and Q backup=False; no valid backup/main invocation or workflow publication was performed.",
+    "Exact 46 Docker IDs, one healthy indo-shipping target and 45 unchanged unrelated container records. Target must have zero mounts. Full Config/HostConfig, configured environment and PID1 environment minus automatic hostname are privately captured and matched before/after.",
+    "Indo DeploymentSecrets source hard-codes db:5432 and derives runtime connection from DB_NAME/USER/PASSWORD/SCHEMA plus persistent JWT/admin base64 environment. B compares existing db container credentials and selected schema with configured and PID1 values, preserves full .env bytes/mode/uid/gid without rewriting or printing secrets.",
+    "Only indo_shipping PostgreSQL schema is captured. All discovered base tables, complete typed multiset digests including images, columns/constraints/indexes/functions/views/triggers/enums/sequence definitions and schema/object ownership ACL/RLS flags are captured. Startup predicates and extra metadata are included in the same READ ONLY repeatable-read exported snapshot statement; pg_dump -Fc uses that exact exported snapshot and pg_restore is list-only.",
+    "Sequence values are independently bracketed and must remain stable during capture; no atomic-MVCC sequence claim or setval/nextval/reset exists. Existing app startup consumes Users_Id_seq once via idempotent bootstrap insert; this backup performs no restart or sequence mutation and the release requires a separate reviewed allowance.",
+    "Exact old prepare/verify archive seals and all private file manifest entries are replayed. Prior actual deployed immutable image037bae and source9b890cc are bound; actual base6742 indo subtree equals prior running application tree037be63. Actual container code is tied through matching PE CodeView/Portable PDB and every non-generated source checksum, copied schema/seed data and full compiled wwwroot inventory equality to prior sealed prepare.",
+    "Portable PDB parser is bounded, validates document SHA256 algorithm and matching DLL CodeView identifier, and rejects unexpected non-generated document inventory. Container source tar is bounded and rejects symlinks/path traversal. docker.diff only permits /tmp entries; any unbacked writable application files or key directories are rejected. Default business-data seed must be absent.",
+    "Exactly eight startup predicates must pass, no legacy lowercase users table, existing Users rows and all expected inventory tables, no omitted columns in typed digest and sealed valid PostgreSQL dump. No migrations, schema/table/role/user changes, credentials rotation, authenticated HTTP or business/model requests, container lifecycle or maintenance changes occur in backup.",
+    "Full fixed global/compose/nginx/update/maintenance/workflow/env-example/startup source files, exact four existing tracked dirty paths outside app/config, maintenance inventory, full environment and all runtime records remain unchanged. Only exclusive0700 directories/0600 private evidence files are written.",
+    "T exact delta from independently reviewed PR995 is fixed PR/base/tree/state/branch/prefix/title, indo-only manifest scope and allowlisted Q/PDB dependency replacement. Source/plan review hashes, only AST gate substitutions, official remote, exact heads/parent, one phase/attempt, required SSH host fingerprint, deploy-cloud concurrency, durable exclusive dispatch reservations and finally ordinary-workflow restoration are retained."
+  ],
+  "offlineChecks": {
+    "backupFixturesReadAndIndependentlyRerun": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr996-backup-author.py",
+      "sha256": "e40cb3067c571b5cf25f9895feabcd40a982e2bd8c2d18e1a6f5c3d30b0c21d6",
+      "passed": 7,
+      "failed": 0,
+      "log": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-backup-independent-tests.log",
+      "logSHA256": "b131d9de62da05631b58c607ff6b8b0f2ae819d7d50f600d65e684a8f21a2303"
+    },
+    "pinnedGenericLibrariesVerified": true,
+    "sourceASTsParsed": true,
+    "productionOrGitHubActionsPerformed": false,
+    "stateOrTrackedOPSModified": false,
+    "onlySyntheticTemporaryFixtures": true
+  },
+  "boundaries": [
+    "Backup source/transport only; no release or phase-plan approval is implied.",
+    "No state, application, OPS source, git branch, remote or production operation occurred during this independent operational review."
+  ],
+  "remainingBlockers": []
+}

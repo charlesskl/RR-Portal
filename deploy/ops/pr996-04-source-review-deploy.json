@@ -1,0 +1,133 @@
+{
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "attempt": 4,
+  "base": "6742f820c0a43388e274b867a2825a42548b5cea",
+  "baseTree": "ce652db9eb263e09d24a3f44ef0c48a5c1f7b79e",
+  "boundaries": [
+    "Source-only approval; no actual backup4/build/deploy/verify success asserted. Each activated phase still requires an exact reviewed plan and actual sealed result.",
+    "Docker CLI semantics were checked against primary Docker docs earlier. Real created-only copy/ownership rehearsal is deliberately a prepare-stage gate, not claimed from offline tests.",
+    "Full logical typed rows/schema/owner preservation is distinguished from internal unchanged idempotent startup SQL and known sequence consumption; no user attribution or sequence MVCC atomicity is claimed.",
+    "The fixed fail-closed behavior for completely absent created keyring may require operator follow-up, while preserving candidate and maintenance; it is intentionally safer than assuming absence from a generic cp error.",
+    "New prepare archive finalized-02 must be activated by a fresh reviewed plan and retained failure/dispatch evidence; no previous attempt receipt is repurposed as a successful prepare.",
+    "V3 source approved with same-user real copyback pending. Any copied bytes/modes/owners drift still fails before production maintenance/switch;1654 guard never relaxed. New finalized03 plan must preserve prior failed archives and dispatch evidence."
+  ],
+  "checks": [
+    "Independent narrow R4v3: exact inverse, including the adjacent and-token whitespace, proves only finalized03 prepare archive, reading Config.User from sealed BACKUP target inspect restricted to app/1654/1654:1654 and equal fresh immutable image Config.User, then using/checking that exact user in isolated created rehearsal. All other bytes unchanged from reviewed ec55; owner1654/cp-a/isolated-never-started copyback/finally/PG/production recovery checks remain unchanged.",
+    "Read actual owner diagnostic39908131217: rehearsal User0 and copied owners0, immutable-image User equals original runtime User, all non-owner header metadata match, original46 runtime unchanged and temp absent. Diagnostic whitelist omits app; fixed Dockerfile USER app supports the chosen restricted guard but does not establish the omitted private value. New guard resolves it privately and rejects unknown forms/image mismatch. Successful corrected real copyback remains a mandatory prepare gate; exact Docker29 source verification is not claimed.",
+    "Independent narrow R4v2 review: exact inverse normalization proves only three changes from already reviewed b969 source: fresh sibling prepare-finalized-02 archive, immutable image inspect with exact image Id, and full inherited label-map equality replacing the erroneous blanket compose-label prohibition. All other bytes unchanged. Existing failed prepare archive, source and receipts remain intact; this receipt does not authorize a blind redispatch or state reset.",
+    "Actual read-only diagnostic run39907129556 reports only the old no-compose-label predicate false; immutable image and all remaining rehearsal guards true, full labels exactly inherited, all46 original runtime contracts unchanged and temporary rehearsal absent. New guard accepts only the exact full labels from the same immutable image SHA; added/changed labels fail equality. Network none/log none/restart no/no mounts/entrypoint tar/exact original app user/created-never-started/exact own CID cleanup and actual key copyback checks are unchanged.",
+    "Independently read the complete frozen R4 and B4 keyring implementation and full R3 delta; exact application head151/treeD41 and eight reviewed blobs remain unchanged. Seven frozen dependency hashes and all nine blank runtime gates match. The first R4 public replay-key typo is corrected by one exact field substitution; original e3bb source is preserved.",
+    "Attempt4 uses separate archive/branch/manifest namespaces. Prior source-PDB, native Q128MiB capacity, sealed prior provenance, PG repeatable-read exported snapshot/dump, full typed rows/schema/owner/ACL/RLS/constraint and independently bracketed sequence contracts remain intact. Only indo-shipping is targeted; all other45 runtime records must remain exact.",
+    "B4 captures the complete existing .aspnet/DataProtection-Keys raw tar privately at0600 with bounded archive/member/total/count limits, safe unique regular paths, exact1654:1654 owners,0755 directory/0600 key modes and canonical XML key identity. Tar replay checks bytes/hash and validated full inventory, not merely a success flag. Unrecognized writable paths outside tmp, known real home ancestors and captured complete keyring remain blocked.",
+    "Ancestor ownership and modes are explicitly last running stat observations, not claimed fresh-closed metadata. Old target is drained then stopped; fresh closed keyring and PG are read only after stop. Restore copies only .aspnet into existing /home/app; home ancestors are not rewritten. Post-start actual ancestor stat must equal the recorded pre-stop metadata.",
+    "Prepare builds only the immutable single-service candidate before maintenance and validates actual PDB/source/compiled assets, platform/default image Config, unchanged full literal environment/PID1/JWT/admin secrets and fixed config/dirty paths. A real isolated created-only rehearsal uses network none, log-driver none, restart no, entrypoint tar, exact original app user, labels exactly equal freshly inspected immutable image labels and never starts any process; only its exact never-started CID is removed.",
+    "Deploy explicitly uses compose up --no-start --force-recreate --no-build --no-deps --pull never for the owned service. Created candidate must have State created/Pid0/zero StartedAt/RestartCount0/OOMfalse and exact immutable image, complete Config/HostConfig/env/labels. Private closed keyring is copied before first start, re-read and compared for all entries/bytes/modes/owners, with full raw inspect unchanged and still never-started after copyback. PG pre-start interval permits exactly0 only. A single exact docker start follows.",
+    "Healthy candidate startup and healthy recovered-old startup each permit exactly Users_Id_seq+1; all other sequence states and all typed rows/schema/owners/ACL/RLS stay equal. Only the failed-start recovery interval permits Users_Id_seq0or1 with RestartCount0/OOMfalse. Created-never-started or absent-after-create intervals require0. No setval, database restore, schema/account/role/env change or business request is introduced.",
+    "Recovery A: before replacement, inspect original CID/image/restarts; if already running do not start it again, if stopped start original once. Closed capture failure can recover the retained original without falsely asserting closed-data verification. Recovery B: failed create may leave no target, so PG0 is required before recreating immutable old image. Recovery C: an extant never-started candidate must have all potentially unknown key material copied to private raw custody before replacement; absent keydir or unclassified cp failure intentionally fails closed and retains candidate plus owned maintenance. Recovery D: a started candidate is stopped, complete failed-state evidence is compared in a separate0or1 interval, then old image is created-restored-verified-started and compared in its own+1 interval. No candidate deletion or recreation happens without valid fresh closed evidence.",
+    "A failed/ambiguous first start is never blindly repeated; actual inspect determines whether candidate has started. Any OOM, restart ambiguity, key material drift, missing custody, row/schema/sequence drift or failed full contract retains owned maintenance. Replacement key writes occur only on created never-started CIDs; no running app receives a key rewrite and no unknown material is silently discarded.",
+    "Verify replays sealed fresh-live, stopped-before, restored-before-first-start, PG0 and post-start evidence; binds actual created/current CID/image/StartedAt, full runtime Config/env, private key archive and exact recorded audit. It repeats public health/index/all compiled assets and six anonymous GET401 checks, with no production authentication or business write. It does not compare changing live business rows after users resume.",
+    "Public keyring gates now align with C4: dataProtectionKeyringPreservedBeforeStart, dataProtectionKeyringPostStartExact, ancestorMetadataMatchesPreStop and sealedClosedKeyringCheckReproduced are true; keyMaterialPrintedOrSubmittedToGit is false. Only safe booleans/counts are public. The raw keyring and contents remain private and are never printed or submitted to Git.",
+    "Normal protected merge, reviewed source/manifest/prior seals, official repository and exact branch/parent/attempt binding, independent phase-plan approval, exclusive dispatch reservations, SSH fingerprint, deploy-cloud concurrency and no blind rerun controls remain the transport responsibility. This source approval does not activate or execute any phase."
+  ],
+  "dependencies": {
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "portable-pdb-library.py": "cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5",
+    "pr996-04-backup-library.py": "b433486575a40fba04a179a4549227d2657f6abb49b34a743c244fae2a6f08c9",
+    "qc-source-library.py": "4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5"
+  },
+  "disposition": "CHECKED",
+  "evidenceSHA256": {
+    "work/pr996-03-release-source-review.json": "5292bad743b425a5611df69cdcd403e7e9153f446a28ed82b3f24de7928b3110",
+    "work/pr996-04-backup.py": "b433486575a40fba04a179a4549227d2657f6abb49b34a743c244fae2a6f08c9",
+    "work/pr996-04-release-author-v2-ops.json": "d995176d2fc6552e3025e94ef76dd9758cfe68828bac6cde6c4b325d2cb8384f",
+    "work/pr996-04-release-source-review-v2.json": "ee78260f85a094b54d8830fd3736d77f3d574cb23f1611105f3f891eb1c20233",
+    "work/pr996-04-release-v2-failed.py": "ec55e9700d05e087d33ce9ac873f77922c49fbc3771ab7a8fdae874b6ab7d37c",
+    "work/pr996-04-release-v2-ops.diff": "3707cb0f874018c17a01bc5f195a7b19cb95cfa72fcdfc60848da9fe59bf0247",
+    "work/pr996-04-release-v3-ops.diff": "52a5707285c9f20988fbedace2f7d27446761f81edfd4f9fad7e7368f78b36fd",
+    "work/pr996-04-release.py": "b969e2e7c2e378ba49595ed097457132f251a214f2fa46a550d2b8a1168f5481",
+    "work/pr996-final-source-pin-review.json": "9dda6e9326f2f449af5b7a4a19ae0ed638389dd9b5374b3458aeea4ccc721bb4",
+    "work/pr996-keyring-cli-design-review-backend.json": "c992c77bd04ba2781ee6c9a3ed1fd3ce5bc4d7a3c6b0d0d87cf2be47ce6d4d75",
+    "work/pr996-prepare-diagnostic-result.json": "914bcded904a41962ba90b0a97f816e5a221fd59c593d8f7a50a5b053ed0ebf6",
+    "work/pr996-prepare02-owner-diagnostic-result.json": "a5492fcf35421256bd468ab3ee34636e9946a4a94ed47cbeb3d471feb99abeef",
+    "work/pr996-writable-result.json": "60f099fb7426218f29d73aa0280b3acc4772f2e62c7bd467ec476d796d529b3e"
+  },
+  "helperGatesFrozen": true,
+  "helperSHA256": "a470f45ee2b27246653163b40bcec0cd58fdccc2bb80926f7c2a8769439767a9",
+  "independent": true,
+  "offlineChecks": {
+    "allNineGatesBlankAndSevenDependenciesChecked": true,
+    "exactNarrowV3InverseComputed": true,
+    "previousUnchangedLifecycleEvidence": {
+      "allNineGatesBlankAndSevenDependencyHashesChecked": true,
+      "exactThreeChangeInverseComputed": true,
+      "inheritedLabelFullEqualityChecked": true,
+      "previousUnchangedKeyRestoreLifecycleEvidence": {
+        "actualStateOPSProductionOrRemoteMutation": false,
+        "allNineGatesBlankAndSevenDependenciesChecked": true,
+        "applicationFullSuitesNotRepeated": true,
+        "authorNineLifecycleFixturesIndependentlyRerun": {
+          "limitations": "Pure offline dependency-mocked lifecycle fixtures; no Docker server or real rehearsal execution.",
+          "passed": 9,
+          "path": "work/pr996-04-lifecycle-independent-rerun-backend.log",
+          "sha256": "c98148f220ac2820ea77bfe123ba2caf6e897cccb0043fe00e495ebafb1bfd39"
+        },
+        "exactEightApplicationBlobPinsChecked": true,
+        "independentlyAuthoredActualRestoreAndReplay": {
+          "covers": [
+            "actual R.restore_keys plus actual B.capture/replay on synthetic tar",
+            "running CID rejected before copy",
+            "tampered closed tar rejected before any container command",
+            "different copyback bytes rejected",
+            "changed copyback owner rejected"
+          ],
+          "limitations": "Actual restore/comparison functions with synthetic tar and fake docker command runner; does not prove server CLI support or production key layout.",
+          "log": "work/pr996-04-key-restore-independent-backend.log",
+          "logSHA256": "97a22e722200966077d94701803d18f7a340690a6bbbc10985c9ad50c7eecb7b",
+          "passed": 5,
+          "source": "work/test-pr996-04-key-restore-independent-backend.py",
+          "sourceSHA256": "78c36d9fa180c5a128fa692b3c745eccb09edaa6e55d7a101ef74db05d59bbde"
+        },
+        "publicFieldSingleDiffConfirmed": true
+      },
+      "realProductionOrRemoteActionsPerformed": false,
+      "testsRerunForV2": "No repeated lifecycle/app matrix; new change is source-equivalent except exact image-label contract and archive namespace. Real rehearsal remains a mandatory new prepare gate."
+    },
+    "realProductionOrRemoteActionsPerformed": false,
+    "testsForV3": "Narrow source/inverse/user guard review only. No repeated app or lifecycle matrix; corrected real rehearsal remains pending."
+  },
+  "otherContainerCount": 45,
+  "portableSQLiteCount": 0,
+  "postgresSchema": "indo_shipping",
+  "previousSourceReviewSHA256": "ee78260f85a094b54d8830fd3736d77f3d574cb23f1611105f3f891eb1c20233",
+  "previousSourceSHA256": "ec55e9700d05e087d33ce9ac873f77922c49fbc3771ab7a8fdae874b6ab7d37c",
+  "remainingBlockers": [],
+  "reviewedApplicationFiles": {
+    "apps/印尼小组/印尼走货明细/src/IndoShipping.Api/Controllers/OutboundController.cs": "36c908d2a0301bc64a3748304e235844793d787b22a61aae1c7af91c6cc8ad5e",
+    "apps/印尼小组/印尼走货明细/src/IndoShipping.Api/Controllers/PurchaseOrdersController.Receipts.cs": "cc64ec7fcc2e956adb1f4c2394d0c6f7a6822bcf17e17eed6214cfadb1e984ac",
+    "apps/印尼小组/印尼走货明细/src/IndoShipping.Api/Controllers/PurchaseOrdersController.cs": "247a6836f176ca41f7ac7cce8650a19a7a89ecc7c5c74422866a50dd9450271d",
+    "apps/印尼小组/印尼走货明细/tests/IndoShipping.Api.Tests/PurchaseReceiptTests.cs": "e83591f5b3cfdf17e2718bb16220de9028125bc616323cd131a03bce90a3d452",
+    "apps/印尼小组/印尼走货明细/web/src/pages/PurchasePage.tsx": "04808ca24c971fb7eaca137672ac9420f1a2315aa666fa6469ec6e716fd764aa",
+    "apps/印尼小组/印尼走货明细/web/src/utils/purchaseReceipt.test.ts": "e91562b5a8768b1a861c6dae940afe6dc96bcce2cf6cd74151bd691deb32e2d3",
+    "apps/印尼小组/印尼走货明细/web/src/utils/purchaseReceipt.ts": "ca5963552e8f081bb9965b0646b0be90ae0058a07af941053b7b5fdaf3864d02",
+    "apps/印尼小组/印尼走货明细/web/src/utils/purchaseReceiptFlow.test.ts": "cc3a2b7dae912e80d26e49ded569f674029ec476d1ab4a18ece471daf9e90c16"
+  },
+  "reviewedApplicationHead": "151c8d3805162862063cd91afe498e999baf1049",
+  "reviewedAtUTC": "2026-10-23T05:56:40.846036+00:00",
+  "reviewedIntegrationTree": "d41d5f98f97ee0cd34b0a868fb7283f57841ee4e",
+  "reviewer": "/root/pr996_backend_review",
+  "scope": [
+    "indo-shipping"
+  ],
+  "sourceManifestSHA256": "fb1567df15dba946e0d32660ccb5f162f0654e7fb3a67d1ca652909676f23edb",
+  "sourcePath": "work/pr996-04-release-v3-ops.py",
+  "sourceRevision": 3,
+  "targetContainerCount": 1,
+  "transportSHA256": "19f5fc6bcf7069c0f47e083cc8fee3ffab4d48cc806e8bc68bc38f52817dd251"
+}

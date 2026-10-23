@@ -2,7 +2,7 @@
 Only sealed JSON assertions and bounded Docker ps/inspect metadata; no key/PG/HTTP.
 """
 import hashlib,json,os,pathlib,re,stat,subprocess,sys
-DIAGNOSTIC_PIN=True
+DIAGNOSTIC_PIN=False
 ROOT=pathlib.Path('/opt/rr-portal')
 BRANCH='refs/heads/ops/pr-996-20261023-04'
 BASE='6742f820c0a43388e274b867a2825a42548b5cea'

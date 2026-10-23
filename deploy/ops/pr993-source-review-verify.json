@@ -1,0 +1,66 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr993_regressions",
+  "reviewedAtUTC": "2026-10-23T00:41:17.153893+00:00",
+  "helperSHA256": "4156a68ba9b33e1d126b26f0b568f9b5c830d5b578375bf7f9e0c76a933b1aa5",
+  "helperGatesFrozen": true,
+  "base": "29254a0e90d3fe2a75f212492902aa1a00a4cba5",
+  "baseTree": "ef92d7ed70394780f0389578c8cc1b2b67a167a5",
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "dependencies": {
+    "pr993-backup-library.py": "efc3e1f7f92a26236f0c19fc8920cfdad2fae5f18716617071d67b9f8cdb4ad3",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9"
+  },
+  "transportSHA256": "394fb5e6cba522cc5dc5d0d964fb16fd35b5514a65bf9032735dacc398c559e9",
+  "sourceManifestSHA256": "f92b6906cbf49a142c83206a5adabf07ae9ac5b147051e1a1254de50624b3e24",
+  "reviewedApplicationHead": "9678fb35263db94d62a2b201caebf9522601b0bd",
+  "reviewedIntegrationTree": "d04be0b8c89a8a8cf1d375b2a9cb30d5443d2aa3",
+  "reviewedApplicationFiles": {
+    "apps/生产部/品质管理系统/server/ocr-parser.test.js": "1625b188c6bcb006912daa6326d6c53c541305618b2ce03a703496b8e2b9ecb8",
+    "apps/生产部/品质管理系统/server/server.js": "ae5d667d8a3d710d338a492c53a38cabb9290e1c9be8bcde54f282e76cf9dccb"
+  },
+  "scope": [
+    "qc"
+  ],
+  "targetContainerCount": 1,
+  "otherContainerCount": 45,
+  "portableSQLiteCount": 26,
+  "qcCompanyDatabaseCount": 13,
+  "qcHistoricalDatabaseCount": 13,
+  "checks": [
+    "Read the entire frozen qc-only release helper. The final source is byte-identical to pre-reviewed 19a69cf0 except the SOURCE_MANIFEST_SHA assignment; all nine phase/target/tree/prior-result gates remain blank and the entrypoint rejects before I/O.",
+    "Exact source manifest f92b6906 binds only server/server.js plus server/ocr-parser.test.js. The actual manifest validator accepts these pinned bytes, requires server.js, permits only bounded safe QC test paths, and the release checks exact BASE..TARGET paths, file hashes/modes, fixed source/config/auth/provider bytes, unchanged startup/schema/seed region and canonical main ancestry.",
+    "Build happens before maintenance and targets only qc, with immutable image proof for every Docker COPY source and unchanged default/runtime Config/HostConfig, mounts, full literal configured/PID1 environment. Full .env bytes/mode/owner, entire compose render, four preexisting dirty files, maintenance inventory and all other 45 containers remain bound to backup.",
+    "Deploy drains and stops only the qc writer, takes a fresh closed portable snapshot, starts the exact prepared image with no build/deps/pull, then captures and compares all 26 typed SQLite schemas/rows plus raw 13 historical byte/mode/owners and all attachments/files/ownership before releasing maintenance. No authentication token, AI/provider environment, business row, schema migration or credential change is allowed.",
+    "Recovery owns only the failed qc service/image. It requires fresh closed evidence, verifies no data delta before restoring only the original immutable image with literal original runtime contract, and never restores a database. Unsafe recovery retains maintenance and reports failure.",
+    "Public checks are bounded localhost GETs for health, exact static asset hashes and six anonymous 401 reads. No login, authenticated business endpoint, OCR/model request, bulk write, mail or PostgreSQL query exists in this release path.",
+    "Verify reproduces sealed closed cutover data evidence and checks the current runtime/source/public state. It does not perform a changing live business-data capture after service use resumes.",
+    "Exact transport 394fb5e6 retains source/plan/dependency hashes, phase/prior seal chaining, fixed branch/remote heads, first-attempt exclusive dispatch reservation, host fingerprint, deploy-cloud concurrency, bounded execution and normal-workflow restoration controls. Individual prepare/deploy/verify plans still require separate exact plan reviews."
+  ],
+  "offlineChecks": {
+    "authorMinimalFixturesPreviouslyIndependentlyReadAndRerun": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr993-adapters-offline.py",
+      "sha256": "57f2b4cbf6cb96aeaa97a799ef3a66625bcd88159ace635dcf7e2b7bac5be236",
+      "passed": 7,
+      "failed": 0,
+      "logSHA256": "9cb967e4f80e221432f51b70b5f72be7cebddbc0e751ca32de2f461aa6d291ce"
+    },
+    "finalManifestDeltaChecksLog": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr993-release-final-independent-checks.log",
+    "finalManifestDeltaChecksLogSHA256": "076672877f6e57ef792f8eb73f0e9da2bb6cd8fbc688e33f1f2a7f3e45ccb864",
+    "entirePriorSuitesRepeated": false,
+    "realDockerProductionDatabaseHTTPPostgresGitHubOrModelCalls": false
+  },
+  "boundaries": [
+    "This receipt reviews only frozen release source and manifest; each activated phase needs a separate exact plan review and successful prior seals.",
+    "All SQLite copies are individually consistent. No cross-database atomicity or 27-photo OCR retest is claimed."
+  ],
+  "remainingBlockers": []
+}

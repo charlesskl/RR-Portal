@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   App, Button, Card, Checkbox, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm,
   Row, Select, Space, Table, Tag, Typography,
@@ -15,7 +15,7 @@ import { linkPurchaseLine, matchingLineSchedules } from '../utils/purchaseSchedu
 import { autoLinkPurchaseMaterials, planPurchaseNetWeight } from '../utils/purchaseNetWeight'
 import { purchaseLineDeliveryDate, purchaseLineSourceKey, purchaseOrderNumbers } from '../utils/purchaseOrderMerge'
 import { schedulePurchasePlaced, type ScheduleStatusRow } from '../utils/scheduleLineStatus'
-import { bulkReceiptLines, receiptQuantityError } from '../utils/purchaseReceipt'
+import { bulkReceiptLines, receiptQuantityError, receiptEditLimit, createReceiptSession, type ReceiptSession } from '../utils/purchaseReceipt'
 
 interface SchedRow extends ScheduleStatusRow {
   source?: string
@@ -413,6 +413,16 @@ export default function PurchasePage() {
   const [receiptRows, setReceiptRows] = useState<ReceiptRecord[]>([])
   const [receiptLoading, setReceiptLoading] = useState(false)
   const [receiptForm] = Form.useForm()
+  const [editingReceipt, setEditingReceipt] = useState<ReceiptRecord | null>(null)
+  const [receiptEditSaving, setReceiptEditSaving] = useState(false)
+  const [receiptEditForm] = Form.useForm()
+  const [receiptSession] = useState(createReceiptSession)
+  const receiptEditOperation = useRef<ReceiptSession | null>(null)
+  const receiptEditMax = receiptEditLimit(
+    Number(receiptItem?.purchase_qty ?? receiptItem?.qty ?? 0),
+    Number(receiptItem?.received_qty ?? 0),
+    Number(editingReceipt?.qty ?? 0),
+  )
   const [bulkReceiptPo, setBulkReceiptPo] = useState<PoSummary | null>(null)
   const [bulkReceiptQty, setBulkReceiptQty] = useState<Record<number, number>>({})
   const [bulkReceiptSpareQty, setBulkReceiptSpareQty] = useState<Record<number, number>>({})
@@ -429,18 +439,38 @@ export default function PurchasePage() {
       ])
       setRows(Array.isArray(data) ? data : [])
       setItemRows(Array.isArray(detailRows) ? detailRows : [])
+      return Array.isArray(detailRows) ? detailRows : []
     } finally { setLoading(false) }
   }
 
-  async function loadReceipts(itemId: number) {
+  async function loadReceipts(itemId: number, session = receiptSession.current(itemId)) {
+    if (!receiptSession.isCurrent(session)) return
     setReceiptLoading(true)
     try {
       const { data } = await api.get<ReceiptRecord[]>(`/purchase/items/${itemId}/receipts`)
-      setReceiptRows(Array.isArray(data) ? data : [])
-    } finally { setReceiptLoading(false) }
+      if (receiptSession.isCurrent(session)) setReceiptRows(Array.isArray(data) ? data : [])
+    } finally {
+      if (receiptSession.isCurrent(session)) setReceiptLoading(false)
+    }
+  }
+
+  function closeReceipt() {
+    receiptSession.close()
+    receiptEditOperation.current = null
+    setReceiptEditSaving(false)
+    setEditingReceipt(null)
+    setReceiptItem(null)
+    setReceiptRows([])
+    setReceiptLoading(false)
+    receiptForm.resetFields()
   }
 
   async function openReceipt(item: PurchaseItemRow) {
+    const session = receiptSession.open(item.id)
+    receiptEditOperation.current = null
+    setReceiptEditSaving(false)
+    setEditingReceipt(null)
+    setReceiptRows([])
     setReceiptItem(item)
     receiptForm.resetFields()
     receiptForm.setFieldsValue({
@@ -450,12 +480,15 @@ export default function PurchasePage() {
       batch_no: '',
       notes: '',
     })
-    await loadReceipts(item.id)
+    await loadReceipts(item.id, session)
   }
 
   async function saveReceipt() {
     if (!receiptItem) return
+    const session = receiptSession.current(receiptItem.id)
+    if (!session) return
     const values = await receiptForm.validateFields()
+    if (!receiptSession.isCurrent(session)) return
     const nextShortage = Math.max(
       Number(receiptItem.shortage_qty ?? 0) - Number(values.qty ?? 0),
       0,
@@ -471,24 +504,72 @@ export default function PurchasePage() {
     })
     message.success('本批入库已登记，欠数已自动更新')
     await load()
-    await loadReceipts(receiptItem.id)
+    await loadReceipts(receiptItem.id, session)
+    if (!receiptSession.isCurrent(session)) return
     setReceiptItem({ ...receiptItem, received_qty: nextReceived, spare_qty: nextSpare, shortage_qty: nextShortage })
     receiptForm.setFieldsValue({ qty: nextShortage, spare_qty: 0, batch_no: '', notes: '' })
   }
 
+  function editReceipt(record: ReceiptRecord) {
+    if (!receiptItem || !receiptSession.current(receiptItem.id) || record.po_item_id !== receiptItem.id) {
+      message.warning('入库记录与当前物料不一致，请重新打开入库明细')
+      return
+    }
+    if (receiptEditOperation.current) return
+    setEditingReceipt(record)
+    receiptEditForm.setFieldsValue({ qty: Number(record.qty), spare_qty: Number(record.spare_qty ?? 0) })
+  }
+
+  async function saveReceiptEdit() {
+    if (!editingReceipt || !receiptItem || receiptEditOperation.current) return
+    const session = receiptSession.current(receiptItem.id)
+    if (!session || editingReceipt.po_item_id !== receiptItem.id) {
+      message.warning('入库记录与当前物料不一致，请重新打开入库明细')
+      return
+    }
+    receiptEditOperation.current = session
+    setReceiptEditSaving(true)
+    try {
+      const values = await receiptEditForm.validateFields()
+      if (!receiptSession.isCurrent(session)) return
+      await api.put(`/purchase/receipts/${editingReceipt.id}`, {
+        qty: values.qty, spare_qty: values.spare_qty,
+        expected_qty: Number(editingReceipt.qty),
+        expected_spare_qty: Number(editingReceipt.spare_qty ?? 0),
+      })
+      if (receiptSession.isCurrent(session)) setEditingReceipt(null)
+      message.success('入库数量已修改，修改前后记录已保留')
+      const [latest] = await Promise.all([load(), loadReceipts(receiptItem.id, session)])
+      if (!receiptSession.isCurrent(session)) return
+      const item = latest.find(row => row.id === receiptItem.id)
+      if (item) {
+        setReceiptItem(item)
+        receiptForm.setFieldsValue({ qty: Number(item.shortage_qty ?? 0), spare_qty: 0 })
+      }
+    } finally {
+      if (receiptEditOperation.current === session) {
+        receiptEditOperation.current = null
+        setReceiptEditSaving(false)
+      }
+    }
+  }
+
   async function deleteReceipt(receiptId: number) {
     if (!receiptItem) return
+    const session = receiptSession.current(receiptItem.id)
+    if (!session) return
     const deletedQty = Number(receiptRows.find(x => x.id === receiptId)?.qty ?? 0)
     const deletedSpareQty = Number(receiptRows.find(x => x.id === receiptId)?.spare_qty ?? 0)
     await api.delete(`/purchase/receipts/${receiptId}`)
     message.success('入库记录已删除，欠数已重新计算')
+    if (!receiptSession.isCurrent(session)) { await load(); return }
     setReceiptItem({
       ...receiptItem,
       received_qty: Math.max(Number(receiptItem.received_qty ?? 0) - deletedQty, 0),
       spare_qty: Math.max(Number(receiptItem.spare_qty ?? 0) - deletedSpareQty, 0),
       shortage_qty: Number(receiptItem.shortage_qty ?? 0) + deletedQty,
     })
-    await Promise.all([load(), loadReceipts(receiptItem.id)])
+    await Promise.all([load(), loadReceipts(receiptItem.id, session)])
   }
 
   function openBulkReceipt(po: PoSummary) {
@@ -1969,7 +2050,7 @@ export default function PurchasePage() {
         open={receiptItem !== null}
         title={`分批入库 · ${receiptItem?.po_no || ''} · ${receiptItem?.material_name || receiptItem?.product_code || ''}${receiptItem?.spec ? ` · ${receiptItem.spec}` : ''}`}
         width={760}
-        onCancel={() => { setReceiptItem(null); setReceiptRows([]); receiptForm.resetFields() }}
+        onCancel={closeReceipt}
         onOk={saveReceipt}
         okText={Number(receiptItem?.shortage_qty ?? 0) > 0 ? '确认本批入库' : '确认补录备品'}
         destroyOnClose
@@ -2066,15 +2147,47 @@ export default function PurchasePage() {
             { title: '批次号', dataIndex: 'batch_no', width: 140, render: (v) => v || '-' },
             { title: '备注', dataIndex: 'notes', ellipsis: true, render: (v) => v || '-' },
             {
-              title: '操作', width: 70,
+              title: '操作', width: 115,
               render: (_v, r) => (
+                <Space>
+                  <a onClick={() => editReceipt(r)}>编辑</a>
                 <Popconfirm title="删除这条入库记录？欠数会自动恢复。" onConfirm={() => deleteReceipt(r.id)}>
                   <a style={{ color: '#ff4d4f' }}>删除</a>
                 </Popconfirm>
+                </Space>
               ),
             },
           ]}
         />
+      </Modal>
+
+      <Modal
+        open={editingReceipt !== null}
+        title="编辑入库数量"
+        onCancel={() => { if (!receiptEditSaving) setEditingReceipt(null) }}
+        onOk={saveReceiptEdit}
+        confirmLoading={receiptEditSaving}
+        okText="保存修改"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Typography.Paragraph>
+          {receiptItem?.material_name} · 批次 {editingReceipt?.batch_no || '—'}
+          <br />仅修改该批次数量，日期、批次号和备注保持不变。正常入库最多 {receiptEditMax.toLocaleString()}，备品不抵扣欠数。
+        </Typography.Paragraph>
+        <Form form={receiptEditForm} layout="vertical">
+          <Form.Item name="qty" label="本批入库数量" dependencies={['spare_qty']}
+            rules={[{ required: true, message: '请输入数量' }, { validator: async (_rule, value) => {
+              const error = receiptQuantityError(Number(value ?? 0), Number(receiptEditForm.getFieldValue('spare_qty') ?? 0), receiptEditMax)
+              if (error) throw new Error(error)
+            } }]}>
+            <InputNumber min={0} max={receiptEditMax} precision={4} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="spare_qty" label="备品入数" rules={[{ required: true, message: '请输入备品入数，无备品填 0' }]}>
+            <InputNumber min={0} precision={4} style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+        <Typography.Text type="secondary">保存时会校验已出库数量，并记录修改前后数量。</Typography.Text>
       </Modal>
 
       <Modal

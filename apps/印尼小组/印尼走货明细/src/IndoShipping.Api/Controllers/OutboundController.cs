@@ -201,7 +201,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
             await c.ExecuteAsync(@"
                 SELECT i.id FROM po_items i
                 WHERE i.po_id=@poId AND i.id = ANY(@itemIds)
-                FOR UPDATE", new { poId = body.po_id, itemIds }, tx);
+                ORDER BY i.id FOR UPDATE", new { poId = body.po_id, itemIds }, tx);
             var stocks = (await c.QueryAsync<BulkOutboundStock>(@"
                 SELECT i.id AS ""PoItemId"", po.po_no AS ""PoNo"", i.material_id AS ""MaterialId"",
                        COALESCE((SELECT SUM(r.qty + r.spare_qty) FROM po_receipts r WHERE r.po_item_id=i.id), 0) AS ""ReceivedQty"",

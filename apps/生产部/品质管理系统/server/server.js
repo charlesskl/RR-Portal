@@ -1276,7 +1276,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/defects' && req.method === 'POST') {
       const body = await readBody(req);
-      Auth.requirePermission(user, 'defectlib', 'm');
+      /* 录入时新增不良描述是录入流程的一部分：有录入权限（records.e）即可；
+         删除/改名（名单里少词）仍由下方 records.m 兜底 */
+      Auth.requirePermission(user, 'records', 'e');
       if (!Array.isArray(body.defectLib)) Auth.fail(400, 'defectLib须为数组');
       const oldDefects = db.prepare('SELECT name,category FROM defect_library').all();
       if (oldDefects.some(old => !body.defectLib.some(item => item.name === old.name && item.category === old.category))) Auth.requirePermission(user, 'records', 'm');

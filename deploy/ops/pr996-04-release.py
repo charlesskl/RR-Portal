@@ -2,19 +2,19 @@
 No environment changes, DB restore, authenticated writes or model calls.
 """
 import copy,hashlib,importlib.util,io,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,traceback,urllib.error,urllib.request
-PHASE=''
-TARGET=''
-TREE=''
+PHASE='prepare'
+TARGET='2de4be7bdb0fa983dc86259701a3c4f3ddd14234'
+TREE='d41d5f98f97ee0cd34b0a868fb7283f57841ee4e'
 SOURCE_MANIFEST_SHA='fb1567df15dba946e0d32660ccb5f162f0654e7fb3a67d1ca652909676f23edb'
 BASE='6742f820c0a43388e274b867a2825a42548b5cea'
 BASE_TREE='ce652db9eb263e09d24a3f44ef0c48a5c1f7b79e'
 BRANCH='refs/heads/ops/pr-996-20261023-04'
 ROOT=pathlib.Path('/opt/rr-portal')
 BACKUP=ROOT/'deploy/backups/pr-996-20261023-04-backup'
-PREPARE=BACKUP.with_name('pr-996-20261023-04-prepare')
+PREPARE=BACKUP.with_name('pr-996-20261023-04-prepare-finalized-02')
 DEPLOY=BACKUP.with_name('pr-996-20261023-04-deploy')
 VERIFY=BACKUP.with_name('pr-996-20261023-04-verify')
-BACKUP_MANIFEST='';BACKUP_RESULT='';PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+BACKUP_MANIFEST='9d0618f4e28efa4c97d9cf65cb3e53cbb73a9bb92d9546d7b556cea9bef81a31';BACKUP_RESULT='e4633500509d7aaecca38761804767fbcb9ac5f6f0a5d6f29dfb91623c85cb7a';PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 ORDER=('indo-shipping',)
 INDO_SCHEMA_SHA='68d764113e6f0e7e8404392c4865bed2053fd0204728b2d69647b9a54fb6e573'
 ADMIN_INSERT_FRAGMENT=b'INSERT INTO "Users" ("Username", "PasswordHash", "DisplayName", "Userbqrpower", "Usereditpower")\nVALUES (\'admin\', \'$2a$11$m559Cb68j1R4cHfTHJ5tV.z3oeYQyjPGL/mIlkhdltC70AnKNsLyi\',\n        \'\xe7\xae\xa1\xe7\x90\x86\xe5\x91\x98\', \'111111111\', \'111111111\')\nON CONFLICT ("Username") DO NOTHING;'
@@ -193,8 +193,9 @@ def prepare(result,b):
 
 def key_restore_rehearsal(service,image,snapshot,path,before):
  need(service=='indo-shipping'and pin(image.removeprefix('sha256:'))and B.runtime()[0]==before,'exact-isolated-key-restore-rehearsal-image-and-original-runtime');cid=None;restored=False
+ immutable=json.loads(run(['docker','image','inspect',image]))[0];need(immutable['Id']==image,'exact-immutable-rehearsal-image-id');image_labels=immutable['Config'].get('Labels')or{}
  try:
-  cid=run(['docker','create','--network','none','--log-driver','none','--restart','no','--entrypoint','tar','--user','0',image],timeout=45).decode().strip();need(pin(cid),'exact-self-created-rehearsal-identity');raw=json.loads(run(['docker','inspect',cid]))[0];private(service+'-key-rehearsal-created.private.json',raw);labels=raw['Config'].get('Labels')or{};need(raw['Id']==cid and raw['Image']==image and never_started(raw)and raw['Mounts']==[]and raw['HostConfig']['NetworkMode']=='none'and raw['HostConfig']['LogConfig']['Type']=='none'and raw['HostConfig']['RestartPolicy']['Name']=='no'and raw['Config']['Entrypoint']==['tar']and raw['Config']['User']=='0'and not any(k.startswith('com.docker.compose.')for k in labels),'isolated-never-started-no-network-no-logs-no-restart-key-rehearsal');ref={'observationKind':'running-pre-stop-stat','metadata':snapshot['keyring']['ancestors'],'observedUTC':snapshot['keyring']['ancestorObservationUTC']};proof,dest=restore_keys(service,cid,snapshot,path,ref,'key-rehearsal-copied-back');B.replay_keyring(proof,dest);restored=True
+  cid=run(['docker','create','--network','none','--log-driver','none','--restart','no','--entrypoint','tar','--user','0',image],timeout=45).decode().strip();need(pin(cid),'exact-self-created-rehearsal-identity');raw=json.loads(run(['docker','inspect',cid]))[0];private(service+'-key-rehearsal-created.private.json',raw);labels=raw['Config'].get('Labels')or{};need(raw['Id']==cid and raw['Image']==image and never_started(raw)and raw['Mounts']==[]and raw['HostConfig']['NetworkMode']=='none'and raw['HostConfig']['LogConfig']['Type']=='none'and raw['HostConfig']['RestartPolicy']['Name']=='no'and raw['Config']['Entrypoint']==['tar']and raw['Config']['User']=='0'and labels==image_labels,'isolated-never-started-no-network-no-logs-no-restart-key-rehearsal');ref={'observationKind':'running-pre-stop-stat','metadata':snapshot['keyring']['ancestors'],'observedUTC':snapshot['keyring']['ancestorObservationUTC']};proof,dest=restore_keys(service,cid,snapshot,path,ref,'key-rehearsal-copied-back');B.replay_keyring(proof,dest);restored=True
  finally:
   if cid is not None:
    current=json.loads(run(['docker','inspect',cid]))[0];need(current['Id']==cid and current['Image']==image and never_started(current),'remove-only-own-never-started-rehearsal-container');run(['docker','rm',cid],timeout=30)

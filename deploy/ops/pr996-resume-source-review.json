@@ -1,0 +1,97 @@
+{
+  "actualDiagnosticFileSHA256": "94b1c0c539269e079ff75f767714674c9c4dffb78a066538269067f26fe1d034",
+  "actualStateOrOPSModified": false,
+  "allowedPhases": [
+    "resume"
+  ],
+  "base": "6742f820c0a43388e274b867a2825a42548b5cea",
+  "boundaries": [
+    "Approves source only, not an unseen transport or actual recovery success.",
+    "The fresh404 and PG0/key copyback gates must succeed again on execution; prior diagnostic alone is not reused as current-state proof.",
+    "No production changes performed by reviewer."
+  ],
+  "checks": [
+    "Complete69line helper read. Nine exact transitive dependencies verified; only frozen R3 imported with9empty gates and sealed original backup/prepare3/failed-deploy hashes bound. Only present nullable boolean OomKillDisable None/False equivalence is locally applied on copies through original full comparator; true, missing, numeric0, stringfalse and other drift remain strict.",
+    "Actual candidate must equal sealed created CID/image/fullConfig/HostConfig/mounts and be neverStarted PID0/restart0/OOMfalse. Other45 full runtime contracts and full environment/config/dirty files remain unchanged. Prestart source basis is the complete sealed prepare proof plus identical immutable image and fullConfig, avoiding docker exec on a created CID. Actual PDB/source/all compiled assets checked after sole healthy first start.",
+    "Fixed local Docker unixsocket HEAD targets only canonical exact CID archive .aspnet path; requires fresh structured404 then re-inspects same created contract. No body or key material printed. Existing closed PG and complete keyring archive are replayed before any candidate write.",
+    "Restore copies private full closed keyring only to this never-started CID, actual copied-back bytes/path/count/mode/owner exact and unchanged never-started inspect; requires PG0 before a single start. Post healthy full runtime/PID1 environment/source and PGtypedrows/schema/othersequences exact with only Users+1, keyring and ancestor exact follow.",
+    "Only then clear owned maintenance with DNSgrace and public bounded GET health/index/assets+6anonymous401 checks. No successful path image recreation, environment/schema/account/cursor change, DB restore or business request.",
+    "Partial-copy or pre-copy failure with keys_restoredFalse keeps candidate and owned maintenance, preserving possible unknown keys. After fully verified copy, failure delegates to unchanged reviewed R.recover with complete closed evidence, private custody and separate failed-start0or1/recovered-old+1 intervals. Recovery failure preserves owned maintenance and private evidence.",
+    "Success produces new private resume evidence rather than overwriting failed deploy archive; RESUME_PINFalse, fixedbranch/attempt/sha and fresh exclusive OUT gate prevent import execution or blind retry. Transport and actual phase plan remain separately reviewed."
+  ],
+  "dependencies": {
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "portable-pdb-library.py": "cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5",
+    "pr996-04-backup-library.py": "b433486575a40fba04a179a4549227d2657f6abb49b34a743c244fae2a6f08c9",
+    "pr996-04-reviewed-files.json": "fb1567df15dba946e0d32660ccb5f162f0654e7fb3a67d1ca652909676f23edb",
+    "pr996-resume-release-library.py": "a470f45ee2b27246653163b40bcec0cd58fdccc2bb80926f7c2a8769439767a9",
+    "qc-source-library.py": "4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5"
+  },
+  "disposition": "CHECKED",
+  "helperGatesFrozen": true,
+  "helperSHA256": "92fb26457f063e99abda08eaa53e30acde9a83e6bfc53bbca686add2dd99d3fa",
+  "independent": true,
+  "offlineChecks": {
+    "actualMainOrDockerEngineOrProductionCalls": false,
+    "actualScopedHostPredicateCases": 10,
+    "doesNotMutateInputs": true,
+    "exactDependenciesChecked": 9,
+    "oldFullMatrixNotRepeated": true,
+    "typeBoundaryCases": [
+      [
+        null,
+        false,
+        true
+      ],
+      [
+        false,
+        null,
+        true
+      ],
+      [
+        null,
+        null,
+        true
+      ],
+      [
+        false,
+        false,
+        true
+      ],
+      [
+        null,
+        true,
+        false
+      ],
+      [
+        false,
+        true,
+        false
+      ],
+      [
+        0,
+        false,
+        false
+      ],
+      [
+        "false",
+        false,
+        false
+      ]
+    ]
+  },
+  "remainingBlockers": [],
+  "remoteActionsPerformed": false,
+  "resumePinFalse": true,
+  "reviewedAtUTC": "2026-10-23T06:17:55.012972+00:00",
+  "reviewer": "/root/pr996_backend_review",
+  "semanticsReviewSHA256": "b3d957a9197b42e026e7574d9191e12cbad3db3b29a8ac92273b1c7fbc46e211",
+  "sourceManifestSHA256": "fb1567df15dba946e0d32660ccb5f162f0654e7fb3a67d1ca652909676f23edb",
+  "sourceSHA256": "92fb26457f063e99abda08eaa53e30acde9a83e6bfc53bbca686add2dd99d3fa",
+  "status": "CHECKED",
+  "targetCommit": "2de4be7bdb0fa983dc86259701a3c4f3ddd14234",
+  "targetTree": "d41d5f98f97ee0cd34b0a868fb7283f57841ee4e"
+}

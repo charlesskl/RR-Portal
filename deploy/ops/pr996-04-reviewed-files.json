@@ -1,0 +1,10 @@
+{
+  "apps/印尼小组/印尼走货明细/src/IndoShipping.Api/Controllers/OutboundController.cs": "36c908d2a0301bc64a3748304e235844793d787b22a61aae1c7af91c6cc8ad5e",
+  "apps/印尼小组/印尼走货明细/src/IndoShipping.Api/Controllers/PurchaseOrdersController.Receipts.cs": "cc64ec7fcc2e956adb1f4c2394d0c6f7a6822bcf17e17eed6214cfadb1e984ac",
+  "apps/印尼小组/印尼走货明细/src/IndoShipping.Api/Controllers/PurchaseOrdersController.cs": "247a6836f176ca41f7ac7cce8650a19a7a89ecc7c5c74422866a50dd9450271d",
+  "apps/印尼小组/印尼走货明细/tests/IndoShipping.Api.Tests/PurchaseReceiptTests.cs": "e83591f5b3cfdf17e2718bb16220de9028125bc616323cd131a03bce90a3d452",
+  "apps/印尼小组/印尼走货明细/web/src/pages/PurchasePage.tsx": "04808ca24c971fb7eaca137672ac9420f1a2315aa666fa6469ec6e716fd764aa",
+  "apps/印尼小组/印尼走货明细/web/src/utils/purchaseReceipt.test.ts": "e91562b5a8768b1a861c6dae940afe6dc96bcce2cf6cd74151bd691deb32e2d3",
+  "apps/印尼小组/印尼走货明细/web/src/utils/purchaseReceipt.ts": "ca5963552e8f081bb9965b0646b0be90ae0058a07af941053b7b5fdaf3864d02",
+  "apps/印尼小组/印尼走货明细/web/src/utils/purchaseReceiptFlow.test.ts": "cc3a2b7dae912e80d26e49ded569f674029ec476d1ab4a18ece471daf9e90c16"
+}

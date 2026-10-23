@@ -513,10 +513,10 @@
       heading.appendChild(cell); body.insertBefore(heading, first);
       first.cells[0].textContent = groupIndex + 1;
       first.cells[0].rowSpan = parts.length;
-      first.cells[2].rowSpan = parts.length;
-      first.cells[2].style.verticalAlign = 'middle';
+      first.cells[1].rowSpan = parts.length;
+      first.cells[1].style.verticalAlign = 'middle';
       for (let i = 1; i < parts.length; i++) {
-        rows[offset + i].deleteCell(2);
+        rows[offset + i].deleteCell(1);
         rows[offset + i].deleteCell(0);
       }
       offset += parts.length;

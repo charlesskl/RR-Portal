@@ -157,6 +157,17 @@ function sectionDraft(section) {
   if (!sectionDraftPayloads.has(section)) sectionDraftPayloads.set(section, JSON.parse(section.payload_json || '{}'));
   return sectionDraftPayloads.get(section);
 }
+function quotationExchangeRates(sections, exposedRates = {}) {
+  const sales = (sections || []).find(section => section.dept === 'sales');
+  const header = sales?.payload_json != null ? sectionDraft(sales).header || {} : {};
+  const positive = value => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : 0;
+  // A quote without a saved header is calculated by the server at the legacy
+  // fallback. Display that same rate rather than a newer costing-basis default.
+  return {
+    rmb_hkd: positive(header.fx_rmb_hkd) || positive(exposedRates?.fx_rmb_hkd) || 0.85,
+    hkd_usd: positive(header.fx_hkd_usd) || positive(exposedRates?.fx_hkd_usd) || 7.8,
+  };
+}
 const shippingSummarySavers = new WeakMap();
 function shippingSummaryEditState(section, me, locked) {
   const permitted = canEditDepartment(me, 'sales') && hasPerm(me, '汇总分析', 'edit');
@@ -475,7 +486,7 @@ function sewLaborToAdd(g) {
 }
 
 function formatNum(v) {
-  if (typeof v === 'number' && !Number.isNaN(v)) return v.toFixed(Math.abs(v) < 1 ? 4 : 2);
+  if (typeof v === 'number' && !Number.isNaN(v)) return v.toFixed(4);
   return String(v ?? '');
 }
 
@@ -1038,13 +1049,40 @@ function addMoldToProductGroup(molds, groupId) {
   return row;
 }
 
+function canMoveMoldRow(molds, index, direction) {
+  const target = index + direction;
+  return Number.isInteger(index) && (direction === -1 || direction === 1)
+    && index >= 0 && index < molds.length && target >= 0 && target < molds.length
+    && (molds[index].product_group_id || '') === (molds[target].product_group_id || '');
+}
+
+function moveMoldRow(molds, index, direction) {
+  if (!canMoveMoldRow(molds, index, direction)) return false;
+  const target = index + direction;
+  [molds[index], molds[target]] = [molds[target], molds[index]];
+  return true;
+}
+
+function copyMoldRow(molds, index) {
+  if (!Number.isInteger(index) || index < 0 || index >= molds.length) return null;
+  const copy = JSON.parse(JSON.stringify(molds[index]));
+  const freshId = prefix => prefix + (typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
+  if (copy.id != null) copy.id = freshId('mold-');
+  for (const part of copy.parts || []) {
+    if (part.id != null) part.id = freshId('mold-part-');
+  }
+  molds.splice(index + 1, 0, copy);
+  return copy;
+}
+
 function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
   container.innerHTML = '';
   const table = document.createElement('table'); table.className = 'wb-table mold-table';
   table.innerHTML = `<thead><tr>
     <th style="width:40px">序号</th>
-    <th style="width:160px">模具名称</th>
     <th style="width:70px">模号</th>
+    <th style="width:160px">模具名称</th>
     <th style="width:120px">模胚类型</th>
     <th style="width:70px">材质</th>
     <th style="width:70px">颜色</th>
@@ -1058,13 +1096,13 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
     <th style="width:120px">模具价格 USD</th>
     <th style="width:120px">模价 HKD</th>
     <th>备  注</th>
-    ${canEdit ? '<th style="width:40px"></th>' : ''}
+    ${canEdit ? '<th style="width:120px">操作</th>' : ''}
   </tr></thead><tbody></tbody>`;
   const tbody = table.querySelector('tbody');
 
   const fields = [
-    ['name', 'textarea'],
     ['mold_no', 'text'],
+    ['name', 'textarea'],
     ['mold_type', 'textarea'],
     ['material', 'text'], ['color', 'text'], ['cavity', 'text'], ['sets', 'number'],
     ['weight_g', 'number'],
@@ -1238,10 +1276,22 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
     });
 
     if (canEdit) {
-      const td = document.createElement('td');
-      const b = document.createElement('button'); b.textContent = '×'; b.className = 'mini danger';
-      b.onclick = () => { molds.splice(idx, 1); renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd); onChange(); };
-      td.appendChild(b); tr.appendChild(td);
+      const td = document.createElement('td'); td.className = 'row-actions';
+      const redraw = () => { renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd); onChange(); };
+      const action = (label, title, run, danger = false) => {
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = danger ? 'mini danger' : 'mini';
+        button.textContent = label; button.title = title;
+        button.setAttribute('aria-label', `${title}第${idx + 1}行模具`);
+        button.style.cssText = 'padding:2px 6px;margin-right:2px';
+        button.onclick = () => { run(); redraw(); };
+        td.appendChild(button);
+      };
+      if (canMoveMoldRow(molds, idx, -1)) action('↑', '上移', () => moveMoldRow(molds, idx, -1));
+      if (canMoveMoldRow(molds, idx, 1)) action('↓', '下移', () => moveMoldRow(molds, idx, 1));
+      action('⎘', '复制', () => copyMoldRow(molds, idx));
+      action('×', '删除', () => molds.splice(idx, 1), true);
+      tr.appendChild(td);
     }
     tbody.appendChild(tr);
 
@@ -6448,7 +6498,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
 }
 
 function renderSales(host, payload, quote, canEditHeader, canEditPricing, allSections, onChange, onHeaderChange) {
-  const defaultFx = defaultExchangeRates();
+  const defaultFx = quotationExchangeRates(allSections, window.__data?.quotation_rates);
   payload.header = payload.header || { currency: 'HKD', fx_hkd_usd: defaultFx.hkd_usd, fx_rmb_hkd: defaultFx.rmb_hkd };
   payload.header.fx_hkd_usd = payload.header.fx_hkd_usd ?? defaultFx.hkd_usd;
   payload.header.fx_rmb_hkd = payload.header.fx_rmb_hkd ?? defaultFx.rmb_hkd;
@@ -6665,7 +6715,7 @@ async function renderQuotePage() {
     try { authorizedCustomers = (await api('/quotes/customers')).customers || []; }
     catch { authorizedCustomers = []; }
   }
-  window.__data = { quote, sections, me, quote_locked: quoteLocked, mixed_quote: data.mixed_quote, mixed_engineering_molds: data.mixed_engineering_molds };
+  window.__data = { quote, sections, me, quotation_rates: data.quotation_rates, quote_locked: quoteLocked, mixed_quote: data.mixed_quote, mixed_engineering_molds: data.mixed_engineering_molds };
   // 从业务 section 读税率，给所有 loss-summary 用
   const salesSecForTax = sections.find(s => s.dept === 'sales');
   if (salesSecForTax && salesSecForTax.payload_json) {
@@ -6689,6 +6739,7 @@ async function renderQuotePage() {
   const host = document.getElementById('sections'); host.innerHTML = '';
   const dirtyByDept = new Map();
   const saveHandlers = new Map();
+  const rateRefreshers = new Map();
   let dirtyTrackingReady = false;
   const markDirty = dept => {
     if (!dirtyTrackingReady || !dept) return;
@@ -6732,6 +6783,7 @@ async function renderQuotePage() {
     }
   });
   const activateTab = (tabKey, dept) => {
+    rateRefreshers.get(dept)?.();
     if (dept === 'engineering') window.MixedQuotation?.refreshEngineeringSharedMolds(host);
     sessionStorage.setItem(tabKey, dept);
     host.querySelectorAll('.dept-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.dept === dept));
@@ -6833,35 +6885,37 @@ async function renderQuotePage() {
       await api('/quotes/' + id + '/header', { method: 'PUT', body: JSON.stringify(patch) }).catch(e => alert(e.message));
     });
   } else {
-    const salesSec = sections.find(x => x.dept === 'sales');
-    const salesHdr = salesSec && salesSec.payload_json ? (JSON.parse(salesSec.payload_json).header || {}) : (data.quotation_rates || {});
-    const fx = num(salesHdr.fx_rmb_hkd) || 0.85;
-    const fxHU = num(salesHdr.fx_hkd_usd) || 7.8;
-    if (me.dept === 'engineering') {
-      const headerHost = document.createElement('div');
-      const engineeringHost = document.createElement('div');
-      body.append(headerHost, engineeringHost);
-      if (!quoteLocked) renderEngineeringQuoteHeader(headerHost, quote, authorizedCustomers, patch =>
-        api('/quotes/' + id + '/header', { method: 'PUT', body: JSON.stringify(patch) }));
-      renderEngineering(engineeringHost, payload, canEditMine, onChange, fx, fxHU, quote.qty, quote.customer);
-    }
-    else if (me.dept === 'electronic') renderElectronic(body, payload, canEditMine, onChange, fx, fxHU);
-    else if (me.dept === 'molding') renderMolding(body, payload, canEditMine, onChange, refMolds, fx, me.role);
-    else if (me.dept === 'painting') renderPainting(body, payload, canEditMine, onChange, fx);
-    else if (me.dept === 'slush') renderSlush(body, payload, canEditMine, onChange, fx);
-    else if (me.dept === 'sewing') renderSewing(body, payload, canEditMine, onChange, fx);
-    else if (me.dept === 'assembly') renderAssembly(body, payload, canEditMine, onChange, fx);
-    installDepartmentExport(body, me.dept, id);
+    let renderedRates;
+    const renderMyDepartment = () => {
+      renderedRates = quotationExchangeRates(sections, data.quotation_rates);
+      const { rmb_hkd: fx, hkd_usd: fxHU } = renderedRates;
+      body.innerHTML = '';
+      if (me.dept === 'engineering') {
+        const headerHost = document.createElement('div');
+        const engineeringHost = document.createElement('div');
+        body.append(headerHost, engineeringHost);
+        if (!quoteLocked) renderEngineeringQuoteHeader(headerHost, quote, authorizedCustomers, patch =>
+          api('/quotes/' + id + '/header', { method: 'PUT', body: JSON.stringify(patch) }));
+        renderEngineering(engineeringHost, payload, canEditMine, onChange, fx, fxHU, quote.qty, quote.customer);
+      }
+      else if (me.dept === 'electronic') renderElectronic(body, payload, canEditMine, onChange, fx, fxHU);
+      else if (me.dept === 'molding') renderMolding(body, payload, canEditMine, onChange, refMolds, fx, me.role);
+      else if (me.dept === 'painting') renderPainting(body, payload, canEditMine, onChange, fx);
+      else if (me.dept === 'slush') renderSlush(body, payload, canEditMine, onChange, fx);
+      else if (me.dept === 'sewing') renderSewing(body, payload, canEditMine, onChange, fx);
+      else if (me.dept === 'assembly') renderAssembly(body, payload, canEditMine, onChange, fx);
+      installDepartmentExport(body, me.dept, id);
+    };
+    renderMyDepartment();
+    rateRefreshers.set(mySec.dept, () => {
+      const rates = quotationExchangeRates(sections, data.quotation_rates);
+      if (rates.rmb_hkd !== renderedRates.rmb_hkd || rates.hkd_usd !== renderedRates.hkd_usd) renderMyDepartment();
+    });
   }
 
   // 其他部门 section 渲染（用户对哪些部门有 view 权限就渲染哪些）
   if (visibleDepts.length > 1) {
     const others = visibleDepts.filter(s => s.dept !== me.dept);
-    const salesSecForFx = sections.find(x => x.dept === 'sales');
-    const salesHdrOther = salesSecForFx && salesSecForFx.payload_json ? (JSON.parse(salesSecForFx.payload_json).header || {}) : (data.quotation_rates || {});
-    const fxRate = num(salesHdrOther.fx_rmb_hkd) || 0.85;
-    const fxRateUsd = num(salesHdrOther.fx_hkd_usd) || 7.8;
-
     others.forEach(s => {
       const sectionPayload = sectionDraft(s);
       // 默认只读，避免业务/工程不小心点保存覆盖其他部门数据；点"✏️ 进入编辑"切换为可写。
@@ -6889,7 +6943,10 @@ async function renderQuotePage() {
       </div>`;
       c.innerHTML = renderHeader() + '<div class="ro-body"></div>' + renderBar();
       const body = c.querySelector('.ro-body');
+      let renderedRates;
       const renderBody = () => {
+        renderedRates = quotationExchangeRates(sections, data.quotation_rates);
+        const { rmb_hkd: fxRate, hkd_usd: fxRateUsd } = renderedRates;
         body.innerHTML = '';
         const onChangeOther = () => markDirty(s.dept);
         if (s.dept === 'engineering') renderEngineering(body, sectionPayload, inEdit, onChangeOther, fxRate, fxRateUsd, quote.qty, quote.customer);
@@ -6915,6 +6972,13 @@ async function renderQuotePage() {
         clearDirty(s.dept);
       });
       renderBody();
+      rateRefreshers.set(s.dept, () => {
+        const rates = quotationExchangeRates(sections, data.quotation_rates);
+        if (rates.rmb_hkd !== renderedRates.rmb_hkd || rates.hkd_usd !== renderedRates.hkd_usd) {
+          renderBody();
+          bindActs();
+        }
+      });
 
       // 绑定本卡操作（每次重渲染都重新绑定）
       const bindActs = () => {

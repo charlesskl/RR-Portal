@@ -1,0 +1,64 @@
+{
+  "actualStateOrOPSModified": false,
+  "allowedPhases": [
+    "backup"
+  ],
+  "base": "dacf295b539ebd696c9bae38d9551e276e3d88ad",
+  "baseTree": "1c718952aa72752af8eed4e08575bf3fd06a9e80",
+  "boundaries": [
+    "Backup source approval only. Release migration comparator/rollback remains draft until final pins and separate independent approval.",
+    "Concrete phase plan, actual sealed preflight/classification and runtime assertions must still pass.",
+    "No production SQL/container/API calls or OPS/state/remote/application modifications performed by reviewer."
+  ],
+  "checks": [
+    "Read complete frozen B999 and its full delta against independently reviewed B996 b433; dependency5 hashes fixed, BACKUP_PINFalse. Only new baseline/namespace/prior successful996 provenance, customer-aware original-column projection/classifier and explicitly changed startup-file bookkeeping are added.",
+    "Actual running-image prior provenance is sealed996 prepare-finalized03 plus successful resume with exact target2de4/image d707/sourceProof/runtime/private key preservation; current base dacf indo subtree independently equals actual prior2de4 subtree. No unsealed source assumption or weakened private archive guard.",
+    "CompletePG READ ONLY repeatable-read exported snapshot/dump, full typed multiset rows/schema and owner/ACL/RLS/constraint flags preserved. Same capture SQL includes per-ID expected/actual customer map and exact raw classification; JSON property customer only, lowertrimTOMY or Spin regex, missing/blank/nonarray legacyTOMY, initial unsupported/mixed abort. No SKU/catalogue inference.",
+    "F.OPS.NEW_COLUMNS starts and ends empty. Only synchronous original pg_table_sql SQL-generation temporarily projects schedules.customer out of original-column digest and finally restores empty before pg_capture stage checks or dump/sequence reads. Customer excluded nowhere else; full schedules digest remains retained; all other full/original digests must match. Reserved synthetic evidence keys are prohibited from original tables.",
+    "Existing customer column is either absent or exact text NOTNULL TOMY default/noidentity/nogenerated/default text collation; customer_preflight never reassigns an already-present column. New-column data map comes from same snapshot as original row digests, avoiding live re-query races. Read-only backup does not apply migration.",
+    "Eight original startup safety checks, complete stable sequence evidence, actual custom dump, source/PDB/compiled-assets, all DataProtection key bytes/path/modes/owners, ancestors honestly pre-stop, full env/dirty/global config and all46 original runtime protections remain. Two changing startup sources retain original hashes/mode/owner separately for later exact R manifest validation; four invariant startup source files remain fixed.",
+    "Public backup reports only safe classification counts/map hashes and honest original-column wording; it can disclose unsupported/mixed counts on a failed preflight without printing business rows, key names/material or credentials. No HTTP/signal/maintenance/config/role/cursor/business write is performed."
+  ],
+  "dependencies": {
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "portable-pdb-library.py": "cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5",
+    "qc-source-library.py": "4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5"
+  },
+  "disposition": "CHECKED",
+  "evidenceSHA256": {
+    "work/pr996-04-release-source-review-v3.json": "dcb5562c0f73af1cd98aeae120c71c02bf40ac7e99d82204524c8523f4110981",
+    "work/pr996-resume-source-review-backend.json": "1dc8f41957e43f87a7f3eb05cfe41497383531d99e6e0884564bb1824ed7d7a4",
+    "work/pr999-backend-independent-review.json": "9930ffca7cb683e80742269e9633cb5f11c72bf871f4bc88307241a36f2f1163",
+    "work/pr999-backup-author-ops.json": "c7b07d004f2604a2d5382d44359463769197846a268cae877083ff231dc15b60"
+  },
+  "helperGatesFrozen": true,
+  "helperSHA256": "39e5e409e00bf263e8df584ec4905b326b95394fa2aa3450cb59dfbe1af6dc28",
+  "independent": true,
+  "independentValidation": {
+    "actualDockerOrProductionCommandsExecuted": false,
+    "database": "pr999_backend_tests",
+    "fixture": "work/test-pr999-migration-comparator-ops.py",
+    "fixtureSHA256": "686d5e3e301da18124d8237be1c17833574dc92b994d15376d33c711b2c3daaf",
+    "localHost": "127.0.0.1",
+    "localPort": 59969,
+    "log": "work/pr999-ops-migration-independent-local.log",
+    "logSHA256": "46932253a79af9e3f76ac4b0c7eefd31c28258a0e31e7c24f488720ba013ed31",
+    "matrixNotRepeated": true,
+    "method": "Read whole B/R delta and independently rerun existing author minimal local realSQL fixture, no production",
+    "pass": "one rolled-back transaction; actual classifier+real C# migration SQL+real schema capture and comparator; old/new equal stages and4 negative map/raw/DDL/owner cases"
+  },
+  "otherContainerCount": 45,
+  "productionActionsPerformed": false,
+  "remainingBlockers": [],
+  "remoteActionsPerformed": false,
+  "reviewedAtUTC": "2026-10-23T09:15:31.993676+00:00",
+  "reviewer": "/root/pr996_backend_review",
+  "scope": [
+    "indo-shipping"
+  ],
+  "sourceSHA256": "39e5e409e00bf263e8df584ec4905b326b95394fa2aa3450cb59dfbe1af6dc28",
+  "status": "CHECKED",
+  "targetContainerCount": 1
+}

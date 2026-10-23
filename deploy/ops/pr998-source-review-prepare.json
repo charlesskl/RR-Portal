@@ -1,0 +1,29 @@
+{
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "author": "/root/pr984_review",
+  "base": "094f17602e4fe614c28ddc38e6db9fda6a2bb165",
+  "baseTree": "1b3a86eb68435babca7415a24d01c1b2d3648916",
+  "checks": [
+    "Read complete narrow diff from successful997 helper. Only fixed PR identity/base/branch/archive and PR997 sealed prior image/source tree/prepare/verify references update; all data/env/45peer and fullConfig guards retained.",
+    "B prior is exact actually deployed997 image0ba11294 and direct single-service proof map, target094f and quote subtree7a3748 verified. R exact5file manifestdcfad and strictallowedpaths; public actualcacheURLs and type-strict OOMnullFalse wrapper unchanged.",
+    "Full PG snapshot/dump/schema/typedrows/known bootstrap sequence policy,2legacySQLite/uploads/files/ownership/source/PID1/env and sourceauth/config invariants retained; build-before-maintenance, scoped drain+closed comparison+recovery+readonlyverify retained. No runtime action performed by review."
+  ],
+  "dependencies": {
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "internal-quote-readonly-library.py": "be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69",
+    "pr998-backup-library.py": "5a0671eb6ddde68bc2a072646bd9c8e31d1fbd2f2ab1a7f838e7d304c4e8d060",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5"
+  },
+  "disposition": "CHECKED",
+  "helperGatesFrozen": true,
+  "helperSHA256": "b1836164c2c657682455a2a699c926c5323d74d755eb455b2410eb6d518bed47",
+  "independent": true,
+  "remainingBlockers": [],
+  "reviewer": "/root"
+}

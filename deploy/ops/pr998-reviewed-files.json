@@ -1,0 +1,7 @@
+{
+  "apps/业务部/内部报价系统/frontend/quote.html": "19dbe914f5de7d62e5c34aff7b93d5cbf497c5601e5be770022f1031f717f037",
+  "apps/业务部/内部报价系统/frontend/verification.html": "e0a19b2f28cc9733432812b2e47ba6b77999b8cddaa3e144f703f44856f16291",
+  "apps/业务部/内部报价系统/frontend/workbench.js": "bb2c9f40051a171fd055b2659d97b70cba3e34c7eb00e81d2708b273d982f42d",
+  "apps/业务部/内部报价系统/tests/manual-mold-parts.test.js": "fe3644df54e38fc52e02ec7ed4d627d08dfb499b78ab8bb3e7e0b77ac623ea79",
+  "apps/业务部/内部报价系统/tests/section-save-queue.test.js": "958f51c6f89b85e766a7b1b7358db7f5b1fd69bc9484af57e242509990bce2a9"
+}

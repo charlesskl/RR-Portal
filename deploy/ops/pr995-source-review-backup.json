@@ -1,0 +1,58 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr995_ui_review",
+  "reviewedAtUTC": "2026-10-23T01:10:12.733608+00:00",
+  "helperSHA256": "bb661d3ad4258d800d25a098092db9ba0f49eeaba507c302cda00bab256bf87f",
+  "helperGatesFrozen": true,
+  "base": "c5162e74833f388ff3e9cddff1c9b7de3d2723ba",
+  "baseTree": "d04be0b8c89a8a8cf1d375b2a9cb30d5443d2aa3",
+  "allowedPhases": [
+    "backup"
+  ],
+  "dependencies": {
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "internal-quote-readonly-library.py": "be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69"
+  },
+  "transportSHA256": "0c2d7d33c23ea4b3dc3ca8f1e06b6169568fdf0b19c50c9af77b6ef698704e02",
+  "scope": [
+    "internal-quote"
+  ],
+  "targetContainerCount": 1,
+  "otherContainerCount": 45,
+  "totalContainerCount": 46,
+  "portableSQLiteCount": 2,
+  "consistentExportedInternalQuotePostgresSnapshotAndDump": true,
+  "checks": [
+    "Read all B source, T source, exact delta from approved PR993 T, transitive PostgreSQL capture and called startup-check SQL. B remains inert on import and BACKUP_PIN=False; reviewer did not invoke valid main, publish, dispatch, database or container operations.",
+    "One existing internal-quote service only. Exact all46 Docker IDs, target healthy/noOOM, 45 unrelated runtime records, full Config/HostConfig hashes, mount maps, configured and PID1 environments are pinned and equal before/after. Canonical exclusive roots are enforced; quote legacy SQLite bind must be RO and uploads bind RW. Existing Postgres db container remains one of 45 unchanged services.",
+    "Actual DATABASE_URL/driver/schema/legacy path must match existing db connection; credentials are decoded and compared privately, never printed or rewritten. All four dependency bytes are hashed before imports; READONLY library is used only for pure startup SQL, required-table declarations and startup predicates.",
+    "Current-base quote subtree bca36989ef6a77731853bfe7cb4cf23f21ce7be6 equals prior actual deployed26a0095 subtree. Full prior prepare and verify archive seals b0002877/0f815ba7 and024a9f41/48208ddc, exact prior immutable image77b6bb5, current actual image metadata and every Docker-copied source file are bound. Reviewed Dockerfile copies package.json, backend and frontend, exactly the code_paths scope.",
+    "Exactly2 discovered legacy SQLite databases, including data.db, get read-only portable typed/schema/integrity/FK captures and closed-copy replays. Raw legacy files including DB bytes and uploads, directories, modes/uid/gid and sidecar metadata are privately archived; no legacy migration or restore is executed.",
+    "PostgreSQL scope is set to internal_quote alone. Row digests, complete schema and startup checks are selected within one repeatable-read READ ONLY exported snapshot; pg_dump -Fc uses the same exported snapshot, validated only with pg_restore --list, never applied. Sequences are non-MVCC separately bracketed, must remain stable during each capture and are not claimed atomic with the dump.",
+    "Startup guard rejects pending migrations, seeds, recycle cleanup, missing sections/scopes/references/material-manager links, missing costing basis, columns/indexes and missing tables; all typed table digests require originalColumnsSHA256 equality. Existing application bootstrap can perform same-value physical upserts/sequence advances on a future restart; backup makes no false restart-sequence claim.",
+    "Full .env.cloud.production bytes/mode/owner, fixed config/bootstrap/AI-independent files, exact four existing dirty paths outside app/config, maintenance flag inventory and all runtime records must remain unchanged. Only0700/0600 backup evidence is written. No HTTP, auth/login/model request, signals/container lifecycle, mail, business/config write or restore occurs in backup.",
+    "Transport changes are only PR995 BASE/tree/state/branch/prefix/title, internal-quote-only manifest scope, and one fixed READONLY-library allowlist entry. Exact AST activation, generic libraries, independent source/plan hashes, one phase/first attempt, SSH fingerprint, deploy-cloud concurrency, prior receipt seals, exclusive reservations, exact remote heads and finally normal-workflow restoration retain reviewed behavior."
+  ],
+  "offlineChecks": {
+    "minimalFixturesIndependentlyReadAndRerun": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr995-backup-author.py",
+      "sha256": "e9e7ed9340b07e52e72ab37dc739adcfa86ab9df7a59bbe4c4d25a0832487830",
+      "passed": 6,
+      "failed": 0
+    },
+    "independentTestLog": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr995-backup-independent-tests.log",
+    "independentTestLogSHA256": "4f114b1d24ce43d9f6f653ef890f400ca2d5c2097130a4afedce3a90401a7177",
+    "pinnedGenericLibraryImportsVerified": true,
+    "productionOrGitHubActionsPerformed": false,
+    "stateOrOPSModified": false,
+    "onlyTemporarySyntheticFixtures": true
+  },
+  "boundaries": [
+    "Receipt covers frozen backup source and transport controller only. Release helper and each generated phase plan require separate exact source/plan review.",
+    "No production operation or state/OPS mutation was performed."
+  ],
+  "remainingBlockers": []
+}

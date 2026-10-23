@@ -1,0 +1,151 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr996_frontend_review",
+  "reviewedAtUTC": "2026-10-23T03:16:57.430763+00:00",
+  "helperSHA256": "035b5d5b09cec20ff9bc06fde9b305ca9b8a3a32ecc437017c2211d4a2e252c9",
+  "helperGatesFrozen": true,
+  "base": "6742f820c0a43388e274b867a2825a42548b5cea",
+  "baseTree": "ce652db9eb263e09d24a3f44ef0c48a5c1f7b79e",
+  "allowedPhases": [
+    "backup"
+  ],
+  "dependencies": {
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "qc-source-library.py": "4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5",
+    "portable-pdb-library.py": "cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5"
+  },
+  "transportSHA256": "d34c8f1d8025851011c0eb681ee1b24160076d0249a44c3383a35b3134c41146",
+  "scope": [
+    "indo-shipping"
+  ],
+  "targetContainerCount": 1,
+  "otherContainerCount": 45,
+  "totalContainerCount": 46,
+  "portableSQLiteCount": 0,
+  "postgresSchemaCount": 1,
+  "checks": [
+    "Read full frozen B and T; five transitive dependency hashes checked before imports. B BACKUP_PIN=False, F backup/deploy/verify gates=False and Q backup=False; no valid backup/main invocation or workflow publication was performed.",
+    "Exact 46 Docker IDs, one healthy indo-shipping target and 45 unchanged unrelated container records. Target must have zero mounts. Full Config/HostConfig, configured environment and PID1 environment minus automatic hostname are privately captured and matched before/after.",
+    "Indo DeploymentSecrets source hard-codes db:5432 and derives runtime connection from DB_NAME/USER/PASSWORD/SCHEMA plus persistent JWT/admin base64 environment. B compares existing db container credentials and selected schema with configured and PID1 values, preserves full .env bytes/mode/uid/gid without rewriting or printing secrets.",
+    "Only indo_shipping PostgreSQL schema is captured. All discovered base tables, complete typed multiset digests including images, columns/constraints/indexes/functions/views/triggers/enums/sequence definitions and schema/object ownership ACL/RLS flags are captured. Startup predicates and extra metadata are included in the same READ ONLY repeatable-read exported snapshot statement; pg_dump -Fc uses that exact exported snapshot and pg_restore is list-only.",
+    "Sequence values are independently bracketed and must remain stable during capture; no atomic-MVCC sequence claim or setval/nextval/reset exists. Existing app startup consumes Users_Id_seq once via idempotent bootstrap insert; this backup performs no restart or sequence mutation and the release requires a separate reviewed allowance.",
+    "Exact old prepare/verify archive seals and all private file manifest entries are replayed. Prior actual deployed immutable image037bae and source9b890cc are bound; actual base6742 indo subtree equals prior running application tree037be63. Actual container code is tied through matching PE CodeView/Portable PDB and every non-generated source checksum, copied schema/seed data and full compiled wwwroot inventory equality to prior sealed prepare.",
+    "Portable PDB parser is bounded, validates document SHA256 algorithm and matching DLL CodeView identifier, and rejects unexpected non-generated document inventory. Container source tar is bounded and rejects symlinks/path traversal. docker.diff only permits /tmp entries; any unbacked writable application files or key directories are rejected. Default business-data seed must be absent.",
+    "Exactly eight startup predicates must pass, no legacy lowercase users table, existing Users rows and all expected inventory tables, no omitted columns in typed digest and sealed valid PostgreSQL dump. No migrations, schema/table/role/user changes, credentials rotation, authenticated HTTP or business/model requests, container lifecycle or maintenance changes occur in backup.",
+    "Full fixed global/compose/nginx/update/maintenance/workflow/env-example/startup source files, exact four existing tracked dirty paths outside app/config, maintenance inventory, full environment and all runtime records remain unchanged. Only exclusive0700 directories/0600 private evidence files are written.",
+    "T exact delta from independently reviewed PR995 is fixed PR/base/tree/state/branch/prefix/title, indo-only manifest scope and allowlisted Q/PDB dependency replacement. Source/plan review hashes, only AST gate substitutions, official remote, exact heads/parent, one phase/attempt, required SSH host fingerprint, deploy-cloud concurrency, durable exclusive dispatch reservations and finally ordinary-workflow restoration are retained.",
+    "Attempt2 migration independently reproduced byte-for-byte: B only changes branch, exclusive output archive and exact successful prior verify path; T only changes state/prefix/branch/workflow title/private tmp prefix; C only changes state/T/B pins/prefix. No safety guard, scope or lifecycle behavior was relaxed. Old failed attempt1 remains sealed and its two-file OPS gate closure precedes new branch.",
+    "Attempt3 inverse bytes independently reproduced exactly to B2 by only namespace reversal and restoring the single Q.run assignment. T3 inverse is only state3/namespace03/title3. Actual sealed diagnosis confirms F.run23/need13 through Q.container_files133 and49,295,360-byte complete tar. Native reviewed Q.run128MiB, own COUNTER and4-digit private stderr paths are restored; F/B/OPS keep32MiB and3-digit counters. Q.ROOT/BASE/OUT/OPS/PDB and no remote/lifecycle/data guards are changed."
+  ],
+  "offlineChecks": {
+    "priorUnchangedGuardFixturesReferencedWithoutRepeating": {
+      "B2ReviewPath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-02-backup-source-review.json",
+      "B2ReviewSHA256": "d7d719f5252520cb0c3927255dc727370a7650b5b39adb7c8ed61a1bcf7d5044",
+      "existingPassedBackupFixtures": 7,
+      "capacityBoundaryFixturesPreviouslyPassed": 3,
+      "originalDiagnosticFixturesPreviouslyPassed": 12
+    },
+    "newExactDeltaAuthorChecksIndependentlyRead": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-03-conditional-source-check-ops.py",
+      "sha256": "a0ca645d3ae015ec8dc8e0648985d77693cc40703b2ba39403d44b29df5c9949",
+      "authorLogPath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-03-conditional-source-check-ops.log",
+      "authorLogSHA256": "ba83d59718e45f8fab5357074cf1916d31172df55d74cd7ea351f01fc512c37c",
+      "authorPassed": 5,
+      "authorFailed": 0,
+      "includesActualInertInitializeNativeQFunctionOwnerAndCOUNTERZero": true,
+      "independentlyRepeated": false
+    },
+    "independentByteInverseAndCanonicalDiagnosticSealChecked": true,
+    "productionOrGitHubActionsPerformed": false,
+    "stateOrTrackedOPSModified": false,
+    "noUnnecessarySuiteRepetition": true
+  },
+  "boundaries": [
+    "Backup source/transport only; no release or phase-plan approval is implied.",
+    "No state, application, OPS source, git branch, remote or production operation occurred during this independent operational review."
+  ],
+  "remainingBlockers": [],
+  "attempt": 3,
+  "priorSourceReview": {
+    "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-02-backup-source-review.json",
+    "sha256": "d7d719f5252520cb0c3927255dc727370a7650b5b39adb7c8ed61a1bcf7d5044"
+  },
+  "preciseMigration": {
+    "onlyBChanges": [
+      "Exact new branch03 and exclusive new backup archive03",
+      "Delete only Q.run=run in initialize; preserve all Q ROOT/BASE/OUT/OPS/PDB bindings and native Q.run128MiB plus independent counter/private stderr"
+    ],
+    "allOtherBFunctionASTsAndAllFiveDependenciesUnchanged": true,
+    "allGenericFactoryAndBRunLimitsStill32MiB": true,
+    "nativeQWholeProgramReadLimitStillReviewed128MiB": true,
+    "oldFailedAttemptsAndClosedDiagnosticRetained": true,
+    "statePath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-state3.json",
+    "branch": "ops/pr-996-20261023-03"
+  },
+  "actualDiagnostic": {
+    "state": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-trace-state.json",
+      "sha256": "9239dcfb47ae00bc451a278bbfc314894cd83db6a4198e644895cef4dbec894b"
+    },
+    "result": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-trace-result.json",
+      "sha256": "a34ff48e2f8d585cec466ebf7c6862c07cc9e5392ac9805b399dd6f9799e9751",
+      "manifestSHA256": "4ee1d600c3b093001d360544616ffea4b7a8ece3de6607cf82dce7392167e9a2",
+      "resultSHA256": "d170e2f0584c7cad8f6ebd1fd077c68819daf0718f8142ee12a3772819c7fa8d"
+    },
+    "runId": 39893846466,
+    "actualFailedRun": 39892794253,
+    "frames": [
+      {
+        "file": "run.py",
+        "function": "main",
+        "line": 170
+      },
+      {
+        "file": "run.py",
+        "function": "backup",
+        "line": 164
+      },
+      {
+        "file": "run.py",
+        "function": "application_proof",
+        "line": 101
+      },
+      {
+        "file": "qc-source-library.py",
+        "function": "service_source_proof",
+        "line": 156
+      },
+      {
+        "file": "qc-source-library.py",
+        "function": "container_files",
+        "line": 133
+      },
+      {
+        "file": "run.py",
+        "function": "run",
+        "line": 45
+      },
+      {
+        "file": "factory-review-backup-library.py",
+        "function": "run",
+        "line": 23
+      },
+      {
+        "file": "factory-review-backup-library.py",
+        "function": "need",
+        "line": 13
+      }
+    ],
+    "sameOriginalProgramTarBytes": 49295360,
+    "sameOriginalProgramTarSHA256": "728e05b1830d7ad93ee40187ec7401d576e5328868e124a10bf5d3955dc69273",
+    "completeReturnCodeZero": true,
+    "within128MiB": true,
+    "noTimeout": true,
+    "sealedRuntimeBeforeAfterBoundAndStillRunning": true,
+    "rootCause": "The actual valid complete program source tar exceeds inherited F.run32MiB cap. Remove accidental Q runner override; retain reviewed native Q128MiB without expanding other run limits."
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "apps/业务部/内部报价系统/frontend/mixed-quotation.js": "eadcaaea0d4afe55851f3463cd42b594cdfea7c3b3f4d33e380a19f980ba0842",
+  "apps/业务部/内部报价系统/frontend/quote.html": "2884f1ff71c52fe82f0984d687108689e3e066621ac6982d5742f4b836df6b2f",
+  "apps/业务部/内部报价系统/frontend/verification.html": "e1bb57fec889c97d9a05fc3f50711a3f0379f0fd7890ec5dd06df69f4f207907",
+  "apps/业务部/内部报价系统/frontend/workbench.js": "d911016f6400b248a479f24ab228af69c8e4e26d043067e2f345c7924d53e182",
+  "apps/业务部/内部报价系统/tests/mold-row-order.test.js": "b9f511311277340e1ef392995cee3b47a503d582823ee59debaaa5389229ca5a",
+  "apps/业务部/内部报价系统/tests/quotation-exchange-rates.test.js": "a16c18d0a69a685b1bd0c3a1030d2c6187aa845a0e9f9a21bd86953d73285057",
+  "apps/业务部/内部报价系统/tests/section-save-queue.test.js": "69e4fa163ae833b30579235a20afe4217d7a400b578dac23c90745da5cf83bc4"
+}

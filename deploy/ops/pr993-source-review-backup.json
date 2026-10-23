@@ -1,0 +1,56 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr993_regressions",
+  "reviewedAtUTC": "2026-10-23T00:31:30.102975+00:00",
+  "helperSHA256": "efc3e1f7f92a26236f0c19fc8920cfdad2fae5f18716617071d67b9f8cdb4ad3",
+  "helperGatesFrozen": true,
+  "base": "29254a0e90d3fe2a75f212492902aa1a00a4cba5",
+  "baseTree": "ef92d7ed70394780f0389578c8cc1b2b67a167a5",
+  "allowedPhases": [
+    "backup"
+  ],
+  "dependencies": {
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9"
+  },
+  "transportSHA256": "394fb5e6cba522cc5dc5d0d964fb16fd35b5514a65bf9032735dacc398c559e9",
+  "scope": [
+    "qc"
+  ],
+  "targetContainerCount": 1,
+  "otherContainerCount": 45,
+  "totalContainerCount": 46,
+  "portableSQLiteCount": 26,
+  "qcCompanyDatabaseCount": 13,
+  "qcHistoricalDatabaseCount": 13,
+  "checks": [
+    "Read the entire frozen 189-line backup helper and exact transport diff from approved PR994 controller. All mutation-capable entrypoints remain inert on import and BACKUP_PIN stays False; this review does not execute backup, publish or dispatch.",
+    "Runtime guard requires all 46 exact Docker identities, one qc target, 45 others including both factory services/internal quote/PostgreSQL, full Config/HostConfig hashes, image/StartedAt/restarts/health/mounts, and exact qc PID1 environment. Before/after whole-runtime equality is enforced.",
+    "Only canonical exclusive RW qc data bind is accepted. All mounts resolve without aliases; shared writer/overlap, wrong bind/mount count or RO mount reject. No target other than qc is requested.",
+    "Actual runtime qc image and every copied application file must match the sealed prior f50e237 prepare/verify proof; current BASE and prior f50e237 qc subtree are both 2fcff02d052d70baee0acd46fbfe6535b6a93d97. Original prepare/verify seals independently match retained qms-api-auth receipts.",
+    "Exactly 13 active qc.db and 13 historical qc.db.bak.20260910-152122 are discovered by SQLite header and copied via pinned read-only snapshot functions. All typed rows/schema plus integrity/foreign-key checks reproduce from closed portable copies. Per-database consistency is claimed, without cross-database atomicity.",
+    "Historical databases additionally retain exact raw bytes, size, mode, uid and gid in a bounded replay-verified historical-sqlite.tar. Attachments/non-DB files and directory metadata, database/sidecar metadata and ownership are captured; changed attachment, typed value, owner or raw historical header rejects.",
+    "Full .env.cloud.production bytes/mode/owner, literal configured/PID1 environment, fixed auth/AI/seed/Dockerfile/package/compose/nginx/deploy config, exact four preexisting dirty files and maintenance flags are archived privately and required unchanged. Only private 0700/0600 evidence is written; secret/row details are not printed.",
+    "No HTTP, model/OCR call, token/environment/configuration change, container signal/lifecycle, mail, PostgreSQL query or business mutation is reachable from backup. All three transitive library hashes are verified before import and only read/copy functions are called.",
+    "Transport has only approved BASE/tree/branch/state/prefix/qc scope/manifest-prefix/title substitutions from PR994. Generic source hashes, exact AST pinning, full input plan hashes, one phase/first attempt, host fingerprint, concurrency deploy-cloud, prior seal chain, exclusive reservation, exact remote heads and workflow restore controls remain unchanged. Backup planning is independent of unfinished application manifest."
+  ],
+  "offlineChecks": {
+    "minimalFixturesIndependentlyReadAndRerun": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr993-adapters-offline.py",
+      "sha256": "57f2b4cbf6cb96aeaa97a799ef3a66625bcd88159ace635dcf7e2b7bac5be236",
+      "passed": 7,
+      "failed": 0
+    },
+    "independentTestLog": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr993-backup-independent-tests.log",
+    "independentTestLogSHA256": "9cb967e4f80e221432f51b70b5f72be7cebddbc0e751ca32de2f461aa6d291ce",
+    "realDockerHTTPProductionDatabasePostgresGitHubOrModelCalls": false,
+    "onlyTemporarySyntheticFixtures": true
+  },
+  "boundaries": [
+    "This receipt covers frozen backup source and read-only backup planning only. Release helper final manifest and prepare/deploy/verify plans require separate final review.",
+    "No production operation or state/OPS mutation was performed by this reviewer."
+  ],
+  "remainingBlockers": []
+}

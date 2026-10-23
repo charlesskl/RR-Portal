@@ -1,0 +1,98 @@
+{
+  "actualStateOrOPSModified": false,
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "base": "2de4be7bdb0fa983dc86259701a3c4f3ddd14234",
+  "baseTree": "d41d5f98f97ee0cd34b0a868fb7283f57841ee4e",
+  "boundaries": [
+    "Source-only approval; concrete activation/phase plans and actual sealed run success remain separate.",
+    "No production database/SQL/HTTP/container/configuration/remote calls performed by this reviewer.",
+    "Inherited fail-closed recovery may leave owned maintenance on unexplained startup/data errors; no automatic claim of universal recovery or preserved global database role/ACL audit beyond captured evidence."
+  ],
+  "checks": [
+    "Read complete frozen B997/R997 and complete diff against successful995. All executable function bodies are identical after namespace normalization except recorded intentional proof-shape/manifest/public checks and the isolated OOM wrapper. All dependency hashes and inert gates verified.",
+    "Only internal-quote may be maintained/recreated; original46 runtime identities are captured and45others remain exact. Canonical nonoverlapping exclusive legacy-data RO and uploads RW bind roots, full Config/HostConfig/PID1/env/JWT configuration, complete dotenv bytes/modes/owners, fixed global/startup/auth/package files and four dirty paths are preserved.",
+    "Complete internal_quote READ ONLY repeatable-read exported snapshot shares full typed row/schema capture with custom pg_dump; sequence states are bracketed independently and no cross-database/MVCC-sequence atomicity is claimed. Two legacy SQLite databases, raw DB families/non-DB data, uploads bytes and file/dir metadata are captured and revalidated. Accounts/roles/permission data stay within full typed rows; no role/account/schema/config/DB restore command is introduced.",
+    "Known startup guards must all pass, costing-basis inserts absent, existing bootstrap columns/indexes and auth/account source fixed. Normal startup changes only quote_sections_id_seq by exact quotes row count × departments row count from the SHA-pinned unchanged INSERT...ON CONFLICT source; all typed rows/schema and other sequences equal. No reset or actor attribution.",
+    "Fresh live evidence is followed by owned service maintenance/drain/old-writer stop and fresh closed evidence before only the prepared immutable candidate starts. Cutover success requires exact logical data/raw legacy/uploads/owners, full runtime/env/source and bounded public checks. Failed recovery preserves data, does not restore DB, and requires closed evidence; unexplained delta fails closed retaining own maintenance. Verify replays sealed cutover evidence rather than comparing live user edits.",
+    "Prepare FF-integrates exact reviewed seven frontend/test files with manifest8575, builds one service before any maintenance, checks image defaults/full code-copy files and preserves all46 originals. Exact prepared and actual running source copies cover backend, frontend and package; no dependency/auth/startup source changed.",
+    "Only OomKillDisable when both dictionaries contain the key and each value is exactly None or boolFalse is normalized on deep copies before the original frozen comparator. This is the same independently validated996 semantic/type boundary; true, missing, numeric0, stringfalse and other-field drift are not normalized. The frozen shared H comparator is not edited.",
+    "Public checks use reviewed actual quote.html/mixed-quotation.js, quote.html/workbench.js and verification.html/workbench.js cache query strings, validating full HTML and exact asset hashes, plus health and4anonymous401 GET checks. Actual paths/query syntax were independently extracted from reviewed head60297; no production HTTP or login performed."
+  ],
+  "dependencies": {
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "internal-quote-readonly-library.py": "be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69",
+    "pr997-backup-library.py": "ae03bbf8606c8ba977d831aa482731f6b69c1ef9e0611418f55f33ff4f0b428e",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5"
+  },
+  "disposition": "CHECKED",
+  "effectiveMainExecuted": false,
+  "evidenceSHA256": {
+    "work/pr995-backup-source-review.json": "ee319b62fd56e5adc677169de3eee14bf69d04f7cb964b7bd7445b4db25fcc38",
+    "work/pr995-backup.py": "bb661d3ad4258d800d25a098092db9ba0f49eeaba507c302cda00bab256bf87f",
+    "work/pr995-prepare-39883084977-result.json": "9de8055c7e9bcff236e929f42f011da3e0058e557893fe175f86a154cb420ae6",
+    "work/pr995-release-source-review.json": "8b34afd52f6bfd415aefddf15af12387f9c4859f73370c534e8039b32cac204d",
+    "work/pr995-release.py": "a65fc9d33141703679502b8ad31711cf3bf1b798b2191a6a7944c56b2b4d66a7",
+    "work/pr995-verify-39883833205-result.json": "af2f38ce3c65ca3d4b86483f10136f206e0173081174c85a7659177d0b7e30b4",
+    "work/pr996-oom-disable-semantics-review-backend.json": "b3d957a9197b42e026e7574d9191e12cbad3db3b29a8ac92273b1c7fbc46e211",
+    "work/pr996-resume-source-review-backend.json": "1dc8f41957e43f87a7f3eb05cfe41497383531d99e6e0884564bb1824ed7d7a4",
+    "work/pr997-draft-offline-checks.json": "fda6f6e3dd7dee048868469560e8463f8189c799b64419227a9af2c66f3d07a4",
+    "work/pr997-final-application-review.json": "606c512cf32a6dbd1b460144dd9315132e255f31dba37c1902d688209cf3bfcf"
+  },
+  "helperGatesFrozen": true,
+  "helperSHA256": "a03076c69154ae1ed9588713863364465a88b852f6d67780cd945e4cdd917a22",
+  "independent": true,
+  "offlineReview": {
+    "actualCacheQueryURLsFromReviewedGitHead": {
+      "quote.html:mixed-quotation.js": "mixed-quotation.js?v=20261023-mold-number-column",
+      "quote.html:workbench.js": "workbench.js?v=20261023-mold-row-actions",
+      "verification.html:workbench.js": "workbench.js?v=20261023-mold-row-actions"
+    },
+    "allExecutionGatesInert": true,
+    "allTransitiveDependencyHashesMatch": true,
+    "authorOfflineChecksReadNotIndependentlyRerun": true,
+    "changedFunctionsAgainst995": {
+      "backup": {
+        "addedFunctions": [],
+        "changedFunctionBodies": [
+          "prior_quote_proof"
+        ],
+        "namespaceNormalizedBeforeComparison": true
+      },
+      "release": {
+        "addedFunctions": [
+          "same_host_config"
+        ],
+        "changedFunctionBodies": [
+          "full_contract",
+          "public",
+          "reviewed_manifest",
+          "source"
+        ],
+        "namespaceNormalizedBeforeComparison": true
+      }
+    },
+    "exactSevenApplicationBlobHashesVerified": true,
+    "prior995SourceSubtreeAndActualReceiptPinsChecked": true,
+    "unaffectedMatrixNotRepeated": true
+  },
+  "otherContainerCount": 45,
+  "portableSQLiteCount": 2,
+  "postgresSchema": "internal_quote",
+  "remainingBlockers": [],
+  "remoteActionsPerformed": false,
+  "reviewedApplicationHead": "60297dccb799a311feb0d18e1e66e0e0137bfc86",
+  "reviewedAtUTC": "2026-10-23T06:30:54.263848+00:00",
+  "reviewedIntegrationTree": "1b3a86eb68435babca7415a24d01c1b2d3648916",
+  "reviewer": "/root/pr996_backend_review",
+  "scope": [
+    "internal-quote"
+  ],
+  "sourceManifestSHA256": "8575bf24d3597a09b185dfb377f938d777faff99176a6ed91d01f71f273f5595",
+  "targetContainerCount": 1
+}

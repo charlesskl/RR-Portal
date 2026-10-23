@@ -38,3 +38,64 @@ test('both observed hardware totals agree with backend using actual respective r
     assert.equal(calculateSingleQuoteCosts({qty:5000},sections).components.hardware,preview);
   }
 });
+
+function moldingRateRefreshFixture(status) {
+  const body = {
+    preview: null, native: null,
+    set innerHTML(_value) { this.preview = null; this.native = null; },
+    querySelector(selector) {
+      if (selector === 'h3') return { insertAdjacentHTML: () => {
+        this.preview = { dataset: { act: 'auto-shot' }, onclick: null };
+      } };
+      return selector === '#btn-auto-shot' ? this.native : null;
+    },
+  };
+  const panel = {
+    querySelector: selector => selector === '.ro-body' ? body : { set outerHTML(_value) {} },
+    querySelectorAll: () => body.preview ? [body.preview] : [],
+  };
+  const sales = { dept: 'sales', payload_json: JSON.stringify({ header: { fx_rmb_hkd: .85, fx_hkd_usd: 7.8 } }) };
+  const alerts = [], renders = [];
+  let nativeClicks = 0;
+  const context = vm.createContext({
+    c: panel, s: { id: 13, dept: 'molding', status }, sectionPayload: {},
+    sections: [sales], data: { quotation_rates: { fx_rmb_hkd: .85, fx_hkd_usd: 7.8 }, engineering_molds: [] },
+    quote: { qty: 10 }, me: { role: 'staff' }, id: 1, mayEdit: true,
+    rateRefreshers: new Map(), saveHandlers: new Map(),
+    markDirty() {}, clearDirty() {}, installDepartmentExport() {},
+    renderHeader: () => '<h2>fixture</h2>', renderBar: () => '<div class="wb-bar"></div>',
+    alert: message => alerts.push(message),
+    renderMolding(host, _payload, edit, _changed, _molds, rate) {
+      renders.push({ edit, rate });
+      if (edit) host.native = { click: () => { nativeClicks++; } };
+    },
+  });
+  vm.runInContext(source.slice(source.indexOf('const sectionDraftPayloads ='), source.indexOf('const shippingSummarySavers =')), context);
+  const start = source.indexOf("      const body = c.querySelector('.ro-body');");
+  const end = source.indexOf('      host.appendChild(c);', start);
+  assert.ok(start >= 0 && end > start, 'use the actual other-department rendering, rate-refresh and action callbacks');
+  vm.runInContext('let inEdit = false;\n' + source.slice(start, end), context);
+  return { body, sales, alerts, renders, context, nativeClicks: () => nativeClicks };
+}
+
+for (const status of ['filled', 'approved']) test(`rate redraw rebinds the actual molding preview action (${status})`, async () => {
+  const f = moldingRateRefreshFixture(status);
+  const original = f.body.preview;
+  assert.equal(typeof original.onclick, 'function');
+  f.context.sectionDraft(f.sales).header.fx_rmb_hkd = .87;
+  f.context.rateRefreshers.get('molding')();
+  const refreshed = f.body.preview;
+  assert.notEqual(refreshed, original, 'rate redraw creates a replacement preview control');
+  assert.equal(typeof refreshed.onclick, 'function', 'replacement action must receive the actual bindActs handler');
+  assert.equal(f.renders.at(-1).rate, .87);
+  await refreshed.onclick();
+  if (status === 'approved') {
+    assert.equal(f.nativeClicks(), 0);
+    assert.equal(f.renders.at(-1).edit, false);
+    assert.match(f.alerts[0], /已审核.*解除审核/);
+  } else {
+    assert.equal(f.renders.at(-1).edit, true);
+    assert.equal(f.nativeClicks(), 1, 'preview event enters edit and invokes the existing native auto-shot action');
+    assert.deepEqual(f.alerts, []);
+  }
+});

@@ -6974,7 +6974,10 @@ async function renderQuotePage() {
       renderBody();
       rateRefreshers.set(s.dept, () => {
         const rates = quotationExchangeRates(sections, data.quotation_rates);
-        if (rates.rmb_hkd !== renderedRates.rmb_hkd || rates.hkd_usd !== renderedRates.hkd_usd) renderBody();
+        if (rates.rmb_hkd !== renderedRates.rmb_hkd || rates.hkd_usd !== renderedRates.hkd_usd) {
+          renderBody();
+          bindActs();
+        }
       });
 
       // 绑定本卡操作（每次重渲染都重新绑定）

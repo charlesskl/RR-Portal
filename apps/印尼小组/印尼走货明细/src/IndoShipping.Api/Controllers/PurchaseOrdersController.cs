@@ -426,11 +426,7 @@ RETURNING id",
         try
         {
             var itemIds = requested.Select(x => x.PoItemId).ToArray();
-            // 锁序与单条入库路径保持一致（po_items -> purchase_orders），避免 ABBA 死锁
-            await c.ExecuteAsync(@"
-                SELECT i.id FROM po_items i
-                WHERE i.po_id=@poId AND i.id = ANY(@itemIds)
-                FOR UPDATE", new { poId, itemIds }, tx);
+            // 收货与采购编辑/合并统一锁序：订单 -> 按序物料 -> 入库记录。
             var poNo = await c.ExecuteScalarAsync<string?>(
                 "SELECT po_no FROM purchase_orders WHERE id=@poId FOR UPDATE", new { poId }, tx);
             if (poNo is null)
@@ -438,6 +434,10 @@ RETURNING id",
                 tx.Rollback();
                 return NotFound(new { error = "采购单不存在" });
             }
+            await c.ExecuteAsync(@"
+                SELECT i.id FROM po_items i
+                WHERE i.po_id=@poId AND i.id = ANY(@itemIds)
+                ORDER BY i.id FOR UPDATE", new { poId, itemIds }, tx);
 
             var stocks = (await c.QueryAsync<BulkReceiptStock>(@"
                 SELECT i.id AS ""PoItemId"",
@@ -534,15 +534,29 @@ RETURNING id",
         using var tx = c.BeginTransaction();
         try
         {
-            var item = await c.QueryFirstOrDefaultAsync<(int PoId, decimal OrderedQty)>(@"
-                SELECT po_id AS PoId, COALESCE(purchase_qty, qty, 0) AS OrderedQty
-                FROM po_items
-                WHERE id=@itemId
-                FOR UPDATE", new { itemId }, tx);
-            if (item.PoId == 0)
+            var ownerPoId = await c.ExecuteScalarAsync<int>(
+                "SELECT po_id FROM po_items WHERE id=@itemId", new { itemId }, tx);
+            if (ownerPoId == 0)
             {
                 tx.Rollback();
                 return NotFound(new { error = "采购明细不存在" });
+            }
+            var lockedPoId = await c.ExecuteScalarAsync<int>(
+                "SELECT id FROM purchase_orders WHERE id=@ownerPoId FOR UPDATE", new { ownerPoId }, tx);
+            if (lockedPoId == 0)
+            {
+                tx.Rollback();
+                return Conflict(new { error = "采购明细归属已变化，请刷新后重新入库" });
+            }
+            var item = await c.QueryFirstOrDefaultAsync<(int PoId, decimal OrderedQty)>(@"
+                SELECT po_id AS PoId, COALESCE(purchase_qty, qty, 0) AS OrderedQty
+                FROM po_items
+                WHERE id=@itemId AND po_id=@ownerPoId
+                FOR UPDATE", new { itemId, ownerPoId }, tx);
+            if (item.PoId != ownerPoId)
+            {
+                tx.Rollback();
+                return Conflict(new { error = "采购明细归属已变化，请刷新后重新入库" });
             }
 
             var receivedQty = await c.ExecuteScalarAsync<decimal>(
@@ -617,13 +631,13 @@ RETURNING id",
         using var c = factory.Create();
         c.Open();
         using var tx = c.BeginTransaction();
-        var row = await c.QueryFirstOrDefaultAsync<(int PoId, int ReceiptId, int PoItemId, decimal Qty, decimal SpareQty)>(@"
-            SELECT i.po_id AS PoId, r.id AS ReceiptId, r.po_item_id AS PoItemId, r.qty AS Qty, r.spare_qty AS SpareQty
-            FROM po_receipts r
-            JOIN po_items i ON i.id=r.po_item_id
-            WHERE r.id=@receiptId
-            FOR UPDATE OF r, i", new { receiptId }, tx);
-        if (row.ReceiptId == 0)
+        var (row, ownershipChanged) = await LockReceiptAsync(c, tx, receiptId);
+        if (ownershipChanged)
+        {
+            tx.Rollback();
+            return Conflict(new { error = "采购明细归属已变化，请刷新后重新删除" });
+        }
+        if (row is null)
         {
             tx.Rollback();
             return NotFound(new { error = "入库记录不存在" });

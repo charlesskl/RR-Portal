@@ -1,3 +1,4 @@
+using System.Data;
 using Dapper;
 using IndoShipping.Api.Auditing;
 using Microsoft.AspNetCore.Mvc;
@@ -24,6 +25,33 @@ public partial class PurchaseOrdersController
         public decimal SpareQty { get; set; }
     }
 
+    // All receipt writes lock the header, then item, then receipt. This is also the
+    // purchase edit/merge lock order. Discovering the owner does not lock anything;
+    // recheck it after waiting so a moved/deleted item cannot lock the wrong order.
+    private static async Task<(ReceiptForUpdate? Row, bool OwnershipChanged)> LockReceiptAsync(
+        IDbConnection c, IDbTransaction tx, int receiptId)
+    {
+        var owner = await c.QueryFirstOrDefaultAsync<ReceiptForUpdate>(@"
+            SELECT r.po_item_id AS ""PoItemId"", i.po_id AS ""PoId""
+            FROM po_receipts r JOIN po_items i ON i.id=r.po_item_id
+            WHERE r.id=@receiptId", new { receiptId }, tx);
+        if (owner is null) return (null, false);
+        var poId = await c.ExecuteScalarAsync<int>(
+            "SELECT id FROM purchase_orders WHERE id=@PoId FOR UPDATE", new { owner.PoId }, tx);
+        if (poId == 0) return (null, true);
+        var actualPoId = await c.ExecuteScalarAsync<int>(
+            "SELECT po_id FROM po_items WHERE id=@PoItemId AND po_id=@PoId FOR UPDATE", new { owner.PoItemId, owner.PoId }, tx);
+        if (actualPoId != owner.PoId) return (null, true);
+        var row = await c.QueryFirstOrDefaultAsync<ReceiptForUpdate>(@"
+            SELECT r.id AS ""Id"", r.po_item_id AS ""PoItemId"", i.po_id AS ""PoId"",
+                   COALESCE(i.purchase_qty, i.qty, 0) AS ""OrderedQty"",
+                   r.qty AS ""Qty"", r.spare_qty AS ""SpareQty""
+            FROM po_receipts r JOIN po_items i ON i.id=r.po_item_id
+            WHERE r.id=@receiptId FOR UPDATE OF r", new { receiptId }, tx);
+        return row is not null && (row.PoId != owner.PoId || row.PoItemId != owner.PoItemId)
+            ? (null, true) : (row, false);
+    }
+
     [HttpPut("receipts/{receiptId:int}")]
     public async Task<IActionResult> UpdateReceipt(int receiptId, [FromBody] UpdateReceiptBody body)
     {
@@ -42,13 +70,12 @@ public partial class PurchaseOrdersController
         using var tx = c.BeginTransaction();
         try
         {
-            // 与删除入库使用相同的行锁；采购明细锁也与出库路径互斥。
-            var row = await c.QueryFirstOrDefaultAsync<ReceiptForUpdate>(@"
-                SELECT r.id AS ""Id"", r.po_item_id AS ""PoItemId"", i.po_id AS ""PoId"",
-                       COALESCE(i.purchase_qty, i.qty, 0) AS ""OrderedQty"",
-                       r.qty AS ""Qty"", r.spare_qty AS ""SpareQty""
-                FROM po_receipts r JOIN po_items i ON i.id=r.po_item_id
-                WHERE r.id=@receiptId FOR UPDATE OF r, i", new { receiptId }, tx);
+            var (row, ownershipChanged) = await LockReceiptAsync(c, tx, receiptId);
+            if (ownershipChanged)
+            {
+                tx.Rollback();
+                return Conflict(new { error = "采购明细归属已变化，请刷新后重新编辑" });
+            }
             if (row is null)
             {
                 tx.Rollback();
@@ -59,8 +86,6 @@ public partial class PurchaseOrdersController
                 tx.Rollback();
                 return Conflict(new { error = "这条入库记录已被修改，请刷新后重新编辑" });
             }
-            // 先锁订单再计算整单完成状态，串行化同单不同物料的并发保存。
-            await c.ExecuteScalarAsync<int>("SELECT id FROM purchase_orders WHERE id=@PoId FOR UPDATE", new { row.PoId }, tx);
             var other = await c.QuerySingleAsync<(decimal Qty, decimal SpareQty)>(@"
                 SELECT COALESCE(SUM(qty),0), COALESCE(SUM(spare_qty),0)
                 FROM po_receipts WHERE po_item_id=@PoItemId AND id<>@receiptId",

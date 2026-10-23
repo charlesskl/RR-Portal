@@ -26,3 +26,30 @@ export function bulkReceiptLines(
     return { po_item_id: row.id, qty, spare_qty }
   }).filter(row => row.qty > 0 || row.spare_qty > 0)
 }
+
+// 每次打开或关闭弹窗都会更换会话；同一物料重新打开也不能接收旧请求。
+export interface ReceiptSession {
+  readonly revision: number
+  readonly itemId: number
+}
+
+export function createReceiptSession() {
+  let revision = 0
+  let active: ReceiptSession | null = null
+  return {
+    open(itemId: number): ReceiptSession {
+      active = { revision: ++revision, itemId }
+      return active
+    },
+    close() {
+      revision++
+      active = null
+    },
+    current(itemId: number): ReceiptSession | null {
+      return active?.itemId === itemId ? active : null
+    },
+    isCurrent(session: ReceiptSession | null): session is ReceiptSession {
+      return session !== null && active === session
+    },
+  }
+}

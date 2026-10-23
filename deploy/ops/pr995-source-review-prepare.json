@@ -1,0 +1,88 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr995_mapping_review",
+  "reviewedAtUTC": "2026-10-23T01:12:52.790438+00:00",
+  "helperSHA256": "a65fc9d33141703679502b8ad31711cf3bf1b798b2191a6a7944c56b2b4d66a7",
+  "helperGatesFrozen": true,
+  "base": "c5162e74833f388ff3e9cddff1c9b7de3d2723ba",
+  "baseTree": "d04be0b8c89a8a8cf1d375b2a9cb30d5443d2aa3",
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "dependencies": {
+    "pr995-backup-library.py": "bb661d3ad4258d800d25a098092db9ba0f49eeaba507c302cda00bab256bf87f",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "internal-quote-readonly-library.py": "be4f901f3444154e5de06766a2d8a0801dba9b847a4ac25f34a84ccebe354e69",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1"
+  },
+  "transportSHA256": "0c2d7d33c23ea4b3dc3ca8f1e06b6169568fdf0b19c50c9af77b6ef698704e02",
+  "sourceManifestSHA256": "702e0bcb9fcd19b59c03484ddca8f0c83d7dd276510542e49a05e6b14fb2c865",
+  "reviewedApplicationHead": "3dea56a3d3c9ba60dccfaf28b3a684e2a39ae4bb",
+  "reviewedIntegrationTree": "ce652db9eb263e09d24a3f44ef0c48a5c1f7b79e",
+  "reviewedApplicationFiles": {
+    "apps/业务部/内部报价系统/backend/services/verificationWorkshopTemplate.json": "54ce0481ba4d3783fcd2f671b79f36f170977c232ab14ec60c6a254ae6c542b6",
+    "apps/业务部/内部报价系统/frontend/verification-compact.css": "90785d6263b9a8c318ebce7d719e808e12bdf863f2e881b5e16f28a890787de5",
+    "apps/业务部/内部报价系统/frontend/verification.html": "00dffd883aa330f2a87475eac5d5e2d5ad8246a03d39082fd1b4bb8a387be2ce",
+    "apps/业务部/内部报价系统/tests/verification-reviewed-workshops.test.js": "c7f2e28b4de67d5e730a87b7f0de9b415ae7b99006b5952e8f92e0bfa2af3dec"
+  },
+  "scope": [
+    "internal-quote"
+  ],
+  "targetContainerCount": 1,
+  "otherContainerCount": 45,
+  "portableSQLiteCount": 2,
+  "postgresSchema": "internal_quote",
+  "checks": [
+    "Read the full final internal-quote release helper, its inert backup adapter, the transport and relevant fixed library functions. Nine runtime gates remain blank; the final helper rejects before initialization or output directory creation.",
+    "The source manifest pins exactly the four reviewed quote template/CSS/HTML/offline test files. Actual integration tree ce652db9 contains only these four changes versus current main c5162e7; reviewed hashes match. Unchanged startup, schema, account seed, authentication, server, dependencies, Docker/compose/global configuration and four preexisting dirty files are guarded on the server.",
+    "All six helper dependencies and both generic transport libraries are exact hash pins. Frozen backup is false; only internal_quote PostgreSQL snapshots are captured. PostgreSQL uses read-only repeatable-read exported snapshot for full typed row digests, schema inventory and custom-format dump, with sequence states independently bracketed, never claimed MVCC atomic.",
+    "The entire actual postgres.js SHA520519a4 and its unique INSERT quote_sections SELECT quotes CROSS JOIN departments ON CONFLICT fragment were checked against the actual current base. Startup row-safety markers and complete existing tables/columns/indexes are required. Only quote_sections_id_seq may advance by exactly quotes.rows times departments.rows for each single startup; all rows/schema/other sequences remain equal, called states/identity/cache/bounds are constrained, no reset or actor attribution exists.",
+    "Build occurs before maintenance while all 46 containers continue unchanged; only internal-quote is built. Candidate image identity/defaults/full copied backend/frontend/package source, configured/PID1 environment and full runtime Config/HostConfig/mounts are checked. Only sorting the exact two known nonoverlapping quote binds and the preexisting three empty-DNS representations is tolerated.",
+    "Deploy creates a fresh live backup, drains and stops only internal-quote, captures a fresh closed snapshot, recreates only the exact prepared immutable image with no build/deps/pull, and compares closed before/startup after evidence before releasing maintenance. Full typed PostgreSQL rows/schema, two legacy SQLite snapshots and raw bytes, uploads/attachments, all captured file/database family modes/uid/gid remain bound. Other45 runtime contracts, full dotenv bytes/mode/owner, compose render and existing maintenance inventory remain unchanged.",
+    "Recovery requires fresh closed evidence and restores only the old immutable service image, never a database. Candidate and recovery startup sequence intervals are verified separately; any business row/schema/file/owner drift or missing evidence retains the owned maintenance flag and fails closed.",
+    "The discovered databaseFamilyMetadata gap in original R8731 was minimally fixed by a single equality guard in same_data; exact inverse reproduces old hash. Original owner-only counterexample succeeds on preserved old helper and now rejects on final a65fc9. All DB/WAL/SHM/journal mode/uid/gid and inventory mutations were independently rejected; no other helper behavior/pins changed.",
+    "Public checks are bounded loopback GETs for health, exact three HTML/cache asset hashes and four anonymous 401 reads. No authenticated login/business probe or model request exists. Verify reproduces sealed cutover evidence and checks current runtime/source/public state without taking or comparing changing live business records after users resume.",
+    "Transport keeps exact source/phase/prior seal binding, official origin/branch and current main/OPS heads, exclusive first-attempt reservations, required host fingerprint, deploy-cloud noncancelling concurrency, bounded execution and finally restoration of the normal workflow. Each activated prepare/deploy/verify plan still requires an independent exact plan review."
+  ],
+  "resolvedFinding": {
+    "originalHelperSHA256": "8731c9ef5760532a5e266a27cf19fec280d6ac9a2991932410e800264325b86a",
+    "originalSourcePath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr995-release-before-companion-review.py",
+    "evidencePath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr995-release-companion-ownership-gap.json",
+    "evidenceSHA256": "4d2bd8efb81e326fada68f8ccc1f907d76d5281f7d425d6ce1621e269a6040a1",
+    "fixOnly": "same_data requires exact databaseFamilyMetadata equality",
+    "newHelperSHA256": "a65fc9d33141703679502b8ad31711cf3bf1b798b2191a6a7944c56b2b4d66a7",
+    "originalCounterexampleNowRejected": true
+  },
+  "offlineChecks": {
+    "authorFocusedFixturesIndependentlyReadAndRerun": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr995-release-author.py",
+      "sha256": "a28768a5aacade6b53d519a7d76045e805eaf3e5a1f0d282cacc79a2d80275c8",
+      "passed": 12,
+      "failed": 0,
+      "log": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr995-release-independent-author-final-rerun.log",
+      "logSHA256": "836b65fa2f3e5ea568b674ddad945e6855498fbfd3b8769fbb8d81624b84cc6c"
+    },
+    "independentGuardAndCounterexampleFixtures": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr995-release-independent.py",
+      "sha256": "5b666ee07107e8484705c48dc3f657f7f242baa2d0f7e061d4b0529bb1f1fd97",
+      "passed": 6,
+      "failed": 0,
+      "log": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr995-release-independent-final-tests.log",
+      "logSHA256": "3e62fd54fa59d496ed75af8b657d3c31aa5ea6f038555f840d36f9b287ba26ef"
+    },
+    "realDockerProductionDatabaseHTTPPostgresGitHubOrModelCalls": false,
+    "opsOrStateMutationPerformed": false
+  },
+  "boundaries": [
+    "This receipt approves frozen source only. Each activated phase needs a separately reviewed exact plan and successful sealed prior receipts; no deployment is asserted complete here.",
+    "PostgreSQL startup retains its existing physical no-op upserts and exact identity-sequence consumption; the evidence guards preservation of logical typed rows/schema, not an assertion that the process executes no SQL writes internally.",
+    "SQLite snapshots and PostgreSQL snapshots are individually consistent; no cross-database atomicity, sequence MVCC atomicity, reset, or deletion/consumption actor attribution is claimed.",
+    "The original workbook evidence files were not provided; this source review does not independently verify the 152 business mappings or claim any production quote count."
+  ],
+  "remainingBlockers": []
+}

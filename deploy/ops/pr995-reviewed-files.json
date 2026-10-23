@@ -1,0 +1,6 @@
+{
+  "apps/业务部/内部报价系统/backend/services/verificationWorkshopTemplate.json": "54ce0481ba4d3783fcd2f671b79f36f170977c232ab14ec60c6a254ae6c542b6",
+  "apps/业务部/内部报价系统/frontend/verification-compact.css": "90785d6263b9a8c318ebce7d719e808e12bdf863f2e881b5e16f28a890787de5",
+  "apps/业务部/内部报价系统/frontend/verification.html": "00dffd883aa330f2a87475eac5d5e2d5ad8246a03d39082fd1b4bb8a387be2ce",
+  "apps/业务部/内部报价系统/tests/verification-reviewed-workshops.test.js": "c7f2e28b4de67d5e730a87b7f0de9b415ae7b99006b5952e8f92e0bfa2af3dec"
+}

@@ -2,7 +2,7 @@
 Restore complete closed keys before one first start; preserve all PG and 45 peers.
 """
 import copy,hashlib,http.client,importlib.util,json,os,pathlib,re,socket,stat,sys,traceback
-RESUME_PIN=True
+RESUME_PIN=False
 ROOT=pathlib.Path('/opt/rr-portal')
 BRANCH='refs/heads/ops/pr-996-20261023-04'
 BASE='6742f820c0a43388e274b867a2825a42548b5cea'

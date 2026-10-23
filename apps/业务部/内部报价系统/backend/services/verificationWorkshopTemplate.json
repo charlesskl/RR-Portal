@@ -1,5 +1,5 @@
 {
-  "source": "副本2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+  "source": "原始核价资料车间对照（含2026-10-22逐项复核）",
   "records": [
     {
       "customer": "ZURU",
@@ -2506,6 +2506,2456 @@
       "product": "信号发声器",
       "workshop": "兴信A",
       "source": "ZANZOON（嘉苏）!B48"
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC6099(减价）",
+      "workshop": "河源",
+      "source": "JAZ华登核价总表 JWC系列 2026.08.07（单码）(1).xlsx / JWC6099（河源做货）!工作表名称",
+      "reviewed_on": "2026-10-22",
+      "match_method": "当前原始核价工作表明确标注河源做货",
+      "evidence": [
+        {
+          "file": "JAZ华登核价总表 JWC系列 2026.08.07（单码）(1).xlsx",
+          "sha256": "6e47551e018599c8a9934cd30e7be6d545844308876491dbf9e661ade0801f15",
+          "sheet": "JWC6099（河源做货）",
+          "cell": "工作表名称"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC4186",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B91",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B91"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC4676(减价）",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B92",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B92"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC5837（JWC3154） -减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B93",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B93"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC5833（JWC3142）-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B94",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B94"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC2257-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B95",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B95"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC2263-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B96",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B96"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC2269-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B97",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B97"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC4336-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B98",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B98"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC1778-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B99",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B99"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC2416-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B100",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B100"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC5256-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B101",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B101"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC4609-新产品，未核价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B102",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B102"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0210-新产品，未核价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B103",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B103"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP001-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B104",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B104"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0072",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B105",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B105"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0137-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B106",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B106"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC3559/JWC2862-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B107",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B107"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC3556-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B108",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B108"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0191-新产品，未核价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B109",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B109"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0228-新产品，未核价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B110",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B110"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0231-新产品，未核价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B111",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B111"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC0747-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B112",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B112"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC0783-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B113",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B113"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC5407-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B114",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B114"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0193",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B115",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B115"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0205-新产品，未核价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B116",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B116"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC3353-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B117",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B117"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC3359-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B118",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B118"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC0972-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B119",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B119"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC3148-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B120",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B120"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC3190-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B121",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B121"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC6466-新产品，未核价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B122",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B122"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC6472-新产品，未核价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B123",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B123"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC1160-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B124",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B124"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP014-新产品，未核价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B125",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B125"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC2863-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B126",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B126"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP004-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B127",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B127"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC1173",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B128",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B128"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC2303",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B129",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B129"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC1450",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B130",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B130"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC2217",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B131",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B131"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JDU0051",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B132",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B132"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0161",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B133",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B133"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0168",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B134",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B134"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0169",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B135",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B135"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC1101",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B136",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B136"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC2283",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B137",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B137"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC2283-减价",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B137",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋去除核价备注后的正式货号匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B137"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0152",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B138",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B138"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0170",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B139",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B139"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0224",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B140",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B140"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC0041",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B141",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B141"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC0175",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B142",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B142"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC0791(JWC5252)",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B143",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B143"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC1394",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B144",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B144"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC3172",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B145",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B145"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC8360",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B146",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B146"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC8361",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B147",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B147"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC8362",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B148",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B148"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JWC8363",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B149",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B149"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "COMP0336",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B150",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B150"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "JDU0011(新产品，未核价）",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B151",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B151"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1609",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B4",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B4"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1610",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B5",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B5"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1611",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B6",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B6"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1612",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B7",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B7"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1618",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B8",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B8"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1619",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B9",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B9"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1620",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B10",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B10"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1621",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B11",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B11"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1624",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B12",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B12"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1666",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B13",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B13"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1667",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B14",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B14"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1653",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B15",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B15"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1654",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B16",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B16"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1696",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B17",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B17"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1657",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B18",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B18"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1655",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B19",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B19"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1702",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B20",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B20"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "FNT1658",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B21",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B21"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "CMW0015",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B22",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B22"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "CMW0029",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B23",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B23"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "CMW0170",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B24",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B24"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "CMW0182(0352)",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B25",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B25"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "SNF0145（SNF0181&SNF0220)",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B26",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B26"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "CMW0208(0298)",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B27",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B27"
+        }
+      ]
+    },
+    {
+      "customer": "JAZWARES",
+      "sku": "SNF0146（SNF0182&SNF0355)",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / JAZ Tikino play tek!B28",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "JAZ Tikino play tek",
+          "cell": "B28"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "142BT",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B5",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B5"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "HH429",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B6",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B6"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "682TC",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B7",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B7"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "856T1",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B8",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B8"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "HH991",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B9",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B9"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "HH992",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B10",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B10"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "HH993",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B11",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B11"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "HH994",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B12",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B12"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "DC346",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B13",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B13"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "LC630",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B14",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B14"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "GS675",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B15",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B15"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "GS673",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B16",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B16"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "LM986",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B17",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B17"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "RA362",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B18",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B18"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "376MM",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B19",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B19"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "HH393",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B20",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B20"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "RA367",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B21",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B21"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "RA368",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B22",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B22"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "RA369",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B23",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B23"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "300OK",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B24",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B24"
+        }
+      ]
+    },
+    {
+      "customer": "PWP（多美）",
+      "sku": "154DS",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / 多美!B25",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "多美",
+          "cell": "B25"
+        }
+      ]
+    },
+    {
+      "customer": "Tokidos",
+      "sku": "8281",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / CareFocus Tokidos!B12",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "CareFocus Tokidos",
+          "cell": "B12"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS064",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B5",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B5"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS065",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B6",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B6"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS067",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B7",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B7"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS068",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B8",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B8"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS069",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B9",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B9"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS071",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B10",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B10"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS074",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B11",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B11"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS077",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B12",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B12"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS082",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B13",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B13"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS083",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B14",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B14"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS085",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B15",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B15"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS086",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B16",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B16"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS089",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B17",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B17"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "BS090",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B18",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B18"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "CZ001",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B19",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B19"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "CZ003",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B20",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B20"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "CZ006",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B21",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B21"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "CZ014",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B24",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B24"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "CZ017",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B25",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B25"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "CZ018",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B26",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B26"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "CZ022",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B28",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B28"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "CZ023",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B29",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B29"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "MZ002",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B31",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B31"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "MZ003",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B32",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B32"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "PF001",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B45",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B45"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "SP002",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B33",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B33"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "SP003A2",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B34",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B34"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "SP003A3",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B35",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B35"
+        }
+      ]
+    },
+    {
+      "customer": "Tigerhead",
+      "sku": "SP005A1",
+      "workshop": "兴信B",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Tigerhead!B36",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Tigerhead",
+          "cell": "B36"
+        }
+      ]
+    },
+    {
+      "customer": "John Adams",
+      "sku": "9680",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / John Adams!B14",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "John Adams",
+          "cell": "B14"
+        }
+      ]
+    },
+    {
+      "customer": "John Adams",
+      "sku": "10201",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / John Adams!B6",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "John Adams",
+          "cell": "B6"
+        }
+      ]
+    },
+    {
+      "customer": "John Adams",
+      "sku": "11504",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / John Adams!B7",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "John Adams",
+          "cell": "B7"
+        }
+      ]
+    },
+    {
+      "customer": "John Adams",
+      "sku": "9680-CR",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / John Adams!B13",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "John Adams",
+          "cell": "B13"
+        }
+      ]
+    },
+    {
+      "customer": "John Adams",
+      "sku": "11290",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / John Adams!B15",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "John Adams",
+          "cell": "B15"
+        }
+      ]
+    },
+    {
+      "customer": "ToyMonster",
+      "sku": "T02444",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Toymonster!B8",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Toymonster",
+          "cell": "B8"
+        }
+      ]
+    },
+    {
+      "customer": "ToyMonster",
+      "sku": "T01685",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Toymonster!B6",
+      "reviewed_on": "2026-10-22",
+      "match_method": "同手术游戏盘源表货号T01685-S，与原电子报价客户清溪华登/Toymonster交叉核对",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Toymonster",
+          "cell": "B6",
+          "corroborating_source": {
+            "file": "手术游戏盘核价明细.xlsx",
+            "sheet": "电子报价清单V05",
+            "cell": "A5",
+            "value": "产品名称: 手术游戏         产品编号：        客户名称：清溪华登/Toymonster           报价日期：2024.11.28"
+          }
+        }
+      ]
+    },
+    {
+      "customer": "ToyMonster",
+      "sku": "T01535",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Toymonster!B5",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Toymonster",
+          "cell": "B5"
+        }
+      ]
+    },
+    {
+      "customer": "ToyMonster",
+      "sku": "T02428",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Toymonster!B7",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Toymonster",
+          "cell": "B7"
+        }
+      ]
+    },
+    {
+      "customer": "ToyMonster",
+      "sku": "JW-RV-RPGE",
+      "workshop": "华登",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / Toymonster!B4",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "Toymonster",
+          "cell": "B4"
+        }
+      ]
+    },
+    {
+      "customer": "John Adams",
+      "sku": "11494",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / John Adams!B10",
+      "reviewed_on": "2026-10-22",
+      "match_method": "客户＋正式货号精确匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "John Adams",
+          "cell": "B10"
+        }
+      ]
+    },
+    {
+      "customer": "John Adams",
+      "sku": "12091",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / John Adams!B11",
+      "reviewed_on": "2026-10-22",
+      "match_method": "人工复核客户、短货号核心编号及基础款/补充款品名，与总表完整货号JA120910100唯一对应；未推广为自动去前后缀匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "John Adams",
+          "cell": "B11",
+          "corroborating_source": {
+            "file": "徽章制作机报价基础版0.5mgl 20260831核价.xlsx",
+            "sheet": "最新排模表",
+            "cell": "A3",
+            "value": "客户名称:John Adams                   产品编号: 12091           产品名称：印章机              编制:张春瑜                   审核：                批准：         日期：2026/4/9       共  1  页  第  1  页      "
+          }
+        }
+      ]
+    },
+    {
+      "customer": "John Adams",
+      "sku": "12092_01",
+      "workshop": "兴信A",
+      "source": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx / John Adams!B12",
+      "reviewed_on": "2026-10-22",
+      "match_method": "人工复核客户、短货号核心编号及基础款/补充款品名，与总表完整货号JA120920100唯一对应；未推广为自动去前后缀匹配",
+      "evidence": [
+        {
+          "file": "2026年7--月份各客核价汇总表 汇率0.87  ABS 6.5    ZURU车缝不含税，电子不含税(2).xlsx",
+          "sha256": "0bf189e774bdb261f43e8006aa632c541cdd79163440130a3b3ea498c7631201",
+          "sheet": "John Adams",
+          "cell": "B12",
+          "corroborating_source": {
+            "file": "12092_01印章补充款 核价0.5mgl  20260812.xlsx(增加D2C)(生哥调整).xlsx",
+            "sheet": "FEP核价20260811",
+            "cell": "B1",
+            "value": "12092_01印章补充款"
+          }
+        }
+      ]
     }
   ]
 }

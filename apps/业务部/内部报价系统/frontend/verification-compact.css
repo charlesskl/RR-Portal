@@ -36,6 +36,12 @@
  .verification-tools:has(details[open]){grid-template-columns:minmax(0,1fr)}
 }
 @media(min-width:761px){
+ /* Keep the frozen header flush with the scroll pane so rows cannot peek above it. */
+ #verification-list:not(.hidden) .verification-list-pane{padding-top:0}
+ #verification-list:not(.hidden) .verification-list-table{border-collapse:separate;border-spacing:0}
+ #verification-list:not(.hidden) .verification-list-table thead{box-shadow:0 2px 4px rgba(15,23,42,.1)}
+ #verification-list:not(.hidden) .verification-list-table thead th{background:#f8fafc}
+ #verification-list:not(.hidden) .verification-list-table .verification-column-filters th{background:#fff;border-bottom:1px solid #cbd5e1}
  body:has(#verification-list:not(.hidden)):has(.verification-tools details[open]){overflow:auto}
  .verification-ledger-page:has(#verification-list:not(.hidden)):has(.verification-tools details[open]){height:auto;min-height:calc(100vh - 55px);padding-bottom:0;overflow:visible}
  .verification-tools:has(details[open])+#verification-list:not(.hidden){position:sticky;top:0;flex:0 0 100vh;height:100vh;min-height:0;margin-bottom:0}

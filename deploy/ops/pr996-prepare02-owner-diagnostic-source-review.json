@@ -1,0 +1,15 @@
+{
+  "author": "/root/pr996_ops",
+  "checks": [
+    "Complete source read; fixed failed prepare02 and original backup4 seal/JSON integrity, old read-only Docker inspector and all46 comparison preserved.",
+    "Keytar headers only, bounded metadata aggregate and private path-set comparison; no extractfile/decode/key names or content output. Ownership mismatch is reported, never accepted for restoration.",
+    "Config.User values whitelist and boolean equality only; Docker server version bounded regex. Only docker ps/inspect/version read-only; no application commands, lifecycle, PG/HTTP/model calls.",
+    "Explicit false gate/branch/first attempt, separate private diagnostic archive, immutable original failed evidence retained."
+  ],
+  "executionSuccessClaimed": false,
+  "helperSHA256": "801c84cf122a6c1a9827f7e35b3afd8375150f8b5e4b6c828370609a9428b33b",
+  "independent": true,
+  "remainingBlockers": [],
+  "reviewer": "/root",
+  "status": "CHECKED"
+}

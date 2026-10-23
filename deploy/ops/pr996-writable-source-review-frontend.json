@@ -1,0 +1,52 @@
+{
+  "status": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr996_frontend_review",
+  "reviewedAtUTC": "2026-10-23T03:25:22.541878+00:00",
+  "helperSHA256": "fe65c2d4cc6783cfbd5f4ad2fd71e779f372bb11e2cd3558bb0091163b7129a0",
+  "gateFrozenFalse": true,
+  "failedRun": 39894262611,
+  "failedManifestSHA256": "5535bde68057452928cad0fe48a632af1c7fea42290c8f9d591f29155a53adec",
+  "failedResultSHA256": "887a05699864ab0353f61167814176e32c306e18b84d5332c66c8e1d42cccddd",
+  "branch": "refs/heads/ops/pr-996-20261023-trace-02",
+  "base": "6742f820c0a43388e274b867a2825a42548b5cea",
+  "newPrivateOutput": "/opt/rr-portal/deploy/backups/pr-996-20261023-trace-02",
+  "checks": [
+    "Full exact frozen source read, AST false DIAGNOSTIC_PIN verified. Enabled main accepts only backup CLI, fixed diagnostic branch, first attempt and40hex SHA; no valid enabled invocation was executed by reviewer.",
+    "Only fixed failedB3 manifest/result/sealed original writable-layer list/sealed target-inspect are read. Strict0700 parent/0600 regular O_NOFOLLOW stable files and exact seals bind failed source/base/tree/stage and all seven no-mutation booleans. Original indo container/image/compose identity and healthy running metadata are pinned.",
+    "At most256 unique sealed entries, each bounded4096 characters, are parsed as A/C/D canonical absolute paths. Traversal, double slash, control characters or malformed entries are not probed and remain represented by safe hash plus explicit rejection status, so unknown changes are never ignored.",
+    "Runtime uses actual-newline seven-field Docker inspect with no Env/Config before/after; both must exactly match the sealed original container. Only per-existing-sealed-path docker exec stat -c ... -- PATH is allowed. There is no -L dereference, shell expansion, recursion, ls/find/tar/cat or file-content request, PG/HTTP/model/application/lifecycle/signal command.",
+    "Only known fixed standard aliases may print paths. Unknown names and administrator home paths are hashes plus fixed path class; no arbitrary customer filename, key UUID, source, environment, credential or administrator-home literal is emitted. stderr is discarded, errors become fixed statuses without exception messages.",
+    "Only filesystem object type/mode/uid/gid/byte length and numeric stat return code are exposed. D-path stat failure includes absenceIsStatFailureOnly=True and does not prove nonexistence; a deleted entry now present is explicit. Symlinks are classified with link metadata, not followed.",
+    "Each stat is bounded10seconds; total120seconds includes before/after runtime guards and reserves the final runtime check. Exhausted/timeout entries remain explicit not_probed statuses. Main rejects if total deadline exceeded. No missing metadata is treated as safe for release.",
+    "Only a new exclusive0700 output directory and0600 canonical result/manifest are written. Old failed evidence, state, OPS and container configuration/data remain unchanged. This is diagnostic acceptance only; no unknown path is allowed for deployment by this helper."
+  ],
+  "fixtures": {
+    "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr996-writable-diagnostic-ops.py",
+    "sha256": "b2a8f026c7a3f4ccb9927edc610729d4f337366b879aec9e31debbc1b8fdb7fd",
+    "existingAuthorLogPath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-writable-diagnostic-tests-ops.log",
+    "existingAuthorLogSHA256": "65b0b37b2e3ae3b7226d94db4d0672bd49711b01d55f9306008615f11e29ad13",
+    "passed": 4,
+    "failed": 0,
+    "independentlyReadSourceAndExpectedAssertions": true,
+    "independentlyRepeated": false,
+    "coverage": [
+      "Falsegate before IO",
+      "Known aliases, unknown names and administrator-home redaction; noncanonical path rejected",
+      "lstat regular/directory/link/socket types, fixed stat command and failure status",
+      "Runtime actual-newline format and identity-drift rejection"
+    ]
+  },
+  "reviewerActions": {
+    "validMainExecuted": false,
+    "networkOrRealDockerPerformed": false,
+    "stateOrOPSModified": false,
+    "remoteMutations": false,
+    "extraOrRepeatedSuites": false
+  },
+  "boundaries": [
+    "Exact inert diagnostic helper only; transport and activation require separate reviewed workflow.",
+    "Diagnostic path classifications and stat failure are not permission to ignore or discard persistent files; actual results must inform a separately reviewed preservation plan."
+  ],
+  "remainingBlockers": []
+}

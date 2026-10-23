@@ -1,7 +1,6 @@
 using Dapper;
 using IndoShipping.Api.Auditing;
 using IndoShipping.Api.Features.Purchasing;
-using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
 
@@ -81,33 +80,12 @@ public partial class PurchaseOrdersController
                 return Reject("采购明细币种必须一致，且不能含未知币种");
             // Enforce customer isolation on the server, including older orders
             // which predate the customer-aware purchase picker.
-            var products = (await c.QueryAsync<PurchaseCustomerIsolation.Product>(
-                "SELECT code AS Code,customer AS Customer FROM products", transaction: tx)).ToList();
-            var snapshots = await c.QueryAsync<(string customer, string raw)>(
-                "SELECT customer,raw_rows::text FROM schedules", transaction: tx);
-            var schedules = new List<PurchaseCustomerIsolation.Schedule>();
-            foreach (var snapshot in snapshots)
+            try
             {
-                using var doc = JsonDocument.Parse(snapshot.raw ?? "[]");
-                if (doc.RootElement.ValueKind != JsonValueKind.Array) continue;
-                foreach (var row in doc.RootElement.EnumerateArray())
-                {
-                    if (row.ValueKind != JsonValueKind.Object) continue;
-                    string Field(string key) => row.TryGetProperty(key, out var value) ? value.ToString().Trim() : "";
-                    var code = Field("code");
-                    var order = Field("orderNo");
-                    if (code.Length > 0 && order.Length > 0)
-                        schedules.Add(new(code, order, string.IsNullOrWhiteSpace(Field("customer")) ? snapshot.customer : Field("customer")));
-                }
+                await PurchaseCustomerValidation.ValidateAsync(c, tx, items.Select(item =>
+                    new PurchaseCustomerValidation.Line((string?)item.product_code, (string?)item.tomy_po, (int?)item.material_id)));
             }
-            var customers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var item in items)
-            {
-                try { customers.Add(PurchaseCustomerIsolation.Resolve((string?)item.product_code, (string?)item.tomy_po, products, schedules)); }
-                catch (InvalidOperationException ex) { return Reject(ex.Message); }
-            }
-            if (customers.Count != 1)
-                return Reject($"不同客户的采购单不能合并（{string.Join("、", customers)}），请按客户分别处理");
+            catch (InvalidOperationException ex) { return Reject(ex.Message); }
             var poNos = orders.Select(p => (string)p.po_no).ToArray();
             var occupied = await c.ExecuteScalarAsync<bool>("""
                 SELECT EXISTS(SELECT 1 FROM po_receipts r JOIN po_items i ON i.id=r.po_item_id WHERE i.po_id=ANY(@ids))

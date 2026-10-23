@@ -833,6 +833,7 @@ public class MaterialCompletionIntegrationTests
                         '[{"moldId":"M1","moldName":"模具","category":"塑胶","parts":[]}]',true);
                     """);
                 await db.ExecuteAsync(MaterialTrackingHistory.SchemaSql);
+                await db.ExecuteAsync("ALTER TABLE products ADD COLUMN customer text");
                 await db.ExecuteAsync(ScheduleCustomerSchema.SchemaSql);
                 await using var tx = await db.BeginTransactionAsync();
                 await MaterialTrackingHistory.CaptureAsync(db, tx);

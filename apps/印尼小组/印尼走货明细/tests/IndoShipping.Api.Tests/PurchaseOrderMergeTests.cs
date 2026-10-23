@@ -401,6 +401,7 @@ public sealed class PurchaseOrderMergeTests
                 CREATE TABLE audit_logs(user_id int,username text,module text,action text,entity_type text,entity_id text,
                     summary text,details jsonb,ip_address text);
                 CREATE TABLE products(code text PRIMARY KEY,customer text);
+                CREATE TABLE tool_materials(material_id int PRIMARY KEY);
                 CREATE TABLE schedules(customer text NOT NULL DEFAULT 'TOMY',raw_rows jsonb);
                 INSERT INTO products(code,customer) VALUES ('35874','TOMY'),('35875','TOMY'),('35876','TOMY');
                 INSERT INTO purchase_orders(id,po_no,supplier,order_date,delivery_date,notes) VALUES

@@ -20,16 +20,23 @@ public class PurchaseCustomerIsolationTests
 
     [Theory]
     [InlineData("47669TSCA")]
-    [InlineData("LEGACY")]
     public void Catalogue_supports_legacy_tomy_codes(string code) =>
         Assert.Equal("TOMY", PurchaseCustomerIsolation.Resolve(code, "", Products, []));
 
     [Fact]
     public void Missing_and_mixed_customers_are_rejected()
     {
+        Assert.Throws<InvalidOperationException>(() => PurchaseCustomerIsolation.Resolve("LEGACY", "", Products, []));
         Assert.Throws<InvalidOperationException>(() => PurchaseCustomerIsolation.Resolve("94704/1099803/6077834 / 47669", "", Products, []));
         Assert.Throws<InvalidOperationException>(() => PurchaseCustomerIsolation.Resolve("94704/1099803/6077835", "", Products, []));
         Assert.Throws<InvalidOperationException>(() => PurchaseCustomerIsolation.Resolve("", "", Products, []));
+    }
+
+    [Fact]
+    public void Unknown_compound_skus_are_not_reinterpreted_as_known_component_products()
+    {
+        PurchaseCustomerIsolation.Product[] prefixes = [new("100", "TOMY"), new("200", "TOMY"), new("300", "TOMY")];
+        Assert.Throws<InvalidOperationException>(() => PurchaseCustomerIsolation.Resolve("100/200/300", "", prefixes, []));
     }
 
     [Fact]

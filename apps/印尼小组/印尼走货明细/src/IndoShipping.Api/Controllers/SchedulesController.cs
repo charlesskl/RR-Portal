@@ -1,9 +1,11 @@
 using System.Text.Json;
 using Dapper;
 using IndoShipping.Api.Features.Bootstrap;
+using IndoShipping.Api.Features.Purchasing;
 using IndoShipping.Api.Features.Schedules;
 using IndoShipping.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
+using Npgsql;
 
 namespace IndoShipping.Api.Controllers;
 
@@ -172,6 +174,29 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;",
         using var c = factory.Create();
         c.Open();
         using var tx = c.BeginTransaction();
+        // Only explicit catalogue ownership can reject an upload. Unknown products
+        // remain valid imports; a prefix must never assign a compound SKU's owner.
+        try
+        {
+            var products = await PurchaseCustomerValidation.ProductsAsync(c, tx,
+                importedRows.Select(r => ScheduleLineHistory.Field(r, "code")));
+            foreach (var row in importedRows)
+            {
+                var code = ScheduleLineHistory.Field(row, "code");
+                var product = products.FirstOrDefault(p => p.Code.Equals(code, StringComparison.OrdinalIgnoreCase));
+                var owner = PurchaseCustomerIsolation.Normalize(product?.Customer);
+                if (owner.Length > 0 && !owner.Equals(customer, StringComparison.OrdinalIgnoreCase))
+                {
+                    tx.Rollback();
+                    return BadRequest(new { error = "排期客户与货号库的明确客户不一致，请核对后重新上传" });
+                }
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState == "55P03")
+        {
+            tx.Rollback();
+            return Conflict(new { error = "货号正在被修改，未保存排期，请刷新后重试" });
+        }
         await MaterialTrackingHistory.CaptureAsync(c, tx);
         // Freeze the current read-only identities before a backfill can change history order.
         // Store metadata separately so existing material-completion hashes remain valid.

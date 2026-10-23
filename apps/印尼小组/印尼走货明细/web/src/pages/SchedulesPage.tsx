@@ -47,6 +47,15 @@ interface Diff {
   removed?: SchedRow[]
   changed?: { from?: SchedRow; to?: SchedRow }[]
 }
+interface ScheduleUploadDraft {
+  session: number
+  request: number
+  open: boolean
+  phase: 'idle' | 'parsing' | 'ready' | 'uploading'
+  rows: SchedRow[]
+  customer: string
+  weekLabel: string
+}
 
 export default function SchedulesPage() {
   const { message } = App.useApp()
@@ -60,6 +69,12 @@ export default function SchedulesPage() {
   const [uploadRows, setUploadRows] = useState<SchedRow[]>([])
   const [customerFilter, setCustomerFilter] = useState<string>()
   const [uploadCustomer, setUploadCustomer] = useState('')
+  const [uploadSessionId, setUploadSessionId] = useState(0)
+  const [parsing, setParsing] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const uploadDraftRef = useRef<ScheduleUploadDraft>({
+    session: 0, request: 0, open: false, phase: 'idle', rows: [], customer: '', weekLabel: '',
+  })
   const [customers, setCustomers] = useState<string[]>([])
   const customerNames = [...new Set(['TOMY', 'Spin Master', ...customers, ...rows.map(r => r.customer || 'TOMY')])]
   const customerOptions = customerNames.map(value => ({ label: value, value }))
@@ -75,6 +90,7 @@ export default function SchedulesPage() {
   }
   useEffect(() => { load() }, [])
   useEffect(() => { api.get<string[]>('/customers').then(({ data }) => setCustomers(data || [])).catch(() => {}) }, [])
+  useEffect(() => () => { uploadDraftRef.current.open = false; uploadDraftRef.current.request++ }, [])
 
   async function openDetail(id: number) {
     setOpenId(id); setDetail(null)
@@ -85,37 +101,90 @@ export default function SchedulesPage() {
       message.error('加载失败: ' + (e?.message ?? e))
     }
   }
+  function resetUploadContext(open: boolean, customer = '') {
+    const session = uploadDraftRef.current.session + 1
+    uploadDraftRef.current = { session, request: 0, open, phase: 'idle', rows: [], customer, weekLabel: '' }
+    setUploadSessionId(session)
+    setShowUpload(open); setUploadRows([]); setUploadCustomer(customer); setWeekLabel('')
+    setParsing(false); setUploading(false)
+  }
+  function openUpload() {
+    if (uploadDraftRef.current.phase !== 'uploading') resetUploadContext(true, customerFilter || '')
+  }
+  function closeUpload() {
+    const draft = uploadDraftRef.current
+    if (draft.session === uploadSessionId && draft.phase !== 'uploading') resetUploadContext(false)
+  }
+  function changeUploadCustomer(value?: string) {
+    const draft = uploadDraftRef.current
+    if (!draft.open || draft.session !== uploadSessionId || draft.phase === 'uploading') return
+    draft.request++; draft.phase = 'idle'; draft.rows = []; draft.customer = value || ''
+    setUploadCustomer(draft.customer); setUploadRows([]); setParsing(false)
+  }
+  function changeUploadWeekLabel(value: string) {
+    const draft = uploadDraftRef.current
+    if (!draft.open || draft.session !== uploadSessionId || draft.phase === 'uploading') return
+    draft.weekLabel = value
+    setWeekLabel(value)
+  }
   async function parseFile(file: File) {
+    const draft = uploadDraftRef.current
+    if (!draft.open || draft.session !== uploadSessionId || draft.phase === 'uploading') return
+    const session = draft.session, request = ++draft.request, customer = draft.customer
+    const current = () => uploadDraftRef.current.open && uploadDraftRef.current.session === session
+      && uploadDraftRef.current.request === request
+    draft.phase = 'parsing'; draft.rows = []
     setUploadRows([])
+    setParsing(true)
     try {
       const XLSX = await import('xlsx')
-      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false })
-      const parsed = parseScheduleWorkbook(wb, XLSX.utils, uploadCustomer)
+      const bytes = await file.arrayBuffer()
+      if (!current()) return
+      const wb = XLSX.read(bytes, { type: 'array', cellDates: false })
+      const parsed = parseScheduleWorkbook(wb, XLSX.utils, customer)
+      if (!current()) return
+      draft.phase = 'ready'; draft.rows = parsed.rows; draft.customer = parsed.customer
       setUploadRows(parsed.rows)
       setUploadCustomer(parsed.customer)
-      if (!weekLabel) setWeekLabel(suggestWeekLabel())
+      if (!draft.weekLabel) { draft.weekLabel = suggestWeekLabel(); setWeekLabel(draft.weekLabel) }
       message.success(`已识别 ${parsed.customer} 排期 ${parsed.rows.length} 条；仅导入总排期主表`)
     } catch (e: any) {
+      if (!current()) return
+      draft.phase = 'idle'
       message.error('解析失败: ' + (e?.message ?? e))
-    }
+    } finally { if (current()) setParsing(false) }
   }
 
   async function upload() {
-    if (!weekLabel.trim()) { message.warning('请填写周次标签'); return }
-    if (!uploadRows.length) { message.warning('请先选 Excel'); return }
+    const draft = uploadDraftRef.current
+    // The visible confirmation must still describe this session's parsed draft.
+    // An old modal callback cannot submit a later session or a replacement file.
+    if (!draft.open || draft.session !== uploadSessionId || draft.phase === 'uploading') return
+    if (draft.phase !== 'ready' || draft.rows !== uploadRows || draft.customer !== uploadCustomer
+      || draft.weekLabel !== weekLabel) return
+    if (!draft.weekLabel.trim()) { message.warning('请填写周次标签'); return }
+    if (!draft.rows.length) { message.warning('请先选 Excel'); return }
+    const session = draft.session, request = draft.request
+    const current = () => uploadDraftRef.current.open && uploadDraftRef.current.session === session
+      && uploadDraftRef.current.request === request
+    draft.phase = 'uploading'
+    setUploading(true)
     try {
       await api.post('/schedules', {
-        customer: uploadCustomer,
-        week_label: weekLabel.trim(),
+        customer: draft.customer,
+        week_label: draft.weekLabel.trim(),
         upload_date: dayjs().format('YYYY-MM-DD'),
-        raw_rows: uploadRows,
+        raw_rows: draft.rows,
       })
-      message.success(`已上传 ${uploadRows.length} 行`)
-      setShowUpload(false); setUploadRows([]); setWeekLabel(''); setUploadCustomer('')
+      if (!current()) return
+      message.success(`已上传 ${draft.rows.length} 行`)
+      resetUploadContext(false)
       load()
     } catch (e: any) {
+      if (!current()) return
+      draft.phase = 'ready'
       message.error('上传失败: ' + (e?.message ?? e))
-    }
+    } finally { if (current()) setUploading(false) }
   }
 
   return (
@@ -134,7 +203,7 @@ export default function SchedulesPage() {
             <Select allowClear showSearch placeholder="全部客户" style={{ width: 180 }}
               value={customerFilter} options={customerOptions} onChange={setCustomerFilter} />
             <Button onClick={load}>🔄 刷新</Button>
-            <Button type="primary" onClick={() => { setUploadCustomer(customerFilter || ''); setShowUpload(true) }}>📥 上传新周次</Button>
+            <Button type="primary" onClick={openUpload}>📥 上传新周次</Button>
           </Space>
         }
       >
@@ -177,9 +246,12 @@ export default function SchedulesPage() {
         open={showUpload}
         title="上传新周次排期"
         width={780}
-        onCancel={() => { setShowUpload(false); setUploadRows([]); setWeekLabel(''); setUploadCustomer('') }}
+        onCancel={closeUpload}
         onOk={upload}
         okText="上传"
+        confirmLoading={uploading}
+        okButtonProps={{ disabled: parsing || !uploadRows.length }}
+        closable={!uploading} maskClosable={!uploading} keyboard={!uploading}
         destroyOnClose
       >
         <Space direction="vertical" style={{ width: '100%' }}>
@@ -187,13 +259,15 @@ export default function SchedulesPage() {
             <span>客户：</span>
             <Select allowClear showSearch placeholder="从文件识别客户（TOMY 模板默认 TOMY）" style={{ width: 360 }}
               value={uploadCustomer || undefined} options={customerOptions}
-              onChange={value => { setUploadCustomer(value || ''); setUploadRows([]) }} />
+              disabled={uploading} onChange={changeUploadCustomer} />
           </Space>
           <Space>
             <span>周次标签：</span>
-            <Input value={weekLabel} onChange={(e) => setWeekLabel(e.target.value)} placeholder="例如 W23 / 2026-W23 / 2026-06-08" style={{ width: 280 }} />
-            <Button onClick={() => fileRef.current?.click()}>📂 选 Excel</Button>
+            <Input value={weekLabel} disabled={uploading} onChange={(e) => changeUploadWeekLabel(e.target.value)} placeholder="例如 W23 / 2026-W23 / 2026-06-08" style={{ width: 280 }} />
+            <Button disabled={uploading} onClick={() => fileRef.current?.click()}>📂 选 Excel</Button>
+            {parsing && <Typography.Text type="secondary">正在读取文件…</Typography.Text>}
             <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
+              disabled={uploading}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) parseFile(f); e.target.value = '' }} />
           </Space>
           <Typography.Text type="secondary">

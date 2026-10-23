@@ -104,7 +104,7 @@ export default function ProductsPage() {
         moldings,
       })
       // Replace materials via bulk PUT. Backend upserts by id; rows removed in UI are soft-removed if referenced, else deleted.
-      const { data: materialSave } = await api.put(`/materials/bulk/${encodeURIComponent(code)}`, {
+      const { data: materialSave } = await api.put(`/materials/bulk/by-code?code=${encodeURIComponent(code)}`, {
         materials: materials.map((m) => ({
           ...(m.id != null ? { id: m.id } : {}),
           itemNo: m.item_no ?? '',

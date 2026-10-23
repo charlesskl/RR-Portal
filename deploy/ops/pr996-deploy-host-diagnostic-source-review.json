@@ -1,0 +1,15 @@
+{
+  "author": "/root/pr996_ops",
+  "checks": [
+    "Full source read; exact sealed failed deploy+backup raw/closed keys and PG metadata, no business content output.",
+    "Only bounded Docker inspect/ps/version and exact-container fixed-key-directory archive HEAD via local socket; no body or lifecycle. Reinspect same CID afterward prevents missing-container404 misclassification.",
+    "HostConfig differences expose only whitelisted scalar values or typed hashes/counts; LogConfig secrets/env/key/rows not printed. Source-only recovery frames no exception text.",
+    "Current candidate identity/status/neverstarted, original45 exact inspector metadata and private closed key/PG seals recorded, old failed evidence unchanged."
+  ],
+  "executionSuccessClaimed": false,
+  "helperSHA256": "0f170170d184040d83622532d891bf5aa0e0b02a5145d4c400a7153ca650fe5f",
+  "independent": true,
+  "remainingBlockers": [],
+  "reviewer": "/root",
+  "status": "CHECKED"
+}

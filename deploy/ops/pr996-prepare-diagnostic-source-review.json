@@ -1,0 +1,18 @@
+{
+  "author": "/root/pr996_ops",
+  "checks": [
+    "Full source read: fixed failed-prepare and backup4 seals, bounded duplicate-safe JSON, symlink and stable-file checks, complete failed archive digest validation.",
+    "Outputs only boolean assertion results/counts/known static label names. No label values, mailbox secrets, environment values, key material or business records printed.",
+    "Only Docker ps and inspect read-only metadata, strict IDs/original46 contract before-after comparison. No exec/SQL/HTTP/lifecycle/model/configuration writes.",
+    "One independent private diagnostic result archive; false gate, exact branch/first attempt. Original sealed failed evidence and primary state preserved."
+  ],
+  "helperSHA256": "869ed9a5a7f406b9d2e7e0db5841564d74d06472ec7013cc7636001ea4156271",
+  "independent": true,
+  "limits": [
+    "Server key/PG artifacts are only hashed for original manifest integrity; their content is never decoded or printed.",
+    "No actual diagnostic success or original runtime match is claimed before execution."
+  ],
+  "remainingBlockers": [],
+  "reviewer": "/root",
+  "status": "CHECKED"
+}

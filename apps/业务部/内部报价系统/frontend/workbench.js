@@ -1017,7 +1017,12 @@ function weightedPaintingProcSum(payload, procKey) {
 // ==================== 工程：模具部分（表格布局，对齐 sheet1 / 导出格式） ====================
 function syncMoldFromParts(mold) {
   const parts = Array.isArray(mold.parts) ? mold.parts : [];
-  if (!parts.length) return;
+  if (!parts.length) {
+    if (Array.isArray(mold.parts)) {
+      mold.name = ''; mold.cavity = ''; mold.weight_g = null; mold.images = [];
+    }
+    return;
+  }
   mold.name = [...new Set(parts.map(p => String(p.name || '').trim()).filter(Boolean))].join('/');
   const cavityTotal = parts.reduce((total, part) => {
     const nums = String(part.cavity || '').match(/[\d.]+/g);
@@ -1027,6 +1032,16 @@ function syncMoldFromParts(mold) {
   const weights = parts.map(p => p.weight_g).filter(v => v !== null && v !== '' && Number.isFinite(Number(v)));
   mold.weight_g = weights.length ? +weights.reduce((a, v) => a + Number(v), 0).toFixed(4) : null;
   mold.images = [...new Set(parts.flatMap(p => p.images || []).filter(Boolean))];
+}
+
+function addMoldPart(mold) {
+  // Preserve any data entered before a plain manual row becomes a multi-part mold.
+  if (!Array.isArray(mold.parts) || !mold.parts.length) {
+    mold.parts = [{ name: mold.name || '', cavity: mold.cavity ?? '', weight_g: mold.weight_g ?? null, images: [...(mold.images || [])] }];
+  }
+  const part = { name: '', cavity: '', weight_g: null, images: [] };
+  mold.parts.push(part);
+  return part;
 }
 
 function addManualMoldGroup(molds, name) {
@@ -1206,11 +1221,6 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
             }
             td.appendChild(nameRow);
           });
-          if (canEdit) {
-            const addPart = document.createElement('button'); addPart.className = 'mini'; addPart.textContent = '+ 配件';
-            addPart.onclick = () => { m.parts.push({ name: '', cavity: '', weight_g: null, images: [] }); renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd); onChange(); };
-            td.appendChild(addPart);
-          }
         } else if (hasPartRows && k === 'cavity') {
           m.parts.forEach(part => {
             const cavityRow = document.createElement('div');
@@ -1271,6 +1281,12 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
           };
           td.appendChild(inp);
         }
+      }
+      if (canEdit && f && f[0] === 'name') {
+        const addPart = document.createElement('button');
+        addPart.type = 'button'; addPart.className = 'mini'; addPart.textContent = '+ 配件';
+        addPart.onclick = () => { addMoldPart(m); renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd); onChange(); };
+        td.appendChild(addPart);
       }
       tr.appendChild(td);
     });

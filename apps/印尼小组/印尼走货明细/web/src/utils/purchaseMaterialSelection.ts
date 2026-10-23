@@ -1,4 +1,5 @@
 import type { Material } from '../api/client'
+import { purchaseScheduleCustomer } from './purchaseCustomer'
 
 export interface PurchaseMaterialGroup {
   key: string
@@ -46,8 +47,9 @@ export function purchaseMaterialLine(choice: PurchaseMaterialChoice, currency: s
   }
 }
 
-export function purchaseMaterialBucket(source: string | undefined, supplier: string, groupKey?: string) {
-  return [(source || '').trim().toUpperCase() === 'RRM' ? 'RRM' : 'RRI', supplier, groupKey ?? ''].join('\u0000')
+export function purchaseMaterialBucket(source: string | undefined, supplier: string, groupKey?: string, customer?: string) {
+  return [(source || '').trim().toUpperCase() === 'RRM' ? 'RRM' : 'RRI', supplier, groupKey ?? '',
+    purchaseScheduleCustomer({ source, customer })].join('\u0000')
 }
 
 export function purchaseSelectionSource(choices: PurchaseMaterialChoice[], sources: Record<string, string | undefined>, currentPoNo = '', existingSources: (string | undefined)[] = []) {

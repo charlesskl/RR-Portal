@@ -33,6 +33,7 @@ public class ScheduleLineIntegrationTests
                 INSERT INTO settings VALUES ('schedule_placed_manual','["MA|47712A"]');
                 """);
             await db.ExecuteAsync(MaterialTrackingHistory.SchemaSql);
+            await db.ExecuteAsync(ScheduleCustomerSchema.SchemaSql);
             var controller = new SchedulesController(new SqlConnectionFactory(options.ConnectionString));
             const string old = """{"source":"KIK","customer":"TOMY","code":"47712A","orderNo":"MA","qty":100,"eta":"2026-11-01"}""";
             const string added = """{"source":"KIK","customer":"TOMY","code":"47712A","orderNo":"MA","qty":200,"eta":"2026-12-01"}""";
@@ -92,6 +93,7 @@ public class ScheduleLineIntegrationTests
                 CREATE TABLE products(code text, name text, moldings jsonb, active boolean);
                 """);
             await db.ExecuteAsync(MaterialTrackingHistory.SchemaSql);
+            await db.ExecuteAsync(ScheduleCustomerSchema.SchemaSql);
             const string old = """{"source":"KIK","customer":"TOMY","code":"47712A","orderNo":"MA","qty":100,"eta":"2026-11-01"}""";
             const string added = """{"source":"KIK","customer":"TOMY","code":"47800A","orderNo":"MA","qty":200,"eta":"2026-12-01"}""";
             await db.ExecuteAsync("""

@@ -145,11 +145,8 @@ export default function MoldingPosPage() {
   }
   async function loadLatestSchedule() {
     try {
-      const { data: list } = await api.get<{ id: number }[]>('/schedules')
-      if (!list?.length) return
-      const top = list[0]
-      const { data: det } = await api.get<{ raw_rows?: string }>(`/schedules/${top.id}`)
-      const parsed = det.raw_rows ? JSON.parse(det.raw_rows) as SchedRow[] : []
+      const { data } = await api.get<{ raw_rows?: string }>('/schedules/latest')
+      const parsed = data.raw_rows ? JSON.parse(data.raw_rows) : []
       setSchedRows(Array.isArray(parsed) ? parsed : [])
     } catch {}
   }
@@ -187,7 +184,7 @@ export default function MoldingPosPage() {
     const prodMap = new Map<string, any>()
     await Promise.all(codes.map(async code => {
       try {
-        const { data } = await api.get<any>(`/products/${encodeURIComponent(code)}`)
+        const { data } = await api.get<any>(`/products/by-code?code=${encodeURIComponent(code)}`)
         prodMap.set(code, data)
       } catch {}
     }))

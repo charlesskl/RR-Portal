@@ -342,15 +342,20 @@ export async function importEngineeringFile(file: File, opts?: { hsDict?: HsDict
     // 取值截断：遇「2+空格(列分隔)」或「下一个标签词」或行尾即止（应对同格多字段且仅单空格分隔）
     const STOP = '(?=\\s{2,}|\\s+(?:客户|产品|编制|审核|批准|日期|版本|文件|页码|PAGE|Product|Customer|No\\.|Revisi|Tgl|Halaman|Nama|Nomer|Disiapkan|Diperiksa|Disetujui|Tanggal)|$)'
     // 货号值：取冒号后连续非空白；名称/客户值：到截断处之前
-    code ||= findVal(codeKeys, k => new RegExp(`${boundary}${k}\\s*[：:]\\s*(\\S+)`, 'gi'))
+    const headerCode = findVal(codeKeys, k => new RegExp(`${boundary}${k}\\s*[：:]\\s*(\\S+)`, 'gi')).replace(/\s*\/\s*/g, '/')
+    // Some Spin Master mold headers use the family number; the purchased-parts
+    // header identifies the exact product/pack. Prefer that full code, not its prefix.
+    const moreSpecificCode = !!code && !code.includes('/') && headerCode.startsWith(code + '/')
+    if (!code || moreSpecificCode) code = headerCode
     // 客户：跳过英文占位（含 Customer/Name/名称）；取首个真实值（如 TOMY）
     const customerKeys = ['客户名称', '客户', 'Customer', '客户名']
     customer ||= findVal(customerKeys,
       k => new RegExp(`${boundary}${k}\\s*[：:]\\s*([^\\s].*?)${STOP}`, 'gi'),
       v => /customer|name|名称/i.test(v))
-    name ||= findVal(nameKeys, k => new RegExp(`${boundary}${k}\\s*[：:]\\s*([^\\s].*?)${STOP}`, 'gi'))
-    if (code && name && customer) break
+    const headerName = findVal(nameKeys, k => new RegExp(`${boundary}${k}\\s*[：:]\\s*([^\\s].*?)${STOP}`, 'gi'))
+    if (!name || moreSpecificCode) name = headerName || name
   }
+  if (/^spin\s*master$/i.test(customer)) customer = 'Spin Master'
   if (!code) {
     // Dump first few rows for debugging
     const previewSheet = snMold ?? snExt!

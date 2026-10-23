@@ -19,6 +19,30 @@ public class ScheduleLineHistoryTests
     static bool Eligible(JsonObject r) => r["_legacyPlacedEligible"]!.GetValue<bool>();
 
     [Fact]
+    public void Interleaved_customers_compare_only_their_own_previous_period()
+    {
+        JsonObject Spin(int qty) { var row = Row(qty); row["customer"] = "Spin Master"; return row; }
+        var views = ScheduleLineHistory.Build([
+            Snapshot(1, "2026-W41", Row()),
+            Snapshot(2, "2026-W41", Spin(100)) with { Customer = "Spin Master" },
+            Snapshot(3, "2026-W42", Row(150)),
+            Snapshot(4, "2026-W43", Spin(200)) with { Customer = "Spin Master" }
+        ]).ToDictionary(v => v.Snapshot.Id);
+        Assert.Empty(views[2].Diff.removed);
+        Assert.Single(views[2].Diff.added);
+        Assert.Equal(Id(views[1].Rows[0]), Id(views[3].Rows[0]));
+        Assert.Equal(Id(views[2].Rows[0]), Id(views[4].Rows[0]));
+        Assert.NotEqual(Id(views[1].Rows[0]), Id(views[2].Rows[0]));
+        Assert.Single(views[3].Diff.changed);
+        Assert.Single(views[4].Diff.changed);
+        Assert.Empty(views[3].Diff.removed);
+        Assert.Empty(views[4].Diff.added);
+        // A legacy PO + code flag is not copied onto another customer's order.
+        Assert.True(Eligible(views[1].Rows[0]));
+        Assert.False(Eligible(views[2].Rows[0]));
+    }
+
+    [Fact]
     public void New_duplicate_is_added_and_does_not_inherit_old_flags()
     {
         var views = ScheduleLineHistory.Build([

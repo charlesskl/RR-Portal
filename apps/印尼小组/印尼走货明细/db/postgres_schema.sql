@@ -157,7 +157,8 @@ CREATE TABLE IF NOT EXISTS schedules (
     raw_rows        JSONB        NULL,   -- JSON（T-SQL 原为 NVARCHAR(MAX) + ISJSON CHECK）
     diff_from_prev  JSONB        NULL,   -- JSON（同上）
     created_at      TIMESTAMP(0) NOT NULL DEFAULT now(),
-    CONSTRAINT "UQ_schedules_week_label" UNIQUE (week_label)
+    customer        TEXT NOT NULL DEFAULT 'TOMY',
+    CONSTRAINT ix_schedules_customer_week UNIQUE (customer, week_label)
 );
 
 -- ============ 采购 ============

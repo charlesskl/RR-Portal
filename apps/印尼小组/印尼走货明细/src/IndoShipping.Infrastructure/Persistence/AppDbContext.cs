@@ -178,12 +178,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("schedules");
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.Customer).HasColumnName("customer").HasDefaultValue("TOMY");
             e.Property(x => x.WeekLabel).HasColumnName("week_label").HasMaxLength(64);
             e.Property(x => x.UploadDate).HasColumnName("upload_date");
             e.Property(x => x.RawRows).HasColumnName("raw_rows");
             e.Property(x => x.DiffFromPrev).HasColumnName("diff_from_prev");
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
-            e.HasIndex(x => x.WeekLabel).IsUnique();
+            e.HasIndex(x => new { x.Customer, x.WeekLabel }).IsUnique().HasDatabaseName("ix_schedules_customer_week");
         });
 
         b.Entity<OutboundRecord>(e =>

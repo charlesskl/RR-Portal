@@ -8,7 +8,19 @@ interface PurchaseCustomsItem {
 }
 
 const key = (value?: string) => (value || '').trim().toLocaleLowerCase()
-export const purchaseItemCodes = (code?: string) => [...new Set((code || '').split('/').map(c => c.trim()).filter(Boolean))]
+export function purchaseItemCodes(code?: string, knownCodes: (string | undefined)[] = []) {
+  const parts = (code || '').split('/').map(c => c.trim()).filter(Boolean)
+  const known = new Set(knownCodes.map(key).filter(Boolean))
+  const result: string[] = []
+  // Longest exact library code wins, including compound codes inside merged rows.
+  for (let start = 0; start < parts.length;) {
+    let end = parts.length
+    while (end > start + 1 && !known.has(key(parts.slice(start, end).join('/')))) end--
+    result.push(parts.slice(start, end).join('/'))
+    start = end
+  }
+  return [...new Set(result)]
+}
 
 // 编号涉及合同主体，不能使用包含式简称匹配或从重复档案中随意取第一条。
 function exactProfile(name: string, profiles: SupplierDict[]) {
@@ -30,7 +42,7 @@ export function resolvePurchaseCustoms(items: PurchaseCustomsItem[], supplier: s
   items.forEach((item, index) => {
     const line = `第 ${index + 1} 行「${item.material_name || '未命名物料'}」`
     const linked = item.material_id == null ? undefined : materials.find(m => Number(m.id) === Number(item.material_id))
-    const codes = purchaseItemCodes(item.product_code)
+    const codes = purchaseItemCodes(item.product_code, materials.map(m => m.product_code))
     // 合并多货号的行必须逐个核对，不能仅取合并后保留的第一个 ID。
     const matches = linked && codes.length <= 1 ? [linked] : codes.map(code => {
       const candidates = materials.filter(m => key(m.product_code) === key(code)

@@ -18,15 +18,16 @@ export function roundPurchaseContractAmount(amount: number): number {
 }
 
 /** 数量沿用单位精度，按原金额反算单价，避免数量舍入改变金额。 */
-export function setPurchaseContractLineAmounts(ws: XLSX.WorkSheet, row: number, quantity: number, amount: number, quantityDigits: number) {
+export function setPurchaseContractLineAmounts(ws: XLSX.WorkSheet, row: number, quantity: number, amount: number, quantityDigits: number, unit?: string) {
   const exportQuantity = Number(quantity.toFixed(quantityDigits))
   const exportAmount = roundPurchaseContractAmount(amount)
   const price = exportQuantity !== 0 ? exportAmount / exportQuantity : 0
-  ws[`D${row}`] = { ...ws[`D${row}`], t: 'n', v: exportQuantity, z: `0.${'#'.repeat(quantityDigits)}` }
+  const isKilogram = ['KGM', 'KG', '千克', '公斤'].includes(String(unit || '').trim().toUpperCase())
+  ws[`D${row}`] = { ...ws[`D${row}`], t: 'n', v: exportQuantity, z: isKilogram ? '0.00' : `0.${'#'.repeat(quantityDigits)}` }
   // 数量舍入为零时无法反算单价；留空单价并保留原金额，不产生除零或错误的零金额。
   ws[`F${row}`] = exportQuantity === 0 && exportAmount !== 0
     ? { ...ws[`F${row}`], t: 's', v: '', f: undefined }
-    : { ...ws[`F${row}`], t: 'n', v: price, z: '0.00' } // 仅显示两位，计算保留完整单价。
+    : { ...ws[`F${row}`], t: 'n', v: price, z: '0.0000' } // 仅显示四位，计算保留完整单价。
   ws[`G${row}`] = {
     ...ws[`G${row}`], t: 'n', v: exportAmount,
     f: exportQuantity === 0 && exportAmount !== 0 ? undefined : `ROUND(D${row}*F${row},2)`, z: '0.00',

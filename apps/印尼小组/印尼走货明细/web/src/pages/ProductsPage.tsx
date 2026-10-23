@@ -80,7 +80,7 @@ export default function ProductsPage() {
     setTimeout(() => form.setFieldsValue({ code: p.code, name: p.name, customer: p.customer }), 0)
     setMoldings([]); setMaterials([])
     try {
-      const { data } = await api.get<ProductDetail>(`/products/${encodeURIComponent(p.code)}`)
+      const { data } = await api.get<ProductDetail>(`/products/by-code?code=${encodeURIComponent(p.code)}`)
       setMoldings(Array.isArray(data.moldings) ? data.moldings : [])
       const loadedMaterials = Array.isArray(data.materials) ? data.materials : []
       setMaterials(loadedMaterials)
@@ -97,7 +97,7 @@ export default function ProductsPage() {
     const originalCode = editing?.code ?? code
     setSavingDetail(true)
     try {
-      await api.put(`/products/${encodeURIComponent(originalCode)}`, {
+      await api.put(`/products/by-code?code=${encodeURIComponent(originalCode)}`, {
         code,
         name: v.name ?? '',
         customer: v.customer ?? '',
@@ -201,7 +201,7 @@ export default function ProductsPage() {
       loadList()
       // 停留在编辑页；重新拉详情回填物料 id（再次保存按 id upsert，不重复新增）
       try {
-        const { data } = await api.get<ProductDetail>(`/products/${encodeURIComponent(code)}`)
+        const { data } = await api.get<ProductDetail>(`/products/by-code?code=${encodeURIComponent(code)}`)
         if (Array.isArray(data.materials)) {
           setMaterials(data.materials)
           originalMaterialsRef.current = data.materials.map(m => ({ ...m }))
@@ -217,13 +217,13 @@ export default function ProductsPage() {
   }
 
   async function deactivate(code: string) {
-    try { await api.delete(`/products/${encodeURIComponent(code)}`); message.success('已停用'); loadList() } catch {}
+    try { await api.delete(`/products/by-code?code=${encodeURIComponent(code)}`); message.success('已停用'); loadList() } catch {}
   }
   async function restore(code: string) {
-    try { await api.post(`/products/${encodeURIComponent(code)}/restore`); message.success('已启用'); loadList() } catch {}
+    try { await api.post(`/products/by-code/restore?code=${encodeURIComponent(code)}`); message.success('已启用'); loadList() } catch {}
   }
   async function hardDel(code: string) {
-    try { await api.delete(`/products/${encodeURIComponent(code)}?hard=true`); message.success('已彻底删除'); loadList() } catch {/* 409 由拦截器提示 */ }
+    try { await api.delete(`/products/by-code?hard=true&code=${encodeURIComponent(code)}`); message.success('已彻底删除'); loadList() } catch {/* 409 由拦截器提示 */ }
   }
 
   const [customerFilter, setCustomerFilter] = useState<string>('')
@@ -253,7 +253,7 @@ export default function ProductsPage() {
       // If existing, fetch current detail then merge (replace strategy)
       if (existing) {
         try {
-          const { data } = await api.get<ProductDetail>(`/products/${encodeURIComponent(r.code)}`)
+          const { data } = await api.get<ProductDetail>(`/products/by-code?code=${encodeURIComponent(r.code)}`)
           // 工程资料也按编码、规格和名称识别旧物料；歧义项不直接追加。
           const existingMats = Array.isArray(data.materials) ? data.materials : []
           originalMaterialsRef.current = existingMats.map(m => ({ ...m }))
@@ -395,7 +395,7 @@ export default function ProductsPage() {
             <Col span={6}>
               <Form.Item name="code" label="编码" rules={[
                 { required: true, message: '必填' },
-                { pattern: /^[^/\\?#%]+$/, message: '编码不能包含 / \\ ? # %（需要斜杠请用全角／）' },
+                { pattern: /^[^\\?#%]+$/, message: '编码不能包含 \\ ? # %' },
               ]}>
                 <Input maxLength={64} placeholder="例如 LDH-23001" />
               </Form.Item>

@@ -24,6 +24,16 @@ public class ProductsController(ISqlConnectionFactory factory) : ControllerBase
         return Ok(rows);
     }
 
+    // Query-string identifiers survive reverse proxies without splitting slash-containing SKUs.
+    [HttpGet("by-code")]
+    public Task<IActionResult> GetByCode([FromQuery] string code) => Get(code);
+    [HttpPut("by-code")]
+    public Task<IActionResult> UpsertByCode([FromQuery] string code, [FromBody] ProductBody body) => Upsert(code, body);
+    [HttpDelete("by-code")]
+    public Task<IActionResult> DeleteByCode([FromQuery] string code, [FromQuery] bool hard = false) => Delete(code, hard);
+    [HttpPost("by-code/restore")]
+    public Task<IActionResult> RestoreByCode([FromQuery] string code) => Restore(code);
+
     [HttpGet("{code}")]
     public async Task<IActionResult> Get(string code)
     {
@@ -56,8 +66,8 @@ public class ProductsController(ISqlConnectionFactory factory) : ControllerBase
             return BadRequest(new { error = "编码不能为空" });
         if (newCode.Length > 64)
             return BadRequest(new { error = "编码不能超过 64 个字符" });
-        if (newCode.IndexOfAny(['/', '\\', '?', '#', '%']) >= 0)
-            return BadRequest(new { error = "编码不能包含 / \\ ? # % 等特殊字符（需要斜杠外观请用全角／）" });
+        if (newCode.IndexOfAny(['\\', '?', '#', '%']) >= 0)
+            return BadRequest(new { error = "编码不能包含 \\ ? # % 等特殊字符" });
 
         var moldings = body.moldings == null ? null : System.Text.Json.JsonSerializer.Serialize(body.moldings);
         using var c = factory.Create();

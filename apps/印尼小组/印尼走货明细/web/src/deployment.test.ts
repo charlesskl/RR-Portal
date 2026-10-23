@@ -260,11 +260,14 @@ describe('deployment base paths', () => {
     for (const address of ['A23', 'K23']) {
       expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet5.xml')).toEqual(['thin', 'thin', 'thin', 'thin'])
     }
-    for (const address of ['A24', 'K30', 'A31', 'K31']) {
-      expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet5.xml')).toEqual(['thin', 'thin', null, 'thin'])
+    for (const address of ['A24', 'K30', 'A31', 'C31']) {
+      expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet5.xml'), address).toEqual(['thin', 'thin', null, 'thin'])
     }
-    for (const column of ['D', 'H', 'I', 'J', 'K']) {
+    // Approved packing layout: the purple total area spans two rows without
+    // an internal horizontal line; its closing row retains a medium bottom.
+    for (const column of ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']) {
       expect(await cellFillId(outputBytes, `${column}31`, 'xl/worksheets/sheet5.xml')).toBeGreaterThan(0)
+      expect(await cellBorderSides(outputBytes, `${column}31`, 'xl/worksheets/sheet5.xml'), `${column}31`).toEqual(['thin', 'thin', null, null])
     }
     expect(await cellFillId(outputBytes, 'A31', 'xl/worksheets/sheet5.xml')).toBeGreaterThan(0)
     for (const column of ['E', 'H', 'I', 'J', 'K']) {
@@ -326,20 +329,22 @@ describe('deployment base paths', () => {
     expect(sheet.AR6?.v).toBe('B 报关公司')
     expect(workbook.Sheets['类别金额'].C4?.f).toContain("'TEST-CNTR'!AA:AA")
     expect(workbook.Sheets['类别金额']['!cols']?.[1]?.wch).toBeGreaterThanOrEqual(19)
-    expect(workbook.Sheets['全球合同'].B24?.f).toBe("'TEST-CNTR'!D4")
-    expect(workbook.Sheets['全球合同'].C24?.f).toBe("'TEST-CNTR'!G4&'TEST-CNTR'!F4")
+    // Keep the original template's contract/invoice + serial lookup rules,
+    // rather than replacing them with positional references to the main sheet.
+    expect(workbook.Sheets['全球合同'].B24?.f).toBe("LOOKUP(1,0/(('TEST-CNTR'!V:V=$H$5)*('TEST-CNTR'!A:A=A24)),'TEST-CNTR'!D:D)")
+    expect(workbook.Sheets['全球合同'].C24?.f).toBe("LOOKUP(1,0/(('TEST-CNTR'!V:V=$H$5)*('TEST-CNTR'!A:A=A24)),'TEST-CNTR'!G:G&'TEST-CNTR'!F:F)")
     expect(workbook.Sheets['全球合同'].G24?.f).toBe('F24*D24')
     expect(workbook.Sheets['全球合同'].H5?.v).toBe('RWCRRM2600206')
     expect(workbook.Sheets['全球合同'].H9?.v).toBe(excelSerial('2026-09-01'))
     expect(workbook.Sheets['全球合同'].B27?.v || '').toBe('')
     expect(workbook.Sheets['全球合同'].B27?.f).toBeUndefined()
-    expect(workbook.Sheets['全球发票'].B32?.f).toBe("'TEST-CNTR'!D4")
+    expect(workbook.Sheets['全球发票'].B32?.f).toBe("LOOKUP(1,0/(('TEST-CNTR'!V:V=$J$13)*('TEST-CNTR'!X:X=$J$9)*('TEST-CNTR'!A:A=A32)),'TEST-CNTR'!D:D)")
     expect(workbook.Sheets['全球发票'].J32?.f).toBe('I32*G32')
     expect(workbook.Sheets['全球发票'].J9?.v).toBe('RW202600206')
     expect(workbook.Sheets['全球发票'].J11?.v).toBe(excelSerial('2026-09-02'))
     expect(workbook.Sheets['全球发票'].B35?.v || '').toBe('')
     expect(workbook.Sheets['全球发票'].B35?.f).toBeUndefined()
-    expect(workbook.Sheets['装箱单'].B24?.f).toBe("'TEST-CNTR'!D4")
+    expect(workbook.Sheets['装箱单'].B24?.f).toBe("LOOKUP(1,0/(('TEST-CNTR'!X:X=$D$9)*('TEST-CNTR'!A:A=A24)),'TEST-CNTR'!D:D)")
     expect(workbook.Sheets['装箱单'].D9?.v).toBe('RW202600206')
     expect(workbook.Sheets['装箱单'].D11?.v).toBe(excelSerial('2026-09-02'))
     expect(workbook.Sheets['装箱单'].D13?.v).toBe('RWCRRM2600206')
@@ -348,11 +353,20 @@ describe('deployment base paths', () => {
     expect(workbook.Sheets['装箱单'].H17?.v).toBe('TEST-SEAL')
     expect(workbook.Sheets['装箱单'].B27?.v || '').toBe('')
     expect(workbook.Sheets['装箱单'].B27?.f).toBeUndefined()
-    for (const name of ['全球合同', '全球发票', '装箱单']) {
-      expect(Object.values(workbook.Sheets[name]).some((cell: any) => cell?.f?.includes('LOOKUP('))).toBe(false)
+    for (const [name, start] of [['全球合同', 24], ['全球发票', 32], ['装箱单', 24]] as const) {
+      for (let index = 0; index < 3; index++) {
+        const row = start + index
+        expect(workbook.Sheets[name][`A${row}`]?.v).toBe(index + 1)
+        expect(workbook.Sheets[name][`B${row}`]?.f).toContain(`('TEST-CNTR'!A:A=A${row})`)
+        expect(workbook.Sheets[name][`B${row}`]?.F).toBe(`B${row}`)
+      }
     }
-    expect(workbook.Sheets['发票'].D9?.f).toBe("'TEST-CNTR'!F4")
-    expect(workbook.Sheets['装箱单 (2)'].B10?.f).toBe("'TEST-CNTR'!F4")
+    // Generic invoice names use the declaration-name column; auxiliary packing
+    // follows that invoice by serial using the approved array formula.
+    expect(workbook.Sheets['发票'].D9?.f).toBe("'TEST-CNTR'!E4")
+    expect(workbook.Sheets['装箱单 (2)'].B10?.f).toContain("XLOOKUP($A10,'发票'!$B:$B,'发票'!$D:$D)")
+    expect(workbook.Sheets['装箱单 (2)'].B10?.F).toBe('B10:H10')
+    expect(workbook.Sheets['装箱单 (2)'].B10?.v).toBe(workbook.Sheets['发票'].D9?.v)
     expect(workbook.Sheets['销售合同'].I53?.f).toBe('SUM(I16:I52)')
   }, 20_000)
 
@@ -371,9 +385,11 @@ describe('deployment base paths', () => {
       '每箱重量', '单个毛重', '单个净重', '卡板', '',
     ])
     expect(workbook.Sheets['实业合同'].H5?.v).toBe('RRI-C001')
-    expect(workbook.Sheets['实业合同'].B24?.f).toBe("'RRI-CNTR'!D4")
+    expect(workbook.Sheets['实业合同'].B24?.f).toBe("LOOKUP(1,0/(('RRI-CNTR'!V:V=$H$5)*('RRI-CNTR'!A:A=A24)),'RRI-CNTR'!D:D)")
+    expect(workbook.Sheets['实业合同'].B24?.F).toBe('B24')
     expect(workbook.Sheets['实业发票'].J9?.v).toBe('RRI-I001')
-    expect(workbook.Sheets['实业发票'].B28?.f).toBe("'RRI-CNTR'!D4")
+    expect(workbook.Sheets['实业发票'].B28?.f).toBe("LOOKUP(1,0/(('RRI-CNTR'!V:V=$J$13)*('RRI-CNTR'!X:X=$J$9)*('RRI-CNTR'!A:A=A28)),'RRI-CNTR'!D:D)")
+    expect(workbook.Sheets['实业发票'].B28?.F).toBe('B28')
     expect(workbook.Sheets['全球合同']).toBeUndefined()
     expect(workbook.Sheets['全球发票']).toBeUndefined()
   }, 20_000)

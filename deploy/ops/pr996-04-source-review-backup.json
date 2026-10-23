@@ -1,0 +1,41 @@
+{
+  "allowedPhases": [
+    "backup"
+  ],
+  "authorValidation": {
+    "fiveOfflineFixturesAuthorPassed": true,
+    "notClaimedAsRootRerun": true,
+    "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr996-04-backup-author-ops.json",
+    "sha256": "658434f6720804d7d915de88b4c1455fdf0c7e134b1d255edaf8df2d2aca27d0"
+  },
+  "base": "6742f820c0a43388e274b867a2825a42548b5cea",
+  "baseTree": "ce652db9eb263e09d24a3f44ef0c48a5c1f7b79e",
+  "checks": [
+    "Read complete B4 frozen source; retained original PG exported read-only snapshot and dump, source/PDB/assets, startup guards, env/dirty/global configuration and all46 runtime protections. One target and45 unchanged others required.",
+    "Native frozen Q source reader retains128MiB; exact diagnostic proved original49,295,360byte tar within bound. Failed prior attempts and archives remain separate and closed.",
+    "Each capture includes complete private0600 keyring tar, exact two0755 owned directories, bounded regular0600 owned UUID XML files, complete bytes/hash/mode/UID/GID replay; links, duplicates, unknown paths, DTD/entities and partial files rejected; legal .NET comments accepted. No key material or names printed/public/Git.",
+    "Running ancestor stat limited to fixed /home and /home/app; stopped capture requires explicit prestop reference, never claims fresh stopped ancestor observation. No Docker lifecycle operation in B4.",
+    "Writable layer guard requires every persistent keyring file captured and rejects other unknown paths. Full private env contents and PG rows remain server-private. Actual backup success and real prestart restoration rehearsal remain separate mandatory future phase gates."
+  ],
+  "dependencies": {
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "portable-pdb-library.py": "cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5",
+    "qc-source-library.py": "4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5"
+  },
+  "disposition": "CHECKED",
+  "helperGatesFrozen": true,
+  "helperSHA256": "b433486575a40fba04a179a4549227d2657f6abb49b34a743c244fae2a6f08c9",
+  "independent": true,
+  "limitations": [
+    "No actual backup4 success claimed by source review; staged private key copy restoration still requires prepare rehearsal and deploy prestart/poststart exact proof.",
+    "Ancestor metadata is observed live, not a fresh closed atomic filesystem snapshot."
+  ],
+  "remainingBlockers": [],
+  "remoteActionsPerformed": false,
+  "reviewer": "/root",
+  "sourceAuthor": "/root/pr996_ops",
+  "stateOrOPSModified": false,
+  "transportSHA256": "19f5fc6bcf7069c0f47e083cc8fee3ffab4d48cc806e8bc68bc38f52817dd251"
+}

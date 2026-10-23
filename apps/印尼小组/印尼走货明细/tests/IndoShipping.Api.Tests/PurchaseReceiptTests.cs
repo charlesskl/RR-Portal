@@ -19,6 +19,137 @@ namespace IndoShipping.Api.Tests;
 
 public sealed class PurchaseReceiptTests
 {
+    [Fact]
+    public async Task Edit_updates_original_batch_preserves_metadata_and_audits_before_after()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        var id = await f.Db.ExecuteScalarAsync<int>("""
+            INSERT INTO po_receipts(po_item_id,receipt_date,qty,spare_qty,batch_no,notes)
+            VALUES (1,'2026-10-01',100,5,'original','keep me') RETURNING id
+            """);
+        Assert.IsType<OkObjectResult>(await f.Controller.UpdateReceipt(id,
+            new() { qty=80, spare_qty=10, expected_qty=100, expected_spare_qty=5 }));
+        var row = await f.Db.QuerySingleAsync<(decimal Qty,decimal SpareQty,DateTime Date,string Batch,string Notes)>(
+            "SELECT qty,spare_qty,receipt_date,batch_no,notes FROM po_receipts WHERE id=@id", new { id });
+        Assert.Equal((80m,10m,new DateTime(2026,10,1),"original","keep me"), row);
+        Assert.Equal(1, await f.Db.ExecuteScalarAsync<int>("SELECT count(*) FROM po_receipts"));
+        Assert.Equal("sent", await f.Status());
+        using var audit = JsonDocument.Parse((await f.Db.ExecuteScalarAsync<string>(
+            "SELECT details::text FROM audit_logs WHERE action='update_receipt'"))!);
+        Assert.Equal(100m, audit.RootElement.GetProperty("before").GetProperty("qty").GetDecimal());
+        Assert.Equal(5m, audit.RootElement.GetProperty("before").GetProperty("spare_qty").GetDecimal());
+        Assert.Equal(80m, audit.RootElement.GetProperty("after").GetProperty("qty").GetDecimal());
+        Assert.Equal(10m, audit.RootElement.GetProperty("after").GetProperty("spare_qty").GetDecimal());
+        Assert.IsType<OkObjectResult>(await f.Controller.UpdateReceipt(id,
+            new() { qty=100, spare_qty=10, expected_qty=80, expected_spare_qty=10 }));
+        Assert.Equal("received", await f.Status());
+    }
+
+    [Fact]
+    public async Task Edit_respects_other_batches_and_other_items_when_recalculating_status()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        var id = await f.Db.ExecuteScalarAsync<int>("""
+            UPDATE purchase_orders SET status='sent' WHERE id=1;
+            INSERT INTO po_items(id,po_id,qty,purchase_qty) VALUES (3,1,20,20);
+            INSERT INTO po_receipts(po_item_id,receipt_date,qty,spare_qty) VALUES (1,CURRENT_DATE,40,0);
+            INSERT INTO po_receipts(po_item_id,receipt_date,qty,spare_qty) VALUES (1,CURRENT_DATE,50,0) RETURNING id;
+            """);
+        Assert.IsType<BadRequestObjectResult>(await f.Controller.UpdateReceipt(id,
+            new() { qty=61, spare_qty=0, expected_qty=50, expected_spare_qty=0 }));
+        Assert.IsType<OkObjectResult>(await f.Controller.UpdateReceipt(id,
+            new() { qty=60, spare_qty=0, expected_qty=50, expected_spare_qty=0 }));
+        Assert.Equal("sent", await f.Status()); // another material is still outstanding
+        Assert.Equal(100m, await f.Db.ExecuteScalarAsync<decimal>("SELECT SUM(qty) FROM po_receipts WHERE po_item_id=1"));
+    }
+
+    [Fact]
+    public async Task Edit_spares_protects_outbound_and_supports_spare_only_batches()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        Assert.IsType<OkObjectResult>(await f.Controller.CreateReceipt(1, new() { qty=100 }));
+        Assert.IsType<OkObjectResult>(await f.Controller.CreateReceipt(1, new() { spare_qty=10 }));
+        var id = await f.Db.ExecuteScalarAsync<int>("SELECT id FROM po_receipts WHERE qty=0");
+        await f.Db.ExecuteAsync("INSERT INTO outbound(po_item_id,qty) VALUES (1,105)");
+        Assert.IsType<ConflictObjectResult>(await f.Controller.UpdateReceipt(id,
+            new() { qty=0, spare_qty=4, expected_qty=0, expected_spare_qty=10 }));
+        Assert.Equal(10m, await f.Db.ExecuteScalarAsync<decimal>("SELECT spare_qty FROM po_receipts WHERE id=@id", new { id }));
+        Assert.IsType<OkObjectResult>(await f.Controller.UpdateReceipt(id,
+            new() { qty=0, spare_qty=5, expected_qty=0, expected_spare_qty=10 }));
+        Assert.Equal("received", await f.Status());
+    }
+
+    [Theory]
+    [InlineData(-1,5)]
+    [InlineData(5,-1)]
+    [InlineData(0,0)]
+    [InlineData(101,0)]
+    public async Task Edit_rejects_invalid_quantities_without_writes(int qty, int spare)
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        var id = await f.Db.ExecuteScalarAsync<int>("""
+            INSERT INTO po_receipts(po_item_id,receipt_date,qty,spare_qty) VALUES (1,CURRENT_DATE,100,0) RETURNING id
+            """);
+        Assert.IsType<BadRequestObjectResult>(await f.Controller.UpdateReceipt(id,
+            new() { qty=qty, spare_qty=spare, expected_qty=100, expected_spare_qty=0 }));
+        Assert.Equal(100m, await f.Db.ExecuteScalarAsync<decimal>("SELECT qty FROM po_receipts WHERE id=@id", new { id }));
+        Assert.Equal(0, await f.Db.ExecuteScalarAsync<int>("SELECT count(*) FROM audit_logs"));
+    }
+
+    [Fact]
+    public async Task Edit_rejects_stale_missing_and_unrepresentable_values()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        var id = await f.Db.ExecuteScalarAsync<int>("""
+            INSERT INTO po_receipts(po_item_id,receipt_date,qty,spare_qty) VALUES (1,CURRENT_DATE,100,0) RETURNING id
+            """);
+        Assert.IsType<ConflictObjectResult>(await f.Controller.UpdateReceipt(id,
+            new() { qty=80, spare_qty=0, expected_qty=99, expected_spare_qty=0 }));
+        Assert.IsType<BadRequestObjectResult>(await f.Controller.UpdateReceipt(id, new() { qty=80, spare_qty=0 }));
+        Assert.IsType<BadRequestObjectResult>(await f.Controller.UpdateReceipt(id,
+            new() { qty=0.00001m, spare_qty=0, expected_qty=100, expected_spare_qty=0 }));
+        Assert.IsType<BadRequestObjectResult>(await f.Controller.UpdateReceipt(id,
+            new() { qty=0, spare_qty=100000000000000m, expected_qty=100, expected_spare_qty=0 }));
+        Assert.IsType<NotFoundObjectResult>(await f.Controller.UpdateReceipt(999999,
+            new() { qty=80, spare_qty=0, expected_qty=100, expected_spare_qty=0 }));
+        Assert.Equal(0, await f.Db.ExecuteScalarAsync<int>("SELECT count(*) FROM audit_logs"));
+    }
+
+    [Fact]
+    public async Task Concurrent_edits_do_not_silently_overwrite_each_other()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        var id = await f.Db.ExecuteScalarAsync<int>("""
+            INSERT INTO po_receipts(po_item_id,receipt_date,qty,spare_qty) VALUES (1,CURRENT_DATE,100,0) RETURNING id
+            """);
+        var results = await Task.WhenAll(
+            f.Controller.UpdateReceipt(id, new() { qty=80, spare_qty=0, expected_qty=100, expected_spare_qty=0 }),
+            f.Controller.UpdateReceipt(id, new() { qty=90, spare_qty=0, expected_qty=100, expected_spare_qty=0 }));
+        Assert.Single(results.OfType<OkObjectResult>());
+        Assert.Single(results.OfType<ConflictObjectResult>());
+        Assert.Equal(1, await f.Db.ExecuteScalarAsync<int>("SELECT count(*) FROM audit_logs"));
+    }
+
+    [Fact]
+    public async Task Concurrent_edit_and_outbound_never_create_negative_inventory()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        var id = await f.Db.ExecuteScalarAsync<int>("""
+            INSERT INTO po_receipts(po_item_id,receipt_date,qty,spare_qty) VALUES (1,CURRENT_DATE,100,0) RETURNING id
+            """);
+        var outbound = new OutboundController(new SqlConnectionFactory(f.ConnectionString))
+        { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
+        var results = await Task.WhenAll(
+            f.Controller.UpdateReceipt(id, new() { qty=80, spare_qty=0, expected_qty=100, expected_spare_qty=0 }),
+            outbound.Create(new() { po_item_id=1, qty=90 }));
+        Assert.Single(results.OfType<OkObjectResult>());
+        Assert.Contains(results, x => x is ConflictObjectResult or BadRequestObjectResult);
+        Assert.True(await f.Db.ExecuteScalarAsync<decimal>("""
+            SELECT (SELECT COALESCE(SUM(qty+spare_qty),0) FROM po_receipts) -
+                   (SELECT COALESCE(SUM(qty),0) FROM outbound)
+            """) >= 0);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { bulkReceiptLines, receiptQuantityError } from './purchaseReceipt'
+import { bulkReceiptLines, receiptQuantityError, receiptEditLimit } from './purchaseReceipt'
 
 describe('purchase spare receipts', () => {
+  it('edits the original batch instead of treating its new quantity as an extra receipt', () => {
+    expect(receiptEditLimit(100, 100, 60)).toBe(60)
+    expect(receiptEditLimit(100, 80, 60)).toBe(80)
+    expect(receiptEditLimit(100, 100, 0)).toBe(0)
+    expect(receiptEditLimit(100, 110, 5)).toBe(0)
+    expect(receiptQuantityError(50, 0, receiptEditLimit(100, 100, 60))).toBeUndefined()
+    expect(receiptQuantityError(61, 0, receiptEditLimit(100, 100, 60))).toBeTruthy()
+  })
   it('allows spare-only receipts after full receipt without changing normal quantity', () => {
     expect(receiptQuantityError(0, 12, 0)).toBeUndefined()
     expect(bulkReceiptLines([{ id: 1, shortage_qty: 0 }], {}, { 1: 12 }))

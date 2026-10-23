@@ -1,3 +1,8 @@
+// 修改批次时先排除原数量，不能直接把当前欠数当成新数量上限。
+export function receiptEditLimit(ordered: number, received: number, originalQty: number): number {
+  return Math.max(ordered - (received - originalQty), 0)
+}
+
 export function receiptQuantityError(qty: number, spareQty: number, shortage: number): string | undefined {
   if (!Number.isFinite(qty) || qty < 0) return '入库数量不能小于 0'
   if (!Number.isFinite(spareQty) || spareQty < 0) return '备品入数不能小于 0'

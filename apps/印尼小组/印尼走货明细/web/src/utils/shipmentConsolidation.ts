@@ -1,6 +1,6 @@
 import type { Material } from '../api/client'
 import type { CustomsItem } from './customsExport'
-import { effectiveCustomsCompany } from './shipmentOrder'
+import { effectiveCustomsCompany, sortShipmentItems } from './shipmentOrder'
 import { invoiceCustomsCompany } from './shipmentInvoice'
 import { isPaperRope, parseShipmentPacking, shipmentWeightQuantity } from './shipmentWeight'
 
@@ -14,12 +14,15 @@ export function consolidateShipmentItems<T extends BatchItem>(
   const groups = new Map<string, T & { sources: T[]; outbound_ids: number[] }>()
   const text = (value: unknown) => String(value ?? '').trim()
   const sum = (a: unknown, b: unknown) => Number(((Number(a) || 0) + (Number(b) || 0)).toPrecision(15))
-  items.forEach((item, index) => {
+  // Sort before choosing the surviving position: shared-carton ordering also
+  // determines which contract owns a company's final-line surcharge.
+  sortShipmentItems(items, materials, fallback).forEach((item, index) => {
     const material = materials.get(item.material_id!)
     const packing = parseShipmentPacking(item.qty_per_carton)
     // Imported/unidentified materials and explicit box ranges cannot safely be
     // collapsed: range labels and per-batch packing must remain intact.
     const eligible = !!material && Number(item.material_id) > 0 && Number(item.outbound_id) > 0
+      && Number.isFinite(Number(item.kg)) && Number(item.kg) > 0
       && !item.material_snapshot && ['uniform', 'empty'].includes(packing.mode)
     const key = eligible ? JSON.stringify([
       item.material_id, text(item.supplier || material?.supplier),

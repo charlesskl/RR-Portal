@@ -109,3 +109,57 @@ it.each(['RRI', 'RRM'])('真实模板导出合并明细，公式引用合并后�
   }
   expect(book.Sheets[customer === 'RRI' ? '实业合同' : '全球合同'].D24.f).toContain("'MERGED-BATCHES'!K:K")
 }, 60000)
+
+it.each(['RRI', 'RRM'])('零重量末批保留原来的附加费边界和整柜金额（%s）', async customer => {
+  const rows = [
+    { ...batches[0], qty: 10, kg: 10, contract_no: 'A', invoice_no: 'A' },
+    { ...batches[1], qty: 10, kg: 0, contract_no: 'A', invoice_no: 'A' },
+  ].map(row => ({ ...row, customs_company: '深圳市华胜益出口贸易有限公司' }))
+  const before = withShipmentInvoicePrices(sortShipmentItems(rows, materials), materials)
+  const consolidated = consolidateShipmentItems(rows, materials)
+  const after = withShipmentInvoicePrices(sortShipmentItems(consolidated, materials), materials)
+  const amount = (values: typeof before) => values.reduce((sum, row) => sum + row.kg * row.invoice_price, 0)
+  expect(consolidated).toHaveLength(2)
+  expect(amount(after)).toBeCloseTo(amount(before), 9)
+  const templateBuffer = Uint8Array.from(readFileSync(new URL(`../../public/template-customs-${customer.toLowerCase()}.xlsx`, import.meta.url))).buffer
+  const blob = await buildCustomsWorkbook({ templateBuffer, items: rows, materials, productHs: new Map(), images: new Map(),
+    form: { containerNo: 'ZERO-LAST-BATCH', customer, rate: 7.2 } })
+  const sheet = XLSX.read(await blob.arrayBuffer(), { type: 'array' }).Sheets['ZERO-LAST-BATCH']
+  expect(sheet.K4.v).toBe(10)
+  expect(sheet.K5.v).toBe(0)
+  expect(sheet.Z4.f).not.toContain('1248')
+  expect(sheet.Z5.f).toContain('IF(K5>0,1248/K5/7.2,0)')
+  expect(Number(sheet.K4.v) * Number(sheet.Z4.v) + Number(sheet.K5.v) * Number(sheet.Z5.v)).toBeCloseTo(amount(before), 9)
+}, 60000)
+
+it.each(['RRI', 'RRM'])('共箱先按共享顺序排序，页面与导出保留原合同附加费归属（%s）', async customer => {
+  const rows = [
+    { ...batches[0], qty: 10, kg: 10, cartons: 2, carton_group: 'G', contract_no: 'A', invoice_no: 'A' },
+    { ...batches[1], qty: 10, kg: 10, cartons: 1, carton_group: 'H', contract_no: 'B', invoice_no: 'B', outbound_id: 76 },
+    { ...batches[1], qty: 10, kg: 10, cartons: 2, carton_group: 'G', contract_no: 'A', invoice_no: 'A' },
+  ].map(row => ({ ...row, customs_company: '深圳市华胜益出口贸易有限公司' }))
+  const original = structuredClone(rows)
+  const before = withShipmentInvoicePrices(sortShipmentItems(rows, materials), materials)
+  const after = withShipmentInvoicePrices(sortShipmentItems(consolidateShipmentItems(rows, materials), materials), materials)
+  const editor = withShipmentInvoicePrices(sortShipmentItems(consolidateShipmentItems(sortShipmentItems(rows, materials), materials), materials), materials)
+  const amount = (values: typeof before, contract: string) => values.filter(row => row.contract_no === contract)
+    .reduce((sum, row) => sum + row.kg * row.invoice_price, 0)
+  expect(after.map(row => row.contract_no)).toEqual(['A', 'B'])
+  for (const contract of ['A', 'B']) {
+    expect(amount(after, contract)).toBeCloseTo(amount(before, contract), 9)
+    expect(amount(editor, contract)).toBeCloseTo(amount(before, contract), 9)
+  }
+  expect(rows).toEqual(original)
+  expect(cartonLayout(after, materials).reduce((sum, row) => sum + row.count, 0)).toBe(3)
+  const templateBuffer = Uint8Array.from(readFileSync(new URL(`../../public/template-customs-${customer.toLowerCase()}.xlsx`, import.meta.url))).buffer
+  const blob = await buildCustomsWorkbook({ templateBuffer, items: rows, materials, productHs: new Map(), images: new Map(),
+    form: { containerNo: 'SHARED-GROUP-ORDER', customer, rate: 7.2 } })
+  const sheet = XLSX.read(await blob.arrayBuffer(), { type: 'array' }).Sheets['SHARED-GROUP-ORDER']
+  expect([sheet.V4.v, sheet.V5.v]).toEqual(['A', 'B'])
+  expect([sheet.K4.v, sheet.K5.v]).toEqual([20, 10])
+  expect([sheet.AT4.v, sheet.AT5.v]).toEqual([2, 1])
+  expect(sheet.Z4.f).not.toContain('1248')
+  expect(sheet.Z5.f).toContain('1248')
+  expect(Number(sheet.K4.v) * Number(sheet.Z4.v)).toBeCloseTo(amount(before, 'A'), 9)
+  expect(Number(sheet.K5.v) * Number(sheet.Z5.v)).toBeCloseTo(amount(before, 'B'), 9)
+}, 60000)

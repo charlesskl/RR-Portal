@@ -1,0 +1,140 @@
+{
+  "status": "CHECKED",
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr998_review",
+  "pr": 1001,
+  "base": "69e37c71354935a4eaae825af2a1fddeee2090a9",
+  "baseTree": "d0053e7f662089359f0afb4e239cff36687b9a3b",
+  "helperGatesFrozen": true,
+  "scope": [
+    "indo-shipping"
+  ],
+  "targetContainerCount": 1,
+  "otherContainerCount": 45,
+  "remainingBlockers": [],
+  "actualStateOrOPSModified": false,
+  "productionActionsPerformed": false,
+  "remoteActionsPerformed": false,
+  "reviewedAtUTC": "2026-10-24T02:14:29.249448+00:00",
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "helperSHA256": "0370d8965b4eafba4c8a6dbefa9689b3f26fbd8079209bca56219d41284c3125",
+  "sourceSHA256": "0370d8965b4eafba4c8a6dbefa9689b3f26fbd8079209bca56219d41284c3125",
+  "dependencies": {
+    "pr1001-backup-library.py": "f0df28a8cd2b3791fcfbddd74a280a949b5c2500052e2e179e173e321930f4ce",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "qc-source-library.py": "4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5",
+    "portable-pdb-library.py": "cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1"
+  },
+  "reviewedApplicationHead": "4187c644b0978ca94ad11476dd94146d0f1d535e",
+  "reviewedApplicationTree": "b31cbe6b6939e743d72debe33c7ffbd52df1c04f",
+  "reviewedManifestSHA256": "6d288f847e7553db189f273c4a47b64a8e0fd0289d53035ce4b2fc8197bc5ccc",
+  "reviewedApplicationFiles": {
+    "apps/印尼小组/印尼走货明细/web/src/pages/ShipmentsPage.tsx": "f6d91ddacdfc97d8ed2d427a5af649915fa32d2ac949d3e41eba242def4770ca",
+    "apps/印尼小组/印尼走货明细/web/src/utils/customsExport.ts": "260f6eb97a4e332fb41f1da4b89bf5bae467f2fded1b410e9062e854fbb1f21e",
+    "apps/印尼小组/印尼走货明细/web/src/utils/shipmentConsolidation.test.ts": "2ca5e8acaa71c16929b6aaeb01ce64b9598757a6a1979b98e70c69f05e0a64ca",
+    "apps/印尼小组/印尼走货明细/web/src/utils/shipmentConsolidation.ts": "9ccd188f70e509bb9fdf4d3b6df5ff0aacb653225392fe4e4921fa56e972b470",
+    "apps/印尼小组/印尼走货明细/web/src/utils/shipmentConsolidationSave.test.ts": "78b77db95d8750de864be54ddbce729d2e5a816027e28a824d911ea4846e975e"
+  },
+  "checks": [
+    "Complete final R0370 source and delta from reviewed successful999 f8ba read, all seven actual dependency hashes checked. Final SOURCE_MANIFEST_SHA and exact five frontend paths bind all final4187 blobs/treeb31; nine phase/target/archive gates remain blank.",
+    "All customer derivation/column projection/schema migration comparator/oldweek compatibility DDL restoration removed. New indo_postgres AST exactly matches independently reviewed996v3 strict full typed rows/schema/security comparator. Schedules.customer now participates in complete row equality; all schema categories, ownersACL/RLS, flags, startup checks and seven source hashes stay exact.",
+    "Only unchanged Users_Id_seq may consume exactly+1 per healthy startup; prestart intervals require0, failed-start recovery permits0or1 with no restart/OOM. All other sequence definitions/states remain identical. Pure synthetic comparator independently accepted +1/0 and rejected customerrow/schema/owner/+2 changes. No counter reset, DB restore, DDL, credentials/account/env writes permitted.",
+    "Prepare performs exact reviewed fast-forward and single-service immutable build while original46 remain unchanged; full source/PDB/assets/image platform/defaults/config/env are bound. Isolated never-started key-copy rehearsal keeps original app user, full inherited labels, no network/logs/restart/mounts and removes only its exact self-created CID.",
+    "Deploy still drains and stops only indo-shipping, seals fresh closed PG/keyring evidence, creates no-start/no-build/no-deps/pullnever prepared image, checks complete created Config/HostConfig/env/CID, restores private full1654 keyring before first start and verifies copyback/hash/modes/owners. PrestartPG must show0, then one exact docker start and healthy post-start full rows/schema/keys/+1 comparison.",
+    "Only present typed None/False OomKillDisable values normalize on copies before frozen HostConfig compare. Other45/entire env/compose/4dirty/fixedsource/auth/admin/JWT properties remain unchanged. Unknown states, missing keydir/custody or ambiguous restart fail closed preserving candidate/private keys/owned maintenance.",
+    "Recovery uses already-compatible old backend/image with fresh closed evidence, preserves all started-candidate data/key state, requires0or1 solely during failed-start interval, creates/restores/verifies old image keys before one start, then requires a separate healthy+1 interval. No legacy uniqueness SQL remains; no running app key rewrite or silent discard.",
+    "Verify replays sealed live/closed/created/prestartPG0/keycopy/poststart/currentCID/audit evidence and actual runtime/source/assets, health and six anonymous401 GETs. It intentionally avoids live business-row equality after users resume. Source-only approval does not activate any phase."
+  ],
+  "independentValidation": {
+    "pureASTSyntaxCompiled": true,
+    "backupGateFalse": true,
+    "releaseNineGatesBlank": true,
+    "actualDependencyHashesChecked": true,
+    "completeFinalManifestFiveBlobsChecked": true,
+    "unchangedBackupFunctionsVs999": [
+      "ancestor_metadata",
+      "application_proof",
+      "capture",
+      "capture_keyring",
+      "current_database_id",
+      "current_target_record",
+      "database_contract",
+      "dirty_snapshot",
+      "enc",
+      "environment_stable",
+      "flags",
+      "initialize",
+      "load",
+      "main",
+      "meta",
+      "prior_archive",
+      "private",
+      "process_environment",
+      "read",
+      "replay_keyring",
+      "replay_snapshot",
+      "run",
+      "runtime",
+      "safe_stage",
+      "sha",
+      "source",
+      "source_proof",
+      "validate_keyring_tar",
+      "writable_layer_guard"
+    ],
+    "changedBackupFunctionsVs999": [
+      "backup",
+      "indo_pg_capture",
+      "need",
+      "prior_indo_proof",
+      "startup_checks_sql",
+      "startup_guard"
+    ],
+    "changedReleaseFunctionsVs999": [
+      "deploy",
+      "indo_postgres",
+      "initialize",
+      "main",
+      "need",
+      "prepare",
+      "recover",
+      "reviewed_manifest",
+      "source",
+      "verify"
+    ],
+    "releaseComparatorASTExactlyEqualsReviewed996v3": true,
+    "pureComparatorSyntheticAcceptsHealthyPlusOneAndPrestartZero": true,
+    "pureComparatorNegativeRejections": [
+      "full-customer-row-change",
+      "schema-change",
+      "owner-change",
+      "users-plus-two"
+    ],
+    "actualSQLDockerNetworkOrProductionCalls": false,
+    "authorLocalPGGuardEvidenceReadOnly": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr1001-inert-ops-author-tests.log",
+      "sha256": "4b2c0f668bcb7850d43d2d3a7d9e6e97bd00e278c469cf8fbcc91cb8a5be726b",
+      "independentlyRerun": false
+    }
+  },
+  "evidenceSHA256": {
+    "work/pr1001-backup-source-review.json": "f92f1fc0a0e6adfaa389d17fd4f089022b25b548af782ec16757f6909d5fd878",
+    "work/pr999-backup-source-review.json": "03dbc89cad42fd524b4d6d1a224337a9f1d1d9d74cbc99a48b1bd93b2dd34dcf",
+    "work/pr999-release-source-review.json": "e5774f1c048d723c83b0b79081fde6b0061d6c79a8cbf43212efc73e2ccd20a2",
+    "work/pr996-04-release-source-review-v3.json": "dcb5562c0f73af1cd98aeae120c71c02bf40ac7e99d82204524c8523f4110981",
+    "work/pr1001-inert-runtime-author.json": "23c9521f97dc95253b1d47022a22a21cb56b1eeb557acc3410426006a7008c3e"
+  },
+  "boundaries": [
+    "Source-only review for exact Bf0df/R0370; concrete phase plans, all runtime gates and actual sealed backup/prepare/deploy/verify evidence remain mandatory.",
+    "This reviewer executed only local pure AST comparator assertions and application tests/build; no production SQL/Docker/API/auth/model or OPS/state/remote mutation.",
+    "No actual key restore rehearsal, container switch, live smoke or rollback success is asserted here; those remain guarded runtime phases."
+  ]
+}

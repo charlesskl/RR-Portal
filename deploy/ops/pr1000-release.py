@@ -2,9 +2,9 @@
 No environment changes, DB restore, authenticated writes or model calls.
 """
 import copy,hashlib,importlib.util,io,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,traceback,urllib.error,urllib.request
-PHASE='verify'
-TARGET='f223ec9957a07e8e7b8dff7b5adcafcbe83ac7c8'
-TREE='23a3654c523cb5aa727fd05b1fe6875e3375e2f5'
+PHASE=''
+TARGET=''
+TREE=''
 SOURCE_MANIFEST_SHA='7534bcebcbaabd0664a6a9b7a4dc36ccaeab2c62c935ff4fa7d268dcd76e5f5b'
 REVIEWED_PATHS=('app.js', 'frontend-auth.test.js', 'qc-backend.js', 'server/api-auth.test.js', 'server/server.js')
 BASE='ab0ae0bdbbea5ab7c6c7216e925f2ba1eeeef2b3'
@@ -15,7 +15,7 @@ BACKUP=ROOT/'deploy/backups/pr-1000-20261024-backup'
 PREPARE=BACKUP.with_name('pr-1000-20261024-prepare')
 DEPLOY=BACKUP.with_name('pr-1000-20261024-deploy')
 VERIFY=BACKUP.with_name('pr-1000-20261024-verify')
-BACKUP_MANIFEST='ef47da11eb21326782471fc750c90979218a545eac56b346ddefc65c3779fdff';BACKUP_RESULT='8d99c37c2e2d3cf45261d9a3b81738232f7bd7fbccabdbc2db78b9cac94c9aa6';PREPARE_MANIFEST='57c12ab919fd34c98ef02278f3d8910ccbe0a4e38f6e2342d0f2b0f89cd46c01';PREPARE_RESULT='5b79c352994d1361d6f01e8a4e215213014a4378e8b7714f4317c9264774bacc';DEPLOY_MANIFEST='ea824229c9bb4998fdb26b92e168aadd190807ad929f072ed6d00da67da49386';DEPLOY_RESULT='2d1a8053f897d7d8278985fd947ffc166af1fcca0f1dde275ddf15b3eeae7c70'
+BACKUP_MANIFEST='';BACKUP_RESULT='';PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 ORDER=('qc',)
 DEPS={'pr1000-backup-library.py': '49c3bc6345e7ea926b777e87a8440240671881744bc4bfaae067fbae8b25f798', 'batch-host-config-library.py': 'bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1', 'factory-review-backup-library.py': '79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666', 'release-data-ops-library.py': 'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5', 'release-data-library.py': 'd63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9'}
 COMPOSE=['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production')]

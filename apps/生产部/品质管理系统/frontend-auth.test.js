@@ -127,7 +127,7 @@ for (const code of [401, 403, 500]) test('write ' + code + ' visibly fails and k
   assert.match(b.ctx.__QC_SYNC_NOTICE, /服务器尚未保存/);
   const call = b.calls.find(c => c.url.includes('/api/records'));
   assert.equal(call.headers['X-QC-CSRF'], 'synthetic-csrf'); assert.equal(call.credentials, 'same-origin');
-  assert.equal(b.ctx.getCurrentUser() === null, code !== 500);
+  assert.equal(b.ctx.getCurrentUser() === null, code === 401);
 });
 
 test('serialized writes acknowledge only deletion revisions actually sent', async () => {
@@ -167,13 +167,111 @@ test('old portal ticket is removed from URL without network calls or fake users/
   assert.equal(b.store.has(prefix + 'session'), false); assert.match(b.ctx.__QC_LEGACY_SSO_NOTICE, /品质账号登录/);
 });
 
-test('AI request helper adds company and CSRF and auth rejection clears UI trust', async () => {
-  const b = browser({ handler: url => url.includes('/api/ai/ocr-extract') ? Promise.resolve({ ok: false, status: 403 }) : undefined });
+for (const code of [401, 403]) test('AI request helper retains company and CSRF; only 401 clears UI trust (' + code + ')', async () => {
+  const b = browser({ handler: url => url.includes('/api/ai/ocr-extract') ? Promise.resolve({ ok: false, status: code }) : undefined });
   await b.ctx.__QC_REQUEST('/api/ai/ocr-extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"image":"synthetic"}' });
   const call = b.calls.at(-1); assert.match(call.url, /\/qc\/api\/ai\/ocr-extract\?company=dg-xingxin$/);
-  assert.equal(call.headers['X-QC-CSRF'], 'synthetic-csrf'); assert.equal(b.ctx.getCurrentUser(), null);
+  assert.equal(call.headers['X-QC-CSRF'], 'synthetic-csrf'); assert.equal(b.ctx.getCurrentUser() === null, code === 401);
   assert.match(source('ai-ocr.js'), /window\.__QC_REQUEST\('\/api\/ai\/ocr-extract'/);
   assert.doesNotMatch(source('ai-ocr.js'), /fetch\(/);
+});
+
+function entryFixture(b) {
+  for (const [id, value] of Object.entries({ f_date: '2026-10-24', f_supplier: 'Fixture Supplier', f_qty: '100',
+    f_sampleQty: '20', f_result: 'PASS', f_type: '成品', f_aqlLevel: 'MAJ 0.65' })) {
+    b.elements.set(id, { value, dataset: {}, style: {} });
+  }
+  b.elements.set('reviewTableWrap', { innerHTML: '' });
+  b.elements.set('recordsTableWrap', { innerHTML: '' });
+  b.run(`getSupplierOptions=()=>['Fixture Supplier']; getCustomerOptions=()=>[]; getProcessTypeOptions=()=>[];
+    renderSupplierDatalist=()=>{}; renderCustomerDatalist=()=>{}; renderProcessTypeDatalist=()=>{};
+    renderInspectorDatalist=()=>{}; bindNameWhitelistCheck=()=>{}; syncAqlLevelPills=()=>{};
+    switchModalMode=()=>{}; _syncOrderNoNA=()=>{}; updateTopKpis=()=>{};
+    _syncCheckAllState=()=>{}; _updateBatchBtn=()=>{}; applyColLock=()=>{};
+    closeModalDirect=()=>{editingId=null}; currentPage='test';`);
+}
+
+test('record entry permission gates both rendered edit actions and direct open/save handlers', () => {
+  const b = browser(); entryFixture(b);
+  const reader = { username: 'reader', role: 'viewer', enabled: true, perms: { records: { e: 0 } } };
+  b.setBootstrap(bootstrap(reader)); b.ctx.__QC_BOOTSTRAP();
+  b.run(`state={records:[{id:1,status:'pending',date:'2026-10-24',supplier:'Fixture Supplier'},
+    {id:2,status:'rejected',date:'2026-10-24',supplier:'Fixture Supplier'}],nextId:501};`);
+  assert.equal(b.ctx.can('createRecord'), false);
+  b.ctx.renderReviewPage();
+  assert.doesNotMatch(b.elements.get('reviewTableWrap').innerHTML, /onclick="openEditModal/);
+  b.ctx.filterRecords();
+  assert.doesNotMatch(b.elements.get('recordsTableWrap').innerHTML, /onclick="openEditModal/);
+  b.ctx.openEditModal(1); assert.equal(b.run('editingId'), null);
+  const before = b.run('JSON.stringify(state)');
+  b.run('editingId=2'); assert.equal(b.ctx.saveRecord(), false);
+  assert.equal(b.run('JSON.stringify(state)'), before);
+  assert.equal(b.calls.some(call => call.method === 'POST'), false);
+
+  const entrant = { username: 'entry', role: 'viewer', enabled: true, perms: {} };
+  b.setBootstrap(bootstrap(entrant)); b.ctx.__QC_BOOTSTRAP();
+  assert.equal(b.ctx.can('createRecord'), true); assert.equal(b.ctx.can('editRecord'), false);
+  assert.equal(b.ctx.can('reviewRecord'), false); assert.equal(b.ctx.can('deleteRecord'), false);
+  b.ctx.renderReviewPage();
+  assert.match(b.elements.get('reviewTableWrap').innerHTML, /onclick="openEditModal\(1\)/);
+  b.ctx.openEditModal(2); assert.equal(b.run('editingId'), 2);
+  assert.equal(b.ctx.saveRecord(), true);
+  assert.equal(b.run('state.records[1].status'), 'pending');
+  assert.equal(b.run('state.records[1].resubmitted'), true);
+  b.run("state.records[0].status='approved'; editingId=null");
+  b.ctx.openEditModal(1); assert.equal(b.run('editingId'), null);
+  b.run('editingId=1'); assert.equal(b.ctx.saveRecord(), false);
+  assert.equal(b.run('state.records[0].status'), 'approved');
+
+  // The API authorizes an approved business edit with review.a, separately
+  // from entry.e. Keep the existing reviewer path without exposing a button.
+  b.setBootstrap(bootstrap({ username: 'reviewer', role: 'viewer', enabled: true,
+    perms: { records: { e: 0 }, review: { a: 1 } } })); b.ctx.__QC_BOOTSTRAP();
+  b.ctx.openEditModal(1); assert.equal(b.run('editingId'), 1);
+  assert.equal(b.ctx.saveRecord(), true); assert.equal(b.run('state.records[0].status'), 'approved');
+});
+
+test('new defect-library values remain text in both datalist attributes and the library table', () => {
+  const b = browser();
+  b.elements.set('defectDescList', { innerHTML: '' });
+  b.elements.set('page-defectlib', { innerHTML: '' });
+  const value = { name: '\"><img src=x onerror=alert(1)>', category: "' & <svg onload=alert(2)>",
+    defaultLevel: '\"><svg onload=alert(3)>', keywords: ['<img src=x onerror=alert(4)>'], enabled: true };
+  b.ctx._saveDefectLib([value]); b.ctx.refreshDefectDescDatalist(); b.ctx.renderDefectLibPage();
+  assert.equal(b.elements.get('defectDescList').innerHTML,
+    `<option value="${b.ctx._esc(value.name)}" data-level="${b.ctx._esc(value.defaultLevel)}" data-cat="${b.ctx._esc(value.category)}">`);
+  const html = b.elements.get('page-defectlib').innerHTML;
+  for (const text of [value.name, value.category, value.defaultLevel, value.keywords[0]]) assert.ok(html.includes(b.ctx._esc(text)));
+  assert.doesNotMatch(html, /<img|<svg/);
+  assert.deepEqual(JSON.parse(b.store.get(prefix + 'defect_library')), [value]);
+});
+
+test('confirming a new defect then receiving 403 keeps the entry session and record draft for retry', async () => {
+  let rejectRecords = true;
+  const b = browser({ handler: url => {
+    if (url.includes('/api/defects')) return Promise.resolve({ ok: false, status: 403 });
+    if (url.includes('/api/records')) return Promise.resolve({ ok: !rejectRecords, status: rejectRecords ? 403 : 200 });
+  } });
+  entryFixture(b);
+  const entrant = { username: 'entry', role: 'viewer', enabled: true, perms: {} };
+  b.setBootstrap(bootstrap(entrant)); b.ctx.__QC_BOOTSTRAP();
+  b.run("state={records:[],nextId:501}; _defectRows=[{desc:'Fixture unknown defect',qty:1,level:'MIN 2.5',category:'外观/质量'}]");
+  b.listeners[0](); // Installs the actual persist/defect-library writers.
+  assert.equal(b.ctx.saveRecord(), true);
+  assert.equal(await b.ctx.__QC_SYNC_NOW(), false); await tick();
+  assert.equal(b.ctx.getCurrentUser().username, 'entry');
+  assert.equal(b.ctx.__QC_BACKEND_OK, true);
+  const defectWrite = b.calls.find(call => call.url.includes('/api/defects'));
+  assert.equal(defectWrite.parsed.defectLib[0].name, 'Fixture unknown defect');
+  assert.equal(defectWrite.headers['X-QC-CSRF'], 'synthetic-csrf');
+  assert.match(defectWrite.url, /company=dg-xingxin$/);
+  const recordWrite = b.calls.find(call => call.url.includes('/api/records'));
+  assert.equal(recordWrite.parsed.records[0].defects[0].desc, 'Fixture unknown defect');
+  assert.match(b.ctx.__QC_SYNC_NOTICE, /服务器尚未保存/);
+  const key = prefix + 'pending_records_entry';
+  assert.equal(JSON.parse(b.store.get(key)).state.records[0].defects[0].desc, 'Fixture unknown defect');
+  rejectRecords = false; assert.equal(await b.ctx.__QC_SYNC_NOW(), true);
+  assert.equal(b.store.has(key), false); assert.equal(b.ctx.getCurrentUser().username, 'entry');
 });
 
 

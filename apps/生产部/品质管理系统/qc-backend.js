@@ -114,7 +114,7 @@
     }
     var requestAuth = window.__QC_AUTH;
     return fetch(apiUrl(path), options).then(function (res) {
-      if (window.__QC_AUTH === requestAuth && (res.status === 401 || res.status === 403)) clearAuth(res.status === 401 ? '登录已失效，请重新登录' : '当前账号无权限，请重新登录或联系管理员');
+      if (window.__QC_AUTH === requestAuth && res.status === 401) clearAuth('登录已失效，请重新登录');
       return res;
     });
   };
@@ -245,7 +245,7 @@
         headers: { 'Content-Type': 'application/json', 'X-QC-CSRF': window.__QC_AUTH.csrfToken }, body: JSON.stringify(body)
       }).then(function (r) {
         if (window.__QC_AUTH !== requestAuth) return false;
-        if (r.status === 401 || r.status === 403) clearAuth(r.status === 401 ? '登录已失效，请重新登录；未同步修改仍保留在本地' : '保存被拒绝，请联系管理员核对权限；未同步修改仍保留在本地');
+        if (r.status === 401) clearAuth('登录已失效，请重新登录；未同步修改仍保留在本地');
         return completed(r.ok, r.status);
       }).catch(function () { return window.__QC_AUTH === requestAuth ? completed(false, 0, '网络连接失败') : false; });
     } catch (_) { return Promise.resolve(completed(false, 0, '网络连接失败')); }

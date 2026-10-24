@@ -2227,8 +2227,8 @@ function filterRecords() {
         const selCls   = _selectedIds.has(r.id) ? 'row-selected' : '';
         const isApproved = recStatus(r) === 'approved';
         const isRejected = recStatus(r) === 'rejected';
-        /* 未审核通过（待审核/已退回）的记录：任何账号都可编辑；已审核锁定 */
-        const editBtn = !isApproved
+        /* 未审核通过的记录由有录入权限的账号编辑；已审核锁定 */
+        const editBtn = can('createRecord') && !isApproved
           ? `<button class="action-btn" onclick="openEditModal(${r.id})">编辑</button>`
           : '';
         const rejBadge = isRejected
@@ -3456,9 +3456,9 @@ function openAddModal() {
 function openEditModal(id) {
   const r = state.records.find(x => x.id === id);
   if (!r) return;
-  /* 未审核通过的记录任何账号都可编辑；已审核锁定的仍需先反审核退回 */
-  if (recStatus(r) === 'approved' && !can('editRecord')) {
-    showToast('该记录已通过审核并锁定，需先由审核人「反审核」退回后才能修改', 'error'); return;
+  const approved = recStatus(r) === 'approved';
+  if (!can(approved ? 'reviewRecord' : 'createRecord')) {
+    showToast(approved ? '该记录已通过审核并锁定，需由审核人修改或反审核退回' : '当前账号无权限执行此操作', 'error'); return;
   }
   editingId = id;
   setText('modalTitle', '编辑验货记录');
@@ -3669,7 +3669,7 @@ function refreshDefectDescDatalist() {
   const dl = document.getElementById('defectDescList');
   if (!dl) return;
   dl.innerHTML = getEnabledDefectLib()
-    .map(d=>`<option value="${d.name}" data-level="${d.defaultLevel}" data-cat="${d.category}">`)
+    .map(d=>`<option value="${_esc(d.name)}" data-level="${_esc(d.defaultLevel)}" data-cat="${_esc(d.category)}">`)
     .join('');
 }
 
@@ -4260,10 +4260,10 @@ function renderDefectLibPage() {
               ? '<span class="badge badge-pass">启用</span>'
               : '<span class="badge badge-rej">停用</span>';
             return `<tr>
-              <td style="font-weight:500">${d.name}</td>
-              <td style="font-size:11px">${d.category||''}</td>
-              <td style="font-size:11px">${d.defaultLevel||''}</td>
-              <td style="font-size:11px;color:var(--text-dim)">${(d.keywords||[]).join('、')||'—'}</td>
+              <td style="font-weight:500">${_esc(d.name)}</td>
+              <td style="font-size:11px">${_esc(d.category||'')}</td>
+              <td style="font-size:11px">${_esc(d.defaultLevel||'')}</td>
+              <td style="font-size:11px;color:var(--text-dim)">${_esc((d.keywords||[]).join('、')||'—')}</td>
               <td style="text-align:center">${badge}</td>
               <td style="text-align:center">
                 ${canAdd ? `<button class="action-btn" onclick="_openDefLibModal(${realIdx})">编辑</button>` : ''}
@@ -4756,6 +4756,11 @@ function _syncFormResult() {
 }
 
 function saveRecord(options = {}) {
+  const editingRecord = editingId !== null ? state.records.find(r => r.id === editingId) : null;
+  const approved = editingRecord && recStatus(editingRecord) === 'approved';
+  if (!can(approved ? 'reviewRecord' : 'createRecord')) {
+    showToast(approved ? '该记录已通过审核并锁定，需由审核人修改或反审核退回' : '当前账号无权限执行此操作', 'error'); return false;
+  }
   const continueEntry = options && options.continueEntry === true && editingId === null;
   const date     = getVal('f_date');
   const supplier = getVal('f_supplier');
@@ -5007,7 +5012,7 @@ function renderReviewPage() {
   }
 
   const canReview = can('reviewRecord');
-  const canEdit   = true;   /* 未审核通过的记录任何账号都可编辑（下方 st!=='approved' 兜底已审核锁定） */
+  const canEdit   = can('createRecord');
   const rows = list.map(r => {
     const st  = recStatus(r);
     const sm  = REVIEW_STATUS_META[st];

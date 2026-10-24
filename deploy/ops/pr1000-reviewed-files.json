@@ -1,0 +1,7 @@
+{
+  "apps/生产部/品质管理系统/app.js": "db3cc169c9074fe81afc9851b087a79cffdf6d56e16aa4f287fde86576874eb7",
+  "apps/生产部/品质管理系统/frontend-auth.test.js": "abb4724b794c1d2ed275c0dd4ea4fccad43e252e9eb92373e61b017518da3ad6",
+  "apps/生产部/品质管理系统/qc-backend.js": "c2a492ebcb1e9efb45c8befbad81916700a4c124def80e805e57fac56566df30",
+  "apps/生产部/品质管理系统/server/api-auth.test.js": "4e12e61f39e7875149261b69d86a8a9719d94140e03323b47d89f6f60a7a6413",
+  "apps/生产部/品质管理系统/server/server.js": "a7c2e56ec95e201bb3c662fc194b0e922b1d1ed29a710f44dab0863f60cfdee3"
+}

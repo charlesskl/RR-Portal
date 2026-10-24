@@ -92,7 +92,10 @@ test.before(async () => {
   directory = fs.mkdtempSync(path.join(os.tmpdir(), 'qms-api-auth-'));
   dataPath = path.join(directory, 'data'); marker = path.join(directory, 'unexpected-model-call');
   const serverDir = path.join(directory, 'server'); fs.mkdirSync(serverDir);
-  for (const filename of ['server.js', 'auth.js']) fs.copyFileSync(path.join(__dirname, filename), path.join(serverDir, filename));
+  for (const filename of ['server.js', 'auth.js']) {
+    const contents = fs.readFileSync(path.join(__dirname, filename), 'utf8');
+    fs.writeFileSync(path.join(serverDir, filename), filename === 'server.js' ? contents.replace("server.listen(PORT, '0.0.0.0'", "server.listen(PORT, '127.0.0.1'") : contents);
+  }
   fs.writeFileSync(path.join(serverDir, 'seed.json'), JSON.stringify({ records: [], defectLib: [], users: [{ username: 'jc', password: Auth.legacyHash(password) }] }));
   fs.writeFileSync(path.join(serverDir, 'ai-config.json'), JSON.stringify({ enabled: false, apiKey: '', baseURL: 'http://127.0.0.1:1/disabled-test-only' }));
   fs.writeFileSync(path.join(directory, 'model-guard.cjs'), "global.fetch = async () => { require('node:fs').appendFileSync(process.env.MODEL_CALL_MARKER, 'called'); throw new Error('Unexpected model call in auth regression'); };\n");
@@ -153,16 +156,16 @@ test('viewer creates pending records, including missing status, alongside unchan
   assert.equal(sql(A, db => db.prepare('SELECT status FROM records WHERE id=1').get().status), 'approved');
 });
 
-test('viewer cannot edit, review, forge audit fields, delete, replace, manage users or reload AI', async () => {
+test('viewer cannot edit approved records, review, forge audit fields, delete, replace, manage users or reload AI', async () => {
   const session = await login('viewer');
   const cases = [
-    ['/api/records', { records: [changed(2, { productNo: 'forbidden' })] }],
+    ['/api/records', { records: [changed(1, { productNo: 'forbidden' })] }],
     ['/api/records', { records: [changed(2, { status: 'approved', reviewBy: 'forged' })] }],
     ['/api/records', { records: [fresh(100, { status: 'approved' })] }],
     ['/api/records', { records: [fresh(100, { reviewBy: 'forged' })] }],
     ['/api/records', { records: [], deletedIds: [2] }], ['/api/records/delete', { ids: [2] }],
     ['/api/records/replace', { records: [] }], ['/api/users', { users: [] }], ['/api/partners', { partners: [] }],
-    ['/api/defects', { defectLib: [] }], ['/api/ai/reload', {}],
+    ['/api/ai/reload', {}],
   ];
   const before = snapshot();
   for (const [route, body] of cases) assert.equal((await request(route, { method: 'POST', session, body })).status, 403, route + ' ' + JSON.stringify(body));
@@ -171,7 +174,7 @@ test('viewer cannot edit, review, forge audit fields, delete, replace, manage us
 
 test('a mixed allowed-create and forbidden-edit batch is atomic', async () => {
   const session = await login('viewer'), before = snapshot();
-  const r = await request('/api/records', { method: 'POST', session, body: { records: [fresh(100), changed(2, { productNo: 'forbidden' })] } });
+  const r = await request('/api/records', { method: 'POST', session, body: { records: [fresh(100), changed(1, { productNo: 'forbidden' })] } });
   assert.equal(r.status, 403); assert.equal(snapshot(), before);
 });
 
@@ -346,4 +349,89 @@ test('session expiry uses the injectable clock and does not trust a supplied use
   sessions.login(req, res, A, user); req.headers.cookie = headers['Set-Cookie'].split(';')[0];
   now = 1099; assert.equal(sessions.authenticate(req, A, name => name === user.username ? user : null).user, user);
   now = 1100; assert.throws(() => sessions.authenticate(req, A, () => ({ ...user, username: 'jc', role: 'admin' })), error => error.status === 401);
+});
+
+
+function capabilityUser(username, rows) {
+  const perms = structuredClone(allZero);
+  for (const [menu, row] of Object.entries(rows)) Object.assign(perms[menu], row);
+  sql(A, db => db.prepare('INSERT INTO users(username,password,role,enabled,name,perms) VALUES(?,?,?,?,?,?)')
+    .run(username, Auth.legacyHash(password), 'viewer', 1, username + ' display', JSON.stringify(perms)));
+}
+const defectRows = company => sql(company, db => db.prepare('SELECT * FROM defect_library ORDER BY id').all());
+
+test('entry permission edits pending and rejected records and resubmits without granting review authority', async () => {
+  const session = await login('viewer');
+  const otherBefore = sql(B, db => db.prepare('SELECT * FROM records ORDER BY id').all());
+  assert.equal((await request('/api/records', { method: 'POST', session, body: { records: [changed(2, { productNo: 'entry edited' })] } })).status, 200);
+  assert.equal((await request('/api/records', { method: 'POST', session, body: { records: [changed(3, { productNo: 'rejected edited' })] } })).status, 200);
+  assert.equal(sql(A, db => db.prepare('SELECT rejectReason FROM records WHERE id=3').get()).rejectReason, 'fixture rejection');
+  assert.equal((await request('/api/records', { method: 'POST', session, body: { records: [changed(3, { productNo: 'resubmitted', status: 'pending', rejectReason: '', rejectBy: 'forged', reviewBy: 'forged', updatedAt: '2026-10-21T12:00:01.000Z' })] } })).status, 200);
+  const row = sql(A, db => db.prepare('SELECT * FROM records WHERE id=3').get());
+  assert.equal(row.status, 'pending');
+  for (const field of ['reviewBy', 'reviewAt', 'rejectReason', 'rejectBy', 'rejectAt']) assert.equal(row[field], '');
+  assert.deepEqual(sql(B, db => db.prepare('SELECT * FROM records ORDER BY id').all()), otherBefore);
+});
+
+test('records.a without entry permission cannot modify pending or rejected business fields', async () => {
+  capabilityUser('edit-only', { records: { v: 1, a: 1 } });
+  const session = await login('edit-only'), before = snapshot();
+  for (const id of [2, 3]) assert.equal((await request('/api/records', { method: 'POST', session, body: { records: [changed(id, { productNo: 'forbidden' })] } })).status, 403);
+  assert.equal(snapshot(), before);
+});
+
+test('defect-library managers retain maintenance without record entry permission and deletion keeps its separate permission', async () => {
+  capabilityUser('library-only', { defectlib: { v: 1, m: 1 } });
+  const session = await login('library-only');
+  const lib = (await request('/api/bootstrap', { session })).json.defectLib;
+  assert.equal((await request('/api/defects', { method: 'POST', session, body: { defectLib: [...lib, { name: 'Managed dent', category: 'appearance', defaultLevel: 'MAJ', enabled: true }] } })).status, 200);
+  const before = defectRows(A);
+  assert.equal((await request('/api/defects', { method: 'POST', session, body: { defectLib: [] } })).status, 403);
+  assert.deepEqual(defectRows(A), before);
+  sql(A, db => db.prepare("UPDATE users SET perms=? WHERE username='library-only'").run(JSON.stringify({ ...allZero, defectlib: { v: 1, e: 0, a: 0, m: 1 }, records: { v: 0, e: 0, a: 0, m: 1 } })));
+  assert.equal((await request('/api/defects', { method: 'POST', session, body: { defectLib: [] } })).status, 200);
+  assert.equal(defectRows(A).length, 0);
+});
+
+test('entry-only defect additions cannot replace existing metadata, categories or names even with record-delete permission', async () => {
+  capabilityUser('entry-delete', { records: { v: 1, e: 1, m: 1 } });
+  const session = await login('entry-delete'), before = defectRows(A), other = defectRows(B);
+  const lib = (await request('/api/bootstrap', { session })).json.defectLib;
+  const forged = lib.map(d => ({ ...d, defaultLevel: 'forged', keywords: ['forged'], enabled: false, createdAt: '1900-01-01' }));
+  assert.equal((await request('/api/defects', { method: 'POST', session, body: { defectLib: forged } })).status, 200);
+  assert.deepEqual(defectRows(A), before);
+  // Matching names are existing entries even when a stale/malicious snapshot changes category.
+  assert.equal((await request('/api/defects', { method: 'POST', session, body: { defectLib: [{ ...lib[0], category: 'forged category' }] } })).status, 200);
+  assert.deepEqual(defectRows(A), before);
+  assert.equal((await request('/api/defects', { method: 'POST', session, body: { defectLib: [] } })).status, 200);
+  assert.deepEqual(defectRows(A), before);
+  assert.equal((await request('/api/defects', { method: 'POST', session, body: { defectLib: [{ name: 'New description', category: 'appearance', enabled: true }] } })).status, 200);
+  assert.deepEqual(defectRows(A).filter(row => row.name === 'Scratch'), before);
+  assert.deepEqual(defectRows(B), other);
+  assert.equal((await request('/api/defects', { method: 'POST', session, company: B, body: { defectLib: [{ name: 'Cross-company', enabled: true }] } })).status, 401);
+  assert.deepEqual(defectRows(B), other);
+});
+
+test('stale entry snapshots append new descriptions without deleting or overwriting another user additions', async () => {
+  const first = await login('viewer'), second = await login('viewer');
+  const stale = (await request('/api/bootstrap', { session: first })).json.defectLib;
+  const original = defectRows(A);
+  assert.equal((await request('/api/defects', { method: 'POST', session: second, body: { defectLib: [...stale, { name: 'Other browser', category: 'appearance', enabled: true }] } })).status, 200);
+  const afterSecond = defectRows(A);
+  assert.equal((await request('/api/defects', { method: 'POST', session: first, body: { defectLib: [...stale, { name: 'This browser', category: 'function', enabled: true }] } })).status, 200);
+  assert.deepEqual(defectRows(A).filter(row => row.name !== 'This browser'), afterSecond);
+  assert.deepEqual(defectRows(A).filter(row => row.name === 'Scratch'), original);
+  assert.equal(defectRows(A).length, original.length + 2);
+});
+
+test('entry append validation is atomic for invalid or duplicate new descriptions', async () => {
+  const session = await login('viewer'), before = defectRows(A);
+  for (const defectLib of [
+    [{ name: 'valid', enabled: true }, null],
+    [{ name: 'valid', enabled: true }, { name: { invalid: true } }],
+    [{ name: 'duplicate', enabled: true }, { name: 'duplicate', enabled: true }],
+  ]) {
+    assert.equal((await request('/api/defects', { method: 'POST', session, body: { defectLib } })).status, 400);
+    assert.deepEqual(defectRows(A), before);
+  }
 });

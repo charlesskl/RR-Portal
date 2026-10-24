@@ -839,6 +839,36 @@ function getBootstrap(db) {
   return { records, nextId, users, defectLib, partners };
 }
 
+/* 录入流程只增加未知名称，不把浏览器的全量旧快照当作库管理修改。
+   现有条目的全部属性和其它标签页刚新增的条目原样保留。 */
+function appendDefects(db, lib) {
+  db.exec('BEGIN');
+  try {
+    const names = new Set(db.prepare('SELECT name FROM defect_library').all().map(row => String(row.name ?? '').trim()));
+    const pending = new Set();
+    const additions = [];
+    for (const item of lib) {
+      if (!item || typeof item !== 'object' || Array.isArray(item) || typeof item.name !== 'string' || !item.name.trim()) {
+        Auth.fail(400, '不良描述名称格式不正确');
+      }
+      const name = item.name.trim();
+      if (names.has(name)) continue;
+      if (pending.has(name)) Auth.fail(400, '不良描述名称重复');
+      pending.add(name);
+      if (['category', 'defaultLevel', 'createdAt'].some(key => item[key] != null && typeof item[key] !== 'string') ||
+          item.keywords != null && (!Array.isArray(item.keywords) || item.keywords.some(word => typeof word !== 'string')) ||
+          item.enabled != null && ![true, false, 0, 1].includes(item.enabled)) {
+        Auth.fail(400, '不良描述属性格式不正确');
+      }
+      additions.push({ ...item, name });
+    }
+    const insert = db.prepare('INSERT INTO defect_library(name,category,defaultLevel,keywords,enabled,createdAt) VALUES(?,?,?,?,?,?)');
+    for (const item of additions) insert.run(item.name, item.category ?? null, item.defaultLevel ?? null,
+      JSON.stringify(item.keywords || []), item.enabled ? 1 : 0, item.createdAt ?? null);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
 /* Authorize the effective write, not the unchanged full browser snapshot. All
    checks finish before the existing atomic merge/replace transaction begins. */
 const REVIEW_FIELDS = ['status', 'reviewBy', 'reviewAt', 'rejectReason', 'rejectBy', 'rejectAt'];
@@ -896,11 +926,15 @@ function authorizeRecordBatch(db, input, ids, user, replace = false) {
     const reviewChanged = current && REVIEW_FIELDS.some(col => String(record[col] || '') !== String(current[col] || ''));
     const resubmission = current && statusOf(current) === 'rejected' && nextStatus === 'pending' && businessChanged;
     if (!replace && !current) Auth.requirePermission(user, 'records', 'e');
-    if (!replace && current && businessChanged) Auth.requirePermission(user, 'records', 'a');
+    /* 未审核通过的记录放开编辑：任何可录入账号都能改（records.e）；已审核由下行 review.a 兜底 */
+    if (!replace && current && businessChanged) {
+      if (statusOf(current) === 'approved') Auth.requirePermission(user, 'review', 'a');
+      else Auth.requirePermission(user, 'records', 'e');
+    }
     if (current && businessChanged && statusOf(current) === 'approved') Auth.requirePermission(user, 'review', 'a');
     if ((!current && (nextStatus !== 'pending' || REVIEW_FIELDS.slice(1).some(col => record[col]))) ||
         current && reviewChanged && !resubmission) Auth.requirePermission(user, 'review', 'a');
-    if (resubmission) Auth.requirePermission(user, 'records', 'a');
+    if (resubmission) Auth.requirePermission(user, 'records', 'e');   /* 退回后重新提交同样放开 */
     // Unchanged rows may carry an old client-side audit display. Business edits
     // retain the database's audit fields unless a real review is being made.
     if (current && !businessChanged && !reviewChanged && !replace) return null;
@@ -1272,11 +1306,15 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/defects' && req.method === 'POST') {
       const body = await readBody(req);
-      Auth.requirePermission(user, 'defectlib', 'm');
+      const managesLibrary = Auth.can(user, 'defectlib', 'm');
+      if (!managesLibrary) Auth.requirePermission(user, 'records', 'e');
       if (!Array.isArray(body.defectLib)) Auth.fail(400, 'defectLib须为数组');
-      const oldDefects = db.prepare('SELECT name,category FROM defect_library').all();
-      if (oldDefects.some(old => !body.defectLib.some(item => item.name === old.name && item.category === old.category))) Auth.requirePermission(user, 'records', 'm');
-      replaceDefects(db, body.defectLib);
+      if (managesLibrary) {
+        // Keep the existing library-management and delete/rename permissions.
+        const oldDefects = db.prepare('SELECT name,category FROM defect_library').all();
+        if (oldDefects.some(old => !body.defectLib.some(item => item.name === old.name && item.category === old.category))) Auth.requirePermission(user, 'records', 'm');
+        replaceDefects(db, body.defectLib);
+      } else appendDefects(db, body.defectLib);
       return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM defect_library').get().c });
     }
     /* ── AI（阿里百炼，全局共用，不分厂区）── */

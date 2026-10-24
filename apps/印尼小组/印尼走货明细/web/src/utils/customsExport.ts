@@ -14,6 +14,7 @@ import { bindInvoiceLookupSerial, documentRow, rebindDocumentFormula, type Docum
 import auxiliaryDocumentLayout from './auxiliaryDocumentLayout.json'
 import { AUXILIARY_TABLES, auxiliaryDetailFormulas } from './auxiliaryDocumentFormula'
 import { invoiceDetailGroups, invoiceDetailSumFormula } from './invoiceDetailGroups'
+import { consolidateShipmentItems } from './shipmentConsolidation'
 
 import { CUSTOMS_FIXED, effectiveCustomsCompany, sortShipmentItems, cartonLayout } from './shipmentOrder'
 export { CUSTOMS_FIXED, effectiveCustomsCompany } from './shipmentOrder'
@@ -59,6 +60,7 @@ export { customsInvoicePrice } from './shipmentInvoice'
 
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
 export interface CustomsItem {
+  outbound_id?: number
   material_id?: number
   kg?: number
   qty?: number
@@ -1145,7 +1147,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     // 仅用于展示及分组；发票计算另取明确的报关公司，不使用默认值。
     return effectiveCustomsCompany(it, m, tf.exportCompany)
   }
-  const sorted = sortShipmentItems(items, materials, tf.exportCompany)
+  const sorted = sortShipmentItems(consolidateShipmentItems(items, materials, tf.exportCompany), materials, tf.exportCompany)
   const cartonRows = cartonLayout(sorted, materials, tf.exportCompany)
   const supplierOf = (it: CustomsItem) => (it.supplier || matOf(it)?.supplier || '').trim()
   const companyColor = new Map<string, string>()

@@ -8,6 +8,7 @@ import { api, type Dictionaries, type Material } from '../api/client'
 import { toolShipmentFields } from '../utils/toolShipment'
 import { sortShipmentItems, cartonLayout, cartonGroupKey, shipmentScope } from '../utils/shipmentOrder'
 import { withShipmentInvoicePrices } from '../utils/shipmentInvoice'
+import { consolidateShipmentItems } from '../utils/shipmentConsolidation'
 import { createCartonGroupId } from '../utils/cartonGroupId'
 import { shipmentPurchaseAmount } from '../utils/shipmentPurchase'
 import ShipmentImport from '../components/ShipmentImport'
@@ -178,6 +179,7 @@ export default function ShipmentsPage() {
   const [editing, setEditing] = useState<ShipmentDetail | null>(null)
   const [creating, setCreating] = useState(false)
   const [rawItems, setRawItems] = useState<ShipmentItem[]>([])
+  const [showBatchDetails, setShowBatchDetails] = useState(false)
   const nextRowKey = useRef(0)
   const [cartonSelection, setCartonSelection] = useState<React.Key[]>([])
   const [mergeOpen, setMergeOpen] = useState(false)
@@ -222,6 +224,11 @@ export default function ShipmentsPage() {
   }, [baseMatMap, rawItems])
   const orderedItems = (values: ShipmentItem[]) => withShipmentInvoicePrices(sortShipmentItems(values, matMap), matMap).map((it, i) => ({ ...it, seq: i + 1 }))
   const items = useMemo(() => orderedItems(rawItems), [rawItems, matMap])
+  const consolidatedItems = useMemo(() => withShipmentInvoicePrices(
+    sortShipmentItems(consolidateShipmentItems(items, matMap), matMap), matMap,
+  ), [items, matMap])
+  const showConsolidated = !showBatchDetails && consolidatedItems.length < items.length
+  const consolidatedCartons = useMemo(() => cartonLayout(consolidatedItems, matMap), [consolidatedItems, matMap])
   const customsOptions = useMemo(() => [...new Set([
     HUASHENGYI_FULL_NAME, ...customsNames,
     ...items.flatMap(item => {
@@ -521,6 +528,7 @@ export default function ShipmentsPage() {
   }
 
   function openCreate() {
+    setShowBatchDetails(false)
     setCreating(true); setEditing({ id: 0, status: 'draft', rate: 0.93, container_count: 1 })
     setItems([]); setMatMap(new Map()); setDirtyMatIds(new Set())
     setEditorDirty(false)
@@ -534,6 +542,7 @@ export default function ShipmentsPage() {
     }), 0)
   }
   async function openEdit(s: ShipmentSummary) {
+    setShowBatchDetails(false)
     setCreating(false); setEditing(s)
     form.resetFields(); setItems([]); setMatMap(new Map()); setDirtyMatIds(new Set())
     setEditorDirty(false)
@@ -637,6 +646,7 @@ export default function ShipmentsPage() {
   }
 
   function closeEditor() {
+    setShowBatchDetails(false)
     setEditing(null)
     setCreating(false)
     setDrawerFull(false)
@@ -874,6 +884,7 @@ export default function ShipmentsPage() {
     setItems(its => its.map(it => it.material_id === materialId ? { ...it, kg: kgForItem(it, newM) } : it))
   }
   function addItem() {
+    setShowBatchDetails(true)
     setEditorDirty(true)
     setItems(its => [...its, { seq: its.length + 1, qty: 0, kg: 0, cartons: 0, currency: 'US$' }])
   }
@@ -1146,7 +1157,7 @@ export default function ShipmentsPage() {
           className="shipment-detail-card"
           title={
             <div className="shipment-summary">
-              <span><b>{tot.rows}</b><small>明细行</small></span>
+              <span><b>{showConsolidated ? consolidatedItems.length : tot.rows}</b><small>明细行</small></span>
               <span><b>{tot.qty.toFixed(2)}</b><small>送货数量</small></span>
               <span><b>{tot.kg.toFixed(2)} kg</b><small>送货重量</small></span>
               <span><b>{tot.gross.toFixed(2)} kg</b><small>毛重总重</small></span>
@@ -1157,6 +1168,9 @@ export default function ShipmentsPage() {
           }
           extra={
             <Space wrap>
+              <Button size="small" onClick={() => { setShowBatchDetails(!showBatchDetails); setCartonSelection([]) }}>
+                {showBatchDetails ? '按物料汇总' : '查看/编辑出库批次'}
+              </Button>
               <Button size="small" type="primary" onClick={() => { loadOutbound(editing?.id || undefined); setOutOpen(true) }}>📦 从出库精确分配</Button>
               <Button size="small" onClick={() => { setManOpen(true); if (!manMats.length) loadManMats(manCode) }}>🗂 按货号选物料</Button>
               <Button size="small" onClick={openTools}>从工具库选择</Button>
@@ -1190,7 +1204,40 @@ export default function ShipmentsPage() {
             </Space>
           }
         >
-          <Table
+          {showConsolidated ? <>
+            <Typography.Paragraph type="secondary">
+              同柜相同物料已汇总，导出使用同一汇总规则。出库分配仍按原批次保存；供应商、价格、单据或装箱资料不同的明细保留分行。
+            </Typography.Paragraph>
+            <Table
+              rowKey={r => String(r._rowKey)}
+              size="small" pagination={false}
+              scroll={{ x: 2300, y: drawerFull ? 'calc(100vh - 350px)' : 'calc(100vh - 400px)' }}
+              dataSource={consolidatedItems}
+              columns={[
+                { title: '序号', width: 60, render: (_, _r, i) => i + 1 },
+                { title: '出库来源', width: 160, render: (_, r) => r.outbound_ids.map(id => <Tag key={id}>OUT-{id}</Tag>) },
+                { title: '图片', width: 60, render: (_, r) => matMap.get(r.material_id!)?.image
+                  ? <img src={matMap.get(r.material_id!)?.image} alt="" style={{ width: 36, height: 36, objectFit: 'contain' }} /> : '无' },
+                { title: '物料ID', dataIndex: 'material_id', width: 85 },
+                { title: '产品中文名称', width: 160, render: (_, r) => matMap.get(r.material_id!)?.name_zh },
+                { title: '货号', width: 130, render: (_, r) => matMap.get(r.material_id!)?.product_code },
+                { title: '产品英文名称', width: 160, render: (_, r) => matMap.get(r.material_id!)?.name_en },
+                { title: '规格', width: 160, render: (_, r) => matMap.get(r.material_id!)?.spec },
+                { title: '单位', width: 70, render: (_, r) => matMap.get(r.material_id!)?.unit_kg || 'KGM' },
+                { title: '送货重量', width: 120, render: (_, r) => num(r.kg).toFixed(4) },
+                { title: '送货数量', width: 120, render: (_, r) => num(r.qty) },
+                { title: '数量单位', width: 90, render: (_, r) => r.purchase_unit || (isPaperRope(matMap.get(r.material_id!)?.name_zh) ? '米' : '个') },
+                { title: '毛重总重', width: 110, render: (_, r) => calc(r).grossTotal.toFixed(2) },
+                { title: '净重总重', width: 110, render: (_, r) => calc(r).netTotal.toFixed(2) },
+                { title: '箱数', width: 80, render: (_, _r, i) => consolidatedCartons[i]?.count || 0 },
+                { title: '采购单价', width: 110, render: (_, r) => num(r.price).toFixed(4) },
+                { title: '采购金额', width: 110, render: (_, r) => calc(r).purchaseAmount.toFixed(2) },
+                { title: '采购单号', dataIndex: 'po_no', width: 160 },
+                { title: '供应商', dataIndex: 'supplier', width: 180 },
+                { title: '操作', width: 110, fixed: 'right', render: () => <Button size="small" onClick={() => setShowBatchDetails(true)}>编辑批次</Button> },
+              ]}
+            />
+          </> : <Table
             rowKey={r => String(r._rowKey)}
             rowSelection={{ selectedRowKeys: cartonSelection.map(String), onChange: keys => setCartonSelection(keys.map(Number)), fixed: true }}
             size="small"
@@ -1286,7 +1333,7 @@ export default function ShipmentsPage() {
                 ),
               },
             ]}
-          />
+          />}
         </Card>
       </Drawer>
 

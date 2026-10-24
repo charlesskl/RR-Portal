@@ -2,7 +2,7 @@
 No environment changes, DB restore, authenticated writes or model calls.
 """
 import copy,hashlib,importlib.util,io,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,traceback,urllib.error,urllib.request
-PHASE='deploy'
+PHASE='verify'
 TARGET='ab0ae0bdbbea5ab7c6c7216e925f2ba1eeeef2b3'
 TREE='b31cbe6b6939e743d72debe33c7ffbd52df1c04f'
 SOURCE_MANIFEST_SHA='6d288f847e7553db189f273c4a47b64a8e0fd0289d53035ce4b2fc8197bc5ccc'
@@ -14,7 +14,7 @@ BACKUP=ROOT/'deploy/backups/pr-1001-20261024-backup'
 PREPARE=BACKUP.with_name('pr-1001-20261024-prepare')
 DEPLOY=BACKUP.with_name('pr-1001-20261024-deploy')
 VERIFY=BACKUP.with_name('pr-1001-20261024-verify')
-BACKUP_MANIFEST='02d4cf796e366a54117c4b04ddede786eb9b26ba46debb90bce5a11ef64969e8';BACKUP_RESULT='02611b29b6c05ffdf4e1ad37e3b53cd009059ded2032d3a672f49223a42fdcda';PREPARE_MANIFEST='1a283f8d160fc100a566b1d73c2d54a21c8ab97041b4f55f7dfc828176a19ab5';PREPARE_RESULT='2e9b3acae49606982e1bba2516a1be7f730b530839d45f2022676513abe3c6da';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+BACKUP_MANIFEST='02d4cf796e366a54117c4b04ddede786eb9b26ba46debb90bce5a11ef64969e8';BACKUP_RESULT='02611b29b6c05ffdf4e1ad37e3b53cd009059ded2032d3a672f49223a42fdcda';PREPARE_MANIFEST='1a283f8d160fc100a566b1d73c2d54a21c8ab97041b4f55f7dfc828176a19ab5';PREPARE_RESULT='2e9b3acae49606982e1bba2516a1be7f730b530839d45f2022676513abe3c6da';DEPLOY_MANIFEST='9679b9f5b3d880e719334842e3ab138ff14b32ebe876c982bcdf46ed9584aac7';DEPLOY_RESULT='6048d32c87ded8bc2653820e7f1983198f4e9e7c39a8991600b241e48525e5ab'
 ORDER=('indo-shipping',)
 INDO_SCHEMA_SHA='2a7e993b0c6f673cb27eec87ca9cf4fde483e5b91468a92f96342691e7372a7a'
 REVIEWED_PATHS=('web/src/pages/ShipmentsPage.tsx', 'web/src/utils/customsExport.ts', 'web/src/utils/shipmentConsolidation.test.ts', 'web/src/utils/shipmentConsolidation.ts', 'web/src/utils/shipmentConsolidationSave.test.ts')

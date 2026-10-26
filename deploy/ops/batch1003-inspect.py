@@ -4,7 +4,7 @@ ROOT=pathlib.Path('/opt/rr-portal')
 OUT=ROOT/'deploy/backups/batch-1003-1011-20261026-inspect'
 BASE='74b0f2143197dd1a814a4a11b0f737c3f110454e'
 BRANCH='refs/heads/ops/batch-1003-1011-20261026'
-EXECUTE=True
+EXECUTE=False
 APPS={'qc':'apps/生产部/品质管理系统','rr-production':'apps/工程部/工程啤办单','gongcheng-ziliao':'apps/工程部/工程资料管理系统','factory-review':'apps/PMC跟仓管/加工厂月度评审管理制度','factory-review-test':'apps/PMC跟仓管/加工厂月度评审管理制度'}
 FILES={'qc':{'qc-backend.js':'/app/qc-backend.js','server/server.js':'/app/server/server.js','server/auth.js':'/app/server/auth.js'},'rr-production':{'public/engineering.html':'/app/public/engineering.html','public/slush.html':'/app/public/slush.html','server.js':'/app/server.js'},'gongcheng-ziliao':{'vite-plugin-docs-api.ts':'/app/vite-plugin-docs-api.ts','package-lock.json':'/app/package-lock.json','src/sections/DocEditor.tsx':'/app/src/sections/DocEditor.tsx'},'factory-review':{'pb_hooks/lib/analysis_ai.js':'/pb/pb_hooks/lib/analysis_ai.js','pb_hooks/analysis_ai.pb.js':'/pb/pb_hooks/analysis_ai.pb.js'},'factory-review-test':{'pb_hooks/lib/analysis_ai.js':'/pb/pb_hooks/lib/analysis_ai.js','pb_hooks/analysis_ai.pb.js':'/pb/pb_hooks/analysis_ai.pb.js'}}
 def need(v,label):

@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '84f6b16e04342a24964c91c2c797776f6872ccd7cf6abfce2e7769b930071ae3'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
+  SCOPED_RELEASE_HELPER_SHA256: 'aa160eb41a594d75f6ba0737f301d265ad4812f7ccc6151362d13fce573c73e4'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -56,7 +56,7 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/batch1003-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/batch1003-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 84f6b16e04342a24964c91c2c797776f6872ccd7cf6abfce2e7769b930071ae3 ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = aa160eb41a594d75f6ba0737f301d265ad4812f7ccc6151362d13fce573c73e4 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch1003-data-library.py" > "$scoped_release_tmp/batch1003-data-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/batch1003-data-library.py" | cut -d ' ' -f1)" = f40fdf266b765a9a1fedcb04190b413e2d979aaa8e7548c030c1eed5560e50c6 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch1003-image-library.py" > "$scoped_release_tmp/batch1003-image-library.py" 2>/dev/null || exit 1

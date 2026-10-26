@@ -6,7 +6,7 @@ vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({role:'admin'})}))
 import AnalysisAiPanel from '../src/components/AnalysisAiPanel.vue'
 const response={report:{summary:'需要核实',findings:[{title:'风险',risk:'medium',analysis:'有待核实',actions:['复查'],evidence_ids:['quality_patrols:p']}],limitations:['缺少产能']},evidence:[{id:'quality_patrols:p',factoryId:'f',factoryCode:'F1',factoryName:'工厂',source:'quality_patrols',recordId:'p',date:'2026-10-16',craft:'assembly',region:'hunan'}],coverage:[],model:'test-model',start:'2026-10-01',end:'2026-10-20',generatedAt:'2026-10-20T00:00:00Z'}
 const mountPanel=()=>mount(AnalysisAiPanel,{props:{factories:[]},global:{stubs:{RouterLink:{props:['to'],template:'<a><slot /></a>'}}}})
-beforeEach(()=>{vi.clearAllMocks();mocks.record={id:'u'};mocks.send.mockImplementation(async(path:string)=>path.endsWith('/config')?{enabled:true,model:'test-model',reason:'',dailyLimit:20}:response)})
+beforeEach(()=>{vi.clearAllMocks();mocks.record={id:'u'};mocks.send.mockImplementation(async(path:string,options:any)=>path.endsWith('/config')?{enabled:true,model:'test-model',reason:'',dailyLimit:20}:options?.body?.preview?{total:5,limit:500,coverage:[{source:'订单',count:1,status:'已读取'}]}:response)})
 describe('AI analysis interaction',()=>{
   it('does not issue a paid request without configuration and shows the admin entry',async()=>{
     mocks.send.mockResolvedValue({enabled:false,model:'',reason:'AI服务尚未启用',dailyLimit:20})
@@ -37,7 +37,7 @@ describe('AI analysis interaction',()=>{
 it('replaces opaque server errors with actionable Chinese guidance',async()=>{
  mocks.send.mockImplementation(async(path:string)=>{if(path.endsWith('/config'))return {enabled:true,model:'test-model',reason:'',dailyLimit:20};throw {response:{message:'Something went wrong while processing your request.'}}})
  const w=mountPanel();await flushPromises();await w.find('button.primary').trigger('click');await flushPromises()
- expect(w.text()).toContain('请缩小日期范围或选择单个工厂后重试')
+ expect(w.text()).toContain('请稍后重试')
  expect(w.text()).not.toContain('Something went wrong')
  w.unmount()
 })
@@ -203,4 +203,15 @@ it('aborts and discards an in-flight analysis when a selected factory disappears
  expect(signal.aborted).toBe(true)
  resolveReport(response);await flushPromises();expect(w.find('.result').exists()).toBe(false)
  w.unmount()
+})
+
+it('previews counts without a paid request and blocks combined overflow',async()=>{
+ const w=mountPanel();await flushPromises()
+ mocks.send.mockResolvedValue({total:501,limit:500,coverage:[{source:'订单',count:340,status:'已读取'},{source:'品质检验',count:161,status:'已读取'}]})
+ await w.find('button.primary').trigger('click');await flushPromises()
+ expect(mocks.send).toHaveBeenCalledTimes(2);expect(mocks.send.mock.calls[1]![1].body).toMatchObject({preview:true,orderDateBasis:'order_date'})
+ expect(w.text()).toContain('订单：340条');expect(w.text()).toContain('品质检验：161条');expect(w.text()).toContain('尚未调用AI')
+ await w.find('[aria-label="订单日期口径"]').setValue('delivery_date');expect(w.find('.coverage').exists()).toBe(false)
+ await w.findAll('button').find(b=>b.text()==='统计分析范围（不调用AI）')!.trigger('click');await flushPromises()
+ expect(mocks.send.mock.calls.at(-1)![1].body).toMatchObject({preview:true,orderDateBasis:'delivery_date'});w.unmount()
 })

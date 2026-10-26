@@ -13,6 +13,8 @@ const auth=useAuthStore()
 const config=ref<AnalysisConfig|null>(null)
 const configLoading=ref(false), configError=ref(''), configNeedsLogin=ref(false)
 let configController:AbortController|null=null
+const orderDateBasis=ref('order_date')
+const statistics=ref<{coverage:{source:string;status:string;count:number}[];total:number;limit:number}|null>(null)
 const error=ref(''), busy=ref(false), factory=ref(props.factoryId||'')
 const region=ref<Region|''>(''),craft=ref<Craft|''>('')
 const regionOptions=computed(()=>[...new Set(props.factories.map(f=>regionOf(f)).filter(r=>auth.role&&allowedRegions(auth.role).includes(r)))])
@@ -33,7 +35,7 @@ interface Evidence {id:string;factoryCode:string;factoryId:string;factoryName:st
 interface Report { report:{summary:string;limitations:string[];findings:{title:string;risk:string;analysis:string;actions:string[];evidence_ids:string[]}[]}; evidence:Evidence[]; coverage:{source:string;status:string;count:number}[]; model:string; generatedAt:string; start:string; end:string }
 const result=ref<Report|null>(null)
 let generation=0,configGeneration=0,disposed=false,controller:AbortController|null=null
-function clear(){generation++;controller?.abort();controller=null;result.value=null;busy.value=false;error.value=''}
+function clear(){generation++;controller?.abort();controller=null;result.value=null;statistics.value=null;busy.value=false;error.value=''}
 function resetScope(){region.value='';craft.value='';factory.value=props.factoryId||'';clear()}
 async function loadConfig(){
   const current=++configGeneration
@@ -60,14 +62,23 @@ async function loadConfig(){
     }
   } finally {if(current===configGeneration){configLoading.value=false;configController=null}}
 }
-async function generate(){
-  if(!config.value?.enabled||busy.value)return
+async function generate(previewOnly=false){
+  if(busy.value||(!previewOnly&&!config.value?.enabled))return
   clear();const current=generation;busy.value=true;controller=new AbortController()
-  try{const report=await pb.send<Report>('/api/factory-review/analysis-ai',{method:'POST',body:{start:start.value,end:end.value,factory:factory.value,region:region.value,craft:craft.value,question:question.value},signal:controller.signal});if(current===generation)result.value=report}
-  catch(e:any){if(current===generation)error.value=e?.response?.message && e.response.message !== 'Something went wrong while processing your request.' ? e.response.message : 'AI分析请求处理失败，请缩小日期范围或选择单个工厂后重试；若仍失败，请联系管理员检查后端日志。'}
+  const body={start:start.value,end:end.value,factory:factory.value,region:region.value,craft:craft.value,question:question.value,orderDateBasis:orderDateBasis.value}
+  try{
+    const counts=await pb.send('/api/factory-review/analysis-ai',{method:'POST',body:{...body,preview:true},signal:controller.signal,requestKey:null})
+    if(current!==generation)return
+    statistics.value=counts
+    if(previewOnly)return
+    if(counts.total>counts.limit){error.value=`分析总明细 ${counts.total} 条，超过 ${counts.limit} 条上限，请参考各类数量缩小范围；尚未调用AI。`;return}
+    const report=await pb.send<Report>('/api/factory-review/analysis-ai',{method:'POST',body,signal:controller.signal,requestKey:null})
+    if(current===generation)result.value=report
+  }
+  catch(e:any){if(current===generation)error.value=e?.response?.message && e.response.message !== 'Something went wrong while processing your request.' ? e.response.message : 'AI分析请求处理失败，请稍后重试；若仍失败，请联系管理员检查后端日志。'}
   finally{if(current===generation){busy.value=false;controller=null}}
 }
-watch([start,end,factory,question],()=>clear())
+watch([start,end,factory,question,orderDateBasis],()=>clear())
 watch(()=>props.factoryId,()=>resetScope())
 const stop=pb.authStore.onChange(()=>{resetScope();configGeneration++;config.value=null;configError.value='';configLoading.value=false;configController?.abort();if(pb.authStore.record)void loadConfig()})
 onMounted(loadConfig);onScopeDispose(()=>{disposed=true;configGeneration++;configController?.abort();clear();stop()})
@@ -91,9 +102,12 @@ function target(e:Evidence){
       <button :disabled="busy||configLoading" @click="loadConfig">刷新配置状态</button>
     </details>
     <div class="controls"><label>开始日期<input type="date" v-model="start" :max="end" :disabled="busy" /></label><label>结束日期<input type="date" v-model="end" :min="start" :max="chinaToday()" :disabled="busy" /></label><label v-if="!factoryId">厂区<select v-model="region" :disabled="busy" aria-label="分析厂区"><option value="">全部厂区</option><option v-for="r in regionOptions" :key="r" :value="r">{{REGION_LABELS[r]}}</option></select></label><label v-if="!factoryId">部门<select v-model="craft" :disabled="busy" aria-label="分析部门"><option value="">全部部门</option><option v-for="c in craftOptions" :key="c" :value="c">{{CRAFT_LABELS[c]}}</option></select></label><label v-if="!factoryId">分析工厂<select v-model="factory" :disabled="busy" aria-label="分析工厂"><option value="">所选范围全部工厂</option><option v-for="f in scopeFactories" :key="f.id" :value="f.id">{{f.name}}</option></select></label></div>
+    <label>订单日期口径<select v-model="orderDateBasis" :disabled="busy" aria-label="订单日期口径"><option value="order_date">按下单时间（与货期管理一致）</option><option value="delivery_date">按约定交货时间</option></select></label>
     <label class="question">希望分析的问题<textarea v-model="question" maxlength="600" rows="3" :disabled="busy" /></label>
-    <p class="muted">订单按约定交期、巡查按检查日期、检验按送货日期筛选；评分和产值按涉及的整月分析，不含无日期及范围外记录。最多180天、500条明细，过多时请缩小范围。</p>
-    <button class="primary" :disabled="!config?.enabled||busy||!start||!end||question.trim().length<2" @click="generate">{{busy?'AI正在分析…':'生成综合分析'}}</button>
+    <p class="muted">订单按所选日期口径、巡查按检查日期、检验按送货日期筛选；评分和产值按涉及的整月分析，不含无日期及范围外记录。最多180天；500条上限为订单、巡查、品质检验、评分和产值的合计，并非仅订单数量。</p>
+    <button :disabled="busy||!start||!end" @click="generate(true)">统计分析范围（不调用AI）</button>
+    <div v-if="statistics" class="coverage" role="status"><strong>合计 {{statistics.total}} 条 / 上限 {{statistics.limit}} 条</strong><span v-for="c in statistics.coverage" :key="c.source">{{c.source}}：{{c.count}}条（{{c.status}}）</span></div>
+    <button class="primary" :disabled="!config?.enabled||busy||!start||!end||question.trim().length<2" @click="generate(false)">{{busy?'AI正在分析…':'生成综合分析'}}</button>
     <p v-if="configError" role="alert" class="error">{{configError}} <RouterLink v-if="configNeedsLogin" to="/login">重新登录</RouterLink><button v-else :disabled="configLoading" @click="loadConfig">重试配置</button></p>
     <p v-if="error" role="alert" class="error">{{error}} <button v-if="!config" @click="loadConfig">重试</button></p>
     <div v-if="result" class="result">

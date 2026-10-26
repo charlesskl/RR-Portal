@@ -56,7 +56,9 @@
   }
   function notice(message, error) {
     window.__QC_SYNC_NOTICE = message;
-    if (typeof window.showToast === 'function') window.showToast(message, error ? 'error' : 'info');
+    /* 例行成功不弹 toast：应用自身已有「记录已添加 ✓」等提示，
+       同步层的「服务器已保存修改」会把它覆盖掉。错误状态照常提示。 */
+    if (error && typeof window.showToast === 'function') window.showToast(message, 'error');
     var banner = document.getElementById('qcSyncNotice');
     if (!banner && document.body && document.createElement) {
       banner = document.createElement('div');
@@ -68,7 +70,9 @@
     }
     if (banner) {
       banner.textContent = message;
-      banner.style.display = message ? '' : 'none';
+      /* 例行「服务器已保存修改」不占用底部横幅：全宽横幅会盖住右下角的操作提示（toast）。
+         横幅只留给错误/草稿等需要用户处理的状态。 */
+      banner.style.display = (message && error) ? '' : 'none';
       var hasRecordFailure = Object.keys(failedWrites).some(function (url) { return url.indexOf('/api/records') !== -1; });
       if (error && hasRecordFailure && document.createElement) {
         var retry = document.createElement('button');
@@ -263,7 +267,9 @@
     if (!owner) return Promise.resolve(false);
     var epoch = recordQueueEpoch;
     recordRevision++; recordToken = newRecordToken();
-    if (!saveRecordDraft(owner)) return Promise.resolve(false);
+    /* 草稿备份失败（如浏览器存储满）只降级为「无草稿保护」，绝不能因此中止发送：
+       中止会让记录只留在本地，下次刷新被服务器数据覆盖后无声丢失。 */
+    saveRecordDraft(owner);
     // Each queued write is bound to the authenticated actor that created it.
     recordPushQueue = recordPushQueue.then(function () { return sendRecords(owner, epoch); }, function () { return sendRecords(owner, epoch); });
     return recordPushQueue;

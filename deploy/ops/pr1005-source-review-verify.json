@@ -1,0 +1,58 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr1002_ui",
+  "reviewedAtUTC": "2026-10-26T01:58:55.399992+00:00",
+  "helperSHA256": "5e0e0a7c222b11b6acd85609b4693a0339ed198db9803863f40fd236697b6b4e",
+  "helperGatesFrozen": true,
+  "base": "04b6e92301c7dce04b83a3f63b1e83bfe2d9fe10",
+  "baseTree": "fd9348f63f6d1edb156677dce8b600179fd4b0a5",
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "dependencies": {
+    "pr1005-backup-library.py": "800103096b0640690e498fd305ab1044d07d4252e0ea8fe69954ef825f461f48",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9"
+  },
+  "reviewedPRHead": "748f1ef96657727a16581bd16569c96480abf4ff",
+  "reviewedCandidateTree": "2ae9b60d6aa627005d5937298fa84386b3572054",
+  "sourceManifestSHA256": "77ce532388969ff3846137d0e43fe199057ae9967066a384cf72d3327d9497e1",
+  "changedFileCount": 5,
+  "scope": [
+    "factory-review"
+  ],
+  "otherContainerCount": 45,
+  "portableSQLiteCount": 2,
+  "checks": [
+    "Read complete normalized R delta vs independently reviewed successful1002 R38ed. Only batch/priorproof labels, exact5 source manifest plus reviewed two-hook guard added. Reverse final manifest/path pins exactly reproduce reviewed inert d96d source; all9runtime gate strings blank and all5 dependency bytes exact.",
+    "Actual final head748f/tree2ae and all5 BASEdiff blobSHA equal manifest77ce with narrow exactpaths. Only reviewed analysis_ai entry and lib hook paths may change; regular full hook entry inventory and every other hook mode/blob remain BASE. Both reviewed modes preserved and bytehash pinned; sole known cronAdd cleanup tail original bytes through EOF, cardinality one.",
+    "Actual hook_entries/unchanged_hooks_and_startup AST positive and13 negative fixtures reject extra/deleted hook, third-hook content/mode, reviewedmode, symlink/path escape, wrong/missing manifest, changing only one hook, modified/missing/extra known cron. No controller or actual Git execution in those fixtures.",
+    "All18 critical source/data/family/log/runtime/env/flag/recovery/deploy/verify/public functions AST-identical to successful1002, including strict retained companion mode-owner/new inherited companion/lifecycle evidence and businessfulltyped/schema/usersperms/sqlite_sequence exact. Auxiliary only mature log retention and bounded observation-window compatibility, no broad data exception.",
+    "Source still requires fixed Docker/package/global configs and full pb_migrations tree unchanged; health exact-existing admin/migration/2hour quota guards remain in Bd8001. All other hooks unchanged plus reviewed request handlers are application-reviewed hashes; no startup seed/migration/cron behavior change.",
+    "Only production factory-review owns maintenance/drain60/stop60/closed2SQLite backup/recreate preparedimage no-build/no-deps/pullnever. Test remains one of45others, all46originals serve during build. Full env/PID1/HostConfig/images/mounts and4dirty preserved; typedOOM null/false compatibility stays mature full comparator.",
+    "Read-only public health/index/all index assets and anonymousconfig401 only. Public index/static SHA maps support independent externalbyteverification. Verify replays sealed closed data/source/currentruntime, explicitly no fresh changing live business comparison/auth/model/build/SQL writes."
+  ],
+  "offlineChecks": {
+    "hookBoundaries": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr1005-hook-boundaries-independent-pure.py",
+      "sha256": "553485e65fcc7094aab779641b42e2a305b89aab00f82bca19d7af7dc4f4b67c",
+      "log": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr1005-hook-boundaries-independent-pure.log",
+      "logSHA256": "75d33af0898468fecf07c0e6f484264598ae2016513b9d0db284a54bd8e795d8",
+      "negativeCasesRejected": 13
+    },
+    "unchangedCriticalFunctionASTs": 18,
+    "finalPurePinsAndActualFiveGitBlobsVerified": true,
+    "realControllerDatabaseDockerHTTPModelOrRemoteCalls": false
+  },
+  "remainingBlockers": [],
+  "boundaries": [
+    "SQLite snapshots individually consistent, not cross-database atomic.",
+    "Known companion presence lifecycle and mature auxiliary log retention compatibility are recorded without proving deletion actor/timing; all business typedrows/schema and owners remain strict.",
+    "No controller import/entrypoint, actualSQL/DB/Docker/production/login/paidmodel/remote or OPS/state mutation by this reviewer."
+  ]
+}

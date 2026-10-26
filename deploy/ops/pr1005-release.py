@@ -2,7 +2,7 @@
 No environment changes, DB restore, authenticated writes or model calls.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,traceback,urllib.error,urllib.request
-PHASE='deploy'
+PHASE='verify'
 TARGET='37b6146354f692dfabc8b009f6c5b80ced091bdb'
 TREE='2ae9b60d6aa627005d5937298fa84386b3572054'
 SOURCE_MANIFEST_SHA='77ce532388969ff3846137d0e43fe199057ae9967066a384cf72d3327d9497e1'
@@ -16,7 +16,7 @@ BACKUP=ROOT/'deploy/backups/pr-1005-20261026-backup'
 PREPARE=BACKUP.with_name('pr-1005-20261026-prepare')
 DEPLOY=BACKUP.with_name('pr-1005-20261026-deploy')
 VERIFY=BACKUP.with_name('pr-1005-20261026-verify')
-BACKUP_MANIFEST='8d45e2ed4bcb5fda49adf56029f5ea8f69e1dc8d233596735f8dc8aa5f979e7e';BACKUP_RESULT='a9450e4874e0c209da8edce4d35facfd22a3b3f3c788facd14384cf04f357cb3';PREPARE_MANIFEST='ad8149c5d24c0a1bc499b273632e9f40b86703e8fd86bfacafeb60422857f048';PREPARE_RESULT='c45e46e7339f1074907c1a221fee85698bfe8e7b3303285580a13a112b0a63ba';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+BACKUP_MANIFEST='8d45e2ed4bcb5fda49adf56029f5ea8f69e1dc8d233596735f8dc8aa5f979e7e';BACKUP_RESULT='a9450e4874e0c209da8edce4d35facfd22a3b3f3c788facd14384cf04f357cb3';PREPARE_MANIFEST='ad8149c5d24c0a1bc499b273632e9f40b86703e8fd86bfacafeb60422857f048';PREPARE_RESULT='c45e46e7339f1074907c1a221fee85698bfe8e7b3303285580a13a112b0a63ba';DEPLOY_MANIFEST='59c88becd4312a2d5a3d5ca0c65a72e6511edb1810fd93ab51f0f742dc2a5af5';DEPLOY_RESULT='651c1b12ec5712a4cbafc32f829a55c029eb94a291bf8c97c847eafe4cf31a3d'
 ORDER=('factory-review',)
 DEPS={'pr1005-backup-library.py': '800103096b0640690e498fd305ab1044d07d4252e0ea8fe69954ef825f461f48', 'batch-host-config-library.py': 'bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1', 'factory-review-backup-library.py': '79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666', 'release-data-ops-library.py': 'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5', 'release-data-library.py': 'd63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9'}
 COMPOSE=['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production')]

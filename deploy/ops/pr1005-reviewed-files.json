@@ -1,0 +1,7 @@
+{
+  "apps/PMC跟仓管/加工厂月度评审管理制度/pb_hooks/analysis_ai.pb.js": "0f5a3da40c8d3f93f69712f54b49960f3cb3c0d5a95ab2912c8f0d34d0251d91",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/pb_hooks/lib/analysis_ai.js": "30ad1227ccc18f2c7e36b04faca2bd60eee1f1f304cbaa899faa450b24b710b7",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/src/components/AnalysisAiPanel.vue": "1d5a2e9d7f14b1d66e63dd68dc600028e564077d4e98e20190df6f6b919ea501",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/tests/AnalysisAiPanel.spec.ts": "dbdcfad06a2b4e8daf14c5aa6dd0eb2331c3c595b92a09277f0328f9bf495320",
+  "apps/PMC跟仓管/加工厂月度评审管理制度/tests/analysisAiBackend.integration.mjs": "40c0793b8cec93148e2d3f4ea35dce8a99a99ec4e11d008df6cc348d4ecd132f"
+}

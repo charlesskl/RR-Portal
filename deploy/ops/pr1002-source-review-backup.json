@@ -1,0 +1,48 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr1002_ui",
+  "reviewedAtUTC": "2026-10-26T00:31:49.615190+00:00",
+  "helperSHA256": "d92192102d2fd19e95fc9a2702bb453757dc87200e7e714173362091a7ae6a1c",
+  "helperGatesFrozen": true,
+  "base": "f223ec9957a07e8e7b8dff7b5adcafcbe83ac7c8",
+  "baseTree": "23a3654c523cb5aa727fd05b1fe6875e3375e2f5",
+  "allowedPhases": [
+    "backup"
+  ],
+  "dependencies": {
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9"
+  },
+  "scope": [
+    "factory-review"
+  ],
+  "targetContainerCount": 1,
+  "otherContainerCount": 45,
+  "portableSQLiteCount": 2,
+  "checks": [
+    "Read complete new B, mature994 B/R, actual F.runtime_files sole O_EXCL image writer, pinned SQLite audit/connect and real health/quota hooks. GateFalse and exact branch/attempt1 preserved; all3 dependency bytes checked before import.",
+    "Only production factory-review; test remains among45others. All46 identity/fullConfig/HostConfig/env/PID1/mount/image/source/start/restart captured. Canonical exclusiveRW pb_data bind rejects alias/shared writers. No HTTP, lifecycle, maintenance, model or business calls.",
+    "Exact data.db+auxiliary.db via native SQLite header discovery and read-only transactional portable backup/replay. Full typed rows/schema/table_xinfo and sqlite_sequence include users/passwordhash/roles/perms. Files, uploads and main/companion mode-owner metadata archived; individually consistent, not cross-database atomic.",
+    "Whole env bytes/mode-owner, literalConfig/PID1, global Docker/package config, fourdirty files and maintenance flags sealed privately0600/0700 without printing rows or secrets.",
+    "Prior994 full prepare/verify file seals and successful result pins match retained actual state/receipts. Two-service original image/proof selects only production; actual production image matches priorprepared and verified-runtime. Local Git currentBASEf223 factory subtree6836ff exactly equals prior99429254 subtree.",
+    "Original OCI_REVISION selected by service key from sealed two-service build overlay, independent of test-first ordering. Wrong/missing/duplicate services and extra OCI args rejected in pure fixtures.",
+    "Startup guard checks existing users authcollection and configured email lower uniqueness plus BINARY exact match, independent of old index collation. Every source migration already applied. Conservative entire-cutoff-date quota guard rejects invalid/old usage through next2hours. It never calls health/seed/migration/cleanup."
+  ],
+  "offlineChecks": {
+    "kind": "AST-extracted pure functions/dicts and fake run only; no controller import/entrypoint, SQL, Docker or remote",
+    "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr1002-runtime-independent-pure.py",
+    "sha256": "d072f15c1155302d4a38e9d13730857bff7b961c97a5b85ebbe8f0450cd76705",
+    "log": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr1002-runtime-independent-pure-tests.log",
+    "logSHA256": "8f16137d638a3fe2dac1165b76427b168c9ff7cf3d20d895902385034abad0db",
+    "passedGroups": 3,
+    "negativeCasesRejected": 13
+  },
+  "remainingBlockers": [],
+  "boundaries": [
+    "Backup source only; final R manifest/lifecycle source and actual backup acceptance remain separate.",
+    "R family-owner omission was reported and independently fixed by its author; B captures the evidence but does not replace R comparison review.",
+    "No controller entrypoint/import or actual DB/Docker/production/remote/OPS/state action performed."
+  ]
+}

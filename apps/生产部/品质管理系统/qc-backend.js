@@ -158,15 +158,49 @@
   function newRecordToken() { return window.crypto && typeof window.crypto.randomUUID === 'function' ? window.crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2); }
   var recordQueueEpoch = 0;
   var draftOwner = null;
+  // Storage quota failures still need an owner-bound copy during this page's life.
+  // This is not durable storage: leaving the page must warn until it is saved.
+  var volatileRecordDrafts = Object.create(null);
+  var unloadGuardInstalled = false;
+  function warnUnprotectedDraft(event) {
+    if (!Object.keys(volatileRecordDrafts).length) return;
+    event.preventDefault(); event.returnValue = '';
+    return '';
+  }
+  function updateUnloadGuard() {
+    var needed = Object.keys(volatileRecordDrafts).length > 0;
+    if (needed && !unloadGuardInstalled) {
+      window.addEventListener('beforeunload', warnUnprotectedDraft);
+      unloadGuardInstalled = true;
+    } else if (!needed && unloadGuardInstalled) {
+      window.removeEventListener('beforeunload', warnUnprotectedDraft);
+      unloadGuardInstalled = false;
+    }
+  }
+  function currentVolatileDraft() {
+    var owner = window.__QC_AUTH && window.__QC_AUTH.user.username;
+    return owner && volatileRecordDrafts[owner];
+  }
   function draftKey(owner) { return PREFIX + 'pending_records_' + encodeURIComponent(owner); }
   function saveRecordDraft(owner) {
     if (!owner || !window.__QC_AUTH || window.__QC_AUTH.user.username !== owner) return false;
+    var draft, previous;
     try {
-      localStorage.setItem(draftKey(owner), JSON.stringify({ owner: owner, company: COMPANY, revision: recordRevision, token: recordToken,
-        state: JSON.parse(localStorage.getItem(KEY.records) || '{}'), deletedIds: window.__QC_PENDING_DELETES,
-        deleteRevisions: deleteRevisions, nextDeleteRevision: nextDeleteRevision, replacement: window.__QC_FORCE_REPLACE || false }));
+      draft = { owner: owner, company: COMPANY, revision: recordRevision, token: recordToken,
+        state: JSON.parse(localStorage.getItem(KEY.records) || '{}'), deletedIds: window.__QC_PENDING_DELETES.slice(),
+        deleteRevisions: Object.assign({}, deleteRevisions), nextDeleteRevision: nextDeleteRevision, replacement: window.__QC_FORCE_REPLACE || false };
+      try { previous = JSON.parse(localStorage.getItem(draftKey(owner)) || 'null'); } catch (_) {}
+      localStorage.setItem(draftKey(owner), JSON.stringify(draft));
+      delete volatileRecordDrafts[owner]; updateUnloadGuard();
       return true;
-    } catch (_) { notice('本地草稿备份失败，请保留此页面并检查浏览器存储空间。', true); return false; }
+    } catch (_) {
+      if (draft) {
+        volatileRecordDrafts[owner] = { draft: draft, previousToken: previous && previous.token, previousRevision: previous && previous.revision };
+        updateUnloadGuard();
+      }
+      notice('本地草稿备份失败，未同步记录仅保留在当前页面；请勿关闭或刷新，并检查浏览器存储空间。', true);
+      return false;
+    }
   }
   function restoreRecordDraft() {
     recordQueueEpoch++;
@@ -177,7 +211,8 @@
     window.__QC_PENDING_DELETES = []; deleteRevisions = Object.create(null); nextDeleteRevision = 0;
     window.__QC_FORCE_REPLACE = false; recordRevision = 0; recordToken = null;
     try {
-      var draft = JSON.parse(localStorage.getItem(draftKey(owner)) || 'null');
+      var volatile = volatileRecordDrafts[owner];
+      var draft = volatile ? volatile.draft : JSON.parse(localStorage.getItem(draftKey(owner)) || 'null');
       if (!draft || draft.owner !== owner || draft.company !== COMPANY || !draft.state || !Array.isArray(draft.state.records)) return;
       recordToken = typeof draft.token === 'string' ? draft.token : newRecordToken();
       recordRevision = Number.isSafeInteger(draft.revision) && draft.revision > 0 ? draft.revision : 1;
@@ -192,7 +227,9 @@
       window.__QC_FORCE_REPLACE = draft.replacement || false;
       localStorage.setItem(KEY.records, JSON.stringify(draft.state));
       failedWrites[apiUrl('/api/records')] = true;
-      notice('当前账号有未同步的本地验货草稿，已保留。请核对后点击“重试同步”，系统不会自动重发。', true);
+      notice(volatile
+        ? '当前账号有未同步验货记录，仅保留在当前页面，本地草稿备份不可用。请勿关闭或刷新，核对后点击“重试同步”；系统不会自动重发。'
+        : '当前账号有未同步的本地验货草稿，已保留。请核对后点击“重试同步”，系统不会自动重发。', true);
     } catch (_) { notice('本地草稿读取失败，请保留浏览器数据并联系管理员。', true); }
   }
   window.__QC_MARK_DELETED = function (ids) {
@@ -215,7 +252,9 @@
       var data = JSON.parse(xhr.responseText);
       acceptAuth(data);
       if (!Array.isArray(data.records)) throw new Error('服务器数据格式不正确');
-      localStorage.setItem(KEY.records, JSON.stringify({ records: data.records, nextId: data.nextId || 31 }));
+      var volatile = currentVolatileDraft();
+      // Never replace this actor's unprotected records with an older server snapshot.
+      localStorage.setItem(KEY.records, JSON.stringify(volatile ? volatile.draft.state : { records: data.records, nextId: data.nextId || 31 }));
       localStorage.setItem(KEY.users, JSON.stringify(Array.isArray(data.users) ? data.users.map(publicUser) : []));
       if (Array.isArray(data.defectLib)) localStorage.setItem(KEY.defectLib, JSON.stringify(data.defectLib));
       if (Array.isArray(data.partners)) localStorage.setItem(KEY.partners, JSON.stringify(data.partners));
@@ -237,12 +276,14 @@
         delete failedWrites[url];
         if (url.indexOf('/api/records') !== -1) { delete failedWrites[apiUrl('/api/records')]; delete failedWrites[apiUrl('/api/records/replace')]; }
       } else failedWrites[url] = true;
-      if (Object.keys(failedWrites).length) notice('服务器尚未保存部分修改。请保留此页面，检查连接和权限后重新保存；验货记录可重试同步。', true);
+      if (Object.keys(failedWrites).length) notice('服务器尚未保存部分修改。请保留此页面，检查连接和权限后重新保存；验货记录可重试同步。' +
+        (currentVolatileDraft() ? ' 本地草稿备份不可用，请勿关闭或刷新。' : ''), true);
+      else if (currentVolatileDraft()) notice('验货记录正在确认同步，本地草稿备份不可用，请保留此页面。', true);
       else notice('服务器已保存修改', false);
       return ok;
     }
     if (!window.__QC_AUTH || window.__QC_BACKEND_OK !== true) return Promise.resolve(completed(false, 401));
-    notice('修改已在本地暂存，正在同步服务器…', false);
+    notice(currentVolatileDraft() ? '正在同步服务器，本地草稿备份不可用，请保留此页面。' : '修改已在本地暂存，正在同步服务器…', !!currentVolatileDraft());
     var requestAuth = window.__QC_AUTH;
     try {
       return fetch(url, { method: 'POST', credentials: 'same-origin',
@@ -267,7 +308,9 @@
     if (!owner) return Promise.resolve(false);
     var epoch = recordQueueEpoch;
     recordRevision++; recordToken = newRecordToken();
-    if (!saveRecordDraft(owner)) return Promise.resolve(false);
+    /* 草稿备份失败（如浏览器存储满）只降级为「无草稿保护」，绝不能因此中止发送：
+       中止会让记录只留在本地，下次刷新被服务器数据覆盖后无声丢失。 */
+    saveRecordDraft(owner);
     // Each queued write is bound to the authenticated actor that created it.
     recordPushQueue = recordPushQueue.then(function () { return sendRecords(owner, epoch); }, function () { return sendRecords(owner, epoch); });
     return recordPushQueue;
@@ -290,11 +333,20 @@
           return index === -1 || deleteRevisions[id] !== revisions[index];
         });
         if (replacement && window.__QC_FORCE_REPLACE === replacement) window.__QC_FORCE_REPLACE = false;
+        var volatile = volatileRecordDrafts[owner];
+        var acknowledgedVolatile = volatile && volatile.draft.token === sentToken && volatile.draft.revision === sentRevision &&
+          recordToken === sentToken && recordRevision === sentRevision && nextDeleteRevision === sentDeleteRevision;
+        var draftCleanupFailed = false;
         try {
           var stored = JSON.parse(localStorage.getItem(draftKey(owner)) || 'null');
           if (stored && stored.token === sentToken && recordToken === sentToken && stored.revision === sentRevision && recordRevision === sentRevision && nextDeleteRevision === sentDeleteRevision) localStorage.removeItem(draftKey(owner));
+          else if (acknowledgedVolatile && stored && stored.owner === owner && stored.company === COMPANY && stored.token === volatile.previousToken && stored.revision === volatile.previousRevision) localStorage.removeItem(draftKey(owner));
           else if (stored && stored.token === recordToken) saveRecordDraft(owner);
-        } catch (_) { notice('服务器已保存，但本地草稿标记未清除；请核对后刷新。', true); }
+        } catch (_) { draftCleanupFailed = true; notice('服务器已保存，但本地草稿标记未清除；请核对后刷新。', true); }
+        if (acknowledgedVolatile) {
+          delete volatileRecordDrafts[owner]; updateUnloadGuard();
+          if (!draftCleanupFailed && !Object.keys(failedWrites).length) notice('服务器已保存修改', false);
+        }
         return ok;
       }
       if (replacement) return post(apiUrl('/api/records/replace'), { records: st.records || [] }).then(acknowledge);

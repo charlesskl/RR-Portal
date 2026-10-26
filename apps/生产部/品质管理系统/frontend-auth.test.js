@@ -13,7 +13,7 @@ const auth = user => ({ ok: true, user: user || admin, companies: [company], csr
 const bootstrap = user => ({ ...auth(user), records: [], nextId: 501, users: [admin], partners: [], defectLib: [] });
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function browser({ authenticated = true, pathname = '/qc/', cached = [], handler } = {}) {
-  const store = new Map(cached), elements = new Map(), calls = [], messages = [], listeners = [];
+  const store = new Map(cached), elements = new Map(), calls = [], messages = [], listeners = [], unloadListeners = new Set();
   let data = bootstrap(), status = authenticated ? 200 : 401, reloads = 0, shows = 0;
   function element(id, value = '') {
     const el = { id, value, textContent: '', innerHTML: '', style: {}, dataset: {}, disabled: false, children: [],
@@ -25,10 +25,12 @@ function browser({ authenticated = true, pathname = '/qc/', cached = [], handler
     'umUsername','umPassword','umPassword2','umRole','umName','umDept']) element(id);
   const button = element('loginButton');
   const ctx = { console: { log() {}, warn() {}, error() {} }, URLSearchParams, URL, Promise,
-    setTimeout() {}, clearTimeout() {}, setInterval() {}, requestAnimationFrame() {}, addEventListener() {}, navigator: {},
+    setTimeout() {}, clearTimeout() {}, setInterval() {}, requestAnimationFrame() {},
+    addEventListener(event, fn) { if (event === 'beforeunload') unloadListeners.add(fn); },
+    removeEventListener(event, fn) { if (event === 'beforeunload') unloadListeners.delete(fn); }, navigator: {},
     location: { pathname, search: '', hash: '', reload() { reloads++; } }, history: { replaceState(...args) { ctx.replaced = args[2]; } },
     document: { readyState: 'loading', addEventListener(event, fn) { if (event === 'DOMContentLoaded') listeners.push(fn); },
-      getElementById: id => elements.get(id) || null, querySelector: selector => selector === '#loginFields button' ? button : null,
+      getElementById: id => elements.get(id) || Array.from(elements.values()).find(el => el.id === id) || null, querySelector: selector => selector === '#loginFields button' ? button : null,
       querySelectorAll: () => [], createElement: () => element('created-' + elements.size), body: { appendChild() {} } },
     localStorage: { getItem: key => store.get(key) || null, setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) },
     XMLHttpRequest: class { open(method, url, async) { this.url = url; assert.equal(async, false); } send() {
@@ -48,7 +50,7 @@ function browser({ authenticated = true, pathname = '/qc/', cached = [], handler
   ctx._showApp = () => shows++;
   ctx.renderUsersPage = () => {};
   const run = code => vm.runInContext(code, ctx);
-  return { ctx, store, elements, calls, messages, run, button, listeners,
+  return { ctx, store, elements, calls, messages, run, button, listeners, unloadListeners,
     setBootstrap(value, code = 200) { data = value; status = code; }, get shows() { return shows; }, get reloads() { return reloads; } };
 }
 
@@ -346,4 +348,129 @@ test('late session response cannot replace a newer authenticated account', async
   b.setBootstrap(bootstrap({ username: 'alice', role: 'viewer', enabled: true })); b.ctx.__QC_BOOTSTRAP();
   finish({ ok: true, status: 200, json: async () => auth(admin) }); await pending;
   assert.equal(b.ctx.getCurrentUser().username, 'alice'); assert.equal(b.ctx.can('manageUsers'), false);
+});
+
+function failDraftStorage(b, allWrites = false) {
+  const original = b.ctx.localStorage.setItem;
+  b.ctx.localStorage.setItem = (key, value) => {
+    if (allWrites || key.includes('pending_records_')) throw new Error('QuotaExceededError');
+    return original(key, value);
+  };
+  return () => { b.ctx.localStorage.setItem = original; };
+}
+const pendingRecord = { id: 501, productNo: 'quota-draft', updatedAt: '2026-10-26T01:00:00Z' };
+function setPendingRecord(b, records = [pendingRecord]) {
+  b.store.set(prefix + 'records', JSON.stringify({ records, nextId: 502 }));
+}
+
+test('quota-degraded sends still run; failed sends survive same-owner bootstrap without automatic replay', async () => {
+  const b = browser({ handler: url => url.includes('/api/records') ? Promise.resolve({ ok: false, status: 500 }) : undefined });
+  setPendingRecord(b); failDraftStorage(b);
+  b.ctx.__QC_MARK_DELETED([7]); b.ctx.__QC_FORCE_REPLACE = 1;
+  assert.equal(await b.ctx.__QC_SYNC_NOW(), false);
+  const posts = b.calls.filter(c => c.method === 'POST'); assert.equal(posts.length, 1);
+  assert.equal(posts[0].parsed.records[0].productNo, 'quota-draft');
+  assert.equal(b.store.has(prefix + 'pending_records_qc-admin'), false);
+  assert.match(b.ctx.__QC_SYNC_NOTICE, /本地草稿备份不可用/);
+  assert.equal(b.unloadListeners.size, 1);
+  b.ctx.__QC_BOOTSTRAP(); b.ctx.initData(); await tick();
+  assert.equal(b.run('state.records[0].productNo'), 'quota-draft');
+  assert.deepEqual(Array.from(b.ctx.__QC_PENDING_DELETES), [7]); assert.equal(b.ctx.__QC_FORCE_REPLACE, 1);
+  assert.equal(b.calls.filter(c => c.method === 'POST').length, posts.length);
+  assert.match(b.ctx.__QC_SYNC_NOTICE, /不会自动重发/);
+});
+
+test('healthy routine saves remain quiet and do not install an unload warning', async () => {
+  const b = browser(); setPendingRecord(b);
+  assert.equal(await b.ctx.__QC_SYNC_NOW(), true);
+  assert.equal(b.ctx.__QC_SYNC_NOTICE, '服务器已保存修改'); assert.equal(b.unloadListeners.size, 0);
+  assert.equal(b.messages.length, 0);
+  const banner = Array.from(b.elements.values()).find(el => el.id === 'qcSyncNotice'); assert.equal(banner.style.display, 'none');
+});
+
+test('only unprotected unacknowledged data installs beforeunload; confirmed saves remove it', async () => {
+  let finish;
+  const b = browser({ handler: url => url.includes('/api/records') ? new Promise(resolve => { finish = resolve; }) : undefined });
+  assert.equal(b.unloadListeners.size, 0); setPendingRecord(b); failDraftStorage(b);
+  const pending = b.ctx.__QC_SYNC_NOW(); await tick(); assert.equal(b.unloadListeners.size, 1);
+  const event = { prevented: false, preventDefault() { this.prevented = true; } };
+  Array.from(b.unloadListeners)[0](event); assert.equal(event.prevented, true); assert.equal(event.returnValue, '');
+  finish({ ok: true, status: 200 }); assert.equal(await pending, true);
+  assert.equal(b.unloadListeners.size, 0); assert.equal(b.ctx.__QC_SYNC_NOTICE, '服务器已保存修改');
+  const banner = Array.from(b.elements.values()).find(el => el.id === 'qcSyncNotice'); assert.equal(banner.style.display, 'none');
+  assert.equal(b.messages.some(m => m.text === '服务器已保存修改'), false);
+  b.setBootstrap({ ...bootstrap(), records: [pendingRecord], nextId: 502 }); b.ctx.__QC_BOOTSTRAP(); b.ctx.initData();
+  assert.equal(b.run('state.records[0].productNo'), 'quota-draft'); assert.equal(b.unloadListeners.size, 0);
+});
+
+test('quota fallback stays private across authenticated users and retries only for its original owner', async () => {
+  let reject = true;
+  const b = browser({ handler: url => url.includes('/api/records') ? Promise.resolve({ ok: !reject, status: reject ? 500 : 200 }) : undefined });
+  setPendingRecord(b); failDraftStorage(b); await b.ctx.__QC_SYNC_NOW();
+  const posts = b.calls.filter(c => c.method === 'POST').length;
+  const alice = { username: 'alice', role: 'viewer', enabled: true };
+  b.setBootstrap({ ...bootstrap(alice), records: [{ id: 10, productNo: 'alice-server' }] });
+  b.ctx.__QC_BOOTSTRAP(); b.ctx.initData();
+  assert.equal(b.run('state.records[0].productNo'), 'alice-server');
+  assert.equal(b.calls.filter(c => c.method === 'POST').length, posts);
+  reject = false; assert.equal(await b.ctx.__QC_SYNC_NOW(), true);
+  assert.equal(b.calls.filter(c => c.method === 'POST').at(-1).parsed.records[0].productNo, 'alice-server');
+  assert.equal(b.unloadListeners.size, 1); // Original owner's unprotected data remains in memory.
+  b.setBootstrap(bootstrap()); b.ctx.__QC_BOOTSTRAP(); b.ctx.initData();
+  assert.equal(b.run('state.records[0].productNo'), 'quota-draft');
+  assert.equal(await b.ctx.__QC_SYNC_NOW(), true);
+  assert.equal(b.calls.filter(c => c.method === 'POST').at(-1).parsed.records[0].productNo, 'quota-draft');
+  assert.equal(b.unloadListeners.size, 0);
+});
+
+test('earlier confirmation cannot discard a newer volatile revision', async () => {
+  const requests = [];
+  const b = browser({ handler: url => url.includes('/api/records') ? new Promise(resolve => requests.push(resolve)) : undefined });
+  setPendingRecord(b); failDraftStorage(b); const first = b.ctx.__QC_SYNC_NOW(); await tick();
+  setPendingRecord(b, [{ ...pendingRecord, productNo: 'newer-quota-draft' }]); const second = b.ctx.__QC_SYNC_NOW();
+  requests[0]({ ok: true, status: 200 }); await first; await tick(); assert.equal(b.unloadListeners.size, 1);
+  assert.equal(requests.length, 2); assert.equal(b.calls.filter(c => c.method === 'POST')[1].parsed.records[0].productNo, 'newer-quota-draft');
+  requests[1]({ ok: true, status: 200 }); await second; assert.equal(b.unloadListeners.size, 0);
+});
+
+test('confirmed volatile save clears only the stale durable draft it superseded', async () => {
+  let reject = true;
+  const b = browser({ handler: url => url.includes('/api/records') ? Promise.resolve({ ok: !reject, status: reject ? 500 : 200 }) : undefined });
+  setPendingRecord(b); await b.ctx.__QC_SYNC_NOW(); const key = prefix + 'pending_records_qc-admin'; assert.equal(b.store.has(key), true);
+  setPendingRecord(b, [{ ...pendingRecord, productNo: 'confirmed-newer' }]); failDraftStorage(b); reject = false;
+  assert.equal(await b.ctx.__QC_SYNC_NOW(), true); assert.equal(b.store.has(key), false); assert.equal(b.unloadListeners.size, 0);
+  b.setBootstrap({ ...bootstrap(), records: [{ ...pendingRecord, productNo: 'confirmed-newer' }] }); b.ctx.__QC_BOOTSTRAP(); b.ctx.initData();
+  assert.equal(b.run('state.records[0].productNo'), 'confirmed-newer');
+});
+
+test('a different tab durable draft survives confirmation of an unprotected local revision', async () => {
+  let finish;
+  const b = browser({ handler: url => url.includes('/api/records') ? new Promise(resolve => { finish = resolve; }) : undefined });
+  setPendingRecord(b); failDraftStorage(b); const pending = b.ctx.__QC_SYNC_NOW(); await tick();
+  const other = { owner: 'qc-admin', company, revision: 1, token: 'other-tab', state: { records: [{ id: 700 }] }, deletedIds: [] };
+  const key = prefix + 'pending_records_qc-admin'; b.store.set(key, JSON.stringify(other));
+  finish({ ok: true, status: 200 }); await pending;
+  assert.equal(JSON.parse(b.store.get(key)).token, 'other-tab'); assert.equal(b.unloadListeners.size, 0);
+});
+
+test('a late old-user response cannot clear or replay a volatile draft under the new user', async () => {
+  let finish;
+  const b = browser({ handler: url => url.includes('/api/records') ? new Promise(resolve => { finish = resolve; }) : undefined });
+  setPendingRecord(b); failDraftStorage(b); const pending = b.ctx.__QC_SYNC_NOW(); await tick();
+  b.setBootstrap({ ...bootstrap({ username: 'alice', role: 'viewer', enabled: true }), records: [{ id: 10, productNo: 'alice-server' }] });
+  b.ctx.__QC_BOOTSTRAP(); b.ctx.initData(); finish({ ok: true, status: 200 }); assert.equal(await pending, false);
+  assert.equal(b.run('state.records[0].productNo'), 'alice-server'); assert.equal(b.unloadListeners.size, 1);
+  assert.equal(b.calls.filter(c => c.method === 'POST').length, 1);
+  b.setBootstrap(bootstrap()); b.ctx.__QC_BOOTSTRAP(); b.ctx.initData();
+  assert.equal(b.run('state.records[0].productNo'), 'quota-draft'); assert.equal(b.calls.filter(c => c.method === 'POST').length, 1);
+});
+
+test('complete write failure keeps only page memory and warns; storage recovery can protect then send it', async () => {
+  let reject = true;
+  const b = browser({ handler: url => url.includes('/api/records') ? Promise.resolve({ ok: !reject, status: reject ? 500 : 200 }) : undefined });
+  setPendingRecord(b); const recoverStorage = failDraftStorage(b, true); await b.ctx.__QC_SYNC_NOW();
+  assert.equal(b.unloadListeners.size, 1); assert.equal(b.ctx.__QC_BOOTSTRAP(), false); assert.equal(b.unloadListeners.size, 1);
+  recoverStorage(); b.setBootstrap(bootstrap()); assert.equal(b.ctx.__QC_BOOTSTRAP(), true); b.ctx.initData();
+  assert.equal(b.run('state.records[0].productNo'), 'quota-draft');
+  reject = false; assert.equal(await b.ctx.__QC_SYNC_NOW(), true); assert.equal(b.unloadListeners.size, 0);
 });

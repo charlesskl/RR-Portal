@@ -1,0 +1,39 @@
+{
+  "status": "CHECKED",
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root",
+  "author": "/root/pr1008_ops",
+  "helperSHA256": "40f1604ed0a58ec9d0a86591fc25409a7bf64c57d7d4f8754b03acefa95d6e27",
+  "helperGatesFrozen": true,
+  "base": "37b6146354f692dfabc8b009f6c5b80ced091bdb",
+  "baseTree": "2ae9b60d6aa627005d5937298fa84386b3572054",
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "dependencies": {
+    "pr1008-02-publication-ingress-profile.json": "c0c279e91c9b55a119e3755801964d3f586752999d3df6a260ac4697dd018e0e",
+    "pr1008-02-publication-ingress-library.py": "48d16c4ab22aa6befdabbf6ea584292108d78a94b23d12f85b1e8ba8300ccbe8",
+    "pr1008-02-backup-library.py": "cb4cb071c3a6536fe5cf9a802ed092d7798147613501421c8ec5bd7ffaa79428",
+    "pr1008-printlink-contract-library.py": "97a14ebb6a93034cf6531880d8852151472ec49f7881a136648376b602a36882",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9"
+  },
+  "remainingBlockers": [],
+  "checks": [
+    "Read complete R andactualdiffs; independentUI core82e/ef8 findingsfixed: allsource/data/env/loopback checks anddurableevidence beforepublicopening; releasefailureoneactualreacquire/heldproofoverseizure; oldimage recovery lock binds actualrecoveryStartedAt. NoDBrestore/credentialchanges/authwrites.",
+    "OnlysinglePrintLinkbuild/recreate. AllDockerCOPYsourcebytes/modes exactreviewedtree/imageOCI/runtimeconfig/wholeliteralenv/mount/HostConfig typedOomDisableexception; old46serve throughprepare. Fourdirtyfiles/globalconfigurationfullbytes/mode/ownerspreserved.",
+    "Freshclosed2SQLite alltyped/schema/seq/telemetry/sync/authority exact; fullrawattachments/secrets/stations/baselines/cursors/owners exact, onlyparsedplatformlockboundedpid1purpose/time permissible. StartupnoGC2h/nojobmigration/noseed guards preserved.",
+    "D97a14 strict types independentlyf4fa checked. P48/profilec0 independentlyrootfullreviewed at source-review-root; onlypublishedingressclaim, no bridgeNFrequirement or unknownwriterblindskip. Anyclosed-datadelta rejects publication.",
+    "Rootonly bindsfinal6-filemanifestc73/paths;9phase/archive runtimegatesblank. Finalfallback preservesunknownpostoperationstate facts anddoesnotfalselylabelpreflightfailure. NoactualbusinessHTTP/models/othercontainerlifecycle.",
+    "Afteractualprepare21c0 succeeded, wire-onlymetadata revision reviewed in297334 rootrecord: newR40f onlyaddsnonsecretSHA256nibblearrays tostdout; on-disk result bytes, everyruntime/source/data/recovery function exact. OldprepareR21/T0089/reviewa4 archivedfrozen, sealedmetadata recovery linked in state; no rebuild or dataoperation."
+  ],
+  "sourceManifestSHA256": "c73c0f11264192d40a06e16185d356168098ac0c19da66cf15ee05292a5ba734",
+  "applicationReviewSHA256": "28528e74aa7aa4155b510474d64824c54193072750dc2ffb0f34530c0b4530eb",
+  "publicationReviewSHA256": "8dd276ef0c65843859e8cedeafeeaed5389fec736526cbeebfd80c4ea455bcbd",
+  "wireMetadataReviewSHA256": "2973349656405bae5fb9ab003677173b538047566ef097adf8641a64a2bc2523"
+}

@@ -3,9 +3,9 @@ Publication-only ingress adapter binds sealed topology; runtime gates remain bla
 No environment changes, DB restore, authenticated writes or model calls.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,traceback,urllib.error,urllib.request
-PHASE=''
-TARGET=''
-TREE=''
+PHASE='deploy'
+TARGET='bb1fab660bdf4e04e828e4c4250279f717603ac5'
+TREE='72baeafdefab7f2abf01be09f941f31ec8b623fa'
 SOURCE_MANIFEST_SHA='c73c0f11264192d40a06e16185d356168098ac0c19da66cf15ee05292a5ba734' # Root binds final reviewed source manifest.
 REVIEWED_PATHS=('README.md', 'cloud/public/app.js', 'cloud/public/style.css', 'cloud/server.mjs', 'tests/order-browser.test.mjs', 'tests/orders.test.mjs') # Root binds exact final reviewed app-relative paths.
 BASE='37b6146354f692dfabc8b009f6c5b80ced091bdb'
@@ -16,7 +16,7 @@ BACKUP=ROOT/'deploy/backups/pr-1008-20261026-02-backup'
 PREPARE=BACKUP.with_name('pr-1008-20261026-02-prepare')
 DEPLOY=BACKUP.with_name('pr-1008-20261026-02-deploy')
 VERIFY=BACKUP.with_name('pr-1008-20261026-02-verify')
-BACKUP_MANIFEST='';BACKUP_RESULT='';PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+BACKUP_MANIFEST='2a53e7953a986050fc8c786cc5f4baa758926eb2821233436ec9182c169aec15';BACKUP_RESULT='8863f1ccf2101e03075d9029aafca1bebbff638542080708ea9b162bdec8454b';PREPARE_MANIFEST='aa2dcab5af382a7cedbc8efb27c025da97d69b28b29059273b979238cf2c44a6';PREPARE_RESULT='19b89c3480f1ea8d00da0f5ec67aa15e9b830711f679ba8a9c5e32fa45127a7e';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 ORDER=('printlink',)
 DEPS={'pr1008-02-publication-ingress-profile.json': 'c0c279e91c9b55a119e3755801964d3f586752999d3df6a260ac4697dd018e0e', 'pr1008-02-publication-ingress-library.py': '48d16c4ab22aa6befdabbf6ea584292108d78a94b23d12f85b1e8ba8300ccbe8', 'pr1008-02-backup-library.py': 'cb4cb071c3a6536fe5cf9a802ed092d7798147613501421c8ec5bd7ffaa79428', 'pr1008-printlink-contract-library.py': '97a14ebb6a93034cf6531880d8852151472ec49f7881a136648376b602a36882', 'batch-host-config-library.py': 'bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1', 'factory-review-backup-library.py': '79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666', 'release-data-ops-library.py': 'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5', 'release-data-library.py': 'd63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9'}
 COMPOSE=['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production')]
@@ -32,6 +32,9 @@ def sha(v):return hashlib.sha256(v).hexdigest()
 def read(p):return json.loads(p.read_bytes())
 
 def pin(v,length=64):return type(v)is str and re.fullmatch('[a-f0-9]{%d}'%length,v)is not None
+
+def wire_nibbles(value):
+ need(pin(value),'nonsecret-wire-sha256');return[int(c,16)for c in value]
 
 def private(n,v):B.private(n,v)
 
@@ -246,7 +249,8 @@ def main():
   result.update(success=False,failedStage=STAGE,backupLibraryFailedStage=B.STAGE,safeExceptionType=type(error).__name__)
   if LEASE is not None:result.update(lastKnownPublicIngressReopened=LEASE.released,releaseStarted=LEASE.release_started,ingressIsolationMustNotBeAssumed=True)
   private('failure.private.txt',traceback.format_exc().encode())
- finally:private('first-result.json',result);B.F.OPS.L.seal(OUT);print(enc(dict(result,manifestSHA256=B.F.OPS.L.file_hash(OUT/'manifest.json'),resultSHA256=B.F.OPS.L.file_hash(OUT/'first-result.json'))).decode(),flush=True)
+ finally:
+  private('first-result.json',result);B.F.OPS.L.seal(OUT);manifest_sha=B.F.OPS.L.file_hash(OUT/'manifest.json');result_sha=B.F.OPS.L.file_hash(OUT/'first-result.json');print(enc(dict(result,manifestSHA256=manifest_sha,resultSHA256=result_sha,manifestSHA256Nibbles=wire_nibbles(manifest_sha),resultSHA256Nibbles=wire_nibbles(result_sha))).decode(),flush=True)
  return 0 if result['success']else 1
 if __name__=='__main__':
  try:sys.exit(main())

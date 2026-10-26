@@ -1,8 +1,8 @@
-name: PR 1008 PrintLink Scoped Retry03 Deploy Verify
+name: PR1008 Read-only Failed Deployment Diagnostic
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [deploy]}
+      mode: {type: choice, required: true, options: [read-deploy-failure]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '820a081577e3394fe59a115af1613b5016547d5fd760397ffddca9e5c5e8cc5e'
+  SCOPED_RELEASE_HELPER_SHA256: '959ddf46ff40325e0b2484681468c75062f30f860fb4dcbd81bb03877a0279f9'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1008-20261026-02 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1008-20261026-02 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = read-deploy-failure ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed printlink deploy
+      - name: Run only reviewed sealed deploy failure read-deploy-failure
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,33 +48,15 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1008-20261026-02 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1008-20261026-02 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = read-deploy-failure && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1008-20261026-02:refs/remotes/origin/ops/pr-1008-20261026-02 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1008-20261026-02)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            scoped_release_tmp=$(mktemp -d /tmp/pr1008-03-scoped.XXXXXX)
+            scoped_release_tmp=$(mktemp -d /tmp/pr1008-03-deploy-failure-read.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1008-03-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 820a081577e3394fe59a115af1613b5016547d5fd760397ffddca9e5c5e8cc5e ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-host-config-library.py" > "$scoped_release_tmp/batch-host-config-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/batch-host-config-library.py" | cut -d ' ' -f1)" = bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/factory-review-backup-library.py" > "$scoped_release_tmp/factory-review-backup-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/factory-review-backup-library.py" | cut -d ' ' -f1)" = 79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1008-02-backup-library.py" > "$scoped_release_tmp/pr1008-02-backup-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1008-02-backup-library.py" | cut -d ' ' -f1)" = cb4cb071c3a6536fe5cf9a802ed092d7798147613501421c8ec5bd7ffaa79428 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1008-02-publication-ingress-profile.json" > "$scoped_release_tmp/pr1008-02-publication-ingress-profile.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1008-02-publication-ingress-profile.json" | cut -d ' ' -f1)" = c0c279e91c9b55a119e3755801964d3f586752999d3df6a260ac4697dd018e0e ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1008-03-publication-ingress-library.py" > "$scoped_release_tmp/pr1008-03-publication-ingress-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1008-03-publication-ingress-library.py" | cut -d ' ' -f1)" = 0848f4456abcc3d2fbee2bc4250b32029fdebc53965966c1ca6a9f0356d9d2cb ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1008-03-reviewed-files.json" > "$scoped_release_tmp/pr1008-03-reviewed-files.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1008-03-reviewed-files.json" | cut -d ' ' -f1)" = c73c0f11264192d40a06e16185d356168098ac0c19da66cf15ee05292a5ba734 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1008-03-source-review-deploy.json" > "$scoped_release_tmp/pr1008-03-source-review-deploy.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1008-03-source-review-deploy.json" | cut -d ' ' -f1)" = 15f9e4bd13f23368a4095a500c0ddac0f6b4761a746e73b362d733ba4c7c9cdf ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1008-printlink-contract-library.py" > "$scoped_release_tmp/pr1008-printlink-contract-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1008-printlink-contract-library.py" | cut -d ' ' -f1)" = 97a14ebb6a93034cf6531880d8852151472ec49f7881a136648376b602a36882 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1008-03-deploy-failure-read.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 959ddf46ff40325e0b2484681468c75062f30f860fb4dcbd81bb03877a0279f9 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1008-03-deploy-failure-read-source-review-root.json" > "$scoped_release_tmp/pr1008-03-deploy-failure-read-source-review-root.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr1008-03-deploy-failure-read-source-review-root.json" | cut -d ' ' -f1)" = 2cd9bf74c0a77e2a105c644e3b314e0e327f78b089870451cd429b3d57411dbb ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

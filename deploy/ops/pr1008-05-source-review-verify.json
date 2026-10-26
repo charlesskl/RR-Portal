@@ -1,0 +1,79 @@
+{
+  "status": "CHECKED",
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr1008_backend",
+  "author": "/root/pr1008_ops",
+  "mode": "release05",
+  "helperSHA256": "b783bf4e5cccbe2d8512dd0e9fe59f4a1c05eeb51afa9dd20cc3178fbd80796f",
+  "helperGatesFrozen": true,
+  "base": "37b6146354f692dfabc8b009f6c5b80ced091bdb",
+  "baseCommit": "37b6146354f692dfabc8b009f6c5b80ced091bdb",
+  "baseTree": "2ae9b60d6aa627005d5937298fa84386b3572054",
+  "targetCommit": "bb1fab660bdf4e04e828e4c4250279f717603ac5",
+  "targetTree": "72baeafdefab7f2abf01be09f941f31ec8b623fa",
+  "dependencies": {
+    "pr1008-02-publication-ingress-profile.json": "c0c279e91c9b55a119e3755801964d3f586752999d3df6a260ac4697dd018e0e",
+    "pr1008-04-publication-ingress-library.py": "b34cd0fcce033076b4e72bb875588eb982b37f7c12d8b25707b48031f9ab950d",
+    "pr1008-05-backup-library.py": "d816776bcad1b70d893e9f25cef05c2ece2d0d97639adca5c48c865ea1b947b3",
+    "pr1008-printlink-contract-library.py": "97a14ebb6a93034cf6531880d8852151472ec49f7881a136648376b602a36882",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9"
+  },
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "remainingBlockers": [],
+  "changedFunctionASTs": [
+    "initialize",
+    "prepared",
+    "baseline",
+    "reviewed_manifest",
+    "prepare",
+    "deploy",
+    "main"
+  ],
+  "allOtherFunctionASTsIdentical": true,
+  "review": [
+    "New05 phase archives and actual-current B05 baseline. Explicit checkoutTARGET72 vs runningBASE37, full old image5d48, restart count genuine int0; no failedRecovery success certificate or runtime projection.",
+    "Prepare recertifies immutable7cc against fresh actualB05: original candidate image metadata/defaultenv/full source bytes+modes checks, before/after46 runtime and complete literal env/config/flags unchanged. No build/fetch/pull/merge/fastforward, no service lifecycle, no gate. Original proof uses temporary isolated networknone/read-only tar container, not app startup.",
+    "Prepared receipt must prove buildsFalse/reusedTrue/fullyRecertifiedTrue, exact7cc, originalRuntime from freshB05 later bound exactly at deploy.",
+    "Only deploy sequence change captures and replays fresh closed snapshot immediately after old stop, before stopped/held guards. Existing Rfull_contract/recover/same_data/public/ownership/environment guards remain identical; G04 exact two IPAM count fix already independently reviewed.",
+    "All nine runtime gates canonicalblank. Full actual B05/P05 seals, parent-reviewed transport/plan and fresh guards required before any cutover; review is source-only."
+  ],
+  "pureChecks": {
+    "baselinePositive": true,
+    "rejected": [
+      "wrong-server-head",
+      "wrong-running-source",
+      "bool-restart",
+      "nonzero-restart",
+      "wrong-old-image"
+    ],
+    "prepareWritesFakeCertificateOnlyWithActualFixtureRuntimeAndExact7cc": true,
+    "prepareDirectCalls": [
+      "B.flags",
+      "B.runtime",
+      "D.strict_equal",
+      "candidate",
+      "compose_contract",
+      "configuration",
+      "envs",
+      "need",
+      "private",
+      "result.update"
+    ],
+    "allNineGatesBlank": true,
+    "helperMainOrActualDependenciesNotExecuted": true
+  },
+  "boundaries": {
+    "productionCommandsPerformed": false,
+    "opsOrStateModified": false,
+    "actualB05OrP05SuccessClaimed": false,
+    "arbitraryHostOrDirectBridgeIsolationClaimed": false
+  }
+}

@@ -2,7 +2,7 @@ name: PR 1008 PrintLink Fresh Baseline Release 05
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [deploy]}
+      mode: {type: choice, required: true, options: [verify]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'd8751b9c49df5384e04261b5d11bf531ddde464d78def0ab3a87913663e17b73'
+  SCOPED_RELEASE_HELPER_SHA256: '5fb029cdb61b86f508be8b31efd37a33f226c2232fa8d94f2e5718d97c23ff4e'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1008-20261026-02 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1008-20261026-02 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed printlink deploy
+      - name: Run only reviewed printlink verify
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,7 +48,7 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1008-20261026-02 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1008-20261026-02 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1008-20261026-02:refs/remotes/origin/ops/pr-1008-20261026-02 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1008-20261026-02)" = "$RELEASE_SHA" ]] || exit 1
@@ -56,7 +56,7 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/pr1008-05-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1008-05-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = d8751b9c49df5384e04261b5d11bf531ddde464d78def0ab3a87913663e17b73 ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 5fb029cdb61b86f508be8b31efd37a33f226c2232fa8d94f2e5718d97c23ff4e ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-host-config-library.py" > "$scoped_release_tmp/batch-host-config-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/batch-host-config-library.py" | cut -d ' ' -f1)" = bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/factory-review-backup-library.py" > "$scoped_release_tmp/factory-review-backup-library.py" 2>/dev/null || exit 1
@@ -69,8 +69,8 @@ jobs:
             [[ "$(sha256sum "$scoped_release_tmp/pr1008-05-backup-library.py" | cut -d ' ' -f1)" = d816776bcad1b70d893e9f25cef05c2ece2d0d97639adca5c48c865ea1b947b3 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1008-05-reviewed-files.json" > "$scoped_release_tmp/pr1008-05-reviewed-files.json" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/pr1008-05-reviewed-files.json" | cut -d ' ' -f1)" = c73c0f11264192d40a06e16185d356168098ac0c19da66cf15ee05292a5ba734 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1008-05-source-review-deploy.json" > "$scoped_release_tmp/pr1008-05-source-review-deploy.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1008-05-source-review-deploy.json" | cut -d ' ' -f1)" = 6aa4d724c2c8e6688b56bffb4abb5eb12187adca364baac7ccd27b3e0a6a031d ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1008-05-source-review-verify.json" > "$scoped_release_tmp/pr1008-05-source-review-verify.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr1008-05-source-review-verify.json" | cut -d ' ' -f1)" = 6aa4d724c2c8e6688b56bffb4abb5eb12187adca364baac7ccd27b3e0a6a031d ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1008-printlink-contract-library.py" > "$scoped_release_tmp/pr1008-printlink-contract-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/pr1008-printlink-contract-library.py" | cut -d ' ' -f1)" = 97a14ebb6a93034cf6531880d8852151472ec49f7881a136648376b602a36882 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1

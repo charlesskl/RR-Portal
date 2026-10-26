@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "status": "CHECKED",
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr1008_backend",
+  "createdAt": "2026-10-26T02:41:42.016998+00:00",
+  "helperPath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr1008-backup-ingress-read.py",
+  "helperSHA256": "ad7bc2c7e88f34fe01234ddc089b213ec7501cf2f8e389d58b88040f5f02774a",
+  "remainingBlockers": [],
+  "baseCommit": "37b6146354f692dfabc8b009f6c5b80ced091bdb",
+  "baseTree": "2ae9b60d6aa627005d5937298fa84386b3572054",
+  "mode": "backup-ingress-read",
+  "backupSealsPinnedInSource": {
+    "manifestSHA256": "a759bd8ef765291d2ae6dc67750c7f1c34e0897f7fa8bf6eb0953bf924ca7cdb",
+    "resultSHA256": "de74ef0affba561e3b94c1984b0468db4953c5b88899943bc9e192d1b9693ab9"
+  },
+  "assertions": {
+    "inertDiagnosticPinFalse": true,
+    "noMainExecuted": true,
+    "noHelperModuleImported": true,
+    "noRealArchiveReadByReviewer": true,
+    "noDB": true,
+    "noDocker": true,
+    "noNetwork": true,
+    "noConfigOrOPSStateMutation": true,
+    "noFailedBackupMutation": true,
+    "onlyPureFunctionASTSubsetExecuted": true,
+    "noBusinessRowsDecoded": true,
+    "noRealCredentialsOrEnvironmentValuesPrinted": true,
+    "sourceHasNoRuntimeNetworkOrFirewallCommandExecution": true,
+    "sourceReadsOnlyFixedSealedBackupAndWritesOnlyNewPrivateDiagnosticOutput": true,
+    "sourceRequiresExactBackupManifestAndFirstResultSeals": true,
+    "sourceHashesEverySealedArchiveFileBeforeDiagnosticDecode": true,
+    "sourceRequiresBothOriginal46ContainerInspectInventories": true,
+    "noClaimOfLiveIngressOrWriterCoverageProof": true
+  },
+  "sourceReview": [
+    "Entire helper read; top-level imports/constants and AST inspected without running main or importing the module.",
+    "DIAGNOSTIC_PIN=False; exact release branch/attempt/subcommand guards precede output-directory creation. Diagnostic output path differs from original failed backup.",
+    "sealed() checks exact original manifest/result hashes, private regular bounded inputs, normalized relative manifest paths, no symlinks, exact file inventory and streamed whole-file hashes; original backup is never written.",
+    "No subprocess, DB, Docker, socket, HTTP or network APIs. Filesystem writes are exclusive 0600 reports/manifest in one newly-created 0700 diagnostic directory; never existing OPS/state/config/failed backup files.",
+    "Two archived inspect lists require 46 unique service identities. Environment, mounts, Config and HostConfig values are compared by SHA256; output exposes changed field names and bounded health/running/OOM facts.",
+    "Topology decode is limited to archived container/network/ingress evidence. Environment references expose key and value hash only; addresses/listeners/daemon settings retain routing metadata rather than command arguments or arbitrary config fields.",
+    "Current safe_rule whitelists routing options with typed IP/port/protocol/state/action/module/interface values; comments, string/hex-string/log-prefix/u32/unknown options and values are hashed. Unknown chain declarations are hashed. Selection uses only private raw tokens."
+  ],
+  "resolvedIndependentFinding": {
+    "oldHelperSHA256": "fe3c3cc94747e42aa1a6ac0578c5c9b2a194f17cee10e69eb1d7f321c6a9739d",
+    "description": "Old safe_rule emitted a synthetic plaintext --string match value in selected DOCKER-USER output. Reviewer independently reproduced with pure fake archive input; OPS author repaired with typed routing whitelist and hash fallback.",
+    "oldCounterexampleEvidence": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr1008-ingress-diagnostic-pure-tests.json",
+    "oldCounterexampleEvidenceSHA256": "ead3b765e1f295f35ef02f72bcfec5bd4aeec05d9a32244ba2a616cdf21b043a",
+    "currentRetest": "Old counterexample plus ten other secret-bearing match/option/interface/action/address classes no longer emit sentinels; IPv4/IPv6 legitimate routing and listener metadata remains available."
+  },
+  "validation": {
+    "evidencePath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr1008-ingress-diagnostic-pure-tests-v2.json",
+    "evidenceSHA256": "646bed7f7359fe5f8fa48b3be294818577c27e30ef287aa521192e5a46f53ac3",
+    "astParsingPassed": true,
+    "pureSyntheticChecksPassed": true,
+    "checks": [
+      "inert pin and exact BASE/TREE/B seals",
+      "46-inventory and duplicate identity guards",
+      "identical and changed runtime comparison without private values",
+      "11 secret token class negative checks",
+      "IPv4 DNAT and known bridge positive check",
+      "IPv6 typed destination positive check",
+      "unknown chain declaration redaction",
+      "focused selection based on private raw tokens",
+      "IPv4/IPv6 ss listener output excludes trailing arguments"
+    ],
+    "currentSourceHashReverifiedAtReceiptWrite": true
+  },
+  "limits": [
+    "Source-only approval for the exact inert helper bytes. No controller, transport, main, real backup, DB, Docker or network invocation was run by this reviewer.",
+    "Actual sealed archive integrity and facts are deferred to separately approved pinned transport execution; no deployment approval is granted here.",
+    "Focused selectedRoutingRules and archived inspect facts do not prove live reachability, complete rule semantics, process environment equivalence or actual writer coverage. Existing failed B/OPS/state remain untouched."
+  ]
+}

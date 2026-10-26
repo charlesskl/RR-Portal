@@ -5,19 +5,65 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { invalidateClientCache } from "@/lib/clientCache";
 import { apiFetch } from "@/lib/apiFetch";
 import { inProductionQuantity, filterOrders, type OrderRow, type OrderFilter } from "@/lib/orderFilter";
-import { STATUS_META, ACTIVE_STATUSES } from "@/lib/orderStatus";
+import { STATUS_META, ACTIVE_STATUSES, ORDER_STATUSES, type OrderStatus } from "@/lib/orderStatus";
 import DatePicker from "./DatePicker";
 import CompletePendingDialog from "./CompletePendingDialog";
 
 const EMPTY: OrderFilter = { view: "normal", keyword: "", status: "", ma: "", risk: "",
   orderFrom: "", orderTo: "", deliveryFrom: "", deliveryTo: "" };
 
-export default function OrdersTable({ orders, isAdmin }: { orders: OrderRow[]; isAdmin: boolean }) {
+export default function OrdersTable({ orders, isAdmin, canEdit, onSaved }: { orders: OrderRow[]; isAdmin: boolean; canEdit: boolean; onSaved: (id: number, changes: { deliveryDate?: string; totalQty?: number }, status?: OrderStatus) => Promise<void> }) {
   const router = useRouter();
   const [f, setF] = useState<OrderFilter>(EMPTY);
   const [busy, setBusy] = useState(false);
+  const [drafts, setDrafts] = useState<Record<number, { deliveryDate?: string; totalQty?: string }>>({});
+  const [savingId, setSavingId] = useState<number | null>(null);
+  const [notice, setNotice] = useState("");
+  const editingDisabled = savingId !== null || busy;
+  const editRow = (id: number, patch: { deliveryDate?: string; totalQty?: string }) => {
+    setDrafts(current => ({ ...current, [id]: { ...current[id], ...patch } }));
+    setNotice("");
+  };
+  async function saveRow(order: OrderRow) {
+    const draft = drafts[order.id];
+    if (!draft || editingDisabled) return;
+    const payload: { deliveryDate?: string; totalQty?: number } = {};
+    if (draft.deliveryDate !== undefined && draft.deliveryDate !== (order.deliveryDate ?? ""))
+      payload.deliveryDate = draft.deliveryDate;
+    if (draft.totalQty !== undefined && draft.totalQty !== String(order.demandQty ?? order.totalQty)) {
+      const qty = Number(draft.totalQty);
+      if (!/^\d+$/.test(draft.totalQty) || !Number.isInteger(qty) || qty <= 0 || qty > 2147483647) {
+        setNotice("订单总数必须是 1 至 2,147,483,647 之间的整数");
+        return;
+      }
+      payload.totalQty = qty;
+    }
+    setSavingId(order.id);
+    setNotice("");
+    try {
+      const response = await apiFetch(`/api/orders/${order.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || "保存失败，请重试");
+      }
+      const updated = await response.json() as { status?: unknown } | null;
+      const status = ORDER_STATUSES.find(candidate => candidate === updated?.status);
+      invalidateClientCache("/api/orders");
+      invalidateClientCache("/api/schedule");
+      await onSaved(order.id, payload, status);
+      setDrafts(current => { const next = { ...current }; delete next[order.id]; return next; });
+      setNotice(`订单「${order.externalOrderNo}」已保存`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "保存失败，请检查网络后重试");
+    } finally {
+      setSavingId(null);
+    }
+  }
   const [completing, setCompleting] = useState<{ id: number; externalOrderNo: string } | null>(null);
   const set = (patch: Partial<OrderFilter>) => setF((cur) => ({ ...cur, ...patch }));
 
@@ -95,7 +141,7 @@ export default function OrdersTable({ orders, isAdmin }: { orders: OrderRow[]; i
         {tab("normal", "📋 正常单", normalCount)}
         {tab("pending", "🗂️ 待补产品", pendingCount)}
         {tab("recycle", "🗑 回收站", recycleCount)}
-        {f.view === "recycle" && isAdmin && recycleCount > 0 && <button disabled={busy} onClick={emptyRecycleBin}
+        {f.view === "recycle" && isAdmin && recycleCount > 0 && <button disabled={editingDisabled} onClick={emptyRecycleBin}
           className="ml-auto mb-1 text-sm border border-rose/50 text-rose rounded-btn px-3 py-1.5 hover:bg-rose/5 disabled:opacity-50">清空回收站</button>}
       </div>
 
@@ -153,14 +199,16 @@ export default function OrdersTable({ orders, isAdmin }: { orders: OrderRow[]; i
 
       <p className="text-xs text-text-tertiary mb-2">共 {rows.length} 张{f.risk ? " · 已按风险筛选" : ""}</p>
 
+      {notice && <p role="status" className="mb-3 text-sm text-mint-700">{notice}</p>}
+
       {/* 表格 */}
       <div className="overflow-x-auto">
-      <table className="w-full min-w-[1180px] table-fixed text-sm">
+      <table className="w-full min-w-[1300px] table-fixed text-sm">
         <colgroup>
           <col className="w-[170px]" /><col className="w-[125px]" /><col className="w-[115px]" />
-          <col className="w-[115px]" /><col className="w-[125px]" /><col className="w-[120px]" />
+          <col className="w-[155px]" /><col className="w-[125px]" /><col className="w-[120px]" />
           <col className="w-[120px]" /><col className="w-[130px]" /><col className="w-[100px]" />
-          <col className="w-[180px]" />
+          <col className="w-[230px]" />
         </colgroup>
         <thead className="bg-[#f0fdf4] text-[#047857] text-xs">
           <tr>
@@ -182,6 +230,13 @@ export default function OrdersTable({ orders, isAdmin }: { orders: OrderRow[]; i
               {f.view === "recycle" ? "回收站是空的" : f.view === "pending" ? "没有待补产品的订单" : "没有符合条件的订单"}
             </td></tr>
           ) : rows.map((o, i) => {
+            const draft = drafts[o.id];
+            const editable = canEdit && f.view === "normal";
+            const dirty = editable && draft && (
+              (draft.deliveryDate !== undefined && draft.deliveryDate !== (o.deliveryDate ?? "")) ||
+              (draft.totalQty !== undefined && draft.totalQty !== String(o.demandQty ?? o.totalQty))
+            );
+            const inputClass = "w-full min-w-0 h-8 rounded-btn border border-app-border bg-white px-2 text-sm focus:outline-none focus:border-mint-400 disabled:opacity-50";
             const st = STATUS_META[o.status] ?? STATUS_META.received;
             const rowClass = o.riskLevel === "overdue" ? "bg-[#fff1f2]" :
               o.riskLevel === "late" ? "bg-[#fff7ed]" :
@@ -194,29 +249,42 @@ export default function OrdersTable({ orders, isAdmin }: { orders: OrderRow[]; i
                 </td>
                 <td className="px-3 py-3 font-mono">{o.productNo}</td>
                 <td className="px-3 py-3 text-center text-text-secondary tabular-nums">{o.orderDate}</td>
-                <td className="px-3 py-3 text-center text-text-secondary tabular-nums">{o.deliveryDate ?? "—"}</td>
+                <td className="px-3 py-3 text-center text-text-secondary tabular-nums">{editable ? (
+                  <input type="date" aria-label={`${o.externalOrderNo} 交货日`} className={inputClass}
+                    disabled={editingDisabled} value={draft?.deliveryDate ?? o.deliveryDate ?? ""}
+                    onChange={event => editRow(o.id, { deliveryDate: event.target.value })} />
+                ) : (o.deliveryDate ?? "—")}</td>
                 <td className="px-3 py-3 text-center tabular-nums">{o.scheduled ? `${o.planProductionDays ?? 0}天` : "—"}</td>
-                <td className="px-3 py-3 text-right tabular-nums">{(o.demandQty ?? o.totalQty).toLocaleString("zh-CN")}</td>
+                <td className="px-3 py-3 text-right tabular-nums">{editable ? (
+                  <input type="number" min="1" max="2147483647" step="1" aria-label={`${o.externalOrderNo} 订单总数`}
+                    title="修改后按现有部位数量比例同步更新" className={`${inputClass} text-right`}
+                    disabled={editingDisabled} value={draft?.totalQty ?? String(o.demandQty ?? o.totalQty)}
+                    onChange={event => editRow(o.id, { totalQty: event.target.value })} />
+                ) : (o.demandQty ?? o.totalQty).toLocaleString("zh-CN")}</td>
                 <td className="px-3 py-3 text-right tabular-nums">{(o.remainingQty ?? o.totalQty).toLocaleString("zh-CN")}</td>
                 <td className="px-3 py-3 text-center tabular-nums">{o.expectedOutDate ?? "—"}</td>
                 <td className="px-3 py-3 text-center"><span className={`text-[11px] px-2 py-0.5 rounded-full ${st.cls}`}>{st.text}</span></td>
                 <td className="px-3 py-3 text-center">
-                  <span className="inline-flex gap-2.5">
+                  <span className="inline-flex flex-wrap justify-center items-center gap-2.5">
+                    {dirty && <button type="button" disabled={editingDisabled} onClick={() => saveRow(o)}
+                      className="rounded-btn bg-mint-400 px-2.5 py-1 text-white font-semibold hover:bg-mint-700 disabled:opacity-50">
+                      {savingId === o.id ? "保存中…" : "保存"}
+                    </button>}
                     <Link href={`/orders/${o.id}`} className="text-sky hover:underline">编辑</Link>
                     {o.scheduled && o.firstPlanDate && (
                       <Link href={`/schedule?orderId=${o.id}&orderNo=${encodeURIComponent(o.externalOrderNo)}&from=${o.firstPlanDate}&to=${o.scheduleFinishDate ?? o.firstPlanDate}`}
                         className="text-purple hover:underline">查看排期</Link>
                     )}
                     {f.view === "recycle" ? (
-                      <button disabled={busy} onClick={() => restore(o.id, o.externalOrderNo)} className="text-mint-400 font-semibold hover:underline disabled:opacity-50">恢复</button>
+                      <button disabled={editingDisabled} onClick={() => restore(o.id, o.externalOrderNo)} className="text-mint-400 font-semibold hover:underline disabled:opacity-50">恢复</button>
                     ) : f.view === "pending" ? (
                       <>
                         <button onClick={() => setCompleting({ id: o.id, externalOrderNo: o.externalOrderNo })} className="text-mint-700 font-semibold hover:underline">补全</button>
-                        <button disabled={busy} onClick={() => archive(o.id, o.externalOrderNo)} className="text-rose hover:underline disabled:opacity-50">作废</button>
+                        <button disabled={editingDisabled} onClick={() => archive(o.id, o.externalOrderNo)} className="text-rose hover:underline disabled:opacity-50">作废</button>
                       </>
                     ) : (
                       <>
-                        <button disabled={busy} onClick={() => archive(o.id, o.externalOrderNo)} className="text-rose hover:underline disabled:opacity-50">作废</button>
+                        <button disabled={editingDisabled} onClick={() => archive(o.id, o.externalOrderNo)} className="text-rose hover:underline disabled:opacity-50">作废</button>
                       </>
                     )}
                   </span>

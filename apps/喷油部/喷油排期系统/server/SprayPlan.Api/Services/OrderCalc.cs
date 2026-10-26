@@ -6,6 +6,48 @@ namespace SprayPlan.Api.Services;
 // 订单按部位填数量；基础工价从产品库部位带出（不分颜色/规格，无特殊色加价）。
 public static class OrderCalc
 {
+    // 保留部位间的数量比例。同名明细按余数分配，确保取整后总量仍准确。
+    public static void ResizeDemand(List<OrderPartQty> parts, int totalQty)
+    {
+        var groups = parts.GroupBy(part => part.PartName).ToList();
+        var previousTotal = groups.Select(group => group.Sum(part => (long)part.Qty)).DefaultIfEmpty(0).Max();
+        foreach (var group in groups)
+        {
+            var quantity = group.Sum(part => (long)part.Qty);
+            var target = previousTotal > 0
+                ? (int)Math.Round((decimal)quantity * totalQty / previousTotal, MidpointRounding.AwayFromZero)
+                : totalQty;
+            var allocations = group.OrderBy(part => part.Id).Select(part => new
+            {
+                Part = part,
+                Exact = quantity > 0 ? (decimal)part.Qty * target / quantity : (decimal)target / group.Count()
+            }).ToList();
+            foreach (var item in allocations) item.Part.Qty = (int)decimal.Floor(item.Exact);
+            var remainder = target - allocations.Sum(item => item.Part.Qty);
+            foreach (var item in allocations.OrderByDescending(item => item.Exact - decimal.Floor(item.Exact)).Take(remainder))
+                item.Part.Qty++;
+        }
+    }
+
+    // 数量更正沿用撤销实绩后的状态推导，只读取计划/实绩，不改动这些记录。
+    public static string DemandStatus(string currentStatus, IEnumerable<OrderPartQty> parts, IEnumerable<ProductionPlan> sourcePlans)
+    {
+        var plans = sourcePlans.Where(plan => plan.DeletedAt is null).ToList();
+        if (plans.Count == 0) return currentStatus == "draft" ? "draft" : "received";
+        if (!plans.Any(plan => plan.GoodQty is not null || plan.InboundQty is not null)) return "scheduled";
+
+        var demand = parts.GroupBy(part => part.PartName)
+            .Select(group => new { Name = group.Key, Qty = group.Sum(part => (long)part.Qty) })
+            .Where(part => part.Qty > 0).ToList();
+        var complete = demand.Count > 0 && demand.All(part => {
+            var steps = plans.Where(plan => plan.PartName == part.Name)
+                .GroupBy(plan => plan.StepNo)
+                .Select(step => step.Sum(plan => (long)(plan.GoodQty ?? 0))).ToList();
+            return steps.Count > 0 && steps.Min() >= part.Qty;
+        });
+        return complete ? "completed" : "in_production";
+    }
+
     // 行合计：某明细行（子件）所有部位数量之和
     public static int LineTotalQty(IEnumerable<OrderPartQty> partQtys) => partQtys.Sum(q => q.Qty);
 
@@ -17,6 +59,7 @@ public static class OrderCalc
     public static int RemainingQty(Order order)
     {
         var demand = order.PartQtys.GroupBy(q => q.PartName)
+            .Where(group => group.Sum(q => q.Qty) > 0)
             .ToDictionary(group => group.Key, group => group.Sum(q => q.Qty));
         if (demand.Count == 0) return 0;
         var completed = demand.Select(part =>

@@ -2,7 +2,7 @@ name: PR 1013 Factory Review Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [deploy-factory-review-test]}
+      mode: {type: choice, required: true, options: [deploy-factory-review]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'f48e573761b4d5d54e87bdb13ce1ce388a095d6d553c30c7c885b57e3ceb346c'
+  SCOPED_RELEASE_HELPER_SHA256: '359e4ef98bccc8c6a7f84f7e73afa624ce5305dbfac3cf0627ddfc9ff22b66b8'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1013-20261026 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy-factory-review-test ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1013-20261026 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy-factory-review ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed factory-review deploy-factory-review-test
+      - name: Run only reviewed factory-review deploy-factory-review
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,7 +48,7 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1013-20261026 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy-factory-review-test && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1013-20261026 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy-factory-review && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1013-20261026:refs/remotes/origin/ops/pr-1013-20261026 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1013-20261026)" = "$RELEASE_SHA" ]] || exit 1
@@ -56,7 +56,7 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/pr1013-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1013-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = f48e573761b4d5d54e87bdb13ce1ce388a095d6d553c30c7c885b57e3ceb346c ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 359e4ef98bccc8c6a7f84f7e73afa624ce5305dbfac3cf0627ddfc9ff22b66b8 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch1003-data-library.py" > "$scoped_release_tmp/batch1003-data-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/batch1003-data-library.py" | cut -d ' ' -f1)" = f40fdf266b765a9a1fedcb04190b413e2d979aaa8e7548c030c1eed5560e50c6 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch1003-image-library.py" > "$scoped_release_tmp/batch1003-image-library.py" 2>/dev/null || exit 1

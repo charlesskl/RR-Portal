@@ -7,6 +7,32 @@ namespace SprayPlan.Api.Tests;
 public class OrderCalcTests
 {
     [Fact]
+    public void ResizeDemand_PreservesRatiosAndDistributesRoundingForDuplicatePartNames()
+    {
+        var parts = new List<OrderPartQty> {
+            new() { Id = 1, PartName = "头", Qty = 1 },
+            new() { Id = 2, PartName = "头", Qty = 2 },
+            new() { Id = 3, PartName = "脚", Qty = 6 },
+            new() { Id = 4, PartName = "尾", Qty = 0 }
+        };
+        OrderCalc.ResizeDemand(parts, 10);
+        Assert.Equal(new[] { 2, 3, 10, 0 }, parts.Select(part => part.Qty).ToArray());
+        OrderCalc.ResizeDemand(parts, 1);
+        Assert.Equal(1, parts.GroupBy(part => part.PartName).Max(group => group.Sum(part => part.Qty)));
+        Assert.All(parts, part => Assert.True(part.Qty >= 0));
+    }
+
+    [Fact]
+    public void ResizeDemand_ZeroDemand_InitializesEachPart()
+    {
+        var parts = new List<OrderPartQty> {
+            new() { PartName = "头", Qty = 0 }, new() { PartName = "脚", Qty = 0 }
+        };
+        OrderCalc.ResizeDemand(parts, 100);
+        Assert.All(parts, part => Assert.Equal(100, part.Qty));
+    }
+
+    [Fact]
     public void OrderTotalQty_SumsAllPartQtys()
     {
         var partQtys = new List<OrderPartQty> { new() { Qty = 3 }, new() { Qty = 4 }, new() { Qty = 5 } };

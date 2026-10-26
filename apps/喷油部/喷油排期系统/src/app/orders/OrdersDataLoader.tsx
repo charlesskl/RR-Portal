@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 import { staleWhileRevalidate } from "@/lib/clientCache";
 import type { OrderRow } from "@/lib/orderFilter";
 import OrdersTable from "./OrdersTable";
@@ -41,19 +42,40 @@ function enrich(row: OrderRow, summary: Summary | undefined, today: string): Ord
   };
 }
 
-export default function OrdersDataLoader({ initialRows, today, isAdmin }: { initialRows: OrderRow[]; today: string; isAdmin: boolean }) {
+export default function OrdersDataLoader({ initialRows, today, isAdmin, canEdit }: { initialRows: OrderRow[]; today: string; isAdmin: boolean; canEdit: boolean }) {
   const [rows, setRows] = useState(initialRows);
+  const revision = useRef(0);
   useEffect(() => {
     let active = true;
+    const initialRevision = revision.current;
+    let freshApplied = false;
+    setRows(initialRows);
     const apply = (summaries: Summary[]) => {
-      if (!active) return;
+      if (!active || initialRevision !== revision.current) return;
       const byId = new Map(summaries.map((summary) => [summary.id, summary]));
+      freshApplied = true;
       setRows(initialRows.map((row) => enrich(row, byId.get(row.id), today)));
     };
     staleWhileRevalidate<Summary[]>("/api/orders/overview", 60_000, apply).then((stale) => {
-      if (stale) apply(stale);
+      if (stale && !freshApplied) apply(stale);
     });
     return () => { active = false; };
   }, [initialRows, today]);
-  return <OrdersTable orders={rows} isAdmin={isAdmin} />;
+  async function onSaved(id: number, changes: { deliveryDate?: string; totalQty?: number }) {
+    // 保存后原地回读汇总，保留筛选和其他订单尚未保存的编辑。
+    revision.current++;
+    const response = await apiFetch("/api/orders/overview", { cache: "no-store" });
+    if (!response.ok) throw new Error("订单已保存，但汇总刷新失败，请刷新页面查看");
+    const summaries = await response.json() as Summary[];
+    const byId = new Map(summaries.map(summary => [summary.id, summary]));
+    setRows(current => current.map(row => {
+      const updated = row.id === id ? {
+        ...row,
+        ...(changes.deliveryDate !== undefined ? { deliveryDate: changes.deliveryDate || null } : {}),
+        ...(changes.totalQty !== undefined ? { totalQty: changes.totalQty } : {}),
+      } : row;
+      return enrich(updated, byId.get(row.id), today);
+    }));
+  }
+  return <OrdersTable orders={rows} isAdmin={isAdmin} canEdit={canEdit} onSaved={onSaved} />;
 }

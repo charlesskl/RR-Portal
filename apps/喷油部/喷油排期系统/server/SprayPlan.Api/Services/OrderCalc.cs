@@ -6,6 +6,29 @@ namespace SprayPlan.Api.Services;
 // 订单按部位填数量；基础工价从产品库部位带出（不分颜色/规格，无特殊色加价）。
 public static class OrderCalc
 {
+    // 保留部位间的数量比例。同名明细按余数分配，确保取整后总量仍准确。
+    public static void ResizeDemand(List<OrderPartQty> parts, int totalQty)
+    {
+        var groups = parts.GroupBy(part => part.PartName).ToList();
+        var previousTotal = groups.Select(group => group.Sum(part => (long)part.Qty)).DefaultIfEmpty(0).Max();
+        foreach (var group in groups)
+        {
+            var quantity = group.Sum(part => (long)part.Qty);
+            var target = previousTotal > 0
+                ? (int)Math.Round((decimal)quantity * totalQty / previousTotal, MidpointRounding.AwayFromZero)
+                : totalQty;
+            var allocations = group.OrderBy(part => part.Id).Select(part => new
+            {
+                Part = part,
+                Exact = quantity > 0 ? (decimal)part.Qty * target / quantity : (decimal)target / group.Count()
+            }).ToList();
+            foreach (var item in allocations) item.Part.Qty = (int)decimal.Floor(item.Exact);
+            var remainder = target - allocations.Sum(item => item.Part.Qty);
+            foreach (var item in allocations.OrderByDescending(item => item.Exact - decimal.Floor(item.Exact)).Take(remainder))
+                item.Part.Qty++;
+        }
+    }
+
     // 行合计：某明细行（子件）所有部位数量之和
     public static int LineTotalQty(IEnumerable<OrderPartQty> partQtys) => partQtys.Sum(q => q.Qty);
 

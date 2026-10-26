@@ -9,7 +9,7 @@ using SprayPlan.Api.Services;
 namespace SprayPlan.Api.Features.Orders;
 
 // 订单 —— 对应现有 /api/orders + /api/orders/[id]。读=登录、写=文员主管。
-// 明细仍 V2（PATCH 只改订单头/状态），创建走嵌套。
+// 创建走嵌套；PATCH 支持头部、整单数量和未排期订单的明细数量。
 [ApiController]
 [Route("api/orders")]
 [Authorize]
@@ -39,9 +39,16 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             .Select(o => new OrderListItem(
                 o.Id, o.ExternalOrderNo, o.Product == null ? "" : o.Product.ProductNo,
                 o.OrderDate, o.DeliveryDate, o.Status, o.IsMA, o.IsUrgent,
-                o.PartQtys.Sum(q => q.Qty), o.PendingProduct))
+                0, o.PendingProduct))
             .ToListAsync();
         var orderIds = list.Select(order => order.Id).ToList();
+        var partDemands = await db.OrderPartQtys.AsNoTracking()
+            .Where(q => orderIds.Contains(q.OrderId))
+            .GroupBy(q => new { q.OrderId, q.PartName })
+            .Select(group => new { group.Key.OrderId, Qty = group.Sum(q => q.Qty) })
+            .ToListAsync();
+        var demandByOrder = partDemands.GroupBy(part => part.OrderId)
+            .ToDictionary(group => group.Key, group => group.Max(part => part.Qty));
         var productNumbers = await (from qty in db.OrderPartQtys.AsNoTracking()
             join part in db.ProductParts.AsNoTracking() on qty.SourcePartId equals part.Id
             join product in db.Products.AsNoTracking() on part.ProductId equals product.Id
@@ -49,8 +56,10 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             select new { qty.OrderId, product.ProductNo }).Distinct().ToListAsync();
         var numbersByOrder = productNumbers.GroupBy(item => item.OrderId)
             .ToDictionary(group => group.Key, group => string.Join("、", group.Select(item => item.ProductNo)));
-        return Ok(list.Select(item => numbersByOrder.TryGetValue(item.Id, out var numbers)
-            ? item with { ProductNo = numbers } : item).ToList());
+        return Ok(list.Select(item => item with {
+            ProductNo = numbersByOrder.GetValueOrDefault(item.Id, item.ProductNo),
+            TotalQty = demandByOrder.GetValueOrDefault(item.Id)
+        }).ToList());
     }
 
     // GET /api/orders/overview —— 订单总览的轻量排期汇总。
@@ -306,7 +315,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         return StatusCode(201, new OrderCreated(order.Id, order.ExternalOrderNo, order.Status, order.IsMA, order.IsUrgent));
     }
 
-    // PATCH /api/orders/{id} — 改头部/状态（明细 V2 不改）
+    // PATCH /api/orders/{id} — 改头部、整单数量或未排期的明细数量。
     [HttpPatch("{id:int}")]
     [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateOrderRequest req)
@@ -317,6 +326,22 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
 
         var o = await db.Orders.FindAsync(id);
         if (o is null) return NotFound(new { error = "订单不存在" });
+
+        // 总览的整单数量按各部位需求最大值计算，允许修正已排期订单。
+        // 等比例调整部位需求，保留已有排期及实绩，供欠数和覆盖率重新计算。
+        if (req.TotalQty is not null)
+        {
+            if (req.TotalQty <= 0)
+                return BadRequest(new { error = "订单总数必须是大于 0 的整数" });
+            if (req.PartQtys is not null)
+                return BadRequest(new { error = "订单总数与部位数量不能同时修改" });
+            if (o.Status == "archived" || o.PendingProduct)
+                return BadRequest(new { error = "请先恢复订单或补全产品后再修改订单总数" });
+            var parts = await db.OrderPartQtys.Where(q => q.OrderId == id).ToListAsync();
+            if (parts.Count == 0)
+                return BadRequest(new { error = "订单没有部位数量，请先补全部位" });
+            OrderCalc.ResizeDemand(parts, req.TotalQty.Value);
+        }
 
         // 明细数量编辑（修正导入识别错误用）：仅「已接单 received 且无排期计划」可改。
         // 一旦进入排期/实绩，数量锁死，避免与已排产量/核价/实绩冲突。

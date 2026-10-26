@@ -65,10 +65,15 @@ export async function staleWhileRevalidate<T>(url: string, ttlMs: number, onFres
 export function invalidateClientCache(prefix: string) {
   for (const key of Array.from(memory.keys())) if (key.startsWith(prefix)) memory.delete(key);
   if (typeof window === "undefined") return;
-  for (let i = window.sessionStorage.length - 1; i >= 0; i--) {
-    const key = window.sessionStorage.key(i);
-    if (key?.startsWith(`sprayplan:${prefix}`)) window.sessionStorage.removeItem(key);
-  }
+  // Browser policy/storage failures must not turn a committed API save into a
+  // failed UI operation. The in-memory cache is invalidated regardless.
+  try {
+    const storage = window.sessionStorage;
+    for (let i = storage.length - 1; i >= 0; i--) {
+      const key = storage.key(i);
+      if (key?.startsWith(`sprayplan:${prefix}`)) storage.removeItem(key);
+    }
+  } catch { /* storage unavailable */ }
 }
 
 export function clearClientCache() {

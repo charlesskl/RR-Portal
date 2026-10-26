@@ -1,0 +1,23 @@
+{
+  "status": "CHECKED",
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root",
+  "author": "/root/pr1008_backend",
+  "helperSHA256": "5d5442aa39477b3be65386889269ef4189a6220040cfb0f9412b7d47ca8bff13",
+  "baseCommit": "37b6146354f692dfabc8b009f6c5b80ced091bdb",
+  "baseTree": "2ae9b60d6aa627005d5937298fa84386b3572054",
+  "mode": "resource-read",
+  "remainingBlockers": [],
+  "checks": [
+    "Read complete final helper; exact read-only proc/cgroup, Docker inspect/stats/events and fixedhistoricalkerneljournal commands eachtimeout30s; noHTTP/auth/model/configuration/signals/restore/businessrows. Rawoutputs private0600 innew0700directory; stdout onlytypedmetrics/CIDmatch/knownOOMclassification, unknowncommhashed andhealthlog/commandargs notprinted.",
+    "FailedB reference onlypinnedmanifest/result plus2selectedinspectdigests, nofullvolume/database/archive rehash. Missing/unsupported evidenceavailablefalse andnever treatednegative; noautomaticattributionfromOOMKilledorKilledProcessalone.",
+    "IndependentrootAST parser tests19functions: memcg/global/unspecified, selectedmemorykeys, 0/6/9fractionstrpreserved, secrettokensinmessage/healthlog/eventattrs suppressed,5invalidtype/date inputsrejected; noactualresource/controller calls.",
+    "Root fixed onlynanosecond timestamp validation compatibility, preservingoriginalstring; independently reviewed byauthor at exact finalhash (d329... extra), bothsourceandtests frozen."
+  ],
+  "extraReview": {
+    "path": "pr1008-resource-read-rootfix-review-extra.json",
+    "sha256": "d32962df6f09c7d6ebedef0118cfce7f81874ab045c93ce237684f7f1d7fe69c"
+  },
+  "pureEvidenceSHA256": "7eb7679ab083593d4f66dc9e77d127cbd95117bf0156f64d1ae8534912dcedea"
+}

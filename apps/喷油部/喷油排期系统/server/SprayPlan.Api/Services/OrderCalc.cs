@@ -40,6 +40,7 @@ public static class OrderCalc
     public static int RemainingQty(Order order)
     {
         var demand = order.PartQtys.GroupBy(q => q.PartName)
+            .Where(group => group.Sum(q => q.Qty) > 0)
             .ToDictionary(group => group.Key, group => group.Sum(q => q.Qty));
         if (demand.Count == 0) return 0;
         var completed = demand.Select(part =>

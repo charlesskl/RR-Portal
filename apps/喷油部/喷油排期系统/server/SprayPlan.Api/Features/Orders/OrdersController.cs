@@ -80,6 +80,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             var plans = o.Plans;
             var demand = o.PartQtys
                 .GroupBy(q => q.PartName)
+                .Where(g => g.Sum(x => x.Qty) > 0)
                 .ToDictionary(g => g.Key, g => g.Sum(x => x.Qty));
             var recorded = plans.GroupBy(p => p.PartName)
                 .ToDictionary(g => g.Key, g => g.Sum(p => p.GoodQty ?? 0));

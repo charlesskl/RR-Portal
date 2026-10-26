@@ -16,7 +16,7 @@ MANIFEST_KNOWN_PREFIX='aa2dcab5af382a7cedbc8efb27c025da97d69b28'
 MANIFEST_KNOWN_SUFFIX='59273b979238cf2c44a6'
 IMAGE='sha256:7cc8e9f25c895fe97f302357058a9ceb07ecc7c5a204ab53958a8ecfa8666684'
 IMPLEMENTATION={'cloud/server.mjs':'1188ceb60a708c0ec2443e2f868a5aae79ba7ed031a158f8182ef473e03a9260','cloud/public/app.js':'2eb820c8ebe84b5ac863f8ef821d9e01bb1c7b64211b59388a011229b33b912a','cloud/public/style.css':'7af97b8c7ae31a840f803bd05c57fb2fb4965018219eff9da485a3cc35ae1116'}
-PIN=True
+PIN=False
 STAGE='entrypoint'
 def need(value,label):
  global STAGE

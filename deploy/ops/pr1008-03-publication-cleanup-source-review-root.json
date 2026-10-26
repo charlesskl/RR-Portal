@@ -1,0 +1,28 @@
+{
+  "status": "CHECKED",
+  "independent": true,
+  "reviewer": "/root",
+  "helperSHA256": "472fc24035a37d7e52a4aa231aed506ed77165100ad0374a711c674ed98b2c60",
+  "remainingBlockers": [],
+  "dependencies": {
+    "pr1008-02-publication-ingress-profile.json": "c0c279e91c9b55a119e3755801964d3f586752999d3df6a260ac4697dd018e0e",
+    "pr1008-03-publication-ingress-library.py": "0848f4456abcc3d2fbee2bc4250b32029fdebc53965966c1ca6a9f0356d9d2cb",
+    "pr1008-02-backup-library.py": "cb4cb071c3a6536fe5cf9a802ed092d7798147613501421c8ec5bd7ffaa79428",
+    "pr1008-printlink-contract-library.py": "97a14ebb6a93034cf6531880d8852151472ec49f7881a136648376b602a36882",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "pr1008-03-release-library.py": "8a136ece934d484ee34682689150a4ab3ec2bae30947a06ef2b473d1676a4380",
+    "pr1008-03-reviewed-files.json": "c73c0f11264192d40a06e16185d356168098ac0c19da66cf15ee05292a5ba734"
+  },
+  "checks": [
+    "Actual D03 failed and closed diagnostic proves original container stopped; original image/id/config/env/mount fixed",
+    "Fresh closed two-SQLite/full-file/mode/owner snapshot and replay using frozen B02/R03/D97 before single original docker start",
+    "Wait healthy, full original runtime and all source COPY bytes, exact freshclosed comparison with actual recovered StartedAt operational lock",
+    "Existing public-only exact6 held through old loopback checks/data/env/45others; exact observed -C/-D only",
+    "No candidate/rebuild/recreate/DBrestore/auth/business/source/env/model actions",
+    "Running network full static configuration returns to B02 and all43 peers preserved; stopped network binds D03, no generic metadata exemption",
+    "Own Docker rules exact3 currentIP and all foreign rows/order preserved through restart and rule removal"
+  ]
+}

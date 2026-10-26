@@ -56,7 +56,9 @@
   }
   function notice(message, error) {
     window.__QC_SYNC_NOTICE = message;
-    if (typeof window.showToast === 'function') window.showToast(message, error ? 'error' : 'info');
+    /* 例行成功不弹 toast：应用自身已有「记录已添加 ✓」等提示，
+       同步层的「服务器已保存修改」会把它覆盖掉。错误状态照常提示。 */
+    if (error && typeof window.showToast === 'function') window.showToast(message, 'error');
     var banner = document.getElementById('qcSyncNotice');
     if (!banner && document.body && document.createElement) {
       banner = document.createElement('div');
@@ -68,7 +70,9 @@
     }
     if (banner) {
       banner.textContent = message;
-      banner.style.display = message ? '' : 'none';
+      /* 例行「服务器已保存修改」不占用底部横幅：全宽横幅会盖住右下角的操作提示（toast）。
+         横幅只留给错误/草稿等需要用户处理的状态。 */
+      banner.style.display = (message && error) ? '' : 'none';
       var hasRecordFailure = Object.keys(failedWrites).some(function (url) { return url.indexOf('/api/records') !== -1; });
       if (error && hasRecordFailure && document.createElement) {
         var retry = document.createElement('button');

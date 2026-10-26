@@ -1,8 +1,8 @@
-name: PR1008 Reopen Only Original Published Access
+name: PR1008 Read-only Runtime Contract Diagnostic
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [reopen-original]}
+      mode: {type: choice, required: true, options: [read-runtime-contract]}
 permissions:
   contents: read
 concurrency:
@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
-  SCOPED_RELEASE_HELPER_SHA256: 'fb08e1d624fcf265315ca4c6acb93cfb02d7588a4dff3a2e1239db47e509c9cf'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
+  SCOPED_RELEASE_HELPER_SHA256: '3a89086d57603cbdf4c4f45d9200b9e1f482620e85b423768ecdc4ddfd2f03c6'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1008-20261026-02 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = reopen-original ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1008-20261026-02 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = read-runtime-contract ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed owned publication cleanup reopen-original
+      - name: Run only reviewed owned publication cleanup read-runtime-contract
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,15 +48,15 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1008-20261026-02 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = reopen-original && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1008-20261026-02 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = read-runtime-contract && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1008-20261026-02:refs/remotes/origin/ops/pr-1008-20261026-02 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1008-20261026-02)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            scoped_release_tmp=$(mktemp -d /tmp/pr1008-03-reopen-original.XXXXXX)
+            scoped_release_tmp=$(mktemp -d /tmp/pr1008-03-runtime-contract-read.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1008-03-reopen-original.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = fb08e1d624fcf265315ca4c6acb93cfb02d7588a4dff3a2e1239db47e509c9cf ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1008-03-reopen-original-source-review-root.json" > "$scoped_release_tmp/pr1008-03-reopen-original-source-review-root.json" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1008-03-reopen-original-source-review-root.json" | cut -d ' ' -f1)" = a5d38e3f7c7a950d813e502c3fa650d64157ddbee4447f055b4a931ae79ebbfb ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1008-03-runtime-contract-read.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 3a89086d57603cbdf4c4f45d9200b9e1f482620e85b423768ecdc4ddfd2f03c6 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1008-03-runtime-contract-read-source-review-root.json" > "$scoped_release_tmp/pr1008-03-runtime-contract-read-source-review-root.json" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr1008-03-runtime-contract-read-source-review-root.json" | cut -d ' ' -f1)" = 759817abd623e74db7b7c90cb3fe4eb8a2e8325864dd76cf92ccbd5e68474dd0 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

@@ -1,101 +1,60 @@
-name: Service Logs
-
-# 通用服务日志诊断（手动触发）：查看任意 compose 服务的容器状态、健康检查结果与日志。
-# 背景：2026-09-15 voyageplex 上线时 api 容器 unhealthy，仓库里没有一个能看任意服务日志的
-# 入口，只能靠猜。此 workflow 填补该空缺。
-#   service —— compose 服务名（如 voyageplex-api）；容器名按 rr-portal-<service>-1 推导
-#   tail    —— 日志行数，默认 100
-
+name: PR 1007 Indo Static Release
 on:
   workflow_dispatch:
     inputs:
-      service:
-        description: "compose 服务名（如 voyageplex-api）"
-        type: string
-        required: true
-      tail:
-        description: "日志行数"
-        type: string
-        required: false
-        default: "100"
-      tomy_smoke:
-        description: "仅 TOMY：使用合成文件验证上传核对及 ZIP 下载"
-        type: boolean
-        required: false
-        default: false
-
+      mode: {type: choice, required: true, options: [prepare]}
 permissions:
   contents: read
-
 concurrency:
   group: deploy-cloud
   queue: max
   cancel-in-progress: false
-
+env:
+  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
+  SCOPED_RELEASE_HELPER_SHA256: 'd7ee1a568cb96cf3f3e98b3cd0daf4fae626f3587ec31e90d81bb32e2b088e4e'
 jobs:
-  logs:
+  fixed-scoped-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 75
     steps:
-      - name: Validate SSH host fingerprint
+      - name: Validate exact phase, branch and first attempt
         shell: bash
         env:
+          RELEASE_BRANCH: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_MODE: ${{ inputs.mode }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
-            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
-            exit 1
-          fi
-
-      - name: Fetch service logs via SSH
-        env:
-          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          OPS_SERVICE: ${{ inputs.service }}
-          OPS_TAIL: ${{ inputs.tail }}
-          TOMY_SMOKE: ${{ inputs.tomy_smoke }}
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1007-20261026-static && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare ]] || exit 1
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+      - name: Run only reviewed indo static prepare
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        env:
+          RELEASE_BRANCH: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 5m
-          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE
+          command_timeout: 70m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            # 服务名只允许字母数字和连字符，防止注入
-            if [[ ! "$OPS_SERVICE" =~ ^[a-z0-9-]+$ ]]; then
-              echo "非法服务名: $OPS_SERVICE" >&2
-              exit 1
-            fi
-            [[ "$OPS_TAIL" =~ ^[0-9]+$ ]] || OPS_TAIL=100
-            CTR="rr-portal-${OPS_SERVICE}-1"
-
-            echo "=== 容器状态 ==="
-            docker ps -a --filter "name=^${CTR}$" --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
-
-            echo ""
-            echo "=== 健康检查最近结果 ==="
-            docker inspect --format '{{json .State.Health}}' "$CTR" 2>/dev/null | head -c 3000 || echo "(无健康检查信息)"
-
-            echo ""
-            echo "=== 最近 ${OPS_TAIL} 行日志 ==="
-            docker logs --timestamps --tail "$OPS_TAIL" "$CTR" 2>&1 || true
-
-            echo ""
-            echo "=== 重启次数 ==="
-            docker inspect --format 'RestartCount={{.RestartCount}} StartedAt={{.State.StartedAt}}' "$CTR" 2>/dev/null || true
-
-            if [ "$OPS_SERVICE" = "tomy-paiqi" ]; then
-              echo "=== TOMY 实际内存配置（只读） ==="
-              docker inspect --format 'Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}} OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}}' "$CTR" || true
-              docker exec "$CTR" node -e 'console.log(JSON.stringify({nodeOptions:process.env.NODE_OPTIONS,heapLimit:require("v8").getHeapStatistics().heap_size_limit}))' || true
-              echo "=== 最近内存终止记录（只读） ==="
-              journalctl -k --since '2 hours ago' --no-pager 2>/dev/null | grep -Ei 'oom-kill|killed process|memory cgroup out of memory' | tail -20 || true
-              if [ "${TOMY_SMOKE:-false}" = "true" ]; then
-                echo "=== TOMY 合成上传与下载验证 ==="
-                docker exec "$CTR" node server/upload-smoke.mjs
-                docker inspect --format 'RestartCountAfterSmoke={{.RestartCount}} Health={{.State.Health.Status}}' "$CTR"
-              fi
-            fi
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1007-20261026-static && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            cd /opt/rr-portal
+            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1007-20261026-static:refs/remotes/origin/ops/pr-1007-20261026-static >/dev/null 2>&1 || exit 1
+            [[ "$(git rev-parse refs/remotes/origin/ops/pr-1007-20261026-static)" = "$RELEASE_SHA" ]] || exit 1
+            umask 077
+            scoped_release_tmp=$(mktemp -d /tmp/pr1007-static.XXXXXX)
+            trap 'rm -rf "$scoped_release_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/pr1007-static-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = d7ee1a568cb96cf3f3e98b3cd0daf4fae626f3587ec31e90d81bb32e2b088e4e ]] || exit 1
+            timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

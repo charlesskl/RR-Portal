@@ -1,0 +1,37 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root",
+  "helperSHA256": "8a136ece934d484ee34682689150a4ab3ec2bae30947a06ef2b473d1676a4380",
+  "helperGatesFrozen": true,
+  "base": "37b6146354f692dfabc8b009f6c5b80ced091bdb",
+  "baseTree": "2ae9b60d6aa627005d5937298fa84386b3572054",
+  "allowedPhases": [
+    "deploy",
+    "verify"
+  ],
+  "dependencies": {
+    "pr1008-02-publication-ingress-profile.json": "c0c279e91c9b55a119e3755801964d3f586752999d3df6a260ac4697dd018e0e",
+    "pr1008-03-publication-ingress-library.py": "0848f4456abcc3d2fbee2bc4250b32029fdebc53965966c1ca6a9f0356d9d2cb",
+    "pr1008-02-backup-library.py": "cb4cb071c3a6536fe5cf9a802ed092d7798147613501421c8ec5bd7ffaa79428",
+    "pr1008-printlink-contract-library.py": "97a14ebb6a93034cf6531880d8852151472ec49f7881a136648376b602a36882",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9"
+  },
+  "reviewedAtUTC": "2026-10-26T04:06:42.528867+00:00",
+  "scope": [
+    "printlink"
+  ],
+  "reviewedSourceBasis": "R03 complete diff against independently reviewed R02 40f; P03 exact observed raw DROP tuple only, independently reviewed 8fd4; all other data/env/runtime/rollback/ingress rules unchanged",
+  "checks": [
+    "Same actual successful B02/P02 archive names and seals; original immutable 7cc image; no new backup/build phase",
+    "Only D03/V03 output directories and six-file manifest03 alias differ; exact same application target/tree",
+    "Full typed two-SQLite rows/schema/sequence/full-files/mode/owner and candidate lock lifecycle checks preserved",
+    "Six target-publication ingress rules; all non-target firewall/network/container invariants remain; all validation durable before reopen",
+    "Failed D02 and closed diagnostic preserved as immutable predecessor evidence; canonical T/C mutation pins remain False"
+  ],
+  "p03IndependentReviewSHA256": "8fd4b539bc19610dde162fb0464cb7bd0d880d58debd4dc212ac54ff3419e341",
+  "productionActionsPerformed": false
+}

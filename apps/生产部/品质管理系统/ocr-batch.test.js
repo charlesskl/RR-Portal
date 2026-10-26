@@ -55,7 +55,7 @@ function browser({ quota = false, backend = false } = {}) {
     elements.set(id, node); return node;
   };
   for (const id of ['f_date','f_inspDate','f_supplier','f_client','f_processType','f_productNo','f_productName','f_deliveryNo','f_orderNo','f_qty','f_sampleQty','f_pass','f_fail','f_defectRate','f_defect','f_qc','f_remark','f_type','f_result','f_aqlLevel','modalOverlay','modalTitle','btnSaveContinue','modalModeTabs']) element(id);
-  const ctx = { console, setTimeout() {}, clearTimeout() {}, setInterval() {}, addEventListener() {}, navigator: {}, location: { pathname: '/qc/' },
+  const ctx = { console, setTimeout() {}, clearTimeout() {}, setInterval() {}, addEventListener() {}, removeEventListener() {}, navigator: {}, location: { pathname: '/qc/' },
     document: { readyState: 'complete', addEventListener: (event, handler) => { if (event === 'DOMContentLoaded') listeners.push(handler); }, getElementById: id => elements.get(id) || null, querySelectorAll: () => [], querySelector: () => null },
     localStorage: { getItem: key => store.get(key) || null, setItem: (key, value) => { if (quota) throw new Error('QuotaExceededError'); store.set(key, value); }, removeItem: key => store.delete(key) },
     fetch: (url, options) => { if (options?.method === 'POST') requests.push({ url, body: JSON.parse(options.body) }); return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ready: false }) }); }, confirm: () => true,

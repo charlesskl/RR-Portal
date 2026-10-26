@@ -341,7 +341,14 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             var parts = await db.OrderPartQtys.Where(q => q.OrderId == id).ToListAsync();
             if (parts.Count == 0)
                 return BadRequest(new { error = "订单没有部位数量，请先补全部位" });
+            var previousQuantities = parts.Select(part => part.Qty).ToArray();
             OrderCalc.ResizeDemand(parts, req.TotalQty.Value);
+            if (!parts.Select(part => part.Qty).SequenceEqual(previousQuantities))
+            {
+                var plans = await db.ProductionPlans.AsNoTracking()
+                    .Where(plan => plan.OrderId == id && plan.DeletedAt == null).ToListAsync();
+                o.Status = OrderCalc.DemandStatus(o.Status, parts, plans);
+            }
         }
 
         // 明细数量编辑（修正导入识别错误用）：仅「已接单 received 且无排期计划」可改。

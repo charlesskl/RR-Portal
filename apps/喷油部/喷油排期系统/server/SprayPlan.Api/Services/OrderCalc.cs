@@ -29,6 +29,25 @@ public static class OrderCalc
         }
     }
 
+    // 数量更正沿用撤销实绩后的状态推导，只读取计划/实绩，不改动这些记录。
+    public static string DemandStatus(string currentStatus, IEnumerable<OrderPartQty> parts, IEnumerable<ProductionPlan> sourcePlans)
+    {
+        var plans = sourcePlans.Where(plan => plan.DeletedAt is null).ToList();
+        if (plans.Count == 0) return currentStatus == "draft" ? "draft" : "received";
+        if (!plans.Any(plan => plan.GoodQty is not null || plan.InboundQty is not null)) return "scheduled";
+
+        var demand = parts.GroupBy(part => part.PartName)
+            .Select(group => new { Name = group.Key, Qty = group.Sum(part => (long)part.Qty) })
+            .Where(part => part.Qty > 0).ToList();
+        var complete = demand.Count > 0 && demand.All(part => {
+            var steps = plans.Where(plan => plan.PartName == part.Name)
+                .GroupBy(plan => plan.StepNo)
+                .Select(step => step.Sum(plan => (long)(plan.GoodQty ?? 0))).ToList();
+            return steps.Count > 0 && steps.Min() >= part.Qty;
+        });
+        return complete ? "completed" : "in_production";
+    }
+
     // 行合计：某明细行（子件）所有部位数量之和
     public static int LineTotalQty(IEnumerable<OrderPartQty> partQtys) => partQtys.Sum(q => q.Qty);
 

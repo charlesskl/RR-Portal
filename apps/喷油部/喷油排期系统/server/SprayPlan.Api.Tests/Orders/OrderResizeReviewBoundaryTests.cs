@@ -78,6 +78,9 @@ public class OrderResizeReviewBoundaryTests
         Assert.Equal(100, item.GetProperty("progressPct").GetInt32());
         Assert.Equal(0, item.GetProperty("remainingQty").GetInt32());
         Assert.Equal(0, item.GetProperty("inProductionRemainingQty").GetInt32());
+        await factory.WithDbAsync(async db => {
+            Assert.Equal("completed", (await db.Orders.SingleAsync(order => order.Id == id)).Status);
+        });
     }
 
     [Fact]
@@ -98,5 +101,87 @@ public class OrderResizeReviewBoundaryTests
         await factory.WithDbAsync(async db => {
             Assert.Equal(100, await db.OrderPartQtys.Where(p => p.OrderId == id).Select(p => p.Qty).SingleAsync());
         });
+    }
+
+    [Theory]
+    [InlineData(200, "in_production", true)]
+    [InlineData(50, "completed", false)]
+    [InlineData(100, "completed", false)]
+    public async Task ResizingCompletedOrder_DerivesStatusAndPreservesPlans(int totalQty, string status, bool schedulable)
+    {
+        using var factory = new ApiFactory();
+        using var client = factory.CreateClient();
+        await factory.SeedAsync();
+        var id = 0;
+        string? planSnapshot = null;
+        await factory.WithDbAsync(async db => {
+            var order = new Order { ExternalOrderNo = "COMPLETE-RESIZE", Status = "completed", OrderDate = DateTime.UtcNow,
+                PartQtys = new() { new() { PartName = "头", Qty = 100 } } };
+            db.Orders.Add(order); await db.SaveChangesAsync(); id = order.Id;
+            db.ProductionPlans.Add(new ProductionPlan { OrderId = id, LineId = await db.ProductionLines.Select(p => p.Id).FirstAsync(),
+                PlanDate = DateTime.UtcNow.Date, PartName = "头", PlannedQty = 100, GoodQty = 100, Status = "recorded" });
+            await db.SaveChangesAsync();
+            planSnapshot = JsonSerializer.Serialize(await db.ProductionPlans.AsNoTracking().Where(p => p.OrderId == id).OrderBy(p => p.Id).ToListAsync());
+        });
+        (await client.PostAsJsonAsync("/api/auth/login", new { username = "clerk", password = "clerk123" })).EnsureSuccessStatusCode();
+        (await client.PatchAsJsonAsync($"/api/orders/{id}", new { totalQty, deliveryDate = "2026-11-30" })).EnsureSuccessStatusCode();
+        var list = await client.GetFromJsonAsync<JsonElement>("/api/orders");
+        var item = list.EnumerateArray().Single(p => p.GetProperty("id").GetInt32() == id);
+        Assert.Equal(status, item.GetProperty("status").GetString());
+        Assert.StartsWith("2026-11-30", item.GetProperty("deliveryDate").GetString());
+        var schedule = await client.GetFromJsonAsync<JsonElement>("/api/schedule/orders");
+        Assert.Equal(schedulable, schedule.EnumerateArray().Any(p => p.GetProperty("id").GetInt32() == id));
+        (await client.PatchAsJsonAsync($"/api/orders/{id}", new { totalQty })).EnsureSuccessStatusCode();
+        await factory.WithDbAsync(async db => {
+            Assert.Equal(status, (await db.Orders.SingleAsync(o => o.Id == id)).Status);
+            Assert.Equal(planSnapshot, JsonSerializer.Serialize(await db.ProductionPlans.AsNoTracking().Where(p => p.OrderId == id).OrderBy(p => p.Id).ToListAsync()));
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DateOrSameQuantity_DoesNotReclassifyHistoricalStatus(bool includeSameQuantity)
+    {
+        using var factory = new ApiFactory();
+        using var client = factory.CreateClient();
+        await factory.SeedAsync();
+        var id = 0;
+        await factory.WithDbAsync(async db => {
+            var order = new Order { ExternalOrderNo = "HISTORICAL-STATUS", Status = "completed", OrderDate = DateTime.UtcNow,
+                PartQtys = new() { new() { PartName = "头", Qty = 100 } } };
+            db.Orders.Add(order); await db.SaveChangesAsync(); id = order.Id;
+        });
+        (await client.PostAsJsonAsync("/api/auth/login", new { username = "clerk", password = "clerk123" })).EnsureSuccessStatusCode();
+        var payload = new Dictionary<string, object> { ["deliveryDate"] = "2026-11-30" };
+        if (includeSameQuantity) payload["totalQty"] = 100;
+        (await client.PatchAsJsonAsync($"/api/orders/{id}", payload)).EnsureSuccessStatusCode();
+        await factory.WithDbAsync(async db => {
+            Assert.Equal("completed", (await db.Orders.SingleAsync(o => o.Id == id)).Status);
+        });
+    }
+
+    [Theory]
+    [InlineData("draft", "draft")]
+    [InlineData("received", "received")]
+    [InlineData("completed", "received")]
+    public void DemandStatus_NoLivePlansPreservesDraftOtherwiseReceived(string current, string expected)
+    {
+        Assert.Equal(expected, OrderCalc.DemandStatus(current,
+            new[] { new OrderPartQty { PartName = "头", Qty = 10 } },
+            new[] { new ProductionPlan { PartName = "头", GoodQty = 10, DeletedAt = DateTime.UtcNow } }));
+    }
+
+    [Fact]
+    public void DemandStatus_RequiresEachPositivePartAndEveryProcess()
+    {
+        var parts = new List<OrderPartQty> { new() { PartName = "头", Qty = 10 }, new() { PartName = "脚", Qty = 0 } };
+        var plans = new List<ProductionPlan> { new() { PartName = "头", StepNo = 1, GoodQty = 10 }, new() { PartName = "头", StepNo = 2, GoodQty = 5 } };
+        Assert.Equal("in_production", OrderCalc.DemandStatus("completed", parts, plans));
+        plans[1].GoodQty = 10;
+        Assert.Equal("completed", OrderCalc.DemandStatus("in_production", parts, plans));
+        parts.Add(new() { PartName = "身", Qty = 5 });
+        Assert.Equal("in_production", OrderCalc.DemandStatus("in_production", parts, plans));
+        Assert.Equal("scheduled", OrderCalc.DemandStatus("received", parts, new[] { new ProductionPlan { PartName = "头", PlannedQty = 10 } }));
     }
 }

@@ -92,6 +92,18 @@ test('different quantity units remain separate; equivalent unit casing can still
   assert.deepEqual(parse(table([['P001', '玩具', '10', '箱'], ['P001', '玩具', '10', '个']])).items, [item('P001', '玩具', '10', '箱'), item('P001', '玩具', '10', '个')]);
   assert.deepEqual(parse(table([['P001', '玩具', '10', 'pcs'], ['P001', '玩具', '10', 'PCS']])).items, [item('P001', '玩具', '10', 'pcs')]);
 });
+test('table units retain supported traditional characters and equivalent letter casing', () => {
+  for (const unit of ['个', '個', '張', '條', '顆', 'Pcs', 'pCs', 'Kg', 'KG', 'g', 'G', '千克', '克']) {
+    assert.deepEqual(parse(table([['P001', '塑胶零件', '1000', unit]])).items,
+      [item('P001', '塑胶零件', '1000', unit)], unit);
+  }
+});
+test('numeric or shifted-column junk still cannot become a table unit', () => {
+  for (const unit of ['960/960', '1000', 'PO-123456', '未完成']) {
+    assert.deepEqual(parse(table([['P001', '塑胶零件', '1000', unit]])).items,
+      [item('P001', '塑胶零件', '1000', '')], unit);
+  }
+});
 test('repeat fragments without quantity are removed when the complete same product row exists', () => {
   assert.deepEqual(parse(table([goodRow, ['P-001', '塑胶零件', '', '个']])).items, [item(...goodRow)]);
 });

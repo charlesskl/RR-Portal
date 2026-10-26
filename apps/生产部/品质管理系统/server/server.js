@@ -317,7 +317,7 @@ function parseDeliveryNote(text) {
         const nextCell = get(cQty + 1);
         if (!unit && cQty >= 0 && nextCell && !/\d/.test(nextCell) && nextCell.length <= 4) unit = nextCell;
         /* 单位词表外的内容是错列数据（如把 960/960 读进单位列） */
-        if (unit && !/^(个|PCS|pcs|件|套|卷|张|張|桶|KG|kg|米|箱|包|条|條|颗|顆|千克|克|g)$/.test(unit)) unit = '';
+        if (unit && !/^(个|個|PCS|件|套|卷|张|張|桶|KG|米|箱|包|条|條|颗|顆|千克|克|G)$/i.test(unit)) unit = '';
         if (!fields.orderNo) { const o = get(cOrder).replace(/\s+/g, ''); if (o && o !== no && o.length >= 6) fields.orderNo = o; }
         fields.items.push({ productNo: no, productName: name, qty, unit });
       }

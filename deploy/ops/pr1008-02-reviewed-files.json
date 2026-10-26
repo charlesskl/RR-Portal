@@ -1,0 +1,8 @@
+{
+  "apps/工程部/3D打印协同平台/README.md": "37b7d9a987241b9345b489e22c7a50ca5230a4ecaca6539101aa77a9e6563749",
+  "apps/工程部/3D打印协同平台/cloud/public/app.js": "2eb820c8ebe84b5ac863f8ef821d9e01bb1c7b64211b59388a011229b33b912a",
+  "apps/工程部/3D打印协同平台/cloud/public/style.css": "7af97b8c7ae31a840f803bd05c57fb2fb4965018219eff9da485a3cc35ae1116",
+  "apps/工程部/3D打印协同平台/cloud/server.mjs": "1188ceb60a708c0ec2443e2f868a5aae79ba7ed031a158f8182ef473e03a9260",
+  "apps/工程部/3D打印协同平台/tests/order-browser.test.mjs": "6b6498d22ac77803d088004feaeaafbd200f14151a6b7994fb52c469941edeb8",
+  "apps/工程部/3D打印协同平台/tests/orders.test.mjs": "54eac07369edc3789123f6256ce559af7c856b307400764bfe63c4a03a8d0e23"
+}

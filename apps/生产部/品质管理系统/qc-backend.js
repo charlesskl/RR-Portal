@@ -56,7 +56,9 @@
   }
   function notice(message, error) {
     window.__QC_SYNC_NOTICE = message;
-    if (typeof window.showToast === 'function') window.showToast(message, error ? 'error' : 'info');
+    /* 例行成功不弹 toast：应用自身已有「记录已添加 ✓」等提示，
+       同步层的「服务器已保存修改」会把它覆盖掉。错误状态照常提示。 */
+    if (error && typeof window.showToast === 'function') window.showToast(message, 'error');
     var banner = document.getElementById('qcSyncNotice');
     if (!banner && document.body && document.createElement) {
       banner = document.createElement('div');
@@ -68,7 +70,9 @@
     }
     if (banner) {
       banner.textContent = message;
-      banner.style.display = message ? '' : 'none';
+      /* 例行「服务器已保存修改」不占用底部横幅：全宽横幅会盖住右下角的操作提示（toast）。
+         横幅只留给错误/草稿等需要用户处理的状态。 */
+      banner.style.display = (message && error) ? '' : 'none';
       var hasRecordFailure = Object.keys(failedWrites).some(function (url) { return url.indexOf('/api/records') !== -1; });
       if (error && hasRecordFailure && document.createElement) {
         var retry = document.createElement('button');
@@ -114,7 +118,7 @@
     }
     var requestAuth = window.__QC_AUTH;
     return fetch(apiUrl(path), options).then(function (res) {
-      if (window.__QC_AUTH === requestAuth && res.status === 401) clearAuth('登录已失效，请重新登录');
+      if (window.__QC_AUTH === requestAuth && (res.status === 401 || res.status === 403)) clearAuth(res.status === 401 ? '登录已失效，请重新登录' : '当前账号无权限，请重新登录或联系管理员');
       return res;
     });
   };
@@ -245,7 +249,7 @@
         headers: { 'Content-Type': 'application/json', 'X-QC-CSRF': window.__QC_AUTH.csrfToken }, body: JSON.stringify(body)
       }).then(function (r) {
         if (window.__QC_AUTH !== requestAuth) return false;
-        if (r.status === 401) clearAuth('登录已失效，请重新登录；未同步修改仍保留在本地');
+        if (r.status === 401 || r.status === 403) clearAuth(r.status === 401 ? '登录已失效，请重新登录；未同步修改仍保留在本地' : '保存被拒绝，请联系管理员核对权限；未同步修改仍保留在本地');
         return completed(r.ok, r.status);
       }).catch(function () { return window.__QC_AUTH === requestAuth ? completed(false, 0, '网络连接失败') : false; });
     } catch (_) { return Promise.resolve(completed(false, 0, '网络连接失败')); }

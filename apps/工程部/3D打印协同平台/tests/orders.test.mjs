@@ -5,6 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
+import { DatabaseSync } from 'node:sqlite';
 
 test('production: login, uploads, persistence, permissions and order workflow', async () => {
   const dir=await mkdtemp(path.join(tmpdir(),'printlink-test-'));
@@ -23,13 +24,14 @@ test('production: login, uploads, persistence, permissions and order workflow', 
     assert.deepEqual((await request('/api/orders',{},admin)).data,[]);
     assert.equal((await request('/api/users',{method:'POST',body:'{}',headers:{'X-CSRF-Token':'bad'}},admin)).res.status,403);
     assert.equal((await request('/api/users',{method:'POST',body:JSON.stringify({username:'shortpw',name:'测试',password:'test123',factory:'湖南',role:'member'})},admin)).res.status,400);
-    for(const [username,factory] of [['hunan','湖南'],['heyuan','河源']]) assert.equal((await request('/api/users',{method:'POST',body:JSON.stringify({username,name:username,password:'test1234',factory,role:'member'})},admin)).res.status,201);
-    const hn=await login('hunan','test1234'),hy=await login('heyuan','test1234');
+    for(const [username,factory] of [['hunan','湖南'],['heyuan','河源'],['filepeer','湖南']]) assert.equal((await request('/api/users',{method:'POST',body:JSON.stringify({username,name:username,password:'test1234',factory,role:'member'})},admin)).res.status,201);
+    const hn=await login('hunan','test1234'),hy=await login('heyuan','test1234'),filePeer=await login('filepeer','test1234');
     const bytes=Buffer.from('ISO-10303-21;\nDATA;\nENDSEC;\nEND-ISO-10303-21;');
     const upload=async(name,auth=hn)=>request('/api/uploads',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(name)},body:bytes},auth);
     assert.equal((await upload('evil.html')).res.status,400);
     assert.equal((await upload('../test.stp')).res.status,400);
     const file=await upload('呼吸灯.stp');assert.equal(file.res.status,201);
+    assert.equal((await request('/api/files/'+file.data.id,{},filePeer)).res.status,404,'pending uploads are private');
     const input={factory:'湖南',workshop:'A',customer:'测试客户',sku:'TEST-1',product:'测试模型',quantity:10,printerType:'光固化',material:'硬胶',color:'白色',engineer:'测试工程师',dueDate:'2026-10-06',priority:'普通',fileIds:[file.data.id]};
     const post=d=>request('/api/orders',{method:'POST',body:JSON.stringify(d)},hn);
     assert.equal((await post({...input,factory:'河源'})).res.status,403);
@@ -44,6 +46,20 @@ test('production: login, uploads, persistence, permissions and order workflow', 
     assert.equal((await request('/api/orders',{},hy)).data.length,0);
     assert.equal((await request('/api/files/'+file.data.id,{},hy)).res.status,404);
     const downloaded=await fetch(base+'/api/files/'+file.data.id,{headers:{Cookie:hn.cookie}});assert.equal(downloaded.status,200);assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()),bytes);
+    const peerOrders=(await request('/api/orders',{},filePeer)).data;
+    assert.equal(peerOrders.length,1,'same-factory colleagues still see the order');
+    assert.deepEqual(peerOrders[0].files,[],'file metadata is hidden from other accounts');
+    assert.equal(peerOrders[0].canDownloadFiles,false);
+    assert.equal((await request('/api/files/'+file.data.id,{},filePeer)).res.status,404,'direct links cannot bypass ownership');
+    assert.equal((await request('/api/files/'+file.data.id+'?preview=1',{},filePeer)).res.status,404,'preview uses the same permission');
+    assert.equal((await request('/api/files/'+file.data.id)).res.status,401);
+    const ownerOrder=(await request('/api/orders',{},hn)).data[0];
+    assert.equal(ownerOrder.files.length,1);assert.equal(ownerOrder.canDownloadFiles,true);
+    const adminOrder=(await request('/api/orders',{},admin)).data[0];
+    assert.equal(adminOrder.files.length,1);assert.equal(adminOrder.canDownloadFiles,true);
+    const adminDownload=await fetch(base+'/api/files/'+file.data.id,{headers:{Cookie:admin.cookie}});
+    assert.equal(adminDownload.status,200);assert.deepEqual(Buffer.from(await adminDownload.arrayBuffer()),bytes);
+
     assert.equal((await request('/api/orders/'+id,{method:'PATCH',body:JSON.stringify({status:'待排产'})},hn)).res.status,403);
     const editApplication=(data,auth=hn)=>request('/api/orders/'+id+'/application',{method:'PATCH',body:JSON.stringify(data)},auth);
     const editInput={...input,updated:created.data.updated,product:'修改后的模型',quantity:22};
@@ -126,7 +142,8 @@ test('production: login, uploads, persistence, permissions and order workflow', 
     let multi=await login('multisite','multi1234');
     assert.deepEqual((await request('/api/me',{},multi)).data.user.factories,['湖南','河源']);
     assert.equal((await request('/api/orders',{},multi)).data.length,1);
-    assert.equal((await fetch(base+'/api/files/'+file.data.id,{headers:{Cookie:multi.cookie}})).status,200);
+    assert.equal((await request('/api/files/'+file.data.id,{},multi)).res.status,404,'multi-factory permission does not grant attachment access');
+    assert.deepEqual((await request('/api/orders',{},multi)).data[0].files,[]);
     const multiFile=await upload('多厂区模型.stp',multi);
     const multiOrder={...input,printerType:'FDM',fileIds:[multiFile.data.id],factory:'河源'};
     assert.equal((await request('/api/orders',{method:'POST',body:JSON.stringify({...multiOrder,factory:'印尼'})},multi)).res.status,403);
@@ -145,4 +162,79 @@ test('production: login, uploads, persistence, permissions and order workflow', 
 
 
   } finally {await stop();await rm(dir,{recursive:true,force:true});}
+});
+
+test('attachment access follows stable order ownership for images, renamed users and legacy rows', async t => {
+  const dir=await mkdtemp(path.join(tmpdir(),'printlink-files-'));
+  const net=await import('node:net');
+  const reserve=net.createServer();reserve.listen(0,'127.0.0.1');await once(reserve,'listening');
+  const port=reserve.address().port;await new Promise(resolve=>reserve.close(resolve));
+  const base=`http://127.0.0.1:${port}`;
+  let child;
+  const launch=async()=>{
+    child=spawn(process.execPath,['cloud/server.mjs'],{cwd:process.cwd(),env:{...process.env,APP_MODE:'production',COLLECTOR_TOKEN:'isolated-file-test-token-at-least-32-characters',DATA_DIR:dir,HOST:'127.0.0.1',PORT:String(port),ADMIN_PASSWORD:'synthetic-admin-pass',COOKIE_SECURE:'false'},stdio:['ignore','pipe','pipe']});
+    await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('exit',code=>reject(Error('isolated server exited '+code)));child.stderr.on('data',b=>{if(!String(b).includes('ExperimentalWarning')&&!String(b).includes('trace-warnings'))process.stderr.write(b);});});
+  };
+  const stop=async()=>{if(child&&child.exitCode===null){child.kill();await once(child,'exit');}};
+  t.after(async()=>{await stop();await rm(dir,{recursive:true,force:true});});
+  const request=async(route,options={},auth)=>{
+    const res=await fetch(base+route,{...options,headers:{...(auth?{Cookie:auth.cookie,'X-CSRF-Token':auth.csrf}:{}),...(typeof options.body==='string'?{'Content-Type':'application/json'}:{}),...options.headers}});
+    return {res,data:await res.json()};
+  };
+  const login=async(username,password)=>{
+    const {res,data}=await request('/api/login',{method:'POST',body:JSON.stringify({username,password})});
+    assert.equal(res.status,200);return {cookie:res.headers.get('set-cookie').split(';')[0],csrf:data.csrf,user:data.user};
+  };
+  const fileResponse=(id,auth,tail='')=>fetch(base+'/api/files/'+id+tail,{headers:auth?{Cookie:auth.cookie}:{}});
+  await launch();
+  let admin=await login('admin','synthetic-admin-pass');
+  for(const username of ['image-owner','same-name-peer']){
+    assert.equal((await request('/api/users',{method:'POST',body:JSON.stringify({username,name:'同名工程师',password:'synthetic-member-pass',role:'member',factory:'湖南'})},admin)).res.status,201);
+  }
+  let owner=await login('image-owner','synthetic-member-pass');
+  const peer=await login('same-name-peer','synthetic-member-pass');
+  const bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxBQAAAAASUVORK5CYII=','base64');
+  const uploaded=await request('/api/uploads',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent('附件图片.png')},body:bytes},owner);
+  assert.equal(uploaded.res.status,201);const fileId=uploaded.data.id;
+  assert.equal((await fileResponse(fileId,peer,'?preview=1')).status,404,'pending preview stays private from same-name colleagues');
+  const pendingAdmin=await fileResponse(fileId,admin,'?preview=1');
+  assert.equal(pendingAdmin.status,200);assert.equal(pendingAdmin.headers.get('content-type'),'image/png');
+  assert.match(pendingAdmin.headers.get('content-disposition'),/^inline;/);assert.deepEqual(Buffer.from(await pendingAdmin.arrayBuffer()),bytes);
+  const created=await request('/api/orders',{method:'POST',body:JSON.stringify({factory:'湖南',workshop:'A',customer:'synthetic customer',sku:'IMAGE-1',product:'synthetic image order',quantity:1,printerType:'FDM',material:'PLA',color:'白色',dueDate:'2026-10-26',priority:'普通',engineer:'someone else',owner:peer.user.id,fileIds:[fileId]})},owner);
+  assert.equal(created.res.status,201);const orderId=created.data.id;
+  assert.equal(created.data.owner,owner.user.id,'request data cannot replace authenticated ownership');
+  const peerOrder=(await request('/api/orders',{},peer)).data.find(row=>row.id===orderId);
+  assert.equal(peerOrder.engineer,'同名工程师');assert.deepEqual(peerOrder.files,[]);assert.equal(peerOrder.canDownloadFiles,false);
+  assert.equal((await fileResponse(fileId,peer,'?preview=1')).status,404,'matching display name does not confer order ownership');
+  const image=await fileResponse(fileId,owner,'?preview=1');
+  assert.equal(image.status,200);assert.equal(image.headers.get('content-type'),'image/png');
+  assert.match(image.headers.get('content-disposition'),/^inline;/);assert.equal(image.headers.get('cache-control'),'private, no-store');assert.deepEqual(Buffer.from(await image.arrayBuffer()),bytes);
+  const aliasRoutes=['/uploads/'+fileId,'/data/uploads/'+fileId,'/api/files/%2e%2e%2f'+fileId,'/api/files/'+fileId+'%2f','/api/platform/overview'];
+  if(fileId.toUpperCase()!==fileId)aliasRoutes.push('/api/files/'+fileId.toUpperCase());
+  for(const route of aliasRoutes){
+    assert.ok([403,404].includes((await request(route,{},peer)).res.status),'no attachment alias or admin-only platform bypass: '+route);
+  }
+  assert.equal((await fetch(base+'/api/files/'+fileId,{method:'HEAD',headers:{Cookie:peer.cookie}})).status,404,'HEAD cannot return protected file headers');
+  assert.equal((await fileResponse(fileId,null,'?preview=1')).status,401);
+  const renamed=await request('/api/users/'+owner.user.id,{method:'PATCH',body:JSON.stringify({username:'renamed-owner',name:'新姓名',role:'member',factory:'湖南'})},admin);
+  assert.equal(renamed.res.status,200);
+  assert.equal((await fileResponse(fileId,owner)).status,401,'username changes revoke the old session');
+  owner=await login('renamed-owner','synthetic-member-pass');
+  assert.equal(owner.user.id,created.data.owner);
+  const renamedOrder=(await request('/api/orders',{},owner)).data.find(row=>row.id===orderId);
+  assert.equal(renamedOrder.canDownloadFiles,true);assert.deepEqual(renamedOrder.files,[{id:fileId,name:'附件图片.png',size:bytes.length}]);
+  const renamedDownload=await fileResponse(fileId,owner);assert.equal(renamedDownload.status,200);assert.deepEqual(Buffer.from(await renamedDownload.arrayBuffer()),bytes);
+  await stop();
+  // A missing legacy creator must never be guessed from names or factory scope.
+  const isolatedDb=new DatabaseSync(path.join(dir,'printlink.sqlite'));
+  try {isolatedDb.prepare('UPDATE orders SET owner=NULL WHERE id=?').run(orderId);} finally {isolatedDb.close();}
+  await launch();
+  const legacyPeer=(await request('/api/orders',{},peer)).data.find(row=>row.id===orderId);
+  assert.equal(legacyPeer.owner,null);assert.equal(legacyPeer.canDownloadFiles,false);assert.deepEqual(legacyPeer.files,[]);
+  assert.equal((await fileResponse(fileId,peer,'?preview=1')).status,404);
+  assert.equal((await fileResponse(fileId,owner)).status,404,'uploader ID does not substitute for an unknown order creator');
+  admin=await login('admin','synthetic-admin-pass');
+  const legacyAdmin=(await request('/api/orders',{},admin)).data.find(row=>row.id===orderId);
+  assert.equal(legacyAdmin.canDownloadFiles,true);assert.equal(legacyAdmin.files.length,1);
+  const legacyDownload=await fileResponse(fileId,admin);assert.equal(legacyDownload.status,200);assert.deepEqual(Buffer.from(await legacyDownload.arrayBuffer()),bytes);
 });

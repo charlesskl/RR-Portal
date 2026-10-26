@@ -198,7 +198,7 @@ function spoilageRate(category: string | undefined, materialQty: number): number
 function applyAutoSpoilage(item: PoItem): PoItem {
   const materialQty = Math.max(0, Number(item.material_qty ?? 0) || 0)
   const spoilageQty = Math.round(materialQty * spoilageRate(item.category, materialQty) * 100) / 100
-  const purchaseQty = Math.round((materialQty + spoilageQty) * 100) / 100
+  const purchaseQty = Math.round(materialQty + spoilageQty)
   return {
     ...item,
     material_qty: materialQty,
@@ -216,7 +216,7 @@ function patchPoItem(item: PoItem, field: keyof PoItem, value: any): PoItem {
   }
   if (field === 'category') return applyAutoSpoilage(next)
   if (field === 'spoilage_qty') {
-    next.purchase_qty = (next.material_qty ?? 0) + (next.spoilage_qty ?? 0)
+    next.purchase_qty = Math.round(Math.max(0, (next.material_qty ?? 0) + (next.spoilage_qty ?? 0)))
     next.qty = next.purchase_qty
   }
   return next
@@ -255,7 +255,7 @@ function FillablePurchaseCell({ rowIndex, field, onFill, onFillToEnd, children }
   )
 }
 
-function restoreSavedSpoilage(item: PoItem): PoItem {
+function restoreSavedSpoilage(item: PoItem, integerDraft = false): PoItem {
   const materialQty = Math.max(0, Number(item.material_qty ?? 0) || 0)
   // Existing purchase orders may contain a manually adjusted loss. Only use the
   // category default for legacy rows where loss was never stored.
@@ -264,9 +264,11 @@ function restoreSavedSpoilage(item: PoItem): PoItem {
     ? Math.max(0, Number(item.spoilage_qty) || 0)
     : Math.round(materialQty * spoilageRate(item.category, materialQty) * 100) / 100
   const hasSavedPurchaseQty = item.purchase_qty !== null && item.purchase_qty !== undefined
-  const purchaseQty = hasSavedPurchaseQty
+  const savedPurchaseQty = hasSavedPurchaseQty
     ? Math.max(0, Number(item.purchase_qty) || 0)
     : Math.round((materialQty + spoilageQty) * 100) / 100
+  const purchaseQty = integerDraft && !Number(item.received_qty) && !Number(item.spare_qty)
+    ? Math.round(savedPurchaseQty) : savedPurchaseQty
   return {
     ...item,
     material_qty: materialQty,
@@ -1055,9 +1057,11 @@ export default function PurchasePage() {
           ship_unit: it.ship_unit || 'PCE',
           net_per_pc: Number(it.net_per_pc) || 0,
           eta: it.eta || schedule?.eta || '',
-        })
+        }, (data.status || 'draft') === 'draft')
       })
       setItems(openedItems)
+      if (openedItems.some((item, index) => item.purchase_qty !== rawItems[index].purchase_qty && rawItems[index].purchase_qty != null))
+        message.info('未入库草稿的采购量已四舍五入为整数，请核对金额后保存')
       if (materials.size && materialChanges(openedItems, materials).length) promptMaterialSync(openedItems, materials)
     } catch (e: any) {
       message.error('加载详情失败: ' + (e?.message ?? e))
@@ -1071,7 +1075,14 @@ export default function PurchasePage() {
       const parsed = dayjs(value as any)
       return parsed.isValid() ? parsed.format('YYYY-MM-DD') : null
     }
-    let saveItems = items
+    // Normalize only new/unreceived draft quantities. Historical receipts and
+    // shipped orders must not be silently rewritten while editing metadata.
+    let saveItems = items.map(item => {
+      if ((!creating && (editing?.status || 'draft') !== 'draft') || Number(item.received_qty) || Number(item.spare_qty)) return item
+      const quantity = Math.round(Math.max(0, Number(item.purchase_qty ?? item.qty ?? ((item.material_qty || 0) + (item.spoilage_qty || 0))) || 0))
+      return item.purchase_qty === quantity && item.qty === quantity ? item : { ...item, purchase_qty: quantity, qty: quantity }
+    })
+    if (saveItems.some((item, index) => item !== items[index])) setItems(saveItems)
     let quoteHits = 0
     try {
       const candidates = await loadPurchaseMaterialCandidates(saveItems)
@@ -1930,7 +1941,7 @@ export default function PurchasePage() {
               { title: '订单量', width: 120, render: (_v, r, i) => fillable(i, 'ordered_qty', <InputNumber size="small" min={0} value={r.ordered_qty} onChange={(v) => patchItem(i, 'ordered_qty', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '物料量', width: 100, align: 'right', render: (_v, r) => Number(r.material_qty ?? 0).toFixed(0) },
               { title: '损耗量', width: 110, render: (_v, r, i) => fillable(i, 'spoilage_qty', <InputNumber size="small" min={0} value={r.spoilage_qty} onChange={(v) => patchItem(i, 'spoilage_qty', v ?? 0)} style={{ width: '100%' }} />) },
-              { title: '采购量', width: 100, align: 'right', render: (_v, r) => <b style={{ color: '#1677ff' }}>{Number(r.purchase_qty ?? r.qty ?? 0).toFixed(2)}</b> },
+              { title: '采购量', width: 100, align: 'right', render: (_v, r) => <b style={{ color: '#1677ff' }}>{Number(r.purchase_qty ?? r.qty ?? 0).toString()}</b> },
               { title: '单价', width: 150, render: (_v, r, i) => fillable(i, 'price', <InputNumber size="small" min={0} precision={8} step={0.00000001} value={r.price} onChange={(v) => patchItem(i, 'price', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '金额', width: 100, align: 'right', render: (_v, r) => <b style={{ color: '#c0392b' }}>{((r.purchase_qty ?? r.qty ?? 0) * (r.price ?? 0)).toFixed(2)}</b> },
               { title: '采购单位', width: 110, render: (_v, r, i) => fillable(i, 'purchase_unit',

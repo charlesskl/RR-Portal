@@ -13,8 +13,21 @@ const auth=useAuthStore()
 const config=ref<AnalysisConfig|null>(null)
 const configLoading=ref(false), configError=ref(''), configNeedsLogin=ref(false)
 let configController:AbortController|null=null
-const orderDateBasis=ref('order_date')
-const statistics=ref<{coverage:{source:string;status:string;count:number}[];total:number;limit:number}|null>(null)
+type OrderDateBasis='order_date'|'delivery_date'
+const orderDateBasis=ref<OrderDateBasis>('order_date')
+interface Statistics {coverage:{source:string;status:string;count:number}[];total:number;limit:number;orderDateBasis:OrderDateBasis}
+const statistics=ref<Statistics|null>(null)
+function isStatistics(value:unknown,expectedBasis:OrderDateBasis):value is Statistics {
+  if(!value||typeof value!=='object')return false
+  const data=value as Record<string,unknown>
+  if(typeof data.total!=='number'||!Number.isSafeInteger(data.total)||data.total<0||data.limit!==500||data.orderDateBasis!==expectedBasis||!Array.isArray(data.coverage)||!data.coverage.length)return false
+  const sources=new Set<string>();let total=0
+  for(const row of data.coverage){
+    if(!row||typeof row.source!=='string'||!row.source.trim()||sources.has(row.source)||typeof row.status!=='string'||!row.status.trim()||!Number.isSafeInteger(row.count)||row.count<0)return false
+    sources.add(row.source);total+=row.count
+  }
+  return total===data.total
+}
 const error=ref(''), busy=ref(false), factory=ref(props.factoryId||'')
 const region=ref<Region|''>(''),craft=ref<Craft|''>('')
 const regionOptions=computed(()=>[...new Set(props.factories.map(f=>regionOf(f)).filter(r=>auth.role&&allowedRegions(auth.role).includes(r)))])
@@ -69,6 +82,7 @@ async function generate(previewOnly=false){
   try{
     const counts=await pb.send('/api/factory-review/analysis-ai',{method:'POST',body:{...body,preview:true},signal:controller.signal,requestKey:null})
     if(current!==generation)return
+    if(!isStatistics(counts,body.orderDateBasis)){error.value='统计结果格式异常，本次尚未调用AI，请刷新后重试。';return}
     statistics.value=counts
     if(previewOnly)return
     if(counts.total>counts.limit){error.value=`分析总明细 ${counts.total} 条，超过 ${counts.limit} 条上限，请参考各类数量缩小范围；尚未调用AI。`;return}

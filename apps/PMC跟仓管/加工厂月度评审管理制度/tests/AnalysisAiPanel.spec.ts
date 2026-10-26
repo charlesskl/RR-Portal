@@ -6,7 +6,7 @@ vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({role:'admin'})}))
 import AnalysisAiPanel from '../src/components/AnalysisAiPanel.vue'
 const response={report:{summary:'需要核实',findings:[{title:'风险',risk:'medium',analysis:'有待核实',actions:['复查'],evidence_ids:['quality_patrols:p']}],limitations:['缺少产能']},evidence:[{id:'quality_patrols:p',factoryId:'f',factoryCode:'F1',factoryName:'工厂',source:'quality_patrols',recordId:'p',date:'2026-10-16',craft:'assembly',region:'hunan'}],coverage:[],model:'test-model',start:'2026-10-01',end:'2026-10-20',generatedAt:'2026-10-20T00:00:00Z'}
 const mountPanel=()=>mount(AnalysisAiPanel,{props:{factories:[]},global:{stubs:{RouterLink:{props:['to'],template:'<a><slot /></a>'}}}})
-beforeEach(()=>{vi.clearAllMocks();mocks.record={id:'u'};mocks.send.mockImplementation(async(path:string,options:any)=>path.endsWith('/config')?{enabled:true,model:'test-model',reason:'',dailyLimit:20}:options?.body?.preview?{total:5,limit:500,coverage:[{source:'订单',count:1,status:'已读取'}]}:response)})
+beforeEach(()=>{vi.clearAllMocks();mocks.record={id:'u'};mocks.send.mockImplementation(async(path:string,options:any)=>path.endsWith('/config')?{enabled:true,model:'test-model',reason:'',dailyLimit:20}:options?.body?.preview?{total:5,limit:500,orderDateBasis:options.body.orderDateBasis,coverage:[{source:'订单',count:5,status:'已读取'}]}:response)})
 describe('AI analysis interaction',()=>{
   it('does not issue a paid request without configuration and shows the admin entry',async()=>{
     mocks.send.mockResolvedValue({enabled:false,model:'',reason:'AI服务尚未启用',dailyLimit:20})
@@ -207,11 +207,80 @@ it('aborts and discards an in-flight analysis when a selected factory disappears
 
 it('previews counts without a paid request and blocks combined overflow',async()=>{
  const w=mountPanel();await flushPromises()
- mocks.send.mockResolvedValue({total:501,limit:500,coverage:[{source:'订单',count:340,status:'已读取'},{source:'品质检验',count:161,status:'已读取'}]})
+ mocks.send.mockImplementation(async(_path:string,options:any)=>({total:501,limit:500,orderDateBasis:options.body.orderDateBasis,coverage:[{source:'订单',count:340,status:'已读取'},{source:'品质检验',count:161,status:'已读取'}]}))
  await w.find('button.primary').trigger('click');await flushPromises()
  expect(mocks.send).toHaveBeenCalledTimes(2);expect(mocks.send.mock.calls[1]![1].body).toMatchObject({preview:true,orderDateBasis:'order_date'})
  expect(w.text()).toContain('订单：340条');expect(w.text()).toContain('品质检验：161条');expect(w.text()).toContain('尚未调用AI')
  await w.find('[aria-label="订单日期口径"]').setValue('delivery_date');expect(w.find('.coverage').exists()).toBe(false)
  await w.findAll('button').find(b=>b.text()==='统计分析范围（不调用AI）')!.trigger('click');await flushPromises()
  expect(mocks.send.mock.calls.at(-1)![1].body).toMatchObject({preview:true,orderDateBasis:'delivery_date'});w.unmount()
+})
+
+it.each([
+ ['missing statistics',{}],
+ ['proxy HTML','<html>proxy fallback</html>'],
+ ['null statistics',null],
+ ['wrong date basis',{total:1,limit:500,orderDateBasis:'delivery_date',coverage:[{source:'订单',count:1,status:'已读取'}]}],
+ ['missing total',{limit:500,orderDateBasis:'order_date',coverage:[{source:'订单',count:1,status:'已读取'}]}],
+ ['inconsistent total',{total:5,limit:500,orderDateBasis:'order_date',coverage:[{source:'订单',count:1,status:'已读取'}]}],
+ ['invalid limit',{total:501,limit:1000,orderDateBasis:'order_date',coverage:[{source:'订单',count:501,status:'已读取'}]}],
+ ['invalid source count',{total:1,limit:500,orderDateBasis:'order_date',coverage:[{source:'订单',count:'1',status:'已读取'}]}],
+])('does not generate after an invalid statistics response: %s',async(_name,counts)=>{
+ mocks.send.mockImplementation(async(path:string,options:any)=>path.endsWith('/config')?{enabled:true,model:'test-model',reason:'',dailyLimit:20}:options?.body?.preview?counts:response)
+ const w=mountPanel();await flushPromises();await w.find('button.primary').trigger('click');await flushPromises()
+ expect(mocks.send).toHaveBeenCalledTimes(2)
+ expect(w.find('[role=alert]').text()).toContain('统计结果格式异常')
+ expect(w.find('.result').exists()).toBe(false)
+ expect(w.find('.coverage').exists()).toBe(false)
+ w.unmount()
+})
+
+it('can preview with an empty question while keeping generation disabled',async()=>{
+ const w=mountPanel();await flushPromises();await w.find('textarea').setValue('')
+ expect(w.find('button.primary').attributes('disabled')).toBeDefined()
+ await w.findAll('button').find(b=>b.text()==='统计分析范围（不调用AI）')!.trigger('click');await flushPromises()
+ expect(mocks.send).toHaveBeenCalledTimes(2)
+ expect(mocks.send.mock.calls[1]![1].body).toMatchObject({preview:true,question:'',orderDateBasis:'order_date'})
+ expect(w.find('[role=status]').text()).toContain('合计 5 条')
+ expect(w.find('.result').exists()).toBe(false);w.unmount()
+})
+
+it('accepts a complete 500-record preview and generates only once on repeated clicks',async()=>{
+ let resolveCounts!:(value:any)=>void
+ mocks.send.mockImplementation((path:string,options:any)=>path.endsWith('/config')?Promise.resolve({enabled:true,model:'test-model',reason:'',dailyLimit:20}):options?.body?.preview?new Promise(resolve=>{resolveCounts=resolve}):Promise.resolve(response))
+ const w=mountPanel();await flushPromises()
+ await w.find('[aria-label="订单日期口径"]').setValue('delivery_date')
+ await w.find('button.primary').trigger('click');await w.find('button.primary').trigger('click')
+ expect(mocks.send).toHaveBeenCalledTimes(2)
+ resolveCounts({total:500,limit:500,orderDateBasis:'delivery_date',coverage:[{source:'订单',count:340,status:'已读取'},{source:'品质检验',count:160,status:'已读取'}]});await flushPromises()
+ expect(mocks.send).toHaveBeenCalledTimes(3)
+ expect(mocks.send.mock.calls[2]![1].body).toMatchObject({orderDateBasis:'delivery_date'})
+ expect(mocks.send.mock.calls[2]![1].body).not.toHaveProperty('preview')
+ expect(w.find('.result').exists()).toBe(true);w.unmount()
+})
+
+it('does not call the model after a source-cap statistics failure',async()=>{
+ mocks.send.mockImplementation(async(path:string)=>{if(path.endsWith('/config'))return {enabled:true,model:'test-model',reason:'',dailyLimit:20};throw {response:{message:'订单候选记录超过2000条，统计未完成，请缩短时间或选择工厂'}}})
+ const w=mountPanel();await flushPromises();await w.find('button.primary').trigger('click');await flushPromises()
+ expect(mocks.send).toHaveBeenCalledTimes(2);expect(w.find('[role=alert]').text()).toContain('统计未完成')
+ expect(w.find('.coverage').exists()).toBe(false);expect(w.find('.result').exists()).toBe(false)
+ expect(w.find('button.primary').attributes('disabled')).toBeUndefined();w.unmount()
+})
+
+it('discards an old preview after a date-basis change and keeps the new statistics',async()=>{
+ let resolveOld!:(value:any)=>void;let previews=0
+ mocks.send.mockImplementation((path:string,options:any)=>{
+  if(path.endsWith('/config'))return Promise.resolve({enabled:true,model:'test-model',reason:'',dailyLimit:20})
+  if(options?.body?.preview&&++previews===1)return new Promise(resolve=>{resolveOld=resolve})
+  return Promise.resolve({total:8,limit:500,orderDateBasis:options.body.orderDateBasis,coverage:[{source:'订单',count:8,status:'已读取'}]})
+ })
+ const w=mountPanel();await flushPromises();await w.find('button.primary').trigger('click');await flushPromises()
+ const oldSignal=mocks.send.mock.calls[1]![1].signal as AbortSignal
+ // A route change can clear the busy scope while the transport still resolves.
+ await w.setProps({factoryId:'different-route'});await w.find('[aria-label="订单日期口径"]').setValue('delivery_date')
+ await w.findAll('button').find(b=>b.text()==='统计分析范围（不调用AI）')!.trigger('click');await flushPromises()
+ expect(oldSignal.aborted).toBe(true);expect(w.find('[role=status]').text()).toContain('合计 8 条')
+ resolveOld({total:501,limit:500,orderDateBasis:'order_date',coverage:[{source:'订单',count:501,status:'已读取'}]});await flushPromises()
+ expect(w.find('[role=status]').text()).toContain('合计 8 条');expect(w.find('[role=alert]').exists()).toBe(false)
+ expect(mocks.send).toHaveBeenCalledTimes(3);expect(w.find('.result').exists()).toBe(false);w.unmount()
 })

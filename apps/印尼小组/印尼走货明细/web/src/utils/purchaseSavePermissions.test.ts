@@ -9,7 +9,7 @@ import { purchaseItemCodes } from './purchaseCustoms'
 // Execute the page's actual save path, not a copy of its permission handling.
 const page = readFileSync(new URL('../pages/PurchasePage.tsx', import.meta.url), 'utf8')
 const tree = ts.createSourceFile('PurchasePage.tsx', page, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-const names = ['save', 'loadPurchaseMaterials', 'loadPurchaseMaterialCandidates', 'applyQuotePrices']
+const names = ['save', 'loadPurchaseMaterials', 'loadPurchaseMaterialCandidates', 'applyQuotePrices', 'roundPurchaseQuantity']
 const functions: string[] = []
 function collect(node: ts.Node) {
   if (ts.isFunctionDeclaration(node) && node.name && names.includes(node.name.text)) functions.push(node.getText(tree))

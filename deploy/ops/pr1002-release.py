@@ -2,7 +2,7 @@
 No environment changes, DB restore, authenticated writes or model calls.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,traceback,urllib.error,urllib.request
-PHASE='prepare'
+PHASE='deploy'
 TARGET='04b6e92301c7dce04b83a3f63b1e83bfe2d9fe10'
 TREE='fd9348f63f6d1edb156677dce8b600179fd4b0a5'
 SOURCE_MANIFEST_SHA='1bc48e075d759335855d74e17a326e49a4c8d8072ef538560f848919c505c0c5'
@@ -15,7 +15,7 @@ BACKUP=ROOT/'deploy/backups/pr-1002-20261026-backup'
 PREPARE=BACKUP.with_name('pr-1002-20261026-prepare')
 DEPLOY=BACKUP.with_name('pr-1002-20261026-deploy')
 VERIFY=BACKUP.with_name('pr-1002-20261026-verify')
-BACKUP_MANIFEST='3620ad6e62ab24f8b0898091cdde0d6c0b8ce12806eabe8f0e27f37ba57d23ec';BACKUP_RESULT='17b8a8087c62ee19e84a0c2a2f4d9c7b42d4e5cb9eec387e6d5fa64f8e0f863b';PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+BACKUP_MANIFEST='3620ad6e62ab24f8b0898091cdde0d6c0b8ce12806eabe8f0e27f37ba57d23ec';BACKUP_RESULT='17b8a8087c62ee19e84a0c2a2f4d9c7b42d4e5cb9eec387e6d5fa64f8e0f863b';PREPARE_MANIFEST='b9d72806470bbe47f063ce381bb40e546ed8c193c7aba8daf34175222bc55285';PREPARE_RESULT='6133867fbe3a5e7312c390870f6b6a5345de89aa9058071d510e08215029a888';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 ORDER=('factory-review',)
 DEPS={'pr1002-backup-library.py': 'd92192102d2fd19e95fc9a2702bb453757dc87200e7e714173362091a7ae6a1c', 'batch-host-config-library.py': 'bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1', 'factory-review-backup-library.py': '79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666', 'release-data-ops-library.py': 'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5', 'release-data-library.py': 'd63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9'}
 COMPOSE=['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production')]

@@ -2,12 +2,15 @@
 import { onMounted, onScopeDispose, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { pb } from '../pb'
+import { configErrorMessage, isAnalysisConfig, type AnalysisConfig } from '../utils/analysisConfig'
 import { chinaToday } from '../utils/dynamicAnalysis'
 import { useAuthStore } from '../stores/auth'
 import type { Factory } from '../types/factory'
 const props=defineProps<{ factories: Factory[]; factoryId?:string }>()
 const auth=useAuthStore()
-const config=ref<{enabled:boolean;model:string;reason:string;dailyLimit:number}|null>(null)
+const config=ref<AnalysisConfig|null>(null)
+const configLoading=ref(false), configError=ref(''), configNeedsLogin=ref(false)
+let configController:AbortController|null=null
 const error=ref(''), busy=ref(false), factory=ref(props.factoryId||'')
 const end=ref(chinaToday()), start=ref(chinaToday(new Date(Date.now()-29*86400000)))
 const question=ref('哪些工厂需要优先跟进？请结合巡查、品质、交期、评分和产值说明依据、数据不足及建议。')
@@ -16,7 +19,31 @@ interface Report { report:{summary:string;limitations:string[];findings:{title:s
 const result=ref<Report|null>(null)
 let generation=0,configGeneration=0,disposed=false,controller:AbortController|null=null
 function clear(){generation++;controller?.abort();controller=null;result.value=null;busy.value=false;error.value=''}
-async function loadConfig(){const current=++configGeneration;try{const c=await pb.send('/api/factory-review/analysis-ai/config',{method:'GET'});if(!disposed&&current===configGeneration)config.value=c}catch{if(!disposed&&current===configGeneration){config.value=null;error.value='AI配置状态读取失败，请重试'}}}
+async function loadConfig(){
+  const current=++configGeneration
+  configController?.abort()
+  const request=new AbortController();configController=request
+  configLoading.value=true;configError.value='';configNeedsLogin.value=false;config.value=null
+  try {
+    // Retry only this free, read-only request once on transient failures.
+    for(let attempt=0;attempt<2;attempt++){
+      const timeout=setTimeout(()=>request.abort(),10000)
+      try {
+        const c=await pb.send('/api/factory-review/analysis-ai/config',{method:'GET',signal:request.signal,requestKey:null})
+        if(disposed||current!==configGeneration)return
+        if(!isAnalysisConfig(c)){configError.value='AI配置接口返回格式异常，请管理员检查后端版本和代理地址。';return}
+        config.value=c;return
+      } catch(e:any) {
+        if(disposed||current!==configGeneration)return
+        const status=Number(e?.status||e?.response?.status||0)
+        if(attempt===0&&!request.signal.aborted&&(status===0||status>=500))continue
+        configNeedsLogin.value=status===401
+        configError.value=configErrorMessage(e)
+        return
+      } finally {clearTimeout(timeout)}
+    }
+  } finally {if(current===configGeneration){configLoading.value=false;configController=null}}
+}
 async function generate(){
   if(!config.value?.enabled||busy.value)return
   clear();const current=generation;busy.value=true;controller=new AbortController()
@@ -26,8 +53,8 @@ async function generate(){
 }
 watch([start,end,factory,question],()=>clear())
 watch(()=>props.factoryId,id=>{factory.value=id||'';clear()})
-const stop=pb.authStore.onChange(()=>{clear();configGeneration++;config.value=null;if(pb.authStore.record)void loadConfig()})
-onMounted(loadConfig);onScopeDispose(()=>{disposed=true;configGeneration++;clear();stop()})
+const stop=pb.authStore.onChange(()=>{clear();configGeneration++;config.value=null;configError.value='';configLoading.value=false;configController?.abort();if(pb.authStore.record)void loadConfig()})
+onMounted(loadConfig);onScopeDispose(()=>{disposed=true;configGeneration++;configController?.abort();clear();stop()})
 function target(e:Evidence){
   if(e.source==='quality_patrols')return {path:'/quality-patrol',query:{region:e.region,factory:e.factoryId,date:e.date}}
   if(e.source==='orders')return `/orders/dept/${e.craft}/${e.recordId}`
@@ -38,19 +65,20 @@ function target(e:Evidence){
 </script>
 <template>
   <section class="ai-panel">
-    <header><h2>AI综合分析</h2><span>{{config?.enabled?'服务已配置':'待配置服务'}}</span></header>
+    <header><h2>AI综合分析</h2><span>{{configLoading?'正在读取配置…':configError?'配置状态未知':config?.enabled?'服务已配置':config?'待配置服务':'配置尚未读取'}}</span></header>
     <p>选择范围并提问后生成一次分析。发送所选范围内的授权业务明细及问题；工厂以代号传给模型，不读取联系人字段、照片和订单价格。AI建议需人工核实，不会修改业务记录。</p>
     <p v-if="config && !config.enabled" class="notice">{{config.reason}}。当前规则预警仍正常使用。</p>
     <details v-if="auth.role==='admin'"><summary>AI服务配置入口（管理员）</summary>
       <p>支持阿里云百炼千问和OpenAI。请运维在服务器环境中填写以下配置并重新创建加工厂服务；这里不接收、不显示密钥。测试版使用独立的 TEST 配置，不共用正式密钥。</p>
       <ul><li>FACTORY_REVIEW_AI_PROVIDER=qwen：阿里云百炼千问；openai：OpenAI</li><li>FACTORY_REVIEW_AI_ENABLED=true：开通后启用</li><li>FACTORY_REVIEW_AI_API_KEY：专用API密钥</li><li>FACTORY_REVIEW_AI_MODEL：百炼控制台可用的模型ID（如 qwen3-max）</li><li>FACTORY_REVIEW_AI_BASE_URL：千问默认北京地域 https://dashscope.aliyuncs.com/compatible-mode/v1；可填写控制台同地域的业务空间专属地址。OpenAI默认 https://api.openai.com/v1</li></ul>
       <p>完成后刷新配置状态，先用测试数据验证。每个账号每分钟最多1次、每天最多20次；仅在主动点击时调用，失败请求也占用调用额度。测试配置前缀为 FACTORY_REVIEW_TEST_AI_。</p>
-      <button :disabled="busy" @click="loadConfig">刷新配置状态</button>
+      <button :disabled="busy||configLoading" @click="loadConfig">刷新配置状态</button>
     </details>
     <div class="controls"><label>开始日期<input type="date" v-model="start" :max="end" :disabled="busy" /></label><label>结束日期<input type="date" v-model="end" :min="start" :max="chinaToday()" :disabled="busy" /></label><label v-if="!factoryId">分析工厂<select v-model="factory" :disabled="busy"><option value="">全部授权工厂</option><option v-for="f in factories" :key="f.id" :value="f.id">{{f.name}}</option></select></label></div>
     <label class="question">希望分析的问题<textarea v-model="question" maxlength="600" rows="3" :disabled="busy" /></label>
     <p class="muted">订单按约定交期、巡查按检查日期、检验按送货日期筛选；评分和产值按涉及的整月分析，不含无日期及范围外记录。最多180天、500条明细，过多时请缩小范围。</p>
     <button class="primary" :disabled="!config?.enabled||busy||!start||!end||question.trim().length<2" @click="generate">{{busy?'AI正在分析…':'生成综合分析'}}</button>
+    <p v-if="configError" role="alert" class="error">{{configError}} <RouterLink v-if="configNeedsLogin" to="/login">重新登录</RouterLink><button v-else :disabled="configLoading" @click="loadConfig">重试配置</button></p>
     <p v-if="error" role="alert" class="error">{{error}} <button v-if="!config" @click="loadConfig">重试</button></p>
     <div v-if="result" class="result">
       <p class="muted">{{result.start}} 至 {{result.end}} · {{result.model}} · {{new Date(result.generatedAt).toLocaleString('zh-CN')}}生成的快照，数据更新后需重新分析</p>

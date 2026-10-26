@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { onMounted, onScopeDispose, ref, watch } from 'vue'
+import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { pb } from '../pb'
 import { configErrorMessage, isAnalysisConfig, type AnalysisConfig } from '../utils/analysisConfig'
 import { chinaToday } from '../utils/dynamicAnalysis'
 import { useAuthStore } from '../stores/auth'
+import { allowedRegions } from '../utils/permissions'
+import { REGION_LABELS, CRAFT_LABELS, regionOf, type Region, type Craft } from '../constants/roles'
 import type { Factory } from '../types/factory'
 const props=defineProps<{ factories: Factory[]; factoryId?:string }>()
 const auth=useAuthStore()
@@ -12,6 +14,13 @@ const config=ref<AnalysisConfig|null>(null)
 const configLoading=ref(false), configError=ref(''), configNeedsLogin=ref(false)
 let configController:AbortController|null=null
 const error=ref(''), busy=ref(false), factory=ref(props.factoryId||'')
+const region=ref<Region|''>(''),craft=ref<Craft|''>('')
+const regionOptions=computed(()=>[...new Set(props.factories.map(f=>regionOf(f)).filter(r=>auth.role&&allowedRegions(auth.role).includes(r)))])
+const regionFactories=computed(()=>props.factories.filter(f=>!region.value||regionOf(f)===region.value))
+const craftOptions=computed(()=>[...new Set(regionFactories.value.map(f=>f.craft))])
+const scopeFactories=computed(()=>regionFactories.value.filter(f=>!craft.value||f.craft===craft.value))
+watch(region,()=>{craft.value='';if(!props.factoryId)factory.value='';clear()})
+watch(craft,()=>{if(!props.factoryId)factory.value='';clear()})
 const end=ref(chinaToday()), start=ref(chinaToday(new Date(Date.now()-29*86400000)))
 const question=ref('哪些工厂需要优先跟进？请结合巡查、品质、交期、评分和产值说明依据、数据不足及建议。')
 interface Evidence {id:string;factoryCode:string;factoryId:string;factoryName:string;source:string;recordId:string;date:string;craft:string;region:string}
@@ -47,12 +56,12 @@ async function loadConfig(){
 async function generate(){
   if(!config.value?.enabled||busy.value)return
   clear();const current=generation;busy.value=true;controller=new AbortController()
-  try{const report=await pb.send<Report>('/api/factory-review/analysis-ai',{method:'POST',body:{start:start.value,end:end.value,factory:factory.value,question:question.value},signal:controller.signal});if(current===generation)result.value=report}
+  try{const report=await pb.send<Report>('/api/factory-review/analysis-ai',{method:'POST',body:{start:start.value,end:end.value,factory:factory.value,region:region.value,craft:craft.value,question:question.value},signal:controller.signal});if(current===generation)result.value=report}
   catch(e:any){if(current===generation)error.value=e?.response?.message && e.response.message !== 'Something went wrong while processing your request.' ? e.response.message : 'AI分析请求处理失败，请缩小日期范围或选择单个工厂后重试；若仍失败，请联系管理员检查后端日志。'}
   finally{if(current===generation){busy.value=false;controller=null}}
 }
 watch([start,end,factory,question],()=>clear())
-watch(()=>props.factoryId,id=>{factory.value=id||'';clear()})
+watch(()=>props.factoryId,id=>{region.value='';craft.value='';factory.value=id||'';clear()})
 const stop=pb.authStore.onChange(()=>{clear();configGeneration++;config.value=null;configError.value='';configLoading.value=false;configController?.abort();if(pb.authStore.record)void loadConfig()})
 onMounted(loadConfig);onScopeDispose(()=>{disposed=true;configGeneration++;configController?.abort();clear();stop()})
 function target(e:Evidence){
@@ -74,7 +83,7 @@ function target(e:Evidence){
       <p>完成后刷新配置状态，先用测试数据验证。每个账号每分钟最多1次、每天最多20次；仅在主动点击时调用，失败请求也占用调用额度。测试配置前缀为 FACTORY_REVIEW_TEST_AI_。</p>
       <button :disabled="busy||configLoading" @click="loadConfig">刷新配置状态</button>
     </details>
-    <div class="controls"><label>开始日期<input type="date" v-model="start" :max="end" :disabled="busy" /></label><label>结束日期<input type="date" v-model="end" :min="start" :max="chinaToday()" :disabled="busy" /></label><label v-if="!factoryId">分析工厂<select v-model="factory" :disabled="busy"><option value="">全部授权工厂</option><option v-for="f in factories" :key="f.id" :value="f.id">{{f.name}}</option></select></label></div>
+    <div class="controls"><label>开始日期<input type="date" v-model="start" :max="end" :disabled="busy" /></label><label>结束日期<input type="date" v-model="end" :min="start" :max="chinaToday()" :disabled="busy" /></label><label v-if="!factoryId">厂区<select v-model="region" :disabled="busy" aria-label="分析厂区"><option value="">全部厂区</option><option v-for="r in regionOptions" :key="r" :value="r">{{REGION_LABELS[r]}}</option></select></label><label v-if="!factoryId">部门<select v-model="craft" :disabled="busy" aria-label="分析部门"><option value="">全部部门</option><option v-for="c in craftOptions" :key="c" :value="c">{{CRAFT_LABELS[c]}}</option></select></label><label v-if="!factoryId">分析工厂<select v-model="factory" :disabled="busy" aria-label="分析工厂"><option value="">所选范围全部工厂</option><option v-for="f in scopeFactories" :key="f.id" :value="f.id">{{f.name}}</option></select></label></div>
     <label class="question">希望分析的问题<textarea v-model="question" maxlength="600" rows="3" :disabled="busy" /></label>
     <p class="muted">订单按约定交期、巡查按检查日期、检验按送货日期筛选；评分和产值按涉及的整月分析，不含无日期及范围外记录。最多180天、500条明细，过多时请缩小范围。</p>
     <button class="primary" :disabled="!config?.enabled||busy||!start||!end||question.trim().length<2" @click="generate">{{busy?'AI正在分析…':'生成综合分析'}}</button>

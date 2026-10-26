@@ -118,3 +118,18 @@ it.each([
  expect(w.find('button.primary').attributes('disabled')).toBeDefined()
  w.unmount()
 })
+
+it('cascades region and department choices, submits server scope and clears stale factory selection',async()=>{
+ const w=mount(AnalysisAiPanel,{props:{factories:[{id:'h1',name:'湖南装配',region:'hunan',craft:'assembly'},{id:'h2',name:'湖南车缝',region:'hunan',craft:'sewing'},{id:'d1',name:'东莞喷油',region:'dongguan',craft:'painting'}] as any},global:{stubs:{RouterLink:true}}});await flushPromises()
+ await w.find('[aria-label="分析厂区"]').setValue('hunan')
+ expect(w.find('[aria-label="分析部门"]').text()).not.toContain('喷油部')
+ await w.find('[aria-label="分析部门"]').setValue('assembly')
+ expect(w.find('[aria-label="分析工厂"]').text()).toContain('湖南装配');expect(w.find('[aria-label="分析工厂"]').text()).not.toContain('湖南车缝')
+ await w.find('button.primary').trigger('click');await flushPromises()
+ expect(mocks.send.mock.calls.at(-1)![1].body).toMatchObject({region:'hunan',craft:'assembly',factory:''})
+ await w.find('[aria-label="分析工厂"]').setValue('h1')
+ await w.find('[aria-label="分析厂区"]').setValue('dongguan')
+ expect((w.find('[aria-label="分析部门"]').element as HTMLSelectElement).value).toBe('')
+ expect((w.find('[aria-label="分析工厂"]').element as HTMLSelectElement).value).toBe('')
+ expect(w.find('.result').exists()).toBe(false);w.unmount()
+})

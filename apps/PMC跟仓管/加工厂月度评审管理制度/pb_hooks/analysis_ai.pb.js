@@ -21,6 +21,7 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
     input=helpers.validateInput(e.requestInfo().body,today)
   } catch(err){throw new BadRequestError(String(err.message))}
   if(!scope.modules.length||!scope.crafts.length||!scope.regions.length)throw new ForbiddenError('没有可分析的数据权限')
+  if((input.region&&!scope.regions.includes(input.region))||(input.craft&&!scope.crafts.includes(input.craft)))throw new ForbiddenError('没有所选厂区或部门的查看权限')
   const apiKey=$os.getenv('FACTORY_REVIEW_AI_API_KEY'),model=$os.getenv('FACTORY_REVIEW_AI_MODEL')
   if($os.getenv('FACTORY_REVIEW_AI_ENABLED')!=='true'||!apiKey||!model)throw new ApiError(503,'AI服务尚未配置，规则预警仍可使用')
   const provider=$os.getenv('FACTORY_REVIEW_AI_PROVIDER')||'openai'
@@ -29,7 +30,11 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
   // Only server configuration controls the destination. Loopback is for the isolated integration harness.
   if(!/^https:\/\/[^\s?#@]+$/.test(base)&&!($os.getenv('FACTORY_REVIEW_AI_LOCAL_TEST')==='true'&&/^http:\/\/127\.0\.0\.1:\d+\/v1$/.test(base)))throw new ApiError(503,'AI服务地址配置无效')
   const info=e.requestInfo(),factoryMap={},factories=[]
-  const all=e.app.findRecordsByFilter('factories',input.factory?'id = {:factory}':'','id',2001,0,{factory:input.factory})
+  const factoryFilters=[],factoryParams={}
+  if(input.factory){factoryFilters.push('id = {:factory}');factoryParams.factory=input.factory}
+  if(input.craft){factoryFilters.push('craft = {:craft}');factoryParams.craft=input.craft}
+  if(input.region){factoryFilters.push(input.region==='dongguan'?'(region = {:region} || region = "")':'region = {:region}');factoryParams.region=input.region}
+  const all=e.app.findRecordsByFilter('factories',factoryFilters.join(' && '),'id',2001,0,factoryParams)
   if(all.length>2000)throw new BadRequestError('工厂数量过多，请选择单个工厂分析')
   all.forEach(f=>{if(scope.crafts.includes(f.getString('craft'))&&e.app.canAccessRecord(f,info,f.collection().viewRule)){factoryMap[f.id]=f;factories.push(f)}})
   if(input.factory&&!factoryMap[input.factory])throw new ForbiddenError('没有该工厂的查看权限')
@@ -51,6 +56,7 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
       const params={start,end}
       const clause=factories.slice(offset,offset+100).map((f,i)=>{params['f'+i]=f.id;return 'factory = {:f'+i+'}'}).join(' || ')
       let filter='('+clause+') && '+src.date+' >= {:start} && '+src.date+' <= {:end}'
+      if(src.collection==='orders'&&input.region){filter+=' && (region = {:selectedRegion} || region = "")';params.selectedRegion=input.region}
       if(src.collection==='monthly_scores')filter+=' && status != "draft"'
       const batch=e.app.findRecordsByFilter(src.collection,filter,src.date+',id',2001-rows.length,0,params)
       batch.forEach(r=>rows.push(r))
@@ -59,7 +65,7 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
     let count=0
     for(const r of rows){
       const f=factoryMap[r.getString('factory')],region=src.collection==='orders'?(r.getString('region')||f.getString('region')||'dongguan'):(f.getString('region')||'dongguan')
-      if(!scope.regions.includes(region)||!e.app.canAccessRecord(r,info,r.collection().viewRule))continue
+      if((input.region&&region!==input.region)||!scope.regions.includes(region)||!e.app.canAccessRecord(r,info,r.collection().viewRule))continue
       const fields={};let shortened=false
       src.fields.forEach(key=>{let value=valueOf(r,src,key);if(typeof value==='string'&&value.length>800){value=value.slice(0,800);shortened=true}fields[key]=value})
       const id=src.collection+':'+r.id
@@ -71,7 +77,7 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
     coverage.push({source:src.label,status:count?'已读取':'范围内无可见记录',count})
   }
   if(!evidence.length)throw new BadRequestError('所选范围没有可分析的记录，请调整日期或工厂')
-  const dataset={start:input.start,end:input.end,coverage,notes:'订单按约定交期、巡查按检查日期、检验按送货日期筛选；月度数据按范围涉及的整月，未包含范围外记录和无日期记录。工厂代号仅本次有效。',evidence}
+  const dataset={start:input.start,end:input.end,region:input.region,craft:input.craft,coverage,notes:'订单按约定交期、巡查按检查日期、检验按送货日期筛选；月度数据按范围涉及的整月，未包含范围外记录和无日期记录。厂区筛选按工厂归属，订单另限定其管理厂区；空管理厂区沿用工厂厂区。工厂代号仅本次有效。',evidence}
   if(JSON.stringify(dataset).length>160000)throw new BadRequestError('分析内容过多，请缩小范围')
   function stillAuthorized(){
     const latest=e.app.findRecordById('users',e.auth.id)

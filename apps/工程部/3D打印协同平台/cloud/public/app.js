@@ -22,15 +22,19 @@ const size = n => n<1024*1024 ? `${(n/1024).toFixed(1)} KB` : `${(n/1024/1024).t
 const displayDate = d => d ? d.replaceAll('-','.') : '待确认';
 const displayTime = d => new Date(d).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 let state={me:null,orders:[],view:'dashboard',factory:'全部厂区',filter:'全部',search:'',fileSearch:'',users:[]}, selectedFiles=[], busy=false, returnFocus=null;
+let sessionGeneration=0,refreshSequence=0;
 const navLabels={dashboard:'首页',orders:'订单',files:'文件',feedback:'反馈',users:'用户',help:'使用指南'};
 const viewLabels={dashboard:'工作台',orders:'打印订单',files:'文件中心',feedback:'交付反馈',users:'用户管理',help:'使用指南'};
 const steps=['待接单','待排产','打印中','待交付','已完成'];
 const nextStatus={'待接单':'待排产','待排产':'打印中','打印中':'待交付','待交付':'已完成'};
 async function api(url,options={}) {
+  const actor=state.me,generation=sessionGeneration;
   const headers={'X-CSRF-Token':state.me?.csrf||'',...options.headers};
   if(options.body && typeof options.body==='string') headers['Content-Type']='application/json';
   const res=await fetch(url,{...options,headers}); let data; try {data=await res.json();} catch {throw Error('连接中断，请重试');}
-  if(!res.ok) {if(res.status===401 && !url.endsWith('/login')){overlay.innerHTML='';renderLogin();} throw Error(data.error||'请求失败');} return data;
+  if(!res.ok) {if(res.status===401 && !url.endsWith('/login') && actor===state.me && generation===sessionGeneration){overlay.innerHTML='';renderLogin();} throw Error(data.error||'请求失败');}
+  if(actor!==state.me || generation!==sessionGeneration) throw Error('账号状态已变更，请重新操作');
+  return data;
 }
 let toastTimer;
 function toast(message){$('#toast').textContent=message;$('#toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),4000);}
@@ -181,9 +185,19 @@ function exportOrders(){
   const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));const a=document.createElement('a');a.href=url;a.download=`打印订单-${new Date().toISOString().slice(0,10)}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast(`已导出 ${list.length} 条订单，可使用 Excel 打开`);
 }
 function renderLogin(){
+  // Invalidate pending account reads before clearing private in-memory data.
+  sessionGeneration++;state.me=null;state.orders=[];state.users=[];state.search='';state.fileSearch='';selectedFiles=[];
   document.body.style.overflow='';app.innerHTML=`<div class="login"><form id="login-form" class="login-card">${brand}<h1>欢迎回到制造工作空间</h1><p>登录后，查看您的厂区订单与打印进度。</p>${field('账号','username',{required:true,placeholder:'请输入账号'})}${field('密码','password',{required:true,type:'password',placeholder:'请输入密码'})}<p class="error" id="login-error" role="alert"></p><button class="btn primary" type="submit">登录工作空间 ${icon('arrow')}</button><p>如需开通账号，请联系管理员。</p></form></div>`;
 }
-async function load(){try{state.me=await api('/api/me');state.orders=await api('/api/orders');state.factory=state.me.user.factories.length>1?'全部厂区':state.me.user.factories[0];renderShell();const linkedOrder=new URLSearchParams(location.search).get('order');if(linkedOrder&&state.orders.some(o=>o.id===linkedOrder))openOrder(linkedOrder);}catch(e){if(!$('#login-form'))app.innerHTML=`<div class="initial"><p>无法连接服务：${esc(e.message)}</p><button class="btn" data-action="retry">重新连接</button></div>`;}}
+async function load(){
+  const generation=++sessionGeneration;
+  try{
+    const me=await api('/api/me');if(generation!==sessionGeneration)return;
+    const orders=await api('/api/orders');if(generation!==sessionGeneration)return;
+    state.me=me;state.orders=orders;state.factory=me.user.factories.length>1?'全部厂区':me.user.factories[0];renderShell();
+    const linkedOrder=new URLSearchParams(location.search).get('order');if(linkedOrder&&state.orders.some(o=>o.id===linkedOrder))openOrder(linkedOrder);
+  }catch(e){if(generation===sessionGeneration&&!$('#login-form'))app.innerHTML=`<div class="initial"><p>无法连接服务：${esc(e.message)}</p><button class="btn" data-action="retry">重新连接</button></div>`;}
+}
 document.addEventListener('click',async e=>{
   const target=e.target.closest('button,[data-order]');if(!target)return;
   if(target.dataset.editApplication){const o=state.orders.find(x=>x.id===target.dataset.editApplication);if(o)newOrder(o);return;}
@@ -222,11 +236,23 @@ document.addEventListener('submit',async e=>{
   if(form.id==='order-form')return submitOrder(form);
   const data=Object.fromEntries(new FormData(form));
   if(form.id==='login-form'){const b=form.querySelector('button[type=submit]');b.disabled=true;try{await api('/api/login',{method:'POST',body:JSON.stringify(data)});await load();}catch(e){$('#login-error').textContent=e.message;}finally{b.disabled=false;}}
-  if(form.id==='update-form'){const b=form.querySelector('button[type=submit]');b.disabled=true;busy=true;try{const o=await api('/api/orders/'+form.dataset.id,{method:'PATCH',body:JSON.stringify(data)});state.orders=state.orders.map(x=>x.id===o.id?o:x);renderView();openOrder(o.id);toast('订单处理结果已保存');}catch(e){$('#update-error').textContent=e.message;b.disabled=false;}finally{busy=false;}}
+  if(form.id==='update-form'){const b=form.querySelector('button[type=submit]');b.disabled=true;busy=true;try{const o=await api('/api/orders/'+form.dataset.id,{method:'PATCH',body:JSON.stringify(data)});state.orders=state.orders.map(x=>x.id===o.id?o:x);renderView();openOrder(o.id);toast('订单处理结果已保存');}catch(e){if($('#update-error'))$('#update-error').textContent=e.message;b.disabled=false;}finally{busy=false;}}
   if(form.id==='user-form'){const b=overlay.querySelector('[form=user-form]');b.disabled=true;data.role=data.role==='管理员'?'admin':'member';data.factories=selectedFactories(form);if(!data.factories.length){$('#user-error').textContent='请至少选择一个厂区';b.disabled=false;return;}busy=true;try{await api('/api/users',{method:'POST',body:JSON.stringify(data)});busy=false;closeModal();renderUsers();toast('成员账号已创建');}catch(e){$('#user-error').textContent=e.message;b.disabled=false;}finally{busy=false;}}
 });
 // Keep multiple open browsers in sync without disrupting active forms.
-setInterval(async()=>{if(document.hidden||overlay.firstChild||!state.me||state.view==='users')return;try{const orders=await api('/api/orders');if(JSON.stringify(orders)!==JSON.stringify(state.orders)){const scroll=$('.order-scroll'),top=scroll?.scrollTop||0,left=scroll?.scrollLeft||0;state.orders=orders;if(state.view==='files')renderFileResults();else renderView();const updatedScroll=$('.order-scroll');if(updatedScroll){updatedScroll.scrollTop=top;updatedScroll.scrollLeft=left;}}}catch{}},5000);
+setInterval(async()=>{
+  if(document.hidden||overlay.firstChild||!state.me||state.view==='users')return;
+  const actor=state.me,generation=sessionGeneration,request=++refreshSequence;
+  try{
+    const orders=await api('/api/orders');
+    if(actor!==state.me||generation!==sessionGeneration||request!==refreshSequence||document.hidden||overlay.firstChild||state.view==='users')return;
+    if(JSON.stringify(orders)!==JSON.stringify(state.orders)){
+      const scroll=$('.order-scroll'),top=scroll?.scrollTop||0,left=scroll?.scrollLeft||0;
+      state.orders=orders;if(state.view==='files')renderFileResults();else renderView();
+      const updatedScroll=$('.order-scroll');if(updatedScroll){updatedScroll.scrollTop=top;updatedScroll.scrollLeft=left;}
+    }
+  }catch{}
+},5000);
 function changePassword(id){
   const u=state.users.find(x=>x.id===id);if(!u)return;
   openModal(`<div class="modal-header"><div><h2 id="modal-title">更改密码</h2><p>${esc(u.name)} · ${esc(u.username)}</p></div><button class="icon-btn" data-action="close" aria-label="关闭">${icon('close')}</button></div><form id="password-form" data-id="${u.id}" class="modal-body"><div class="help-box">保存后，该用户所有已登录会话将失效，需要使用新密码重新登录。${u.id===state.me.user.id?(state.me.demo?'当前演示环境仍会自动登录演示管理员。':'您正在修改自己的密码，保存后将返回登录页。'):''}</div><div class="form-grid">${field('新密码（至少 8 位）','password',{type:'password',required:true,full:true})}${field('确认新密码','confirmation',{type:'password',required:true,full:true})}</div><p class="error" id="password-error" role="alert"></p></form><div class="modal-footer"><button class="btn" data-action="close">取消</button><button class="btn primary" type="submit" form="password-form">保存新密码</button></div>`,true);

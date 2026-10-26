@@ -30,8 +30,9 @@ export default function DocEditor({
   const [baseMtime, setBaseMtime] = useState(0);
   const dirtyRef = useRef(false);
   const destroyedRef = useRef(false);
-  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
-  const fileName = path.split("/").pop() || name;
+  const [resolvedPath, setResolvedPath] = useState(path);
+  const dir = resolvedPath.includes("/") ? resolvedPath.slice(0, resolvedPath.lastIndexOf("/")) : "";
+  const fileName = resolvedPath.split("/").pop() || name;
 
   const markDirty = useCallback(() => {
     dirtyRef.current = true;
@@ -42,18 +43,27 @@ export default function DocEditor({
     let cancelled = false;
     (async () => {
       try {
-        if (!/\.xlsx$/i.test(fileName)) {
-          throw new Error("旧版 .xls 文件暂不支持网页编辑，请下载后用 Excel 打开编辑");
+        let p = path;
+        if (!/\.xlsx$/i.test(p)) {
+          // 旧版 .xls：若旁边已有转换好的 .xlsx（批量转换产生），直接改开它
+          const alt = p.replace(/\.xls$/i, ".xlsx");
+          try {
+            await api.stat(alt);
+            p = alt;
+            if (!cancelled) setResolvedPath(alt);
+          } catch {
+            throw new Error("旧版 .xls 文件暂不支持网页编辑，请下载后用 Excel 打开编辑");
+          }
         }
         await ensureLuckysheet();
         // 记录打开时的修改时间，用于保存冲突检测
         try {
-          const st = await api.stat(path);
+          const st = await api.stat(p);
           if (!cancelled) setBaseMtime(st.mtime);
         } catch {
           /* 拿不到就跳过冲突检测 */
         }
-        const res = await fetch(api.fileUrl(path));
+        const res = await fetch(api.fileUrl(p));
         if (!res.ok) throw new Error(`读取文件失败 (${res.status})`);
         const buf = await res.arrayBuffer();
         if (cancelled) return;
@@ -133,7 +143,7 @@ export default function DocEditor({
       await api.upload(dir, file, undefined, { overwrite: true, baseMtime });
       dirtyRef.current = false;
       setDirty(false);
-      const st = await api.stat(path).catch(() => null);
+      const st = await api.stat(resolvedPath).catch(() => null);
       if (st) setBaseMtime(st.mtime);
       toast.success("已保存到系统");
       onSaved();
@@ -147,7 +157,7 @@ export default function DocEditor({
     } finally {
       setSaving(false);
     }
-  }, [saving, phase, dir, fileName, baseMtime, path, onSaved]);
+  }, [saving, phase, dir, fileName, baseMtime, resolvedPath, onSaved]);
 
   // Ctrl+S 保存
   useEffect(() => {
@@ -190,7 +200,7 @@ export default function DocEditor({
         </Button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{name}</div>
-          <div className="truncate text-xs text-slate-400">{path}</div>
+          <div className="truncate text-xs text-slate-400">{resolvedPath}</div>
         </div>
         <span className={`text-xs ${dirty ? "text-amber-600" : "text-slate-400"}`}>
           {saving ? "保存中…" : dirty ? "有未保存的修改" : phase === "ready" ? "已保存" : ""}
@@ -222,7 +232,7 @@ export default function DocEditor({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => window.open(api.fileUrl(path, true), "_blank")}
+                onClick={() => window.open(api.fileUrl(resolvedPath, true), "_blank")}
               >
                 <Download className="mr-1 h-4 w-4" /> 下载文件
               </Button>

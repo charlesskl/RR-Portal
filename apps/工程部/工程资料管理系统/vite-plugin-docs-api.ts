@@ -378,18 +378,21 @@ const routes: Record<string, { method: string; handler: Handler }> = {
           projectFiles = await walk(projAbs, { maxDepth: 4, maxVisit: 2000 });
         }
       }
-      const items = docTypes.map((dt) => ({
-        name: dt.name,
-        dir: dt.dir,
-        template:
-          templates.find((t) => path.basename(t).includes(dt.name)) != null
-            ? `系统模板库/${templates.find((t) => path.basename(t).includes(dt.name))}`
-            : null,
-        existing:
-          project && projectFiles.length
-            ? (projectFiles.find((f) => f.name.includes(dt.name))?.rel ?? null)
-            : null,
-      }));
+      const items = docTypes.map((dt) => {
+        // 同名资料同时存在 .xls 与 .xlsx 时优先 .xlsx（可在网页编辑器打开）
+        const hit =
+          projectFiles.find((f) => f.name.includes(dt.name) && f.name.endsWith(".xlsx")) ??
+          projectFiles.find((f) => f.name.includes(dt.name));
+        return {
+          name: dt.name,
+          dir: dt.dir,
+          template:
+            templates.find((t) => path.basename(t).includes(dt.name)) != null
+              ? `系统模板库/${templates.find((t) => path.basename(t).includes(dt.name))}`
+              : null,
+          existing: project && projectFiles.length ? (hit?.rel ?? null) : null,
+        };
+      });
       json(res, 200, { items, templatesDir: "系统模板库" });
     },
   },

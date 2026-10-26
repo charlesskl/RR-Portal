@@ -8,14 +8,14 @@ import { useRouter } from "next/navigation";
 import { invalidateClientCache } from "@/lib/clientCache";
 import { apiFetch } from "@/lib/apiFetch";
 import { inProductionQuantity, filterOrders, type OrderRow, type OrderFilter } from "@/lib/orderFilter";
-import { STATUS_META, ACTIVE_STATUSES } from "@/lib/orderStatus";
+import { STATUS_META, ACTIVE_STATUSES, ORDER_STATUSES, type OrderStatus } from "@/lib/orderStatus";
 import DatePicker from "./DatePicker";
 import CompletePendingDialog from "./CompletePendingDialog";
 
 const EMPTY: OrderFilter = { view: "normal", keyword: "", status: "", ma: "", risk: "",
   orderFrom: "", orderTo: "", deliveryFrom: "", deliveryTo: "" };
 
-export default function OrdersTable({ orders, isAdmin, canEdit, onSaved }: { orders: OrderRow[]; isAdmin: boolean; canEdit: boolean; onSaved: (id: number, changes: { deliveryDate?: string; totalQty?: number }) => Promise<void> }) {
+export default function OrdersTable({ orders, isAdmin, canEdit, onSaved }: { orders: OrderRow[]; isAdmin: boolean; canEdit: boolean; onSaved: (id: number, changes: { deliveryDate?: string; totalQty?: number }, status?: OrderStatus) => Promise<void> }) {
   const router = useRouter();
   const [f, setF] = useState<OrderFilter>(EMPTY);
   const [busy, setBusy] = useState(false);
@@ -51,9 +51,11 @@ export default function OrdersTable({ orders, isAdmin, canEdit, onSaved }: { ord
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error || "保存失败，请重试");
       }
+      const updated = await response.json() as { status?: unknown } | null;
+      const status = ORDER_STATUSES.find(candidate => candidate === updated?.status);
       invalidateClientCache("/api/orders");
       invalidateClientCache("/api/schedule");
-      await onSaved(order.id, payload);
+      await onSaved(order.id, payload, status);
       setDrafts(current => { const next = { ...current }; delete next[order.id]; return next; });
       setNotice(`订单「${order.externalOrderNo}」已保存`);
     } catch (error) {

@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { apiFetch } from "@/lib/apiFetch";
 import { staleWhileRevalidate } from "@/lib/clientCache";
 import type { OrderRow } from "@/lib/orderFilter";
+import type { OrderStatus } from "@/lib/orderStatus";
 import OrdersTable from "./OrdersTable";
 
 type Summary = {
@@ -61,7 +62,7 @@ export default function OrdersDataLoader({ initialRows, today, isAdmin, canEdit 
     });
     return () => { active = false; };
   }, [initialRows, today]);
-  async function onSaved(id: number, changes: { deliveryDate?: string; totalQty?: number }) {
+  async function onSaved(id: number, changes: { deliveryDate?: string; totalQty?: number }, status?: OrderStatus) {
     // 保存后原地回读汇总，保留筛选和其他订单尚未保存的编辑。
     revision.current++;
     const response = await apiFetch("/api/orders/overview", { cache: "no-store" });
@@ -71,6 +72,7 @@ export default function OrdersDataLoader({ initialRows, today, isAdmin, canEdit 
     setRows(current => current.map(row => {
       const updated = row.id === id ? {
         ...row,
+        ...(status !== undefined ? { status } : {}),
         ...(changes.deliveryDate !== undefined ? { deliveryDate: changes.deliveryDate || null } : {}),
         ...(changes.totalQty !== undefined ? { totalQty: changes.totalQty } : {}),
       } : row;

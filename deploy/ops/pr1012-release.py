@@ -8,7 +8,7 @@ an uncertain stop/recreate is never retried by this helper.
 import contextlib,datetime,hashlib,importlib.util,io,json,os,pathlib,re,stat,subprocess,sys,tarfile,time,urllib.error,urllib.request,uuid
 
 ROOT=pathlib.Path('/opt/rr-portal')
-OUT=ROOT/'deploy/backups/pr-1012-20261026-release-r2'
+OUT=ROOT/'deploy/backups/pr-1012-20261026-release-r3'
 BASE='6b36a35e0d1239a96da3d24ec660ac6fb678f8f0'
 BRANCH='refs/heads/ops/pr-1012-20261026'
 TARGET='df60d6a6b1e7f76070cd866cbbc6a4ee50936122'
@@ -19,7 +19,7 @@ EXECUTE=True
 PREPARED_SHA256=''
 APP='apps/喷油部/喷油排期系统'
 SERVICES=('sprayplan-test','sprayplan')
-DEPS={'pr1012-compose-library.py':'9f84d48c122999038151db2f8d6e63cbeba3c5d658546ca67a379c44aa61600c','pr1012-data-library.py':'b937a93ac5d08ba93bb684270e3d05d13d58dc6ecf90af5e1306aec30cec0eb3','release-data-library.py':'d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9'}
+DEPS={'pr1012-compose-library-v2.py':'bbf49ca20451f5c503bc807f71590dca8f20061590d0e78300551f302c386027','pr1012-data-library.py':'b937a93ac5d08ba93bb684270e3d05d13d58dc6ecf90af5e1306aec30cec0eb3','release-data-library.py':'d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9'}
 CODE_FILES=('docker-entrypoint.sh','next.config.mjs','prisma/schema.prisma','.next/BUILD_ID','.next/required-server-files.json','server/SprayPlan.Api/appsettings.json','server/SprayPlan.Api/publish/SprayPlan.Api.dll','server/SprayPlan.Api/publish/SprayPlan.Api.deps.json','server/SprayPlan.Api/publish/SprayPlan.Api.runtimeconfig.json')
 C=None;D=None;L=None;ACTIVE_OUT=None;SERIAL=0;STAGE='entry';RECOVERY={}
 
@@ -47,7 +47,7 @@ def initialize():
  global C,D,L
  for n,h in DEPS.items():
   p=pathlib.Path(__file__).with_name(n);need(p.is_file()and not p.is_symlink()and sha(p.read_bytes())==h,'all-library-pins-before-import')
- C=load('pr1012-compose-library.py');D=load('pr1012-data-library.py');L=load('release-data-library.py')
+ C=load('pr1012-compose-library-v2.py');D=load('pr1012-data-library.py');L=load('release-data-library.py')
 def env(r):return C.environment(r['Config'].get('Env')or[])
 def one(service,healthy=True):
  need(service in SERVICES,'only-two-services')
@@ -173,6 +173,8 @@ def prepare():
  need(not OUT.exists()and not OUT.is_symlink(),'one-prepare');OUT.mkdir(mode=0o700);ACTIVE_OUT=OUT/'prepare';ACTIVE_OUT.mkdir(mode=0o700)
  need(git('rev-parse','HEAD').decode().strip()==BASE,'canonical-base');source_check();hosts=host_files();private(OUT/'environment.private',(ROOT/'.env.cloud.production').read_bytes())
  source=OUT/'source';extract_source(source);records={};recipes={};initial_probes={};guards={}
+ for service in SERVICES:
+  current=one(service);current_image=image(current['Image']);preflight=C.literal_overlay(service,current,current_image,current_image,TARGET,str(ROOT));path=OUT/('schema-preflight-'+service+'.private.json');private(path,preflight);rendered_check(service,path,preflight)
  for service in SERVICES:
   r=one(service);records[service]=r;need(not(ROOT/'deploy/maintenance/services'/service).exists(),'target-gate-initially-clear');guards[service]=guard(service,r);initial_probes[service]=probes(service);internal_health(r['Id'],service)
   old_image=image(r['Image']);tag='rr-portal-'+service+':pr1012-'+TARGET[:12]

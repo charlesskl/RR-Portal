@@ -1,0 +1,65 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr1002_ui",
+  "reviewedAtUTC": "2026-10-26T00:32:59.323645+00:00",
+  "helperSHA256": "38ed8fb84a0cc9b09396deb22d7c09bca413028f7e5d3d78f05c7c387d7d0a97",
+  "helperGatesFrozen": true,
+  "base": "f223ec9957a07e8e7b8dff7b5adcafcbe83ac7c8",
+  "baseTree": "23a3654c523cb5aa727fd05b1fe6875e3375e2f5",
+  "allowedPhases": [
+    "prepare",
+    "deploy",
+    "verify"
+  ],
+  "dependencies": {
+    "pr1002-backup-library.py": "d92192102d2fd19e95fc9a2702bb453757dc87200e7e714173362091a7ae6a1c",
+    "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1",
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9"
+  },
+  "reviewedPRHead": "44c6fe7b2a41d3ccf2638963585ac5307f775c53",
+  "reviewedCandidateTree": "fd9348f63f6d1edb156677dce8b600179fd4b0a5",
+  "sourceManifestSHA256": "1bc48e075d759335855d74e17a326e49a4c8d8072ef538560f848919c505c0c5",
+  "changedFileCount": 5,
+  "scope": [
+    "factory-review"
+  ],
+  "otherContainerCount": 45,
+  "portableSQLiteCount": 2,
+  "checks": [
+    "Read complete final R lifecycle and mature994 comparison. Final38ed differs from reviewed prepin5c6c only exact manifest/path constants; inverse replacement reproduces5c6c SHA. All9runtime gates remain blank; all5 deps including Bd921 bytes match.",
+    "Only production factory-review is target, test and44 other services are45 untouched others. Literal fullenv/PID1 and original service-key OCI build argument preserved. Prepare builds immutable source-proven image while46oldcontainers serve; build no maintenance/writer. HostConfig normalizes only both-present typedNone/False OOM, calls original full typed DNS comparator.",
+    "Root finalhead44c6/treefd9348 and exact5 BASEdiff Git blobs equal manifest1bc48 and sourceworktree; no hook/migration/Docker/package/global changes. Reviewed manifest/path equality is narrow, source requires exact unchanged hook/migration Gitobjects and all4dirty bytes.",
+    "Found missing DB-companion ownership comparison before execution. Author added strict compare_database_family: both typed main maps required; only known suffixes, strict integer nonbool mode/uid/gid bounds; common owners/modes exact; new companions equal main; disappearing known companions reported as lifecycle evidence without claiming identical transient presence. Independent positive lifecycle and13 owner/path/type/main negative fixtures pass.",
+    "Businessdata.db full typed rows/schema including sqlite_sequence/users/perms exact. Auxiliary schema and every nonlog table exact. Existing _logs retained rows typed-identical; missing rows only compatible with unchanged configured retention, additions only exact candidate-start/observed NSwindow. All9 critical log/env/host-contract/flag function ASTs exactly mature994. No broader business/log deletion exception.",
+    "same_data integrates newfamily guard and strict attachment/file/mainDB metadata. Eleven pure mutations to business users/perms, sequences, schema, auxnonlog, attachments/files/owner, mainmeta, familyowner, missing DB or wrongservice all reject.",
+    "Single-owned maintenance/drain60/stop60 fresh closed portable evidence required before recreate. Replays closed snapshots/startup guard to prevent health-seed/migration/quota cleanup; no-build/no-deps/pullnever preparedimage only. Failure recovery refuses missing closed evidence or drift before restarting original immutableimage on originaldata; no database restore/reset.",
+    "Verify replays sealed closed exactdata/source/runtime/env45/flags and anonymousGET health/index/assets/config401 only; publichash receipt added for later external validation. It does not compare changing resumed live rows or authenticate/write/call models."
+  ],
+  "offlineChecks": {
+    "firstSourceAdapters": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr1002-runtime-independent-pure.py",
+      "sha256": "d072f15c1155302d4a38e9d13730857bff7b961c97a5b85ebbe8f0450cd76705",
+      "passedGroups": 3,
+      "negativeCasesRejected": 13
+    },
+    "familyAndData": {
+      "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/test-pr1002-family-data-independent-pure.py",
+      "sha256": "4e46a8927a31a65e7cc4d24c76751814414d8c8c6a7c245e2326910219daf5e4",
+      "log": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr1002-family-data-independent-pure-tests.log",
+      "logSHA256": "27c585d84d64a7787b98947482c6873694a53e9ce086b0f26d124139660d39d2",
+      "passedGroups": 2,
+      "negativeCasesRejected": 24
+    },
+    "criticalASTsUnchangedFrom994": 9,
+    "realControllerDatabaseDockerHTTPModelOrRemoteCalls": false
+  },
+  "boundaries": [
+    "Individually consistent SQLite copies, not cross-database atomic.",
+    "Existing aux logs have narrowly bounded retention/start-window compatibility, not proven deletion actor or exact deletion timing. Companion transient presence may change normally, but captured owners/modes and new inherited owner remain strict.",
+    "No controller import/entrypoint, real SQL/DB/Docker/production/auth/model/remote/OPS/state action by this reviewer."
+  ],
+  "remainingBlockers": []
+}

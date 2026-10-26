@@ -13,7 +13,7 @@ import Panel from '../src/components/DynamicAnalysisPanel.vue'
 import { chinaToday } from '../src/utils/dynamicAnalysis'
 import { overdueMoreThan50 } from '../src/utils/analysisBulkResolve'
 let wrappers:VueWrapper[]=[]
-const order=(id:string,factory='f1')=>({id,factory,region:'dongguan',status:'pending',delivery_date:'2026-09-01',actual_delivery_date:''})
+const order=(id:string,factory='f1')=>({id,factory,region:'dongguan',status:'pending',delivery_date:'2026-09-01',actual_delivery_date:'',delay_days:51})
 async function mounted(props={}){const w=mount(Panel,{props,global:{stubs:{AnalysisAiPanel:true,RouterLink:true}}});wrappers.push(w);await flushPromises();return w}
 beforeEach(()=>{vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-22T00:00:00Z'));vi.spyOn(window,'confirm').mockReturnValue(true);m.record={id:'owner',role:'admin',permissions:null};m.listeners=[];m.orders=[order('one')];m.patrols=[];m.qualityFailure=false;m.list.mockResolvedValue([]);m.create.mockImplementation(async(b:any)=>({id:'saved-'+b.issue_key,...b}));m.update.mockResolvedValue({})})
 afterEach(()=>{wrappers.forEach(w=>w.unmount());wrappers=[];vi.useRealTimers();vi.restoreAllMocks();vi.clearAllMocks()})
@@ -41,7 +41,7 @@ it('page scope is honored while the lower factory dropdown does not narrow confi
  const global=await mounted();await global.find('.filters select').setValue('f1');expect(global.findAll('article')).toHaveLength(1);await global.find('.bulk-actions button').trigger('click');await flushPromises();expect(m.create).toHaveBeenCalledTimes(2)
 })
 it('strict Beijing50-day boundary crosses only at China midnight',()=>{
- const issue={kind:'delivery',date:'2026-09-02'}as any;expect(overdueMoreThan50(issue,chinaToday(new Date('2026-10-22T15:59:59Z')))).toBe(false);expect(overdueMoreThan50(issue,chinaToday(new Date('2026-10-22T16:00:00Z')))).toBe(true)
+ const issue={kind:'correction',date:'2026-09-02'}as any;expect(overdueMoreThan50(issue,chinaToday(new Date('2026-10-22T15:59:59Z')))).toBe(false);expect(overdueMoreThan50(issue,chinaToday(new Date('2026-10-22T16:00:00Z')))).toBe(true)
 })
 it('query-prop reuse continues only the originally confirmed factory snapshot, without writing the new factory',async()=>{
  m.orders=[...Array.from({length:9},(_,i)=>order('old'+i,'f1')),order('other','f2')];const pending:{body:any,resolve:(x:any)=>void}[]=[];m.create.mockImplementation((body:any)=>new Promise(resolve=>pending.push({body,resolve})));const w=await mounted({factoryId:'f1'});await w.find('.bulk-actions button').trigger('click');expect(pending).toHaveLength(4);await w.setProps({factoryId:'f2'});expect(w.findAll('article')).toHaveLength(1)

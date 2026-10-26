@@ -1,6 +1,7 @@
+import { delayedOrder } from './delayedOrders'
 import type { Order } from '../types/order'
 export interface PatrolFact { id: string; factory: string; check_date: string; grade?: string; correction?: string; planned_date?: string; completed_date?: string }
-export interface AnalysisIssue { key: string; factory: string; kind: 'correction' | 'grade' | 'delivery'; level: 'high' | 'medium'; title: string; evidence: string; suggestion: string; date: string; source: string; sourceDate?: string }
+export interface AnalysisIssue { key: string; factory: string; kind: 'correction' | 'grade' | 'delivery'; level: 'high' | 'medium'; title: string; evidence: string; suggestion: string; date: string; source: string; sourceDate?: string; delayDays?: number }
 export function chinaToday(now = new Date()) { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(now) }
 function day(value?: string) {
   const d = (value || '').slice(0, 10)
@@ -31,9 +32,11 @@ export function analyze(patrols: PatrolFact[], orders: Order[], today: string): 
   for (const o of orders) {
     if (['delivered', 'cancelled', 'returned'].includes(o.status || '') || day(o.actual_delivery_date)) continue
     const due = day(o.delivery_date)
-    if (!due) { missingOrderDates++; continue }
-    if (due >= today) continue
-    issues.push({ key: `delivery:${o.id}:${due}`, factory: o.factory, kind: 'delivery', level: days(due, today) >= 7 ? 'high' : 'medium', title: '订单交期已过，未登记交付', evidence: `订单${o.order_no || o.id}（${o.product || '未填产品'}），约定${due}交付，已逾期${days(due, today)}天。`, suggestion: '联系负责人核实交付进度、延期原因及新交期；已交付的更新原订单。', date: due, source: o.id })
+    if (!due) missingOrderDates++
+    const registered = delayedOrder(o)
+    if (!registered) continue
+    const delayDays = Number(registered.delay_days)
+    issues.push({ key: `delivery:${o.id}:${due}`, factory: o.factory, kind: 'delivery', level: delayDays >= 7 ? 'high' : 'medium', title: '订单已登记延期，待确认交付', evidence: `订单${o.order_no || o.id}（${o.product || '未填产品'}），约定${due || '未填日期'}交付，已登记延期${delayDays}天。${o.delay_reason ? `原因：${o.delay_reason}` : ''}`, suggestion: '请下单PMC核实交付情况，更新已登记的延期天数、原因；已交付的补录实际交货时间。', date: due, source: o.id, delayDays })
   }
   issues.sort((a, b) => Number(b.level === 'high') - Number(a.level === 'high') || a.date.localeCompare(b.date) || a.key.localeCompare(b.key))
   return { issues, missingPatrolDates, missingOrderDates }

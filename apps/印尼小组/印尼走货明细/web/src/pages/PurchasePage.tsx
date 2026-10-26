@@ -195,10 +195,19 @@ function spoilageRate(category: string | undefined, materialQty: number): number
   return 0.04
 }
 
+function roundPurchaseQuantity(quantity: number): number {
+  if (!Number.isFinite(quantity) || Number.isInteger(quantity)) return Math.round(quantity)
+  // 0.145 * 100 is one binary step below 14.5. Correct only that half-integer
+  // boundary noise; quantities meaningfully below it must still round down.
+  const half = Math.floor(quantity) + 0.5
+  const tolerance = Math.min(1e-7, Number.EPSILON * 2 ** Math.floor(Math.log2(Math.abs(quantity))))
+  return Math.round(Math.abs(quantity - half) <= tolerance ? half : quantity)
+}
+
 function applyAutoSpoilage(item: PoItem): PoItem {
   const materialQty = Math.max(0, Number(item.material_qty ?? 0) || 0)
   const spoilageQty = Math.round(materialQty * spoilageRate(item.category, materialQty) * 100) / 100
-  const purchaseQty = Math.round(materialQty + spoilageQty)
+  const purchaseQty = roundPurchaseQuantity(materialQty + spoilageQty)
   return {
     ...item,
     material_qty: materialQty,
@@ -216,7 +225,7 @@ function patchPoItem(item: PoItem, field: keyof PoItem, value: any): PoItem {
   }
   if (field === 'category') return applyAutoSpoilage(next)
   if (field === 'spoilage_qty') {
-    next.purchase_qty = Math.round(Math.max(0, (next.material_qty ?? 0) + (next.spoilage_qty ?? 0)))
+    next.purchase_qty = roundPurchaseQuantity(Math.max(0, (next.material_qty ?? 0) + (next.spoilage_qty ?? 0)))
     next.qty = next.purchase_qty
   }
   return next
@@ -268,7 +277,7 @@ function restoreSavedSpoilage(item: PoItem, integerDraft = false): PoItem {
     ? Math.max(0, Number(item.purchase_qty) || 0)
     : Math.round((materialQty + spoilageQty) * 100) / 100
   const purchaseQty = integerDraft && !Number(item.received_qty) && !Number(item.spare_qty)
-    ? Math.round(savedPurchaseQty) : savedPurchaseQty
+    ? roundPurchaseQuantity(savedPurchaseQty) : savedPurchaseQty
   return {
     ...item,
     material_qty: materialQty,
@@ -1079,7 +1088,7 @@ export default function PurchasePage() {
     // shipped orders must not be silently rewritten while editing metadata.
     let saveItems = items.map(item => {
       if ((!creating && (editing?.status || 'draft') !== 'draft') || Number(item.received_qty) || Number(item.spare_qty)) return item
-      const quantity = Math.round(Math.max(0, Number(item.purchase_qty ?? item.qty ?? ((item.material_qty || 0) + (item.spoilage_qty || 0))) || 0))
+      const quantity = roundPurchaseQuantity(Math.max(0, Number(item.purchase_qty ?? item.qty ?? ((item.material_qty || 0) + (item.spoilage_qty || 0))) || 0))
       return item.purchase_qty === quantity && item.qty === quantity ? item : { ...item, purchase_qty: quantity, qty: quantity }
     })
     if (saveItems.some((item, index) => item !== items[index])) setItems(saveItems)

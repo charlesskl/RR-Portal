@@ -19,7 +19,7 @@ const products = [spin, tomy].map(row => ({ code: row.code, customer: row.custom
 // synthetic order to the user's database, and do not duplicate page logic.
 const page = readFileSync(new URL('../pages/PurchasePage.tsx', import.meta.url), 'utf8')
 const tree = ts.createSourceFile('PurchasePage.tsx', page, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-const names = ['generateBySupplier', 'confirmMaterials', 'materialChoiceCustomer', 'applyQuotePrices', 'applyAutoSpoilage', 'spoilageRate']
+const names = ['generateBySupplier', 'confirmMaterials', 'materialChoiceCustomer', 'applyQuotePrices', 'applyAutoSpoilage', 'spoilageRate', 'roundPurchaseQuantity']
 const functions: string[] = []
 function collect(node: ts.Node) {
   if (ts.isFunctionDeclaration(node) && node.name && names.includes(node.name.text)) functions.push(node.getText(tree))
@@ -87,6 +87,13 @@ describe('purchase customer isolation', () => {
     expect(payloads[0].items[0]).toMatchObject({ product_code: fullCode, ordered_qty: 150, material_qty: 300,
       purchase_qty: 303, tomy_po: 'SPIN-1; SPIN-2' })
     expect(payloads[1].items[0]).toMatchObject({ product_code: '47712A', ordered_qty: 200, material_qty: 400, purchase_qty: 404 })
+  })
+  it('rounds half-integer usage products up when generating a supplier order', async () => {
+    const { context, api } = harness([spin])
+    context.choices[0].material = { ...context.choices[0].material, usage_qty: 0.145, category: '耗材' }
+    expect(await runInContext('generateBySupplier(choices)', context)).toBe(true)
+    const payload = (api.post.mock.calls[0] as unknown as [string, any])[1]
+    expect(payload.items[0]).toMatchObject({ ordered_qty: 100, material_qty: 100 * 0.145, qty: 15, purchase_qty: 15 })
   })
   it('blocks cross-customer append before changing items or sending an API request', async () => {
     const { context, api, setItems, message } = harness([spin], 'append')

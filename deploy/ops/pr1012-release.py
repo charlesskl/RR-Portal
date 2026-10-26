@@ -8,7 +8,7 @@ an uncertain stop/recreate is never retried by this helper.
 import contextlib,datetime,hashlib,importlib.util,io,json,os,pathlib,re,stat,subprocess,sys,tarfile,time,urllib.error,urllib.request,uuid
 
 ROOT=pathlib.Path('/opt/rr-portal')
-OUT=ROOT/'deploy/backups/pr-1012-20261026-release'
+OUT=ROOT/'deploy/backups/pr-1012-20261026-release-r2'
 BASE='6b36a35e0d1239a96da3d24ec660ac6fb678f8f0'
 BRANCH='refs/heads/ops/pr-1012-20261026'
 TARGET='df60d6a6b1e7f76070cd866cbbc6a4ee50936122'
@@ -59,6 +59,14 @@ def image(image_id):
  need(re.fullmatch('sha256:[a-f0-9]{64}',image_id or''),'immutable-image-id')
  r=json.loads(run(['docker','image','inspect',image_id]))[0];need(r['Id']==image_id,'same-image-id');return r
 def contract(r):return {'id':r['Id'],'image':r['Image'],'config':sha(enc(r['Config'])),'host':sha(enc(r['HostConfig'])),'mounts':sha(enc(sorted(r['Mounts'],key=enc)))}
+def compose_build_labels(service,old_image):
+ need(service in SERVICES,'known-build-label-service');labels=old_image['Config'].get('Labels')or{};need(type(labels)is dict,'old-image-label-map');result=[]
+ for key in('com.docker.compose.project','com.docker.compose.service','com.docker.compose.version'):
+  if key not in labels:continue
+  value=labels[key];need(type(value)is str,'public-compose-build-label-string')
+  valid=value=='rr-portal'if key.endswith('.project')else value==service if key.endswith('.service')else re.fullmatch(r'v?[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(?:[-+][A-Za-z0-9][A-Za-z0-9.-]{0,31})?',value)is not None
+  need(valid,'fixed-public-compose-build-label');result+=['--label',key+'='+value]
+ return result
 def source_check():
  need(all(re.fullmatch('[a-f0-9]{40}',x or'')for x in(TARGET,TREE,APP_TREE)),'bound-reviewed-source')
  git('fetch','--no-write-fetch-head','origin','+refs/heads/main:refs/remotes/origin/main')
@@ -154,6 +162,9 @@ def runtime_check(service,old,new,recipe):
  for k in('Binds','Mounts','ContainerIDFile'):a.pop(k,None);b.pop(k,None)
  need(a==b,'runtime-resources-restart-ports-security-exact')
  labels_a,labels_b=old['Config'].get('Labels')or{},new['Config'].get('Labels')or{};allowed={'com.docker.compose.config-hash','com.docker.compose.image','com.docker.compose.version','com.docker.compose.replace','org.opencontainers.image.revision'}
+ expected_overlay=str(OUT/(service+'-compose.private.json'));need(recipe['overlay']==expected_overlay,'fixed-service-private-compose-overlay')
+ metadata={'com.docker.compose.project.config_files':str(ROOT/'docker-compose.cloud.yml')+','+expected_overlay,'com.docker.compose.project.environment_file':str(OUT/'environment.private')}
+ need(all(labels_b.get(k)==v for k,v in metadata.items()),'exact-new-compose-invocation-metadata');allowed|=set(metadata)
  need({k:v for k,v in labels_a.items()if k not in allowed}=={k:v for k,v in labels_b.items()if k not in allowed},'all-other-runtime-labels-exact')
  hostname=old['Config'].get('Hostname');need(new['Config'].get('Hostname')==(new['Id'][:12]if hostname==old['Id'][:12]else hostname),'only-automatic-hostname-changes')
  need(code_proof(new['Id'])==recipe['code'],'new-next-and-dotnet-code-exact')
@@ -165,7 +176,7 @@ def prepare():
  for service in SERVICES:
   r=one(service);records[service]=r;need(not(ROOT/'deploy/maintenance/services'/service).exists(),'target-gate-initially-clear');guards[service]=guard(service,r);initial_probes[service]=probes(service);internal_health(r['Id'],service)
   old_image=image(r['Image']);tag='rr-portal-'+service+':pr1012-'+TARGET[:12]
-  run(['docker','build','--label','org.opencontainers.image.revision='+TARGET,'--build-arg','NEXT_PUBLIC_BASE_PATH=/'+service,'--tag',tag,str(source/APP)],timeout=1800)
+  run(['docker','build','--label','org.opencontainers.image.revision='+TARGET]+compose_build_labels(service,old_image)+['--build-arg','NEXT_PUBLIC_BASE_PATH=/'+service,'--tag',tag,str(source/APP)],timeout=1800)
   new_image=json.loads(run(['docker','image','inspect',tag]))[0];C.image_contract(old_image,new_image,TARGET);need((new_image['Config'].get('Labels')or{}).get('org.opencontainers.image.revision')==TARGET,'candidate-revision-label')
   overlay=C.literal_overlay(service,r,old_image,new_image,TARGET,str(ROOT));overlay_path=OUT/(service+'-compose.private.json');private(overlay_path,overlay);rendered_check(service,overlay_path,overlay)
   proof=scratch_proof(new_image['Id'],service);settings=APP+'/server/SprayPlan.Api/appsettings.json';need(proof['server/SprayPlan.Api/appsettings.json']==sha(git('show',TARGET+':'+settings))==sha(code_file(r['Id'],'server/SprayPlan.Api/appsettings.json')),'unchanged-live-and-image-appsettings')
@@ -254,13 +265,18 @@ def verify():
   success=json.loads((OUT/('deploy-'+service)/'success.private.json').read_bytes());need(success['target']==TARGET,'each-service-success-before-final');r=one(service);need(r['Id']==success['id'],'same-final-new-container');runtime_check(service,p['runtime'][service],r,p['services'][service]);need(guard(service,r)==p['services'][service]['guard'],'final-effective-key-preserved');internal_health(r['Id'],service)
   need(not(ROOT/'deploy/maintenance/services'/service).exists(),'final-service-gate-clear');result[service]=probes(service);need(result[service]==p['probes'][service],'final-public-status-and-auth')
  git('merge','--ff-only',TARGET);need(git('rev-parse','HEAD').decode().strip()==TARGET and host_files()==p['hostFiles'],'canonical-main-advanced-host-config-preserved')
- return {'bothServicesVerified':True,'frontendAndBackendSourceRevision':TARGET,'public':result,'noDataRestoreCursorResetOrLogin':True,'allOtherServicesLeftRunning':True}
+ for service in SERVICES:
+  candidate=p['services'][service]['image'];image(candidate);alias='rr-portal-'+service+':latest';run(['docker','tag',candidate,alias])
+  actual=json.loads(run(['docker','image','inspect',alias]));need(len(actual)==1 and actual[0]['Id']==candidate,'canonical-fixed-service-image-alias-exact')
+ return {'bothServicesVerified':True,'frontendAndBackendSourceRevision':TARGET,'public':result,'noDataRestoreCursorResetOrLogin':True,'allOtherServicesLeftRunning':True,'canonicalImagesReadyForRecreation':True}
 def main():
  need(EXECUTE is True and PHASE in('prepare','deploy-sprayplan-test','deploy-sprayplan','verify')and sys.argv[1:]==[PHASE],'inert-exact-phase')
  need(os.environ.get('RELEASE_BRANCH')==BRANCH and os.environ.get('RELEASE_MODE')==PHASE and os.environ.get('RELEASE_ATTEMPT')=='1','fixed-first-attempt-branch');os.umask(0o077);initialize();value={'phase':PHASE,'target':TARGET,'success':False}
  try:value.update(prepare()if PHASE=='prepare'else verify()if PHASE=='verify'else deploy(PHASE[7:]));value['success']=True
  except Exception as e:
   value.update(errorType=type(e).__name__,stage=STAGE)
+  if isinstance(e,RuntimeError)and re.fullmatch(r'(?:SPRAYPLAN_COMPOSE_[a-z0-9-]{1,150}|[a-z][a-z0-9-]{0,150})',str(e)):value['errorLabel']=str(e)
   if RECOVERY:value['recovery']=RECOVERY
+ value['commandNumber']=SERIAL
  value['utc']=datetime.datetime.now(datetime.timezone.utc).isoformat();value['resultSHA256']=sha(enc(value));value['sha256Wire']={k:[int(c,16)for c in(v.split(':')[1]if v.startswith('sha256:')else v)]for k,v in value.items()if type(v)is str and re.fullmatch('(?:sha256:)?[a-f0-9]{64}|[a-f0-9]{40}',v)};print(json.dumps(value,sort_keys=True),flush=True);return 0 if value['success']else 1
 if __name__=='__main__':sys.exit(main())

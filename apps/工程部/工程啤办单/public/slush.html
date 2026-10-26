@@ -7,6 +7,24 @@
   <link href="./vendor/bootstrap.min.css" rel="stylesheet">
   <link href="./vendor/bootstrap-icons.min.css" rel="stylesheet">
   <link href="style.css" rel="stylesheet">
+  <style>
+    /* 打印总表：只保留标题和总表内容 */
+    @media print {
+      nav.navbar, .modal, .toast, .no-print { display: none !important; }
+      body { background: #fff !important; }
+      .card, .card-body, .container-fluid, #orderList { display: block !important; }
+      .card { border: none !important; box-shadow: none !important; }
+      .card-body { padding: 0 !important; }
+      #orderList .table-responsive { overflow: visible !important; }
+      #orderList { padding: 0; }
+      #orderList .mb-4 { margin-bottom: 8px !important; }
+      #orderList table { font-size: 9pt !important; page-break-inside: auto !important; }
+      #orderList table th, #orderList table td { border: 1px solid #333 !important; }
+      #orderList h6 { border-radius: 0 !important; background: #e8e8e8 !important; color: #000 !important; }
+      @page { size: A4 landscape; margin: 8mm; }
+      #orderList thead { display: table-header-group; }
+    }
+  </style>
 </head>
 <body class="bg-light">
 
@@ -24,14 +42,42 @@
 </nav>
 
 <div class="container-fluid mt-3">
-  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-    <div class="status-filter d-flex flex-wrap gap-1">
-      <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
-      <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
-      <button class="btn btn-sm btn-info"     onclick="filterStatus('生产中',this)">生产中</button>
-      <button class="btn btn-sm btn-success"  onclick="filterStatus('已完成',this)">已完成</button>
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 no-print">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <select id="workshopFilter" class="form-select form-select-sm" style="width:auto" onchange="applyFilters()">
+        <option value="">全部车间</option>
+        <option value="兴信车间">兴信车间</option>
+        <option value="华登车间">华登车间</option>
+        <option value="A车间">A车间</option>
+        <option value="B车间">B车间</option>
+      </select>
+      <div class="status-filter d-flex flex-wrap gap-1">
+        <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
+        <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
+        <button class="btn btn-sm btn-info"     onclick="filterStatus('生产中',this)">生产中</button>
+        <button class="btn btn-sm btn-success"  onclick="filterStatus('已完成',this)">已完成</button>
+      </div>
     </div>
-    <small class="text-muted"><i class="bi bi-arrow-clockwise me-1"></i>每30秒自动刷新</small>
+    <div class="d-flex gap-2 align-items-center">
+      <div class="btn-group btn-group-sm">
+        <button class="btn btn-outline-primary active" id="viewListBtn" onclick="switchView('list')"><i class="bi bi-list-ul me-1"></i>列表</button>
+        <button class="btn btn-outline-primary" id="viewSummaryBtn" onclick="switchView('summary')"><i class="bi bi-table me-1"></i>总表</button>
+      </div>
+      <button class="btn btn-sm btn-outline-secondary no-print" onclick="printSummary()"><i class="bi bi-printer me-1"></i>打印总表</button>
+      <small class="text-muted"><i class="bi bi-arrow-clockwise me-1"></i>每30秒自动刷新</small>
+    </div>
+  </div>
+
+  <!-- 筛选行（列表/总表/打印共用） -->
+  <div class="d-flex flex-wrap gap-2 align-items-center mb-3 no-print">
+    <input type="month" id="monthFilter" class="form-control form-control-sm" style="width:auto" onchange="applyFilters()">
+    <button class="btn btn-sm btn-warning" onclick="clearMonthFilter()">全部</button>
+    <input id="orderNoFilter" class="form-control form-control-sm" style="width:150px" placeholder="搜索产品编号..." oninput="applyFilters()">
+    <input id="docNoFilter" class="form-control form-control-sm" style="width:150px" placeholder="搜索订单编号..." oninput="applyFilters()">
+    <select id="clientFilter" class="form-select form-select-sm" style="width:auto" onchange="applyFilters()">
+      <option value="">全部客户</option>
+    </select>
+    <button class="btn btn-sm btn-outline-secondary" onclick="loadOrders()"><i class="bi bi-arrow-clockwise me-1"></i>刷新数据</button>
   </div>
 
   <div class="card shadow-sm">
@@ -88,6 +134,7 @@
 let allOrders = [];
 let problemsMap = {};
 let currentFilter = '';
+let currentView = 'list'; // 'list' or 'summary'
 
 const statusBadge = s => ({
   '待生产': '<span class="badge badge-pending">待生产</span>',
@@ -100,7 +147,42 @@ function filterStatus(status, el) {
   currentFilter = status;
   document.querySelectorAll('.status-filter .btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
-  renderOrders(currentFilter ? allOrders.filter(o => o.status === currentFilter) : allOrders);
+  applyFilters();
+}
+
+function switchView(view) {
+  currentView = view;
+  document.getElementById('viewListBtn').classList.toggle('active', view === 'list');
+  document.getElementById('viewSummaryBtn').classList.toggle('active', view === 'summary');
+  applyFilters();
+}
+
+// 打印总表：先切到总表视图（沿用当前筛选），渲染完成后调起打印
+function printSummary() {
+  if (currentView !== 'summary') switchView('summary');
+  setTimeout(() => window.print(), 50);
+}
+
+function clearMonthFilter() {
+  document.getElementById('monthFilter').value = '';
+  applyFilters();
+}
+
+function applyFilters() {
+  let filtered = allOrders;
+  const ws = document.getElementById('workshopFilter')?.value || '';
+  if (ws) filtered = filtered.filter(o => o.workshop === ws);
+  if (currentFilter) filtered = filtered.filter(o => o.status === currentFilter);
+  const month = document.getElementById('monthFilter')?.value || '';
+  if (month) filtered = filtered.filter(o => String(o.date || '').startsWith(month));
+  const noKw = (document.getElementById('orderNoFilter')?.value || '').trim().toLowerCase();
+  if (noKw) filtered = filtered.filter(o => String(o.order_number || '').toLowerCase().includes(noKw));
+  const docKw = (document.getElementById('docNoFilter')?.value || '').trim().toLowerCase();
+  if (docKw) filtered = filtered.filter(o => String(o.doc_number || '').toLowerCase().includes(docKw));
+  const client = document.getElementById('clientFilter')?.value || '';
+  if (client) filtered = filtered.filter(o => o.client_name === client);
+  if (currentView === 'summary') renderSummary(filtered);
+  else renderOrders(filtered);
 }
 
 function loadOrders() {
@@ -113,7 +195,16 @@ function loadOrders() {
     problems.filter(p => p.status === '待处理').forEach(p => {
       problemsMap[p.order_id] = (problemsMap[p.order_id] || 0) + 1;
     });
-    renderOrders(currentFilter ? orders.filter(o => o.status === currentFilter) : orders);
+    // 客户下拉：从订单收集去重
+    const clientSel = document.getElementById('clientFilter');
+    if (clientSel) {
+      const clients = [...new Set(orders.map(o => o.client_name).filter(Boolean))].sort();
+      const cur = clientSel.value;
+      clientSel.innerHTML = '<option value="">全部客户</option>'
+        + clients.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+      clientSel.value = clients.includes(cur) ? cur : '';
+    }
+    applyFilters();
   }).catch(() => {
     document.getElementById('orderList').innerHTML = '<div class="text-center p-4 text-danger">加载失败，请刷新页面</div>';
   });
@@ -157,6 +248,57 @@ function renderOrders(orders) {
       </thead>
       <tbody>${rows}</tbody>
     </table>`;
+}
+
+// ─── 总表视图（按车间分组，明细展开）─────────────────────────────────────────────
+function renderSummary(orders) {
+  if (!orders.length) {
+    document.getElementById('orderList').innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i><p class="mt-2">暂无搪胶任务</p></div>`;
+    return;
+  }
+  const byWorkshop = {};
+  orders.forEach(o => {
+    const ws = o.workshop || '未分配';
+    if (!byWorkshop[ws]) byWorkshop[ws] = [];
+    byWorkshop[ws].push(o);
+  });
+
+  let html = '';
+  for (const ws of Object.keys(byWorkshop).sort()) {
+    let rows = '';
+    for (const o of byWorkshop[ws]) {
+      const items = (o.items && o.items.length) ? o.items : [null];
+      items.forEach((it, idx) => {
+        rows += `<tr>
+          <td>${idx === 0 ? `<strong>${esc(o.order_number || '-')}</strong>` : ''}</td>
+          <td>${idx === 0 ? esc(o.product_name || '-') : ''}</td>
+          <td>${idx === 0 ? esc(o.client_name || '-') : ''}</td>
+          <td>${idx === 0 ? esc(o.date || '-') : ''}</td>
+          <td>${it ? esc(it.mold_id || '-') : '-'}</td>
+          <td>${it ? esc(it.mold_name || '-') : '-'}</td>
+          <td class="text-center">${it ? esc(it.quantity || '-') : '-'}</td>
+          <td>${it ? esc(it.required_date || '-') : '-'}</td>
+          <td>${it ? esc(it.return_time || '-') : '-'}</td>
+          <td>${idx === 0 ? statusBadge(o.status) : ''}</td>
+        </tr>`;
+      });
+    }
+    html += `<div class="mb-4">
+      <h6 class="fw-bold px-3 py-2 mb-0" style="background:#16a085;color:#fff;border-radius:6px 6px 0 0">
+        <i class="bi bi-building me-1"></i>${esc(ws)}搪胶生产总表
+      </h6>
+      <div class="table-responsive">
+      <table class="table table-bordered table-sm mb-0" style="font-size:.8rem">
+        <thead style="background:#f8f9fa">
+          <tr>
+            <th>产品编号</th><th>产品名称</th><th>客名</th><th>日期</th>
+            <th>工模编号</th><th>工模名称</th><th style="width:70px">数量</th><th>要求完成日期</th><th>回模时间</th><th>状态</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table></div></div>`;
+  }
+  document.getElementById('orderList').innerHTML = html;
 }
 
 function viewOrder(id) {

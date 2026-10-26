@@ -34,6 +34,7 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
   if(!factories.length)throw new BadRequestError('没有可分析的工厂')
   const aliases={};factories.forEach((f,i)=>aliases[f.id]='F'+(i+1))
   const evidence=[],refs=[],coverage=[],checked=[]
+  let total=0
   function valueOf(record,src,key){
     // Optional patrol counts are JSON fields: JSVM exposes their JSONRaw bytes.
     if(src.collection==='quality_patrols'&&['staff','lines','area'].includes(key))return JSON.parse(record.getString(key)||'null')
@@ -60,16 +61,17 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
     for(const r of rows){
       const f=factoryMap[r.getString('factory')],region=src.collection==='orders'?(r.getString('region')||f.getString('region')||'dongguan'):(f.getString('region')||'dongguan')
       if((input.region&&region!==input.region)||!scope.regions.includes(region)||!e.app.canAccessRecord(r,info,r.collection().viewRule))continue
+      count++;total++
+      if(input.preview||total>500)continue
       const fields={};let shortened=false
       src.fields.forEach(key=>{let value=valueOf(r,src,key);if(typeof value==='string'&&value.length>800){value=value.slice(0,800);shortened=true}fields[key]=value})
       const id=src.collection+':'+r.id
       evidence.push({id,factory:aliases[f.id],type:src.label,fields,shortened})
       refs.push({id,factoryCode:aliases[f.id],factoryId:f.id,factoryName:f.getString('name'),source:src.collection,recordId:r.id,date:r.getString(src.date).slice(0,10),craft:f.getString('craft'),region})
-      checked.push({collection:src.collection,id:r.id,factory:f.id,source:src,region:r.getString('region'),snapshot:JSON.stringify(src.fields.map(key=>valueOf(r,src,key)))});count++
+      checked.push({collection:src.collection,id:r.id,factory:f.id,source:src,region:r.getString('region'),snapshot:JSON.stringify(src.fields.map(key=>valueOf(r,src,key)))})
     }
     coverage.push({source:src.label,status:count?'已读取':'范围内无可见记录',count})
   }
-  const total=evidence.length
   const statistics={coverage,total,limit:500,orderDateBasis:input.orderDateBasis}
   if(input.preview)return e.json(200,statistics)
   if(total>500)throw new BadRequestError('分析明细共'+total+'条（'+coverage.map(c=>c.source+' '+c.count+'条').join('、')+'），超过500条上限；请缩小范围。订单按'+(input.orderDateBasis==='order_date'?'下单时间':'约定交货时间')+'筛选')

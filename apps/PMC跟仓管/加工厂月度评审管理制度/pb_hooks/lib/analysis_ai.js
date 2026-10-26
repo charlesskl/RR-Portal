@@ -23,13 +23,13 @@ function validateInput(body, today) {
   if (!body || Object.keys(body).some(k=>!['start','end','factory','region','craft','question','orderDateBasis','preview'].includes(k))) throw new Error('请求只能包含日期范围、厂区、部门、工厂和问题')
   const {start,end}=body
   if(!validDay(start)||!validDay(end)||start>end||end>today||(Date.parse(end)-Date.parse(start))/86400000>180) throw new Error('请选择不晚于今天、跨度不超过180天的有效日期范围')
-  if(typeof body.question!=='string'||body.question.trim().length<2||body.question.length>600) throw new Error('请输入2至600字的分析问题')
+  if(body.preview!==true&&(typeof body.question!=='string'||body.question.trim().length<2||body.question.length>600)) throw new Error('请输入2至600字的分析问题')
   if(body.factory && (typeof body.factory!=='string'||!/^[a-zA-Z0-9]{15}$/.test(body.factory))) throw new Error('工厂参数无效')
   if(Object.prototype.hasOwnProperty.call(body,'region')&&body.region!==''&&!['dongguan','hunan','heyuan'].includes(body.region))throw new Error('厂区参数无效')
   if(Object.prototype.hasOwnProperty.call(body,'craft')&&body.craft!==''&&!['injection','painting','assembly','sewing','electronics'].includes(body.craft))throw new Error('部门参数无效')
   if(body.orderDateBasis!==undefined&&!['order_date','delivery_date'].includes(body.orderDateBasis))throw new Error('订单日期口径无效')
   if(body.preview!==undefined&&typeof body.preview!=='boolean')throw new Error('统计预览参数无效')
-  return {orderDateBasis:body.orderDateBasis||'delivery_date',preview:body.preview===true,start,end,factory:body.factory||'',region:body.region||'',craft:body.craft||'',question:body.question.trim()}
+  return {orderDateBasis:body.orderDateBasis||'delivery_date',preview:body.preview===true,start,end,factory:body.factory||'',region:body.region||'',craft:body.craft||'',question:body.preview===true?'':body.question.trim()}
 }
 const schema={type:'object',additionalProperties:false,required:['summary','findings','limitations'],properties:{
   summary:{type:'string'}, limitations:{type:'array',items:{type:'string'}}, findings:{type:'array',items:{type:'object',additionalProperties:false,required:['title','risk','analysis','actions','evidence_ids'],properties:{title:{type:'string'},risk:{type:'string',enum:['high','medium','low']},analysis:{type:'string'},actions:{type:'array',items:{type:'string'}},evidence_ids:{type:'array',items:{type:'string'}}}}}}

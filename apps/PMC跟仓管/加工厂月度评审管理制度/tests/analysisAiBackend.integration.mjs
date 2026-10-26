@@ -68,6 +68,16 @@ test('AI routes use server evidence, permission scope, quota and validated citat
     assert.equal(calls.length,before);assert.equal((await superuser.collection('analysis_ai_usage').getFullList()).length,0)
     for(const extra of [{orderDateBasis:'created'},{orderDateBasis:null},{preview:'true'}])await assert.rejects(generate(clients.scoped,extra),code(400))
   })
+  await t.test('free preview does not require an analysis question and never reserves quota',async()=>{
+    const before=calls.length,initialQuota=(await superuser.collection('analysis_ai_usage').getFullList()).length
+    for(const question of [undefined,'','x']){
+      const result=await generate(clients.scoped,{preview:true,question})
+      assert.equal(result.total,5)
+      await assert.rejects(generate(clients.scoped,{question}),code(400))
+    }
+    assert.equal(calls.length,before)
+    assert.equal((await superuser.collection('analysis_ai_usage').getFullList()).length,initialQuota)
+  })
   await t.test('scope and row rules are applied before sending a minimal dataset',async()=>{
     const report=await generate(clients.scoped);assert.equal(report.model,'fixture-model');assert.equal(report.evidence.length,5);assert.ok(report.evidence.every(e=>e.factoryId===id('allowed')))
     const payload=calls.at(-1),serialized=JSON.stringify(payload);assert.equal(payload.store,false);assert.equal(payload.text.format.strict,true);assert.equal(payload.max_output_tokens,4000);assert.ok(!serialized.includes('SECRET-CONTACT'));assert.ok(!serialized.includes('SECRET-ORDER-NUMBER'));assert.ok(!serialized.includes(id('other')));assert.ok(!serialized.includes(id('denied')));assert.ok(!serialized.includes('fixture-key'));const patrol=inputDataset(payload).evidence.find(e=>e.type==='巡查');assert.equal(patrol.fields.staff,24);assert.equal(patrol.fields.lines,0);assert.equal(patrol.fields.area,null);assert.equal(inputDataset(payload).evidence.find(e=>e.type==='订单').fields.delay_days,2);assert.ok(payload.instructions.includes('不得用当前日期减delivery_date推算延期天数'))
@@ -186,5 +196,5 @@ test('AI routes use server evidence, permission scope, quota and validated citat
       assert.equal(calls.length,before)
     } finally {for(const r of records)await superuser.collection('orders').delete(r.id)}
   })
-  await t.test('missing service configuration returns explicit disabled status without outbound calls',async()=>{await stop();await start('false');const before=calls.length;const config=await clients.admin.send('/api/factory-review/analysis-ai/config',{method:'GET'});assert.equal(config.enabled,false);assert.ok(!JSON.stringify(config).includes('fixture-key'));await assert.rejects(generate(clients.admin),code(503));assert.equal(calls.length,before)})
+  await t.test('missing service configuration returns explicit disabled status without outbound calls',async()=>{await stop();await start('false');const before=calls.length;const config=await clients.admin.send('/api/factory-review/analysis-ai/config',{method:'GET'});assert.equal(config.enabled,false);assert.ok(!JSON.stringify(config).includes('fixture-key'));const quota=(await superuser.collection('analysis_ai_usage').getFullList()).length;assert.ok((await generate(clients.admin,{preview:true,question:''})).total>0);assert.equal((await superuser.collection('analysis_ai_usage').getFullList()).length,quota);await assert.rejects(generate(clients.admin),code(503));assert.equal(calls.length,before)})
 })

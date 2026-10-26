@@ -45,6 +45,9 @@ export default function DocEditor({
       try {
         let p = path;
         if (!/\.xlsx$/i.test(p)) {
+          if (!/\.xls$/i.test(p)) {
+            throw new Error("此文件格式暂不支持网页编辑，请下载后用对应软件打开");
+          }
           // 旧版 .xls：若旁边已有转换好的 .xlsx（批量转换产生），直接改开它
           const alt = p.replace(/\.xls$/i, ".xlsx");
           try {

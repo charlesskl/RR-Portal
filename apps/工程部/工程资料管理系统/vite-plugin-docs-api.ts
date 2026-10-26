@@ -381,7 +381,7 @@ const routes: Record<string, { method: string; handler: Handler }> = {
       const items = docTypes.map((dt) => {
         // 同名资料同时存在 .xls 与 .xlsx 时优先 .xlsx（可在网页编辑器打开）
         const hit =
-          projectFiles.find((f) => f.name.includes(dt.name) && f.name.endsWith(".xlsx")) ??
+          projectFiles.find((f) => f.name.includes(dt.name) && f.ext === ".xlsx") ??
           projectFiles.find((f) => f.name.includes(dt.name));
         return {
           name: dt.name,

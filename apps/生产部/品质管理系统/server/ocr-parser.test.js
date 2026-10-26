@@ -104,6 +104,16 @@ test('numeric or shifted-column junk still cannot become a table unit', () => {
       [item('P001', '塑胶零件', '1000', '')], unit);
   }
 });
+test('stickers and numeric product names retain their anchored goods rows', () => {
+  const rows = [['P002', '贴纸', '1000', '张'], ['P003', '504/504', '1000', '个'],
+    ['', '505/505', '1000', '个'], ['P004', '504/504', '', '个']];
+  for (const row of rows) assert.deepEqual(parse(table([row])).items, [item(...row)]);
+});
+test('unanchored numeric and header fragments remain excluded, and copied quantities remain blank', () => {
+  const fields = parse(table([goodRow, ['', '504/504', '', ''], ['', '数量', '', ''],
+    ['', '已送货数/总箱数/总数', '', ''], ['1000', '塑胶零件', '1000', '个']]));
+  assert.deepEqual(fields.items, [item(...goodRow), item('1000', '塑胶零件', '', '个')]);
+});
 test('repeat fragments without quantity are removed when the complete same product row exists', () => {
   assert.deepEqual(parse(table([goodRow, ['P-001', '塑胶零件', '', '个']])).items, [item(...goodRow)]);
 });

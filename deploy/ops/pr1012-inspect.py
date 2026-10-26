@@ -6,7 +6,7 @@ BASE='6b36a35e0d1239a96da3d24ec660ac6fb678f8f0'
 OLD='3a3704582279f3bbfe2356a313bfda2165f9da65'
 BRANCH='refs/heads/ops/pr-1012-20261026'
 APP='apps/喷油部/喷油排期系统'
-EXECUTE=True
+EXECUTE=False
 SERVICES={'sprayplan-test':('data-test','storage-test'),'sprayplan':('data','storage')}
 def need(v,label):
     if not v:raise RuntimeError(label)

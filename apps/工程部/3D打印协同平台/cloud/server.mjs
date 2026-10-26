@@ -99,7 +99,8 @@ function requestedFactories(data,role) {
 }
 function allowed(user, order) { return userFactories(user).includes(order.factory); }
 function getOrder(user,id) { const o=db.prepare('SELECT * FROM orders WHERE id=?').get(id); if (!o || !allowed(user,o)) fail(404,'订单不存在或无访问权限'); return o; }
-function orderJSON(o) { const linked=db.prepare('SELECT id,item_id,status,synced FROM production_jobs WHERE order_id=? ORDER BY created').all(o.id),job=linked[0]; return { production:job?{id:job.id,count:linked.length,status:linked.length===1?job.status:o.status,synced:linked.every(j=>!!j.synced)}:null, ...JSON.parse(o.payload), id:o.id, owner:o.owner, number:o.number, factory:o.factory, status:o.status, created:o.created, updated:o.updated, feedback:db.prepare('SELECT f.*, u.name AS authorName FROM feedback f JOIN users u ON u.id=f.author WHERE order_id=? ORDER BY created DESC').all(o.id), files:db.prepare('SELECT id,name,size FROM files WHERE order_id=?').all(o.id), events:db.prepare('SELECT actor,text,created FROM events WHERE order_id=? ORDER BY id DESC').all(o.id) }; }
+function canAccessOrderFiles(user, order) { return allowed(user,order) && (user.role==='admin' || order.owner===user.id); }
+function orderJSON(o, user) { const linked=db.prepare('SELECT id,item_id,status,synced FROM production_jobs WHERE order_id=? ORDER BY created').all(o.id),job=linked[0]; return { production:job?{id:job.id,count:linked.length,status:linked.length===1?job.status:o.status,synced:linked.every(j=>!!j.synced)}:null, ...JSON.parse(o.payload), id:o.id, owner:o.owner, number:o.number, factory:o.factory, status:o.status, created:o.created, updated:o.updated, feedback:db.prepare('SELECT f.*, u.name AS authorName FROM feedback f JOIN users u ON u.id=f.author WHERE order_id=? ORDER BY created DESC').all(o.id), canDownloadFiles:canAccessOrderFiles(user,o), files:canAccessOrderFiles(user,o)?db.prepare('SELECT id,name,size FROM files WHERE order_id=?').all(o.id):[], events:db.prepare('SELECT actor,text,created FROM events WHERE order_id=? ORDER BY id DESC').all(o.id) }; }
 function field(data,key,required=false,max=120) { const v=data[key]; if (v!==undefined && typeof v!=='string') fail(400,`${key} 格式不正确`); const value=(v||'').trim(); if (required && !value) fail(400,`请填写 ${labels[key]||key}`); if(value.length>max) fail(400,`${labels[key]||key} 内容过长`); return value; }
 const labels={factory:'厂区',workshop:'车间',customer:'客名',sku:'货号',product:'产品名称',engineer:'跟进工程师',material:'耗材',color:'颜色',dueDate:'需交板时间'};
 function date(value,required=false) { if (!value && !required) return ''; if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0,10)!==value) fail(400,'请填写有效日期'); return value; }
@@ -186,7 +187,7 @@ const server = http.createServer(async (req,res) => {
         if(db.prepare('SELECT id FROM users WHERE username=?').get(username)) fail(409,'账号已存在');
         const id=addUser(username,name,password,role,factory,scope); return json(res,201,{id}); }
     }
-    if(route==='/api/orders' && req.method==='GET') return json(res,200,db.prepare('SELECT * FROM orders ORDER BY created DESC').all().filter(o=>allowed(u,o)).map(orderJSON));
+    if(route==='/api/orders' && req.method==='GET') return json(res,200,db.prepare('SELECT * FROM orders ORDER BY created DESC').all().filter(o=>allowed(u,o)).map(o=>orderJSON(o,u)));
     if(route==='/api/uploads' && req.method==='POST') {
       let name; try { name=decodeURIComponent(req.headers['x-file-name']||''); } catch { fail(400,'文件名无效'); }
       if(!name || name.length>240 || /[\x00-\x1f/\\]/.test(name) || !extensions.has(path.extname(name).toLowerCase())) fail(400,'不支持此文件类型，请上传 3D 模型、图片或 ZIP / RAR / 7Z 压缩包');
@@ -200,7 +201,7 @@ const server = http.createServer(async (req,res) => {
     const fileMatch=route.match(/^\/api\/files\/([a-f0-9-]+)$/);
     if(fileMatch && req.method==='GET') {
       const f=db.prepare('SELECT * FROM files WHERE id=?').get(fileMatch[1]); if(!f) fail(404,'文件不存在');
-      if(f.order_id) getOrder(u,f.order_id); else if(f.owner!==u.id) fail(404,'文件不存在');
+      if(f.order_id) { const order=getOrder(u,f.order_id); if(!canAccessOrderFiles(u,order)) fail(404,'文件不存在或无访问权限'); } else if(u.role!=='admin' && f.owner!==u.id) fail(404,'文件不存在或无访问权限');
       const isImage=['.png','.jpg','.jpeg','.webp','.gif'].includes(path.extname(f.name).toLowerCase());
       const types={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif'};
       res.writeHead(200,{'Content-Type':isImage?types[path.extname(f.name).toLowerCase()]:'application/octet-stream','Content-Length':f.size,'Content-Disposition':`${isImage && url.searchParams.has('preview')?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(f.name)}`,'Cache-Control':'private, no-store'});
@@ -220,7 +221,7 @@ const server = http.createServer(async (req,res) => {
         for(const f of files) db.prepare('UPDATE files SET order_id=? WHERE id=?').run(id,f.id);
         recordEvent(id,u.name,'提交打印申请'); db.exec('COMMIT');
       } catch(e) { db.exec('ROLLBACK'); throw e; }
-      return json(res,201,orderJSON(getOrder(u,id)));
+      return json(res,201,orderJSON(getOrder(u,id),u));
     }
     const feedbackOrder=route.match(/^\/api\/orders\/([a-f0-9-]+)\/feedback$/);
     if(feedbackOrder && req.method==='POST') {
@@ -234,7 +235,7 @@ const server = http.createServer(async (req,res) => {
         db.prepare('INSERT INTO feedback VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(randomUUID(),o.id,u.id,category,rating,content,created,'待处理','','',created);
         recordEvent(o.id,u.name,`提交交付反馈：${category}`); db.exec('COMMIT');
       } catch(e) {db.exec('ROLLBACK');throw e;}
-      return json(res,201,orderJSON(getOrder(u,o.id)));
+      return json(res,201,orderJSON(getOrder(u,o.id),u));
     }
     const feedbackMatch=route.match(/^\/api\/feedback\/([a-f0-9-]+)$/);
     if(feedbackMatch && req.method==='PATCH') {
@@ -247,7 +248,7 @@ const server = http.createServer(async (req,res) => {
         db.prepare('UPDATE feedback SET status=?,reply=?,responder=?,updated=? WHERE id=?').run(status,reply,u.name,now(),f.id);
         recordEvent(f.order_id,u.name,`反馈${status}：${reply}`); db.exec('COMMIT');
       } catch(e) {db.exec('ROLLBACK');throw e;}
-      return json(res,200,orderJSON(getOrder(u,f.order_id)));
+      return json(res,200,orderJSON(getOrder(u,f.order_id),u));
     }
     const applicationMatch=route.match(/^\/api\/orders\/([a-f0-9-]+)\/application$/);
     if(applicationMatch && req.method==='PATCH') {
@@ -264,7 +265,7 @@ const server = http.createServer(async (req,res) => {
         db.prepare('UPDATE orders SET factory=?,payload=?,updated=? WHERE id=?').run(factory,JSON.stringify(p),now(),o.id);
         recordEvent(o.id,u.name,'修改打印申请信息'); db.exec('COMMIT');
       } catch(e) {db.exec('ROLLBACK');throw e;}
-      return json(res,200,orderJSON(getOrder(u,o.id)));
+      return json(res,200,orderJSON(getOrder(u,o.id),u));
     }
     const match=route.match(/^\/api\/orders\/([a-f0-9-]+)$/);
     if(match && req.method==='PATCH') {
@@ -279,7 +280,7 @@ const server = http.createServer(async (req,res) => {
         db.prepare('UPDATE orders SET status=?,payload=?,updated=? WHERE id=?').run(status,JSON.stringify(p),now(),o.id);
         recordEvent(o.id,u.name,status===o.status?'更新复交板时间 / 跟进人':`${o.status} → ${status}`); db.exec('COMMIT');
       } catch(e) {db.exec('ROLLBACK');throw e;}
-      return json(res,200,orderJSON(getOrder(u,o.id)));
+      return json(res,200,orderJSON(getOrder(u,o.id),u));
     }
     fail(404,'接口不存在');
   } catch(e) { if(!e.status) console.error(e); if(!res.headersSent && !res.destroyed) json(res,e.status||500,{error:e.status?e.message:'服务器处理失败，请稍后重试'}); }

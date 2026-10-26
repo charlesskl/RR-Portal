@@ -23,13 +23,14 @@ test('production: login, uploads, persistence, permissions and order workflow', 
     assert.deepEqual((await request('/api/orders',{},admin)).data,[]);
     assert.equal((await request('/api/users',{method:'POST',body:'{}',headers:{'X-CSRF-Token':'bad'}},admin)).res.status,403);
     assert.equal((await request('/api/users',{method:'POST',body:JSON.stringify({username:'shortpw',name:'测试',password:'test123',factory:'湖南',role:'member'})},admin)).res.status,400);
-    for(const [username,factory] of [['hunan','湖南'],['heyuan','河源']]) assert.equal((await request('/api/users',{method:'POST',body:JSON.stringify({username,name:username,password:'test1234',factory,role:'member'})},admin)).res.status,201);
-    const hn=await login('hunan','test1234'),hy=await login('heyuan','test1234');
+    for(const [username,factory] of [['hunan','湖南'],['heyuan','河源'],['filepeer','湖南']]) assert.equal((await request('/api/users',{method:'POST',body:JSON.stringify({username,name:username,password:'test1234',factory,role:'member'})},admin)).res.status,201);
+    const hn=await login('hunan','test1234'),hy=await login('heyuan','test1234'),filePeer=await login('filepeer','test1234');
     const bytes=Buffer.from('ISO-10303-21;\nDATA;\nENDSEC;\nEND-ISO-10303-21;');
     const upload=async(name,auth=hn)=>request('/api/uploads',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(name)},body:bytes},auth);
     assert.equal((await upload('evil.html')).res.status,400);
     assert.equal((await upload('../test.stp')).res.status,400);
     const file=await upload('呼吸灯.stp');assert.equal(file.res.status,201);
+    assert.equal((await request('/api/files/'+file.data.id,{},filePeer)).res.status,404,'pending uploads are private');
     const input={factory:'湖南',workshop:'A',customer:'测试客户',sku:'TEST-1',product:'测试模型',quantity:10,printerType:'光固化',material:'硬胶',color:'白色',engineer:'测试工程师',dueDate:'2026-10-06',priority:'普通',fileIds:[file.data.id]};
     const post=d=>request('/api/orders',{method:'POST',body:JSON.stringify(d)},hn);
     assert.equal((await post({...input,factory:'河源'})).res.status,403);
@@ -44,6 +45,20 @@ test('production: login, uploads, persistence, permissions and order workflow', 
     assert.equal((await request('/api/orders',{},hy)).data.length,0);
     assert.equal((await request('/api/files/'+file.data.id,{},hy)).res.status,404);
     const downloaded=await fetch(base+'/api/files/'+file.data.id,{headers:{Cookie:hn.cookie}});assert.equal(downloaded.status,200);assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()),bytes);
+    const peerOrders=(await request('/api/orders',{},filePeer)).data;
+    assert.equal(peerOrders.length,1,'same-factory colleagues still see the order');
+    assert.deepEqual(peerOrders[0].files,[],'file metadata is hidden from other accounts');
+    assert.equal(peerOrders[0].canDownloadFiles,false);
+    assert.equal((await request('/api/files/'+file.data.id,{},filePeer)).res.status,404,'direct links cannot bypass ownership');
+    assert.equal((await request('/api/files/'+file.data.id+'?preview=1',{},filePeer)).res.status,404,'preview uses the same permission');
+    assert.equal((await request('/api/files/'+file.data.id)).res.status,401);
+    const ownerOrder=(await request('/api/orders',{},hn)).data[0];
+    assert.equal(ownerOrder.files.length,1);assert.equal(ownerOrder.canDownloadFiles,true);
+    const adminOrder=(await request('/api/orders',{},admin)).data[0];
+    assert.equal(adminOrder.files.length,1);assert.equal(adminOrder.canDownloadFiles,true);
+    const adminDownload=await fetch(base+'/api/files/'+file.data.id,{headers:{Cookie:admin.cookie}});
+    assert.equal(adminDownload.status,200);assert.deepEqual(Buffer.from(await adminDownload.arrayBuffer()),bytes);
+
     assert.equal((await request('/api/orders/'+id,{method:'PATCH',body:JSON.stringify({status:'待排产'})},hn)).res.status,403);
     const editApplication=(data,auth=hn)=>request('/api/orders/'+id+'/application',{method:'PATCH',body:JSON.stringify(data)},auth);
     const editInput={...input,updated:created.data.updated,product:'修改后的模型',quantity:22};
@@ -126,7 +141,8 @@ test('production: login, uploads, persistence, permissions and order workflow', 
     let multi=await login('multisite','multi1234');
     assert.deepEqual((await request('/api/me',{},multi)).data.user.factories,['湖南','河源']);
     assert.equal((await request('/api/orders',{},multi)).data.length,1);
-    assert.equal((await fetch(base+'/api/files/'+file.data.id,{headers:{Cookie:multi.cookie}})).status,200);
+    assert.equal((await request('/api/files/'+file.data.id,{},multi)).res.status,404,'multi-factory permission does not grant attachment access');
+    assert.deepEqual((await request('/api/orders',{},multi)).data[0].files,[]);
     const multiFile=await upload('多厂区模型.stp',multi);
     const multiOrder={...input,printerType:'FDM',fileIds:[multiFile.data.id],factory:'河源'};
     assert.equal((await request('/api/orders',{method:'POST',body:JSON.stringify({...multiOrder,factory:'印尼'})},multi)).res.status,403);

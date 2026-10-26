@@ -202,7 +202,7 @@ async function savePrice() {
 
       <section id="delivery-registration" class="card" v-if="order && canEdit">
         <h3 class="sec-title">交期 / 客退</h3>
-        <p v-if="route.query.reminder === 'delivery'">请核实是否已交付：已交付请填写实际交货时间并保存；未交付请在下方“生产进度”补充延期原因。</p>
+        <p v-if="route.query.reminder === 'delivery'">请核实是否已交付：已交付请填写实际交货时间并保存；未交付请在下方“生产进度”登记延期天数、延期原因并保存。</p>
         <p v-if="deliveryError" role="alert">{{ deliveryError }}</p>
         <form class="prog-form" @submit.prevent="saveDelivery">
           <label>下单PMC <input v-model="delivery.pmc" placeholder="下单跟单人" /></label>

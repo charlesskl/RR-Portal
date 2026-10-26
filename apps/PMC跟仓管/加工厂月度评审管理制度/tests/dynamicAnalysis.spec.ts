@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { analyze, chinaToday } from '../src/utils/dynamicAnalysis'
 const patrol = { id: 'p', factory: 'f', check_date: '2026-10-01', grade: 'B', correction: '整改隔离墙', planned_date: '2026-10-10' }
-const order = { id: 'o', factory: 'f', product: '产品', status: 'producing' as const, delivery_date: '2026-10-10' }
+const order = { id: 'o', factory: 'f', product: '产品', status: 'producing' as const, delivery_date: '2026-10-10', delay_days: 10 }
 describe('dynamic rules', () => {
   it('reports overdue evidence, severity and stable keys as time advances', () => {
     const a = analyze([patrol], [order], '2026-10-20').issues
@@ -10,7 +10,7 @@ describe('dynamic rules', () => {
     expect(analyze([patrol], [order], '2026-10-21').issues.map(i => i.key)).toEqual(a.map(i => i.key))
   })
   it('excludes due today, completed, cancelled, returned and delivered records', () => {
-    expect(analyze([patrol], [order], '2026-10-10').issues).toEqual([])
+    expect(analyze([patrol], [{ ...order, delay_days: 0 }], '2026-10-10').issues).toEqual([])
     expect(analyze([{ ...patrol, completed_date: '2026-10-19' }], ['delivered','cancelled','returned'].map(status => ({ ...order, status } as any)), '2026-10-20').issues).toEqual([])
     expect(analyze([], [{ ...order, actual_delivery_date: '2026-10-19' }], '2026-10-20').issues).toEqual([])
   })
@@ -21,8 +21,19 @@ describe('dynamic rules', () => {
     expect(analyze([{ ...list[0]!, factory:'other' },list[1]!], [], '2026-10-20').issues).toEqual([])
   })
   it('reports missing or invalid dates without false overdue alerts and ignores future patrols', () => {
-    const r = analyze([{ ...patrol, planned_date:'2026-02-30' }, { ...patrol, check_date:'2026-12-01' }], [{ ...order, delivery_date:'' }], '2026-10-20')
+    const r = analyze([{ ...patrol, planned_date:'2026-02-30' }, { ...patrol, check_date:'2026-12-01' }], [{ ...order, delivery_date:'', delay_days: 0 }], '2026-10-20')
     expect(r.issues).toEqual([]); expect(r.missingPatrolDates).toBe(1); expect(r.missingOrderDates).toBe(1)
     expect(chinaToday(new Date('2026-10-19T16:00:00Z'))).toBe('2026-10-20')
   })
+})
+
+it('does not infer delays from missing delivery dates, and uses registered days rather than order age', () => {
+  const old = { ...order, delivery_date: '2025-01-01' }
+  expect(analyze([], [ { ...old, delay_days: undefined }, { ...old, delay_days: 0 }, { ...old, delay_days: -1 }, { ...old, delay_days: NaN } ], '2026-10-26').issues).toEqual([])
+  const result = analyze([], [{ ...old, delay_days: 2, delay_reason: '物料未到' }], '2026-10-26').issues
+  expect(result[0]).toMatchObject({ level: 'medium', delayDays: 2 })
+  expect(result[0]?.evidence).toContain('已登记延期2天')
+  expect(result[0]?.evidence).toContain('物料未到')
+  expect(analyze([], [{ ...old, delay_days: 2 }], '2026-11-26').issues[0]?.delayDays).toBe(2)
+  expect(analyze([], [{ ...old, delivery_date: '', delay_days: 2 }], '2026-10-26').issues).toHaveLength(1)
 })

@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { overdueMoreThan50, resolveRiskBatch } from '../src/utils/analysisBulkResolve'
 import type { AnalysisIssue } from '../src/utils/dynamicAnalysis'
-const issue = (date: string, kind = 'delivery') => ({ date, kind } as AnalysisIssue)
+const issue = (date: string, kind = 'correction') => ({ date, kind } as AnalysisIssue)
 it('uses strict 50-day cutoff, includes correction and excludes rating changes and invalid dates', () => {
  expect(overdueMoreThan50(issue('2026-09-02'), '2026-10-22')).toBe(false)
  expect(overdueMoreThan50(issue('2026-09-01'), '2026-10-22')).toBe(true)
@@ -25,4 +25,9 @@ it('does not continue after account change or unmount',async()=>{
  const write=vi.fn(async()=>{active=false})
  const result=await resolveRiskBatch([1,2,3,4,5],()=>active,write,()=>{})
  expect(result.stopped).toBe(true);expect(write).toHaveBeenCalledTimes(1)
+})
+
+it('uses registered delay days for orders even when the original due date is very old', () => {
+ for (const delayDays of [undefined, 0, 2, 50, NaN]) expect(overdueMoreThan50({ ...issue('2025-01-01', 'delivery'), delayDays }, '2026-10-26')).toBe(false)
+ expect(overdueMoreThan50({ ...issue('2026-10-25', 'delivery'), delayDays: 51 }, '2026-10-26')).toBe(true)
 })

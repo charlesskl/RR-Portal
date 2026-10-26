@@ -52,7 +52,7 @@ async function resolveOldRisks() {
   if (bulkBusy.value || saving.value || loading.value || readFailed.value || !stateReady.value) return
   const items = [...oldRisks.value], owner = pb.authStore.record?.id, current = generation
   if (!owner || !items.length) return
-  if (!window.confirm(`将当前${props.factoryId ? '工厂' : '全部授权工厂'}范围内逾期超过50天的 ${items.length} 项风险标为“已解决”？仅修改本账号的跟进状态，不受下方筛选条件影响，不修改订单交付或整改记录。`)) return
+  if (!window.confirm(`将当前${props.factoryId ? '工厂' : '全部授权工厂'}范围内延期/整改逾期超过50天的 ${items.length} 项风险标为“已解决”？仅修改本账号的跟进状态，不受下方筛选条件影响，不修改订单交付或整改记录。`)) return
   bulkBusy.value = true; bulkDone.value = 0; bulkMessage.value = ''; statusError.value = ''
   const snapshot = new Map(stateMap.value)
   const active = () => current === generation && pb.authStore.record?.id === owner
@@ -82,13 +82,13 @@ const target = computed(() => ({ path: '/analysis', query: props.factoryId ? { f
     <p v-for="error in errors" :key="error" role="alert" class="error">{{ error }}</p>
     <p v-if="updated" class="muted">最近分析：{{ updated }}；仅分析当前账号可查看的数据。</p>
     <div class="metrics"><strong>当前风险 {{ scoped.length }} 项</strong><span>重点关注 {{ scoped.filter(i => i.level === 'high').length }} 项</span><span>涉及 {{ new Set(scoped.map(i => i.factory)).size }} 家工厂</span></div>
-    <template v-if="compact"><p>巡查整改、最近评级下降、未交付订单逾期。{{ errors.length ? '部分数据不可用，结果可能不完整。' : '' }}</p><RouterLink :to="target">查看问题依据与跟进 →</RouterLink></template>
+    <template v-if="compact"><p>巡查整改、最近评级下降、已登记延期且待确认交付的订单。{{ errors.length ? '部分数据不可用，结果可能不完整。' : '' }}</p><RouterLink :to="target">查看问题依据与跟进 →</RouterLink></template>
     <template v-else>
       <AnalysisAiPanel :factories="factories" :factory-id="factoryId" />
-      <details><summary>分析规则与数据缺口</summary><p>整改有描述且计划日期早于今天、未登记有效完成日期时提示；最近两次巡查评级由A向D下降时提示；订单交期早于今天且未登记交付时提示（排除已交付、已取消、已退回订单）。逾期至少7天或评级降至D列为重点关注。日期按北京时间计算，评级变化不会推断为质量不合格。</p><p>授权范围内：{{ result.missingPatrolDates }} 条未完成整改缺少有效计划日期，{{ result.missingOrderDates }} 条未交付订单缺少有效交期，无法判断是否逾期。源数据错误请进入原始记录修正。</p></details>
+      <details><summary>分析规则与数据缺口</summary><p>整改有描述且计划日期早于今天、未登记有效完成日期时提示；最近两次巡查评级由A向D下降时提示；订单仅在已保存的延迟时间≥1天且尚未登记交付时提示（排除已交付、已取消、已退回订单），与“汇总延期订单”使用相同的延期登记依据；已交付的历史延期仍保留在货期汇总。未登记延期不计入延期风险，由到期弹窗提醒PMC核实。订单重点关注按已登记延期≥7天判断；整改逾期至少7天或评级降至D也列为重点关注。日期按北京时间计算，评级变化不会推断为质量不合格。</p><p>授权范围内：{{ result.missingPatrolDates }} 条未完成整改缺少有效计划日期，{{ result.missingOrderDates }} 条未交付订单缺少有效交期，无法触发到期确认提醒。源数据错误请进入原始记录修正。</p></details>
       <p>跟进状态仅当前账号可见。“已解决”代表个人跟进标记；源数据仍触发规则时，预警继续保留。下方为规则预警；上方AI分析需配置服务后主动生成。</p>
       <p v-if="statusError" class="error" role="alert">{{ statusError }} <button :disabled="bulkBusy" @click="loadStates">刷新跟进状态</button></p>
-      <div class="bulk-actions"><p>当前{{ factoryId ? '工厂' : '全部授权工厂' }}范围内，逾期超过50天且尚未标为已解决：{{ oldRisks.length }} 项（不受下方筛选影响）。</p><button :disabled="bulkBusy || !!saving || loading || readFailed || !stateReady || !oldRisks.length" @click="resolveOldRisks">{{ bulkBusy ? `正在标记，已完成 ${bulkDone} 项…` : '逾期超过50天批量标为已解决' }}</button><p v-if="bulkMessage" role="status">{{ bulkMessage }}</p></div>
+      <div class="bulk-actions"><p>当前{{ factoryId ? '工厂' : '全部授权工厂' }}范围内，延期/整改逾期超过50天且尚未标为已解决：{{ oldRisks.length }} 项（不受下方筛选影响）。</p><button :disabled="bulkBusy || !!saving || loading || readFailed || !stateReady || !oldRisks.length" @click="resolveOldRisks">{{ bulkBusy ? `正在标记，已完成 ${bulkDone} 项…` : '延期/整改逾期超过50天批量标为已解决' }}</button><p v-if="bulkMessage" role="status">{{ bulkMessage }}</p></div>
       <div class="filters">
         <label v-if="!factoryId">工厂<select v-model="factoryFilter"><option value="">全部有预警工厂</option><option v-for="id in [...new Set(scoped.map(i => i.factory))]" :key="id" :value="id">{{ name(id) }}</option></select></label>
         <label>问题类型<select v-model="kind"><option value="">全部</option><option value="correction">整改逾期</option><option value="grade">评级下降</option><option value="delivery">交期延期</option></select></label>

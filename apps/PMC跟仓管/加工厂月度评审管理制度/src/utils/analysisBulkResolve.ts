@@ -1,6 +1,7 @@
 import type { AnalysisIssue } from './dynamicAnalysis'
 export function overdueMoreThan50(issue: AnalysisIssue, today: string) {
   if (!['delivery', 'correction'].includes(issue.kind)) return false
+  if (issue.kind === 'delivery') return Number.isFinite(issue.delayDays) && issue.delayDays! > 50
   const due = issue.date
   if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || !Number.isFinite(Date.parse(due)) || new Date(due).toISOString().slice(0, 10) !== due) return false
   return (Date.parse(today) - Date.parse(due)) / 86400000 > 50

@@ -8,14 +8,14 @@ const { setDialog, keydown } = usePatrolDialog(() => emit('later'))
 </script>
 <template>
   <div class="delivery-overlay"><section :ref="setDialog" class="delivery-dialog" role="dialog" aria-modal="true" aria-labelledby="delivery-reminder-title" tabindex="-1" @keydown="keydown">
-    <header><h3 id="delivery-reminder-title">交期已到，请登记交付情况</h3><button @click="emit('later')">一小时后提醒</button></header>
-    <p>以下订单已到约定交期，尚未登记交付。已交付的请补录实际交货时间；未交付的请在原订单更新延期原因和进度。</p>
+    <header><h3 id="delivery-reminder-title">交期已到，请确认交付或登记延期</h3><button @click="emit('later')">一小时后提醒</button></header>
+    <p>以下订单已到约定交期，尚未登记交付。已交付的请补录实际交货时间；未交付的请在原订单“生产进度”登记延期天数、原因和进度。未登记延期的订单不会仅因交期已过计入延期风险。</p>
     <p v-if="hasMore">待核实记录较多，先显示最近到期的500条，处理后会继续显示其余记录。</p>
     <div class="delivery-scroll"><table><thead><tr><th>工厂 / 订单</th><th>产品</th><th>约定交期</th><th>登记</th></tr></thead><tbody><tr v-for="item in items" :key="item.id">
       <td>{{ item.factoryName }}<small>{{ item.orderNo || item.id }}</small></td><td>{{ item.product }}</td><td>{{ item.dueDate }}<small>{{ item.dueDate === today ? '今天到期' : '已过交期，待核实' }}</small></td>
       <td><RouterLink :to="{ path: `/orders/dept/${item.craft}/${item.id}`, query: { region: item.region, reminder: 'delivery' } }" @click="emit('register', item)">去登记交付情况</RouterLink></td>
     </tr></tbody></table></div>
-    <p class="hint">逾期不等于未交付，请核实实际情况。登记实际交货时间或订单标记已交付后，将停止提醒。</p>
+    <p class="hint">交期已过不代表实际延期，请核实实际情况。登记实际交货时间或订单标记已交付后，将停止提醒；仅登记延期仍会提醒确认最终交付。</p>
   </section></div>
 </template>
 <style scoped>

@@ -37,7 +37,7 @@ export function useDynamicAnalysis() {
     const settled = await Promise.allSettled([
       pb.collection('factories').getFullList<Factory>({ fields: 'id,name,craft,region', sort: 'name' }),
       quality ? pb.collection('quality_patrols').getFullList<PatrolFact>({ fields: 'id,factory,check_date,grade,correction,planned_date,completed_date' }) : Promise.resolve([]),
-      delivery ? pb.collection('orders').getFullList<Order>({ filter: orderScopeFilter({}, crafts, regions), fields: 'id,factory,region,product,order_no,status,delivery_date,actual_delivery_date,expand.factory.craft,expand.factory.region', expand: 'factory' }) : Promise.resolve([]),
+      delivery ? pb.collection('orders').getFullList<Order>({ filter: orderScopeFilter({}, crafts, regions), fields: 'id,factory,region,product,order_no,status,delivery_date,actual_delivery_date,delay_days,delay_reason,expand.factory.craft,expand.factory.region', expand: 'factory' }) : Promise.resolve([]),
     ])
     if (disposed || current !== revision) return
     readFailed.value = settled.some(item => item.status === 'rejected')

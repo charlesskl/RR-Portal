@@ -14,9 +14,9 @@ beforeEach(()=>{vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-21T02:00:0
 afterEach(()=>{w?.unmount();document.body.innerHTML='';vi.useRealTimers();vi.unstubAllGlobals()})
 async function setup(){w=mount(DeliveryReminder,{attachTo:document.body});await flushPromises();return w}
 describe('delivery registration reminders',()=>{
-  it('only enables reminders on delivery list pages, not detail forms or other modules',()=>{
-    for(const path of ['/orders','/orders/dept/assembly','/orders/region/hunan/delayed'])expect(deliveryReminderPage(path)).toBe(true)
-    for(const path of ['/dashboard','/orders/new','/orders/dept/assembly/new','/orders/dept/assembly/o1'])expect(deliveryReminderPage(path)).toBe(false)
+  it('enables reminders on home, analysis and delivery lists, without interrupting detail forms',()=>{
+    for(const path of ['/dashboard','/analysis','/orders','/orders/dept/assembly','/orders/region/hunan/delayed'])expect(deliveryReminderPage(path)).toBe(true)
+    for(const path of ['/login','/orders/new','/orders/dept/assembly/new','/orders/dept/assembly/o1'])expect(deliveryReminderPage(path)).toBe(false)
   })
   it('opens automatically, links to registration, snoozes one hour and remains manually accessible',async()=>{
     await setup();expect(w.find('[role=dialog]').text()).toContain('今天到期')
@@ -82,4 +82,8 @@ describe('delivery registration reminders',()=>{
   it('handles ambiguous names without inventing an empty successful reminder',async()=>{
     state.send.mockResolvedValue({...result,items:[],nameAmbiguous:true});await setup();expect(w.text()).toContain('无法唯一匹配');expect(w.find('[role=dialog]').exists()).toBe(false)
   })
+})
+
+it.each(['/dashboard', '/analysis'])('automatically reminds the PMC on %s after login', async path => {
+ state.route.path = path; await setup(); expect(w.find('[role=dialog]').exists()).toBe(true); expect(w.text()).toContain('确认交付或登记延期')
 })

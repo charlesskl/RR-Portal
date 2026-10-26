@@ -25,8 +25,8 @@ function validateInput(body, today) {
   if(!validDay(start)||!validDay(end)||start>end||end>today||(Date.parse(end)-Date.parse(start))/86400000>180) throw new Error('请选择不晚于今天、跨度不超过180天的有效日期范围')
   if(typeof body.question!=='string'||body.question.trim().length<2||body.question.length>600) throw new Error('请输入2至600字的分析问题')
   if(body.factory && (typeof body.factory!=='string'||!/^[a-zA-Z0-9]{15}$/.test(body.factory))) throw new Error('工厂参数无效')
-  if(body.region && !['dongguan','hunan','heyuan'].includes(body.region))throw new Error('厂区参数无效')
-  if(body.craft && !['injection','painting','assembly','sewing','electronics'].includes(body.craft))throw new Error('部门参数无效')
+  if(Object.prototype.hasOwnProperty.call(body,'region')&&body.region!==''&&!['dongguan','hunan','heyuan'].includes(body.region))throw new Error('厂区参数无效')
+  if(Object.prototype.hasOwnProperty.call(body,'craft')&&body.craft!==''&&!['injection','painting','assembly','sewing','electronics'].includes(body.craft))throw new Error('部门参数无效')
   return {start,end,factory:body.factory||'',region:body.region||'',craft:body.craft||'',question:body.question.trim()}
 }
 const schema={type:'object',additionalProperties:false,required:['summary','findings','limitations'],properties:{

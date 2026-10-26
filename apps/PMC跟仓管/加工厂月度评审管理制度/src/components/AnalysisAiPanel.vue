@@ -21,6 +21,12 @@ const craftOptions=computed(()=>[...new Set(regionFactories.value.map(f=>f.craft
 const scopeFactories=computed(()=>regionFactories.value.filter(f=>!craft.value||f.craft===craft.value))
 watch(region,()=>{craft.value='';if(!props.factoryId)factory.value='';clear()})
 watch(craft,()=>{if(!props.factoryId)factory.value='';clear()})
+watch([regionOptions,craftOptions,scopeFactories],()=>{
+  if(props.factoryId)return
+  if(region.value&&!regionOptions.value.includes(region.value)){resetScope();return}
+  if(craft.value&&!craftOptions.value.includes(craft.value)){craft.value='';factory.value='';clear();return}
+  if(factory.value&&!scopeFactories.value.some(f=>f.id===factory.value)){factory.value='';clear()}
+})
 const end=ref(chinaToday()), start=ref(chinaToday(new Date(Date.now()-29*86400000)))
 const question=ref('哪些工厂需要优先跟进？请结合巡查、品质、交期、评分和产值说明依据、数据不足及建议。')
 interface Evidence {id:string;factoryCode:string;factoryId:string;factoryName:string;source:string;recordId:string;date:string;craft:string;region:string}
@@ -28,6 +34,7 @@ interface Report { report:{summary:string;limitations:string[];findings:{title:s
 const result=ref<Report|null>(null)
 let generation=0,configGeneration=0,disposed=false,controller:AbortController|null=null
 function clear(){generation++;controller?.abort();controller=null;result.value=null;busy.value=false;error.value=''}
+function resetScope(){region.value='';craft.value='';factory.value=props.factoryId||'';clear()}
 async function loadConfig(){
   const current=++configGeneration
   configController?.abort()
@@ -61,8 +68,8 @@ async function generate(){
   finally{if(current===generation){busy.value=false;controller=null}}
 }
 watch([start,end,factory,question],()=>clear())
-watch(()=>props.factoryId,id=>{region.value='';craft.value='';factory.value=id||'';clear()})
-const stop=pb.authStore.onChange(()=>{clear();configGeneration++;config.value=null;configError.value='';configLoading.value=false;configController?.abort();if(pb.authStore.record)void loadConfig()})
+watch(()=>props.factoryId,()=>resetScope())
+const stop=pb.authStore.onChange(()=>{resetScope();configGeneration++;config.value=null;configError.value='';configLoading.value=false;configController?.abort();if(pb.authStore.record)void loadConfig()})
 onMounted(loadConfig);onScopeDispose(()=>{disposed=true;configGeneration++;configController?.abort();clear();stop()})
 function target(e:Evidence){
   if(e.source==='quality_patrols')return {path:'/quality-patrol',query:{region:e.region,factory:e.factoryId,date:e.date}}

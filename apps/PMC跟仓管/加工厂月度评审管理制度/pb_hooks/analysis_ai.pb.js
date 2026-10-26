@@ -22,13 +22,6 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
   } catch(err){throw new BadRequestError(String(err.message))}
   if(!scope.modules.length||!scope.crafts.length||!scope.regions.length)throw new ForbiddenError('没有可分析的数据权限')
   if((input.region&&!scope.regions.includes(input.region))||(input.craft&&!scope.crafts.includes(input.craft)))throw new ForbiddenError('没有所选厂区或部门的查看权限')
-  const apiKey=$os.getenv('FACTORY_REVIEW_AI_API_KEY'),model=$os.getenv('FACTORY_REVIEW_AI_MODEL')
-  if($os.getenv('FACTORY_REVIEW_AI_ENABLED')!=='true'||!apiKey||!model)throw new ApiError(503,'AI服务尚未配置，规则预警仍可使用')
-  const provider=$os.getenv('FACTORY_REVIEW_AI_PROVIDER')||'openai'
-  if(!['openai','qwen'].includes(provider))throw new ApiError(503,'AI服务提供商配置无效')
-  const base=($os.getenv('FACTORY_REVIEW_AI_BASE_URL')||(provider==='qwen'?'https://dashscope.aliyuncs.com/compatible-mode/v1':'https://api.openai.com/v1')).replace(/\/$/,'')
-  // Only server configuration controls the destination. Loopback is for the isolated integration harness.
-  if(!/^https:\/\/[^\s?#@]+$/.test(base)&&!($os.getenv('FACTORY_REVIEW_AI_LOCAL_TEST')==='true'&&/^http:\/\/127\.0\.0\.1:\d+\/v1$/.test(base)))throw new ApiError(503,'AI服务地址配置无效')
   const info=e.requestInfo(),factoryMap={},factories=[]
   const factoryFilters=[],factoryParams={}
   if(input.factory){factoryFilters.push('id = {:factory}');factoryParams.factory=input.factory}
@@ -41,12 +34,14 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
   if(!factories.length)throw new BadRequestError('没有可分析的工厂')
   const aliases={};factories.forEach((f,i)=>aliases[f.id]='F'+(i+1))
   const evidence=[],refs=[],coverage=[],checked=[]
+  let total=0
   function valueOf(record,src,key){
     // Optional patrol counts are JSON fields: JSVM exposes their JSONRaw bytes.
     if(src.collection==='quality_patrols'&&['staff','lines','area'].includes(key))return JSON.parse(record.getString(key)||'null')
     return record.get(key)
   }
-  for(const src of helpers.sources){
+  for(const originalSource of helpers.sources){
+    const src=originalSource.collection==='orders'?Object.assign({},originalSource,{date:input.orderDateBasis}):originalSource
     if(!scope.modules.includes(src.module)){coverage.push({source:src.label,status:'未授权，未读取',count:0});continue}
     const monthly=src.date==='year_month',start=monthly?input.start.slice(0,7):input.start,end=monthly?input.end.slice(0,7):input.end+' 23:59:59.999Z'
     // PocketBase limits filter expressions. Keep each disjoint factory batch below
@@ -60,24 +55,35 @@ routerAdd('POST','/api/factory-review/analysis-ai', e => {
       if(src.collection==='monthly_scores')filter+=' && status != "draft"'
       const batch=e.app.findRecordsByFilter(src.collection,filter,src.date+',id',2001-rows.length,0,params)
       batch.forEach(r=>rows.push(r))
-      if(rows.length>2000)throw new BadRequestError('范围内记录过多，请缩短时间或选择工厂后重试')
+      if(rows.length>2000)throw new BadRequestError(src.label+'候选记录超过2000条，统计未完成，请缩短时间或选择工厂；订单日期口径为'+(input.orderDateBasis==='order_date'?'下单时间':'约定交货时间'))
     }
     let count=0
     for(const r of rows){
       const f=factoryMap[r.getString('factory')],region=src.collection==='orders'?(r.getString('region')||f.getString('region')||'dongguan'):(f.getString('region')||'dongguan')
       if((input.region&&region!==input.region)||!scope.regions.includes(region)||!e.app.canAccessRecord(r,info,r.collection().viewRule))continue
+      count++;total++
+      if(input.preview||total>500)continue
       const fields={};let shortened=false
       src.fields.forEach(key=>{let value=valueOf(r,src,key);if(typeof value==='string'&&value.length>800){value=value.slice(0,800);shortened=true}fields[key]=value})
       const id=src.collection+':'+r.id
       evidence.push({id,factory:aliases[f.id],type:src.label,fields,shortened})
       refs.push({id,factoryCode:aliases[f.id],factoryId:f.id,factoryName:f.getString('name'),source:src.collection,recordId:r.id,date:r.getString(src.date).slice(0,10),craft:f.getString('craft'),region})
-      checked.push({collection:src.collection,id:r.id,factory:f.id,source:src,region:r.getString('region'),snapshot:JSON.stringify(src.fields.map(key=>valueOf(r,src,key)))});count++
-      if(evidence.length>500)throw new BadRequestError('分析明细超过500条，请缩短时间或选择工厂；系统不会截取部分数据冒充全局结论')
+      checked.push({collection:src.collection,id:r.id,factory:f.id,source:src,region:r.getString('region'),snapshot:JSON.stringify(src.fields.map(key=>valueOf(r,src,key)))})
     }
     coverage.push({source:src.label,status:count?'已读取':'范围内无可见记录',count})
   }
+  const statistics={coverage,total,limit:500,orderDateBasis:input.orderDateBasis}
+  if(input.preview)return e.json(200,statistics)
+  if(total>500)throw new BadRequestError('分析明细共'+total+'条（'+coverage.map(c=>c.source+' '+c.count+'条').join('、')+'），超过500条上限；请缩小范围。订单按'+(input.orderDateBasis==='order_date'?'下单时间':'约定交货时间')+'筛选')
+  const apiKey=$os.getenv('FACTORY_REVIEW_AI_API_KEY'),model=$os.getenv('FACTORY_REVIEW_AI_MODEL')
+  if($os.getenv('FACTORY_REVIEW_AI_ENABLED')!=='true'||!apiKey||!model)throw new ApiError(503,'AI服务尚未配置，规则预警仍可使用')
+  const provider=$os.getenv('FACTORY_REVIEW_AI_PROVIDER')||'openai'
+  if(!['openai','qwen'].includes(provider))throw new ApiError(503,'AI服务提供商配置无效')
+  const base=($os.getenv('FACTORY_REVIEW_AI_BASE_URL')||(provider==='qwen'?'https://dashscope.aliyuncs.com/compatible-mode/v1':'https://api.openai.com/v1')).replace(/\/$/,'')
+  // Only server configuration controls the destination. Loopback is for the isolated integration harness.
+  if(!/^https:\/\/[^\s?#@]+$/.test(base)&&!($os.getenv('FACTORY_REVIEW_AI_LOCAL_TEST')==='true'&&/^http:\/\/127\.0\.0\.1:\d+\/v1$/.test(base)))throw new ApiError(503,'AI服务地址配置无效')
   if(!evidence.length)throw new BadRequestError('所选范围没有可分析的记录，请调整日期或工厂')
-  const dataset={start:input.start,end:input.end,region:input.region,craft:input.craft,coverage,notes:'订单按约定交期、巡查按检查日期、检验按送货日期筛选；月度数据按范围涉及的整月，未包含范围外记录和无日期记录。厂区筛选按工厂归属，订单另限定其管理厂区；空管理厂区沿用工厂厂区。工厂代号仅本次有效。',evidence}
+  const dataset={start:input.start,end:input.end,region:input.region,craft:input.craft,coverage,orderDateBasis:input.orderDateBasis,notes:'订单按'+(input.orderDateBasis==='order_date'?'下单时间':'约定交期')+'、巡查按检查日期、检验按送货日期筛选；月度数据按范围涉及的整月，未包含范围外记录和无日期记录。厂区筛选按工厂归属，订单另限定其管理厂区；空管理厂区沿用工厂厂区。工厂代号仅本次有效。',evidence}
   if(JSON.stringify(dataset).length>160000)throw new BadRequestError('分析内容过多，请缩小范围')
   function stillAuthorized(){
     const latest=e.app.findRecordById('users',e.auth.id)

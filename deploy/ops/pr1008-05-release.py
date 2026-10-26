@@ -3,7 +3,7 @@ Use a fresh actual-current backup05 and recertify immutable 7cc; never rebuild.
 No environment changes, DB restore, authenticated writes or model calls.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,traceback,urllib.error,urllib.request
-PHASE='prepare'
+PHASE='deploy'
 TARGET='bb1fab660bdf4e04e828e4c4250279f717603ac5'
 TREE='72baeafdefab7f2abf01be09f941f31ec8b623fa'
 SOURCE_MANIFEST_SHA='c73c0f11264192d40a06e16185d356168098ac0c19da66cf15ee05292a5ba734' # Root binds final reviewed source manifest.
@@ -16,7 +16,7 @@ BACKUP=ROOT/'deploy/backups/pr-1008-20261026-05-backup'
 PREPARE=BACKUP.with_name('pr-1008-20261026-05-prepare')
 DEPLOY=BACKUP.with_name('pr-1008-20261026-05-deploy')
 VERIFY=BACKUP.with_name('pr-1008-20261026-05-verify')
-BACKUP_MANIFEST='7e0e9a42b3298802e1dde8145dddc67af93f61614a2322885b2f1d9d10c94bf0';BACKUP_RESULT='4b150d0fa39f9f1362d226cdb12f8da415cc0ec6c6d95b190d27131acf4882fb';PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
+BACKUP_MANIFEST='7e0e9a42b3298802e1dde8145dddc67af93f61614a2322885b2f1d9d10c94bf0';BACKUP_RESULT='4b150d0fa39f9f1362d226cdb12f8da415cc0ec6c6d95b190d27131acf4882fb';PREPARE_MANIFEST='cb1ad89a1076feb38cb591c2eeb713ebcb5c7012c368cc3909e17d2b19674d53';PREPARE_RESULT='a38a3a82a03ab52f0cf68ce8cb31f2d32095e01379c601f6a1a321347df046ad';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 ORDER=('printlink',)
 REUSED_CANDIDATE_IMAGE='sha256:7cc8e9f25c895fe97f302357058a9ceb07ecc7c5a204ab53958a8ecfa8666684'
 DEPS={'pr1008-02-publication-ingress-profile.json': 'c0c279e91c9b55a119e3755801964d3f586752999d3df6a260ac4697dd018e0e', 'pr1008-04-publication-ingress-library.py': 'b34cd0fcce033076b4e72bb875588eb982b37f7c12d8b25707b48031f9ab950d', 'pr1008-05-backup-library.py': 'd816776bcad1b70d893e9f25cef05c2ece2d0d97639adca5c48c865ea1b947b3', 'pr1008-printlink-contract-library.py': '97a14ebb6a93034cf6531880d8852151472ec49f7881a136648376b602a36882', 'batch-host-config-library.py': 'bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1', 'factory-review-backup-library.py': '79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666', 'release-data-ops-library.py': 'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5', 'release-data-library.py': 'd63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9'}

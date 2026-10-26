@@ -118,3 +118,89 @@ it.each([
  expect(w.find('button.primary').attributes('disabled')).toBeDefined()
  w.unmount()
 })
+
+it('cascades region and department choices, submits server scope and clears stale factory selection',async()=>{
+ const w=mount(AnalysisAiPanel,{props:{factories:[{id:'h1',name:'湖南装配',region:'hunan',craft:'assembly'},{id:'h2',name:'湖南车缝',region:'hunan',craft:'sewing'},{id:'d1',name:'东莞喷油',region:'dongguan',craft:'painting'}] as any},global:{stubs:{RouterLink:true}}});await flushPromises()
+ await w.find('[aria-label="分析厂区"]').setValue('hunan')
+ expect(w.find('[aria-label="分析部门"]').text()).not.toContain('喷油部')
+ await w.find('[aria-label="分析部门"]').setValue('assembly')
+ expect(w.find('[aria-label="分析工厂"]').text()).toContain('湖南装配');expect(w.find('[aria-label="分析工厂"]').text()).not.toContain('湖南车缝')
+ await w.find('button.primary').trigger('click');await flushPromises()
+ expect(mocks.send.mock.calls.at(-1)![1].body).toMatchObject({region:'hunan',craft:'assembly',factory:''})
+ await w.find('[aria-label="分析工厂"]').setValue('h1')
+ await w.find('[aria-label="分析厂区"]').setValue('dongguan')
+ expect((w.find('[aria-label="分析部门"]').element as HTMLSelectElement).value).toBe('')
+ expect((w.find('[aria-label="分析工厂"]').element as HTMLSelectElement).value).toBe('')
+ expect(w.find('.result').exists()).toBe(false);w.unmount()
+})
+
+const scopeFactoriesFixture=[
+ {id:'h1',name:'Hunan assembly',region:'hunan',craft:'assembly'},
+ {id:'h2',name:'Hunan sewing',region:'hunan',craft:'sewing'},
+ {id:'d1',name:'Dongguan painting',region:'dongguan',craft:'painting'},
+] as any
+const mountScopePanel=()=>mount(AnalysisAiPanel,{props:{factories:scopeFactoriesFixture},global:{stubs:{RouterLink:true}}})
+
+it('clears unavailable region, department and factory after the authorized factory list changes',async()=>{
+ const w=mountScopePanel();await flushPromises()
+ await w.find('[aria-label="分析厂区"]').setValue('hunan')
+ await w.find('[aria-label="分析部门"]').setValue('assembly')
+ await w.find('[aria-label="分析工厂"]').setValue('h1')
+ await w.setProps({factories:[scopeFactoriesFixture[2]]});await flushPromises()
+ await w.find('button.primary').trigger('click');await flushPromises()
+ expect(mocks.send.mock.calls.at(-1)![1].body).toMatchObject({region:'',craft:'',factory:''})
+ w.unmount()
+})
+
+it('does not carry a selected scope into the next account after authorization changes',async()=>{
+ const w=mountScopePanel();await flushPromises()
+ await w.find('[aria-label="分析厂区"]').setValue('hunan')
+ await w.find('[aria-label="分析部门"]').setValue('assembly')
+ await w.find('[aria-label="分析工厂"]').setValue('h1')
+ mocks.record={id:'other-account'};mocks.changed();await flushPromises()
+ await w.find('button.primary').trigger('click');await flushPromises()
+ expect(mocks.send.mock.calls.at(-1)![1].body).toMatchObject({region:'',craft:'',factory:''})
+ w.unmount()
+})
+
+it('keeps a still-valid selected scope when a background factory refresh returns new objects',async()=>{
+ const w=mountScopePanel();await flushPromises()
+ await w.find('[aria-label="分析厂区"]').setValue('hunan')
+ await w.find('[aria-label="分析部门"]').setValue('assembly')
+ await w.find('[aria-label="分析工厂"]').setValue('h1')
+ await w.setProps({factories:scopeFactoriesFixture.map((f:any)=>({...f}))});await flushPromises()
+ await w.find('button.primary').trigger('click');await flushPromises()
+ expect(mocks.send.mock.calls.at(-1)![1].body).toMatchObject({region:'hunan',craft:'assembly',factory:'h1'})
+ w.unmount()
+})
+
+it('keeps explicit single-factory routes scoped even if their factory is absent from the latest list',async()=>{
+ const w=mountScopePanel();await flushPromises()
+ await w.find('[aria-label="分析厂区"]').setValue('hunan')
+ await w.find('[aria-label="分析部门"]').setValue('assembly')
+ await w.setProps({factoryId:'route-only',factories:[]});await flushPromises()
+ expect(w.find('[aria-label="分析厂区"]').exists()).toBe(false)
+ expect(w.find('[aria-label="分析工厂"]').exists()).toBe(false)
+ await w.find('button.primary').trigger('click');await flushPromises()
+ expect(mocks.send.mock.calls.at(-1)![1].body).toMatchObject({region:'',craft:'',factory:'route-only'})
+ await w.setProps({factoryId:'different-route'});await flushPromises()
+ await w.find('button.primary').trigger('click');await flushPromises()
+ expect(mocks.send.mock.calls.at(-1)![1].body).toMatchObject({region:'',craft:'',factory:'different-route'})
+ w.unmount()
+})
+
+it('aborts and discards an in-flight analysis when a selected factory disappears from its scope',async()=>{
+ let resolveReport!:(value:any)=>void
+ mocks.send.mockImplementation((path:string)=>path.endsWith('/config')?Promise.resolve({enabled:true,model:'test-model',reason:'',dailyLimit:20}):new Promise(resolve=>{resolveReport=resolve}))
+ const w=mountScopePanel();await flushPromises()
+ await w.find('[aria-label="分析厂区"]').setValue('hunan')
+ await w.find('[aria-label="分析部门"]').setValue('assembly')
+ await w.find('[aria-label="分析工厂"]').setValue('h1')
+ await w.find('button.primary').trigger('click');await flushPromises()
+ const signal=mocks.send.mock.calls.at(-1)![1].signal as AbortSignal
+ expect(signal.aborted).toBe(false)
+ await w.setProps({factories:[scopeFactoriesFixture[1]]});await flushPromises()
+ expect(signal.aborted).toBe(true)
+ resolveReport(response);await flushPromises();expect(w.find('.result').exists()).toBe(false)
+ w.unmount()
+})

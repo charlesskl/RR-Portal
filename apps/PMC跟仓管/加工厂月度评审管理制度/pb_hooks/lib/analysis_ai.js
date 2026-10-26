@@ -20,12 +20,14 @@ function permissions(user) {
 }
 function validDay(d) { return typeof d==='string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && Number.isFinite(Date.parse(d)) && new Date(d).toISOString().slice(0,10)===d }
 function validateInput(body, today) {
-  if (!body || Object.keys(body).some(k=>!['start','end','factory','question'].includes(k))) throw new Error('请求只能包含日期范围、工厂和问题')
+  if (!body || Object.keys(body).some(k=>!['start','end','factory','region','craft','question'].includes(k))) throw new Error('请求只能包含日期范围、厂区、部门、工厂和问题')
   const {start,end}=body
   if(!validDay(start)||!validDay(end)||start>end||end>today||(Date.parse(end)-Date.parse(start))/86400000>180) throw new Error('请选择不晚于今天、跨度不超过180天的有效日期范围')
   if(typeof body.question!=='string'||body.question.trim().length<2||body.question.length>600) throw new Error('请输入2至600字的分析问题')
   if(body.factory && (typeof body.factory!=='string'||!/^[a-zA-Z0-9]{15}$/.test(body.factory))) throw new Error('工厂参数无效')
-  return {start,end,factory:body.factory||'',question:body.question.trim()}
+  if(Object.prototype.hasOwnProperty.call(body,'region')&&body.region!==''&&!['dongguan','hunan','heyuan'].includes(body.region))throw new Error('厂区参数无效')
+  if(Object.prototype.hasOwnProperty.call(body,'craft')&&body.craft!==''&&!['injection','painting','assembly','sewing','electronics'].includes(body.craft))throw new Error('部门参数无效')
+  return {start,end,factory:body.factory||'',region:body.region||'',craft:body.craft||'',question:body.question.trim()}
 }
 const schema={type:'object',additionalProperties:false,required:['summary','findings','limitations'],properties:{
   summary:{type:'string'}, limitations:{type:'array',items:{type:'string'}}, findings:{type:'array',items:{type:'object',additionalProperties:false,required:['title','risk','analysis','actions','evidence_ids'],properties:{title:{type:'string'},risk:{type:'string',enum:['high','medium','low']},analysis:{type:'string'},actions:{type:'array',items:{type:'string'}},evidence_ids:{type:'array',items:{type:'string'}}}}}}

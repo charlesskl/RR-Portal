@@ -73,6 +73,64 @@ test('AI routes use server evidence, permission scope, quota and validated citat
       assert.ok(result.evidence.every(e=>[id('allowed'),'extra0000001099'].includes(e.factoryId)))
     } finally {await superuser.collection('quality_patrols').delete(row.id)}
   })
+  await t.test('new scope parameters reject explicit invalid types before quota or model calls',async()=>{
+    await reset()
+    const before=calls.length
+    const usage=()=>superuser.collection('analysis_ai_usage').getFullList()
+    const initialQuota=(await usage()).length
+    for(const field of ['region','craft'])for(const value of [false,0,null,[],{},true,1,'invalid']){
+      await assert.rejects(generate(clients.admin,{[field]:value}),code(400),field+' must reject '+JSON.stringify(value))
+      assert.equal(calls.length,before)
+      assert.equal((await usage()).length,initialQuota)
+    }
+    const empty=await generate(clients.scoped,{region:'',craft:''})
+    assert.equal(empty.evidence.length,5)
+    assert.ok(empty.evidence.every(e=>e.factoryId===id('allowed')))
+    assert.equal(calls.length,before+1)
+  })
+  await t.test('region and department narrow evidence and cannot expand account scope',async()=>{
+    await reset()
+    const report=await generate(clients.admin,{region:'hunan',craft:'assembly'})
+    assert.ok(report.evidence.length>0)
+    assert.ok(report.evidence.every(e=>e.region==='hunan'&&e.craft==='assembly'))
+    const cross=await superuser.collection('orders').create({factory:id('allowed'),delivery_date:'2026-10-16',region:'heyuan'})
+    await reset()
+    const filtered=await generate(clients.admin,{region:'hunan',craft:'assembly'})
+    assert.ok(!filtered.evidence.some(e=>e.recordId===cross.id))
+    await superuser.collection('orders').delete(cross.id)
+    const before=calls.length
+    await assert.rejects(generate(clients.scoped,{region:'heyuan'}),code(403))
+    await assert.rejects(generate(clients.scoped,{craft:'sewing'}),code(403))
+    await assert.rejects(generate(clients.admin,{region:'invalid'}),code(400))
+    await assert.rejects(generate(clients.admin,{craft:'invalid'}),code(400))
+    await assert.rejects(generate(clients.admin,{region:'hunan',factory:id('other')}),code(403))
+    assert.equal(calls.length,before)
+  })
+  await t.test('empty factory region defaults to Dongguan and order management region narrows it further',async()=>{
+    const factory=await superuser.collection('factories').create({id:id('legacy'),name:'legacy',region:'',craft:'assembly'})
+    const local=await superuser.collection('orders').create({factory:factory.id,delivery_date:'2026-10-16',region:''})
+    const cross=await superuser.collection('orders').create({factory:factory.id,delivery_date:'2026-10-16',region:'hunan'})
+    const patrol=await superuser.collection('quality_patrols').create({factory:factory.id,check_date:'2026-10-16',staff:9})
+    try {
+      await reset()
+      const result=await generate(clients.admin,{region:'dongguan',craft:'assembly',factory:factory.id})
+      assert.deepEqual(new Set(result.evidence.map(e=>e.recordId)),new Set([local.id,patrol.id]))
+      assert.ok(result.evidence.every(e=>e.factoryId===factory.id&&e.region==='dongguan'&&e.craft==='assembly'))
+      const dataset=inputDataset(calls.at(-1))
+      assert.equal(dataset.region,'dongguan');assert.equal(dataset.craft,'assembly')
+      assert.deepEqual(new Set(dataset.evidence.map(e=>e.id)),new Set(['orders:'+local.id,'quality_patrols:'+patrol.id]))
+      assert.ok(!JSON.stringify(dataset).includes(cross.id))
+      const before=calls.length,quota=(await superuser.collection('analysis_ai_usage').getFullList()).length
+      await assert.rejects(generate(clients.admin,{region:'dongguan',craft:'painting'}),code(400))
+      await assert.rejects(generate(clients.admin,{region:'hunan',factory:factory.id}),code(403))
+      assert.equal(calls.length,before)
+      assert.equal((await superuser.collection('analysis_ai_usage').getFullList()).length,quota)
+    } finally {
+      for(const row of [local,cross])await superuser.collection('orders').delete(row.id)
+      await superuser.collection('quality_patrols').delete(patrol.id)
+      await superuser.collection('factories').delete(factory.id)
+    }
+  })
   await t.test('disabled modules and forbidden factory cannot be supplied via request',async()=>{
     const report=await generate(clients.noquality);assert.ok(report.evidence.every(e=>!e.source.startsWith('quality_')))
     await assert.rejects(generate(clients.scoped,{factory:id('other')}),code(403))

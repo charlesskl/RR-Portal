@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { pb } from '../pb'
 import { useAuthStore } from '../stores/auth'
 import { canAccessPath, canViewCraft, canViewRegion } from '../utils/permissions'
 import type { Craft, Region } from '../constants/roles'
@@ -48,7 +49,11 @@ export const router = createRouter({ history: createWebHistory(import.meta.env.B
 
 router.beforeEach((to) => {
   const auth = useAuthStore()
-  if (!to.meta.public && !auth.isLoggedIn) return '/login'
+  if (!to.meta.public && (!auth.isLoggedIn || !pb.authStore.isValid)) {
+    // Cached account details survive token expiry; they are not proof of login.
+    auth.logout()
+    return '/login'
+  }
   if (auth.role && !canAccessPath(auth.role, to.path)) return '/dashboard'
   const craft = to.params.craft as Craft | undefined
   if (craft && !canViewCraft(craft)) return '/dashboard'

@@ -21,23 +21,54 @@ describe('AI analysis interaction',()=>{
   it('keeps configuration loading independent from edits to the analysis question',async()=>{
     let resolve!:(value:any)=>void;mocks.send.mockImplementation(()=>new Promise(r=>resolve=r))
     const w=mountPanel();await w.find('textarea').setValue('正在输入分析问题')
-    resolve({enabled:true,model:'test-model'});await flushPromises()
+    resolve({enabled:true,model:'test-model',reason:'',dailyLimit:20});await flushPromises()
     expect(w.find('button.primary').attributes('disabled')).toBeUndefined();expect(mocks.send).toHaveBeenCalledTimes(1);w.unmount()
   })
   it('shows server failures and never substitutes a fake AI conclusion',async()=>{
-    mocks.send.mockImplementation(async(path:string)=>{if(path.endsWith('/config'))return {enabled:true};throw {response:{message:'AI服务暂不可用'}}})
+    mocks.send.mockImplementation(async(path:string)=>{if(path.endsWith('/config'))return {enabled:true,model:'test-model',reason:'',dailyLimit:20};throw {response:{message:'AI服务暂不可用'}}})
     const w=mountPanel();await flushPromises();await w.find('button.primary').trigger('click');await flushPromises();expect(w.find('[role=alert]').text()).toContain('AI服务暂不可用');expect(w.find('.result').exists()).toBe(false);w.unmount()
   })
   it('discards a pending answer after authorization changes',async()=>{
-    let resolve!:(value:any)=>void;mocks.send.mockImplementation((path:string)=>path.endsWith('/config')?Promise.resolve({enabled:true}):new Promise(r=>resolve=r))
+    let resolve!:(value:any)=>void;mocks.send.mockImplementation((path:string)=>path.endsWith('/config')?Promise.resolve({enabled:true,model:'test-model',reason:'',dailyLimit:20}):new Promise(r=>resolve=r))
     const w=mountPanel();await flushPromises();await w.find('button.primary').trigger('click');mocks.changed();resolve(response);await flushPromises();expect(w.find('.result').exists()).toBe(false);w.unmount()
   })
 })
 
 it('replaces opaque server errors with actionable Chinese guidance',async()=>{
- mocks.send.mockImplementation(async(path:string)=>{if(path.endsWith('/config'))return {enabled:true};throw {response:{message:'Something went wrong while processing your request.'}}})
+ mocks.send.mockImplementation(async(path:string)=>{if(path.endsWith('/config'))return {enabled:true,model:'test-model',reason:'',dailyLimit:20};throw {response:{message:'Something went wrong while processing your request.'}}})
  const w=mountPanel();await flushPromises();await w.find('button.primary').trigger('click');await flushPromises()
  expect(w.text()).toContain('请缩小日期范围或选择单个工厂后重试')
  expect(w.text()).not.toContain('Something went wrong')
  w.unmount()
+})
+
+it('retries a transient config failure once and recovers without retaining the old error',async()=>{
+ mocks.send.mockRejectedValueOnce({status:503}).mockResolvedValueOnce({enabled:true,model:'qwen3-max',reason:'',dailyLimit:20})
+ const w=mountPanel();await flushPromises()
+ expect(mocks.send).toHaveBeenCalledTimes(2);expect(w.find('header').text()).toContain('服务已配置');expect(w.find('[role=alert]').exists()).toBe(false)
+ expect(mocks.send.mock.calls.every(c=>c[0].endsWith('/config'))).toBe(true);w.unmount()
+})
+it('shows login expiry without retrying or misreporting missing model configuration',async()=>{
+ mocks.send.mockRejectedValue({status:401})
+ const w=mountPanel();await flushPromises()
+ expect(mocks.send).toHaveBeenCalledTimes(1);expect(w.find('[role=alert]').text()).toContain('登录状态已失效');expect(w.find('header').text()).toContain('配置状态未知')
+ await w.find('textarea').setValue('新问题');expect(w.text()).toContain('登录状态已失效');w.unmount()
+})
+it('clears config error after manual retry succeeds',async()=>{
+ mocks.send.mockRejectedValue({status:403})
+ const w=mountPanel();await flushPromises();expect(w.text()).toContain('当前账号无AI分析权限')
+ mocks.send.mockResolvedValue({enabled:true,model:'qwen3-max',reason:'',dailyLimit:20})
+ await w.find('[role=alert] button').trigger('click');await flushPromises()
+ expect(w.find('[role=alert]').exists()).toBe(false);expect(w.find('button.primary').attributes('disabled')).toBeUndefined();w.unmount()
+})
+it('rejects HTML or malformed successful responses instead of displaying unconfigured service',async()=>{
+ mocks.send.mockResolvedValue('<html>proxy fallback</html>')
+ const w=mountPanel();await flushPromises();expect(w.text()).toContain('接口返回格式异常');expect(w.find('button.primary').attributes('disabled')).toBeDefined();w.unmount()
+})
+it('bounds stalled config requests and cancels them on unmount',async()=>{
+ vi.useFakeTimers()
+ mocks.send.mockImplementation((_path,options)=>new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject({status:0,isAbort:true}))))
+ const w=mountPanel();await vi.advanceTimersByTimeAsync(10000)
+ expect(w.text()).toContain('请求超时或网络连接失败');expect(mocks.send).toHaveBeenCalledTimes(1)
+ w.unmount();expect(vi.getTimerCount()).toBe(0);vi.useRealTimers()
 })

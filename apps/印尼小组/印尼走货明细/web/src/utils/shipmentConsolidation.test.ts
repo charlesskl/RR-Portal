@@ -76,6 +76,74 @@ it('不同共箱组及分段箱号不错误折叠', () => {
   expect(consolidateShipmentItems(batches.map(row => ({ ...row, qty_per_carton: '1-2/100' })), materials)).toHaveLength(2)
 })
 
+it('多物料共箱中只汇总相同物料批次，保持物理箱数及各合同发票金额', () => {
+  const mats = new Map([
+    ...materials,
+    [975, { ...materials.get(974)!, id: 975, name_zh: '另一物料' }] as const,
+  ])
+  const rows = [
+    { ...batches[0], qty: 50, kg: 4.53, cartons: 2, carton_group: 'G', carton_no: 'A01', contract_no: 'A', invoice_no: 'A' },
+    { ...batches[1], material_id: 975, outbound_id: 76, qty: 10, kg: 1, cartons: 2, carton_group: 'G', carton_no: 'B01', contract_no: 'B', invoice_no: 'B' },
+    { ...batches[1], qty: 50, kg: 4.53, cartons: 2, carton_group: 'G', carton_no: 'A02', contract_no: 'A', invoice_no: 'A' },
+  ].map(row => Object.freeze({ ...row, customs_company: '深圳市华胜益出口贸易有限公司' }))
+  const original = structuredClone(rows)
+  const before = withShipmentInvoicePrices(sortShipmentItems(Object.freeze(rows), mats), mats)
+  const result = consolidateShipmentItems(rows, mats)
+  const after = withShipmentInvoicePrices(sortShipmentItems(result, mats), mats)
+  expect(result).toHaveLength(2)
+  expect(result.find(row => row.material_id === 974)).toMatchObject({
+    qty: 100, kg: 9.06, cartons: 2, carton_no: 'A01 / A02', outbound_ids: [74, 75],
+    sources: [original[0], original[2]],
+  })
+  expect(result.find(row => row.material_id === 975)).toMatchObject({ qty: 10, kg: 1, carton_no: 'B01' })
+  expect(cartonLayout(result, mats).reduce((sum, row) => sum + row.count, 0)).toBe(2)
+  for (const contract of ['A', 'B']) {
+    const amount = (items: typeof before) => items.filter(row => row.contract_no === contract)
+      .reduce((sum, row) => sum + row.kg * row.invoice_price, 0)
+    expect(amount(after)).toBeCloseTo(amount(before), 9)
+  }
+  expect(rows).toEqual(original)
+})
+
+it('同名共箱组跨供应商仍各自计箱，批次标签汇总不扩大共箱范围', () => {
+  const rows = [
+    { ...batches[0], supplier: 'A供应商', qty: 50, kg: 4.53, cartons: 2, carton_group: 'G', carton_no: 'A01' },
+    { ...batches[0], supplier: 'B供应商', outbound_id: 76, qty: 40, kg: 3.624, cartons: 3, carton_group: 'G', carton_no: 'B01' },
+    { ...batches[1], supplier: 'A供应商', qty: 50, kg: 4.53, cartons: 2, carton_group: 'G', carton_no: 'A02' },
+    { ...batches[1], supplier: 'B供应商', outbound_id: 77, qty: 40, kg: 3.624, cartons: 3, carton_group: 'G', carton_no: 'B02' },
+  ]
+  const original = structuredClone(rows)
+  const result = consolidateShipmentItems(rows, materials)
+  expect(result).toHaveLength(2)
+  expect(result.map(row => [row.supplier, row.qty, row.cartons, row.carton_no]))
+    .toEqual([['A供应商', 100, 2, 'A01 / A02'], ['B供应商', 80, 3, 'B01 / B02']])
+  expect(cartonLayout(result, materials).reduce((sum, row) => sum + row.count, 0)).toBe(5)
+  expect(rows).toEqual(original)
+})
+
+it.each(['RRI', 'RRM'])('真实模板保留两个半箱的实际箱数，数量重量与源批次一致（%s）', async customer => {
+  const rows = batches.map((row, index) => ({
+    ...row, qty: 50, kg: 4.53, cartons: 1, carton_no: index ? 'HALF-B' : 'HALF-A',
+    contract_no: 'C-HALF', invoice_no: 'I-HALF',
+  }))
+  const original = structuredClone(rows)
+  const templateBuffer = Uint8Array.from(readFileSync(new URL(`../../public/template-customs-${customer.toLowerCase()}.xlsx`, import.meta.url))).buffer
+  const blob = await buildCustomsWorkbook({ templateBuffer, items: rows, materials,
+    productHs: new Map(), images: new Map(), form: { containerNo: 'HALF-CARTONS', customer, rate: 7.2 } })
+  const book = XLSX.read(await blob.arrayBuffer(), { type: 'array' })
+  const sheet = book.Sheets['HALF-CARTONS']
+  expect(sheet.L4.v).toBe(100)
+  expect(sheet.K4.v).toBe(9.06)
+  expect(sheet.AT4.v).toBe(2)
+  expect(sheet.S4.f).toBe('R4*AT4')
+  expect(sheet.P4.f).toBe('ROUND(BA4*L4,2)')
+  expect(sheet.Q4.f).toBe('ROUND(BB4*L4,2)')
+  expect(sheet.AP4.f).toBe('AO4*K4')
+  expect(sheet.F5?.v).not.toBe('彩盒-FSC')
+  expect(book.Sheets['装箱单'][customer === 'RRI' ? 'A25' : 'A24']?.v).toBe(1)
+  expect(rows).toEqual(original)
+}, 60000)
+
 it('华胜益附加费在合并后重新分摊，整柜发票总额不变', () => {
   const rows = batches.map(row => ({ ...row, customs_company: '深圳市华胜益出口贸易有限公司' }))
   const original = withShipmentInvoicePrices(sortShipmentItems(rows, materials), materials)

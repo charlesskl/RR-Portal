@@ -13,7 +13,7 @@ LIVE_IMAGE='sha256:d8080518f8c97d9837af7cf44d74953edda402e0ebf7a2f6cbaf026eb410b
 STATIC_BASE_IMAGE='sha256:d8080518f8c97d9837af7cf44d74953edda402e0ebf7a2f6cbaf026eb410ba00'
 COMPOSE_TAG='rr-portal-indo-shipping:latest'
 BRANCH='refs/heads/ops/pr-1020-20261027-static'
-EXECUTE=True
+EXECUTE=False
 PUBLIC='http://127.0.0.1/indo-shipping/'
 PHASE='inspect'
 STAGE='entry';SERIAL=0

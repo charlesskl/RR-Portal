@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'f024ddcc8b776e8c90264b28639405524f46381b1199df647a260bd1c54d9f6a'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
+  SCOPED_RELEASE_HELPER_SHA256: 'f57d1cb77c0b90f829c124dd14baf1361a426cec8704b081a849c56ad063177a'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -56,5 +56,5 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/pr1020-static.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1020-static-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = f024ddcc8b776e8c90264b28639405524f46381b1199df647a260bd1c54d9f6a ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = f57d1cb77c0b90f829c124dd14baf1361a426cec8704b081a849c56ad063177a ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

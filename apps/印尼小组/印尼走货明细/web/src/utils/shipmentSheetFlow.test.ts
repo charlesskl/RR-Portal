@@ -55,6 +55,16 @@ it('rejects stale confirmation after rows change rather than overwriting newer e
   expect(state.setItems).not.toHaveBeenCalled()
   expect(state.message.warning).toHaveBeenCalled()
 })
+it('rejects stale confirmation after material metadata changes, without overwriting either state', () => {
+  const { state, edit } = setup()
+  edit('material:net_per_pc', '.5')
+  state.sheetRevision.current.matMap = new Map([[2, { net_per_pc: .8, unit_kg: 'KGM' }]])
+  state.Modal.confirm.mock.calls[0][0].onOk()
+  expect(state.setItems).not.toHaveBeenCalled()
+  expect(state.setMatMap).not.toHaveBeenCalled()
+  expect(state.setDirtyMatIds).not.toHaveBeenCalled()
+  expect(state.message.warning).toHaveBeenCalled()
+})
 it('rejects invalid values and unknown customs companies without opening confirmation', () => {
   const { state, edit } = setup()
   edit('qty', '-1'); edit('customs_company', '未知公司')

@@ -2,10 +2,10 @@
 No environment changes, DB restore, authenticated writes or model calls.
 """
 import copy,hashlib,importlib.util,io,json,os,pathlib,re,signal,stat,subprocess,sys,tarfile,traceback,urllib.error,urllib.request
-EXECUTE=True
-PHASE='verify'
-TARGET='b9f72141b44e7a692d2ccbab32d6846f8e9d3dcb'
-TREE='3a57ff94c283d51a0d1c8fae614fc5340fb47ce0'
+EXECUTE=False
+PHASE=''
+TARGET=''
+TREE=''
 SOURCE_MANIFEST_SHA='0e6d264695ef225ea53f63a93a8c4faf2dd436d084c51666e5f9d33380d24353'
 BASE='2fe302c1e65138a056fba0f21c172de11a5de2ee'
 BASE_TREE='6f0264da45fc34aa3eb4933b3657be61568e2ee5'
@@ -15,7 +15,7 @@ BACKUP=ROOT/'deploy/backups/pr-1017-20261027-backup'
 PREPARE=BACKUP.with_name('pr-1017-20261027-prepare-r2')
 DEPLOY=BACKUP.with_name('pr-1017-20261027-deploy')
 VERIFY=BACKUP.with_name('pr-1017-20261027-verify')
-BACKUP_MANIFEST='9cf202aba946d1c0e034e91f2e3d0afe4d513cb0c300edc5fce80e3287f30a1f';BACKUP_RESULT='deef46a9a914176b81fcbad6bce4a9aa43f0af655c1d47d319f7e53e4fed153b';PREPARE_MANIFEST='87414d8cbeb1b2539d794f7fcd325f84fad4bc5e2fb50ec5c5ebe30435fbbe39';PREPARE_RESULT='9066f3e290a921025d1004b77a525896e67030361b58a5d3497b6dcd5e61e7f8';DEPLOY_MANIFEST='265998948f8e34743543716320b2431b8840077c920b9d376ea24632d7a928b8';DEPLOY_RESULT='e9305a069924be600a6853a71161b3cc80095a67a151deacb9a2d6310f806ff4'
+BACKUP_MANIFEST='';BACKUP_RESULT='';PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
 ORDER=('indo-shipping',)
 INDO_SCHEMA_SHA='2a7e993b0c6f673cb27eec87ca9cf4fde483e5b91468a92f96342691e7372a7a'
 REVIEWED_PATHS=('src/IndoShipping.Api/Controllers/ShipmentsController.cs', 'tests/IndoShipping.Api.Tests/ShipmentOutboundLinkTests.cs', 'web/src/components/ShipmentSheetTable.tsx', 'web/src/pages/ShipmentsPage.tsx', 'web/src/utils/shipmentConsolidationSave.test.ts', 'web/src/utils/shipmentOutboundLink.test.ts', 'web/src/utils/shipmentOutboundLink.ts', 'web/src/utils/shipmentOutboundLinkBoundary.test.ts', 'web/src/utils/shipmentOutboundLinkFlow.test.ts', 'web/src/utils/shipmentSheet.ts', 'web/src/utils/shipmentSheetFillDown.test.ts')

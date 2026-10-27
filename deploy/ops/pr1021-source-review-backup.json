@@ -1,0 +1,34 @@
+{
+  "disposition": "CHECKED",
+  "independent": true,
+  "reviewer": "/root/pr1021_calc",
+  "helperSHA256": "41536c76119099bcc9a86da6f830c21428d4b495580cb454f080743a71a36831",
+  "helperGatesFrozen": true,
+  "base": "0126ab920bef53fd2575a612ca932ae99b7aeec9",
+  "baseTree": "758e99287cf3589e9c259b83b4fe3df151f3415a",
+  "allowedPhases": [
+    "backup"
+  ],
+  "dependencies": {
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "qc-source-library.py": "4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5",
+    "portable-pdb-library.py": "cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5"
+  },
+  "scope": [
+    "indo-shipping"
+  ],
+  "parentReview": {
+    "path": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr1021-full-host-independent-review.json",
+    "sha256": "3c4f93c34bdcbf711dd9ffae2138be52234c7ce7acdc69a48e6d266bae271bd5"
+  },
+  "parentReviewPath": "/Users/fovo/Documents/Codex/2026-10-09/new-chat/work/pr1021-full-host-independent-review.json",
+  "parentReviewSHA256": "3c4f93c34bdcbf711dd9ffae2138be52234c7ce7acdc69a48e6d266bae271bd5",
+  "findings": [],
+  "remainingBlockers": [],
+  "independentChecksPassed": 53,
+  "executionPrerequisiteClarification": "The parent source review numeric(18,4) prerequisite requires a positively observed actual approved inventory. V3 was stopped locally before publication/dispatch; root now uses the independently reviewed replacement V4. Neither V2 failure nor unused V3 is evidence of the live column type. Root must require actual V4 success and exact numeric(18,4) metadata before these helpers execute. No hosthelper source or comparison policy changes.",
+  "limits": "Source approval and local synthetic/pure evidence only. Root supplies actual protected merged target/tree, concrete independently reviewed first-attempt phase plan and sealed actual prior phase receipts; no production deployment claimed by this file.",
+  "checkedUTC": "2026-10-27T13:58:21.333497+00:00"
+}

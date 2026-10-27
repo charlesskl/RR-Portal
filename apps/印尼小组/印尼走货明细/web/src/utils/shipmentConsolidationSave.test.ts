@@ -91,7 +91,7 @@ it('表格批量编辑后保存仍保留每批关联，并将导入物料修改�
 it('导入行确认关联后保存真实物料 ID、出库来源和装箱快照，不写回物料库', async () => {
   const snapshot = { name_zh: '导入彩盒', length: 23, net_per_pc: .2, unit_kg: 'KGM' }
   const imported = { _rowKey: 3, material_id: -3, material_snapshot: snapshot, qty: 2, kg: .4, cartons: 1, carton_no: '10', pallet: 'A' }
-  const linked = linkShipmentOutbound([imported], 3, { outbound_id: 74, material_id: 974, allocatable_qty: 10 },
+  const linked = linkShipmentOutbound([imported], 3, { outbound_id: 74, material_id: 974, allocatable_qty: 10, price: 0 },
     materials.get(974)!, new Map([[-3, snapshot]]))
   const api = { put: vi.fn(async (..._args: any[]) => ({})) }
   const context = createContext({

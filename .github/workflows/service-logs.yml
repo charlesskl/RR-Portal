@@ -1,8 +1,8 @@
-name: PR 1016 Indo Readonly Inventory
+name: PR 1016 Indo Static Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [inspect]}
+      mode: {type: choice, required: true, options: [prepare]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'feda1c95bdb049a575b5e608790ee8dde78ecbf5f6b425b6d548dd1ebd18fe74'
+  SCOPED_RELEASE_HELPER_SHA256: '0a64c99da684666f429082641bdf06ad44d1ac0fb962345011b64479723d8874'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1016-20261027-static && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = inspect ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1016-20261027-static && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed indo inspect
+      - name: Run only reviewed indo static prepare
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,13 +48,13 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1016-20261027-static && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = inspect && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1016-20261027-static && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1016-20261027-static:refs/remotes/origin/ops/pr-1016-20261027-static >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1016-20261027-static)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/pr1016-static.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1016-inspect.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = feda1c95bdb049a575b5e608790ee8dde78ecbf5f6b425b6d548dd1ebd18fe74 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1016-static-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 0a64c99da684666f429082641bdf06ad44d1ac0fb962345011b64479723d8874 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

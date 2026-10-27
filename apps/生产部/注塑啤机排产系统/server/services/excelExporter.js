@@ -40,6 +40,10 @@ function isFullyProduced(item) {
   return needed > 0 && (item.accumulated || 0) >= needed;
 }
 
+// 特殊机台：不参与常规机台编号排序，导出时排到制表人行之后
+const SPECIAL_MACHINES = ['其他机台', '吹气机台'];
+const isSpecialMachine = (it) => SPECIAL_MACHINES.includes(it.machine_no);
+
 /**
  * 导出排机单为Excel（严格对齐实际排单表格式）
  */
@@ -119,9 +123,9 @@ async function exportScheduleExcel(scheduleId) {
   headerRow.height = 26;
 
   // ========== Row 4+: 数据行 ==========
-  // 其他机台排到制表人行之后
-  const regularItems = items.filter(it => it.machine_no !== '其他机台');
-  const otherItems = items.filter(it => it.machine_no === '其他机台');
+  // 其他机台/吹气机台 排到制表人行之后
+  const regularItems = items.filter(it => !isSpecialMachine(it));
+  const otherItems = items.filter(it => isSpecialMachine(it));
   const allItems = [...regularItems, null, ...otherItems]; // null 作为分隔符
 
   let rowNum = 4;
@@ -352,6 +356,8 @@ function findPreviousSchedule(schedule) {
  * 将排机数据写入一个worksheet
  */
 function writeScheduleSheet(ws, schedule, items, machineMap, wsName) {
+  // 其他机台/吹气机台排到末尾（与主表一致，跟在常规机台之后）
+  items = [...items.filter(it => !isSpecialMachine(it)), ...items.filter(it => isSpecialMachine(it))];
   const colWidths = [6, 13, 26, 12, 10, 16, 8, 9, 9, 8, 10, 10, 10, 12, 10, 10, 10, 7, 18, 9, 8, 10, 10, 8, 6];
   colWidths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 

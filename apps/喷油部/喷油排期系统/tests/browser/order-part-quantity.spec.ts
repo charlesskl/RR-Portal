@@ -16,6 +16,8 @@ let schedulePayload: { rows: Array<{ partQtyId: number; startDate: string }> } |
 let unschedules = 0;
 let qtyEditable = true;
 let simulateAutoSchedule = false;
+let failAutoSchedule = false;
+let unavailableAutoSchedule = false;
 let pendingHeadQty = 40;
 let pendingProduct = false;
 let headers = { orderDate: "2026-10-08", deliveryDate: "2026-10-26", isMA: true, isUrgent: false, remark: "" };
@@ -51,6 +53,10 @@ test.beforeAll(async () => {
     if (request.url === "/api/orders/1" && request.method === "PATCH") {
       const payload = JSON.parse(text); patches.push(payload);
       if (failSave) { failSave = false; response.statusCode = 500; return response.end(JSON.stringify({ error: "保存失败，请重试" })); }
+      if (failAutoSchedule && payload.autoAdjustSchedule) {
+        failAutoSchedule = false; response.statusCode = 400;
+        return response.end(JSON.stringify({ error: "未来 600 个工作日内无法补齐，请检查产能与上游供给" }));
+      }
       for (const update of payload.partQtys ?? []) {
         if (update.id === 11) headQty = update.qty;
         if (update.id === 12) footQty = update.qty;
@@ -60,8 +66,10 @@ test.beforeAll(async () => {
       let scheduleAdjustment;
       if (simulateAutoSchedule && payload.autoAdjustSchedule) {
         const target = Math.max(0, headQty - 60);
-        scheduleAdjustment = { addedQty: Math.max(0, target - pendingHeadQty), reducedQty: Math.max(0, pendingHeadQty - target), createdPlans: 1, warnings: [] };
-        pendingHeadQty = target;
+        scheduleAdjustment = unavailableAutoSchedule
+          ? { addedQty: 0, reducedQty: 0, createdPlans: 0, warnings: ["头 第1道原拉别不可用，未自动补排"] }
+          : { addedQty: Math.max(0, target - pendingHeadQty), reducedQty: Math.max(0, pendingHeadQty - target), createdPlans: 1, warnings: [] };
+        if (!unavailableAutoSchedule) pendingHeadQty = target;
       }
       return response.end(JSON.stringify({ id: 1, status: detail().status, scheduleAdjustment }));
     }
@@ -78,6 +86,7 @@ test.afterAll(async () => { await new Promise<void>((resolve, reject) => api.clo
 test.beforeEach(async ({ context }) => {
   headQty = 100; footQty = 50; orderStatus = null; samePartName = false;
   simulateAutoSchedule = false; pendingHeadQty = 40;
+  failAutoSchedule = false; unavailableAutoSchedule = false;
   failSave = false; failReadback = false; malformedReadback = false; patches = [];
   holdSave = false; releaseSave = undefined; schedulePayload = undefined; unschedules = 0;
   qtyEditable = true; pendingProduct = false;
@@ -152,6 +161,8 @@ test("只读账号不能编辑数量或保存", async ({ page, context }) => {
   await page.goto("/orders/1");
   await expect(page.getByLabel("头 数量", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  await expect(page.getByRole("checkbox", { name: /保存时自动补排/ })).toHaveCount(0);
+  expect(patches).toHaveLength(0);
 });
 
 
@@ -209,7 +220,12 @@ test("保存未结束时不能同时撤销排期", async ({ page }) => {
   await page.getByLabel("头 数量", { exact: true }).fill("120");
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect.poll(() => patches.length).toBe(1);
-  try { await expect(page.getByRole("button", { name: "撤销排期", exact: true })).toBeDisabled(); }
+  try {
+    await expect(page.getByRole("button", { name: "撤销排期", exact: true })).toBeDisabled();
+    await expect(page.getByRole("checkbox", { name: /保存时自动补排/ })).toBeDisabled();
+    await expect(page.getByRole("checkbox", { name: /保存时自动补排/ })).toBeChecked();
+    expect(patches).toHaveLength(1);
+  }
   finally { releaseSave?.(); }
   await expect(page.getByRole("status")).toContainText("已保存"); expect(unschedules).toBe(0);
 });
@@ -243,7 +259,13 @@ test("归档订单不提供部位数量编辑", async ({ page }) => {
   await page.goto("/orders/1");
   await expect(page.getByLabel("头 数量", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "工序排期", exact: true })).toHaveCount(0);
-  expect(patches).toHaveLength(0);
+  await expect(page.getByRole("checkbox", { name: /保存时自动补排/ })).toHaveCount(0);
+  await page.locator("fieldset").first().locator("input").nth(2).fill("归档备注");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("已保存");
+  expect(patches).toHaveLength(1);
+  expect(patches[0].autoAdjustSchedule).toBe(false);
+  expect(patches[0].partQtys).toBeUndefined();
 });
 
 test("待补产品订单仅显示补全提示，不提供数量或排期编辑", async ({ page }) => {
@@ -289,4 +311,45 @@ test("已保存缺口可以直接保存自动补齐，也可取消自动调整",
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("已自动补排 20 件");
   expect(patches[1].partQtys).toBeUndefined(); expect(pendingHeadQty).toBe(60);
+});
+
+test("自动调整失败保留需求输入，取消自动调整后可以仅保存需求", async ({ page }) => {
+  simulateAutoSchedule = true; failAutoSchedule = true;
+  await page.goto("/orders/1");
+  await page.getByLabel("头 数量", { exact: true }).fill("120");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("alert", { name: "保存错误" })).toContainText("600 个工作日");
+  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(page.getByLabel("头 数量", { exact: true })).toHaveValue("120");
+  expect(headQty).toBe(100); expect(pendingHeadQty).toBe(40);
+  expect(patches[0]).toMatchObject({ autoAdjustSchedule: true, partQtys: [{ id: 11, qty: 120 }] });
+  await page.getByRole("checkbox", { name: /保存时自动补排/ }).uncheck();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("已保存");
+  expect(patches[1]).toMatchObject({ autoAdjustSchedule: false, partQtys: [{ id: 11, qty: 120 }] });
+  expect(headQty).toBe(120); expect(pendingHeadQty).toBe(40);
+});
+
+test("自动调整配置不可用时显示服务器警告与回读后的剩余缺口", async ({ page }) => {
+  simulateAutoSchedule = true; unavailableAutoSchedule = true;
+  await page.goto("/orders/1");
+  await page.getByLabel("头 数量", { exact: true }).fill("120");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("已自动补排 0 件、减排 0 件");
+  await expect(page.getByRole("status")).toContainText("未自动处理：头 第1道原拉别不可用，未自动补排");
+  const cells = page.getByRole("region", { name: "排期调整提示" }).getByRole("row").nth(1).getByRole("cell");
+  await expect(cells.nth(5)).toHaveText("20");
+  expect(headQty).toBe(120); expect(pendingHeadQty).toBe(40);
+});
+
+test("自动补齐后直接重复保存只发送开关并回读零调整", async ({ page }) => {
+  simulateAutoSchedule = true; headQty = 120;
+  await page.goto("/orders/1");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("已自动补排 20 件");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("已自动补排 0 件、减排 0 件");
+  expect(patches).toHaveLength(2);
+  expect(patches.every(patch => patch.autoAdjustSchedule === true && patch.partQtys === undefined)).toBe(true);
+  expect(headQty).toBe(120); expect(pendingHeadQty).toBe(60);
 });

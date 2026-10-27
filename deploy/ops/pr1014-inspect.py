@@ -6,7 +6,7 @@ BASE='bdf872c28daa2dd2b7c44c247569e85db711cf1e'
 OLD='df60d6a6b1e7f76070cd866cbbc6a4ee50936122'
 BRANCH='refs/heads/ops/pr-1014-20261027'
 APP='apps/喷油部/喷油排期系统'
-EXECUTE=True
+EXECUTE=False
 SERVICES={'sprayplan-test':('data-test','storage-test'),'sprayplan':('data','storage')}
 STARTUP=('docker-entrypoint.sh','next.config.mjs','prisma/schema.prisma','server/SprayPlan.Api/appsettings.json')
 def need(v,label):

@@ -149,7 +149,10 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         var plans = await db.ProductionPlans.AsNoTracking()
             .Where(plan => plan.OrderId == id && plan.DeletedAt == null).ToListAsync();
         var quantities = order.PartQtys.Select(part => new OrderPartQty { PartName = part.PartName, Qty = part.Qty });
-        order = order with { ScheduleBalances = OrderCalc.ScheduleBalances(quantities, plans) };
+        var planIds = plans.Select(plan => plan.Id).ToList();
+        var inboundSources = (await db.InboundApplications.Where(app => planIds.Contains(app.SourcePlanId))
+            .Select(app => app.SourcePlanId).ToListAsync()).ToHashSet();
+        order = order with { ScheduleBalances = OrderCalc.ScheduleBalances(quantities, plans, inboundSources) };
         return Ok(order);
     }
 
@@ -309,11 +312,13 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         return StatusCode(201, new OrderCreated(order.Id, order.ExternalOrderNo, order.Status, order.IsMA, order.IsUrgent));
     }
 
-    // PATCH /api/orders/{id} — 改头部、整单数量或未排期的明细数量。
+    // PATCH /api/orders/{id} — 更正订单需求，可在同一事务中自动调整未报工计划。
     [HttpPatch("{id:int}")]
     [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateOrderRequest req)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var selectedParts = new HashSet<string>();
         // 状态校验在查订单前（对齐旧逻辑：非法状态立即 400，不依赖订单是否存在）
         if (req.Status is not null && !OrderStatuses.Contains(req.Status))
             return BadRequest(new { error = "状态无效" });
@@ -335,7 +340,9 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             if (parts.Count == 0)
                 return BadRequest(new { error = "订单没有部位数量，请先补全部位" });
             var previousQuantities = parts.Select(part => part.Qty).ToArray();
+            var previousById = parts.ToDictionary(part => part.Id, part => part.Qty);
             OrderCalc.ResizeDemand(parts, req.TotalQty.Value);
+            selectedParts.UnionWith(parts.Where(part => previousById[part.Id] != part.Qty).Select(part => part.PartName));
             if (!parts.Select(part => part.Qty).SequenceEqual(previousQuantities))
             {
                 var plans = await db.ProductionPlans.AsNoTracking()
@@ -344,7 +351,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             }
         }
 
-        // 按明细主键独立修改需求，不触碰排期、实绩、入库或库存流水。
+        // 先按明细主键独立更正需求；自动排期在末尾统一处理，实绩与库存不变。
         if (req.PartQtys is { Count: > 0 })
         {
             if (o.Status == "archived" || o.PendingProduct)
@@ -366,7 +373,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             if (changed)
             {
                 foreach (var part in parts)
-                    if (updates.TryGetValue(part.Id, out var qty)) part.Qty = qty;
+                    if (updates.TryGetValue(part.Id, out var qty) && part.Qty != qty) { selectedParts.Add(part.PartName); part.Qty = qty; }
                 var plans = await db.ProductionPlans.AsNoTracking()
                     .Where(plan => plan.OrderId == id && plan.DeletedAt == null).ToListAsync();
                 o.Status = OrderCalc.DemandStatus(o.Status, parts, plans);
@@ -387,10 +394,21 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             else
                 return BadRequest(new { error = "订单状态由系统自动流转，不可手动修改" });
         }
+        DemandScheduleResult? adjustment = null;
+        if (req.AutoAdjustSchedule)
+        {
+            if (o.Status == "archived" || o.PendingProduct)
+                return BadRequest(new { error = "请先恢复订单或补全产品后再自动调整排期" });
+            var parts = await db.OrderPartQtys.Where(part => part.OrderId == id).ToListAsync();
+            if (selectedParts.Count == 0) selectedParts.UnionWith(parts.Select(part => part.PartName));
+            try { adjustment = await DemandScheduleAdjustment.Apply(db, o, parts, selectedParts, CurrentUser()); }
+            catch (InvalidOperationException error) { return BadRequest(new { error = error.Message }); }
+        }
         o.LastUpdatedBy = CurrentUser();
         o.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
-        return Ok(new OrderHeadUpdated(o.Id, o.ExternalOrderNo, o.Status, o.IsMA, o.IsUrgent));
+        await transaction.CommitAsync();
+        return Ok(new OrderHeadUpdated(o.Id, o.ExternalOrderNo, o.Status, o.IsMA, o.IsUrgent, adjustment));
     }
 
     // DELETE /api/orders/{id} — 作废（status=archived 软删）

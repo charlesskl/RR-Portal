@@ -270,7 +270,10 @@ VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_car
                 !snapshot.TryGetProperty("name_zh", out var name) || name.ValueKind != System.Text.Json.JsonValueKind.String ||
                 string.IsNullOrWhiteSpace(name.GetString()))
                 return "导入资料必须包含有效物料名称，且单行资料不能超过 8MB";
-            if (item.outbound_id.HasValue) return "导入资料不能自动关联出库记录";
+            if (item.outbound_id.HasValue && (item.material_id is null or <= 0 ||
+                !snapshot.TryGetProperty("id", out var snapshotId) || snapshotId.ValueKind != System.Text.Json.JsonValueKind.Number ||
+                !snapshotId.TryGetInt32(out var confirmedId) || confirmedId != item.material_id))
+                return "导入资料关联出库前必须确认对应物料 ID";
         }
         foreach (var group in items.Where(x => !string.IsNullOrWhiteSpace(x.carton_group)).GroupBy(x => x.carton_group))
         {
@@ -296,14 +299,17 @@ VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_car
 
         foreach (var (outboundId, qty) in requested.OrderBy(x => x.Key))
         {
-            if (qty <= 0)
+            var linkedItems = items.Where(x => x.outbound_id == outboundId).ToArray();
+            if (qty <= 0 || linkedItems.Any(x => x.qty is null or <= 0))
                 return $"出库记录 #{outboundId} 的装柜数量必须大于 0";
 
-            var outboundQty = await connection.ExecuteScalarAsync<decimal?>(@"
-                SELECT qty FROM outbound WHERE id=@outboundId FOR UPDATE",
+            var outbound = await connection.QuerySingleOrDefaultAsync<AllocationSource>(@"
+                SELECT qty AS Quantity, material_id AS MaterialId FROM outbound WHERE id=@outboundId FOR UPDATE",
                 new { outboundId }, transaction);
-            if (outboundQty is null)
+            if (outbound is null)
                 return $"出库记录 #{outboundId} 不存在";
+            if (outbound.MaterialId is null || linkedItems.Any(x => x.material_id != outbound.MaterialId))
+                return $"出库记录 #{outboundId} 与装柜明细的物料不一致，请重新确认关联";
 
             var allocatedOther = await connection.ExecuteScalarAsync<decimal>(@"
                 SELECT COALESCE(SUM(qty), 0)
@@ -311,11 +317,17 @@ VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_car
                 WHERE outbound_id=@outboundId
                   AND (@shipmentId IS NULL OR shipment_id<>@shipmentId)",
                 new { outboundId, shipmentId }, transaction);
-            var available = Math.Max(outboundQty.Value - allocatedOther, 0);
+            var available = Math.Max((outbound.Quantity ?? 0) - allocatedOther, 0);
             if (qty > available)
                 return $"出库记录 #{outboundId} 本柜分配 {qty:0.####}，超过可分配数量 {available:0.####}";
         }
 
         return null;
+    }
+
+    private sealed class AllocationSource
+    {
+        public decimal? Quantity { get; set; }
+        public int? MaterialId { get; set; }
     }
 }

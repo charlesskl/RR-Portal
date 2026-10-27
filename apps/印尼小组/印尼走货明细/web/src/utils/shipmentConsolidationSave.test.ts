@@ -5,6 +5,7 @@ import { expect, it, vi } from 'vitest'
 import { consolidateShipmentItems } from './shipmentConsolidation'
 import { shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
 import { applyShipmentSheetEdits } from './shipmentSheet'
+import { linkShipmentOutbound } from './shipmentOutboundLink'
 
 // Execute the actual page save handler against a mock API. No business records
 // are created while verifying that the one-row view still saves both batches.
@@ -81,4 +82,25 @@ it('表格批量编辑后保存仍保留每批关联，并将导入物料修改�
   expect(saved[2]).toMatchObject({ material_id: null, material_snapshot: { net_per_pc: .002 }, kg: .2 })
   expect(saved[2]._rowKey).toBeUndefined()
   expect(snapshot.net_per_pc).toBe(.001)
+})
+
+it('导入行确认关联后保存真实物料 ID、出库来源和装箱快照，不写回物料库', async () => {
+  const snapshot = { name_zh: '导入彩盒', length: 23, net_per_pc: .2, unit_kg: 'KGM' }
+  const imported = { _rowKey: 3, material_id: -3, material_snapshot: snapshot, qty: 2, kg: .4, cartons: 1, carton_no: '10', pallet: 'A' }
+  const linked = linkShipmentOutbound([imported], 3, { outbound_id: 74, material_id: 974, allocatable_qty: 10 },
+    materials.get(974)!, new Map([[-3, snapshot]]))
+  const api = { put: vi.fn(async (..._args: any[]) => ({})) }
+  const context = createContext({
+    items: linked, creating: false, editing: { id: 9 }, matMap: new Map([[-3, linked[0].material_snapshot]]), dirtyMatIds: new Set(), api,
+    form: { validateFields: async () => ({ container_no: 'TEST-ONLY' }) },
+    setSaving: vi.fn(), setEditing: vi.fn(), setEditorDirty: vi.fn(), load: vi.fn(), message: { success: vi.fn() },
+    shipmentPackingAverageQty, shipmentWeightQuantity, num: (value: any) => Number(value) || 0,
+  })
+  runInContext(executable, context)
+  expect(await runInContext('save()', context)).toBe(true)
+  expect(api.put).toHaveBeenCalledTimes(1)
+  expect(api.put.mock.calls[0][1].items).toEqual([expect.objectContaining({
+    material_id: 974, outbound_id: 74, qty: 2, kg: .4, cartons: 1, carton_no: '10', pallet: 'A',
+    material_snapshot: expect.objectContaining({ id: 974, length: 23 }),
+  })])
 })

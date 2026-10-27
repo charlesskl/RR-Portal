@@ -32,6 +32,15 @@ function formatShift(shift) {
 }
 
 /**
+ * 是否已啤完（欠数=0）：需啤数>0 且 累计数>=需啤数。
+ * 已啤完的明细导出排机单时不显示。
+ */
+function isFullyProduced(item) {
+  const needed = item.quantity_needed || 0;
+  return needed > 0 && (item.accumulated || 0) >= needed;
+}
+
+/**
  * 导出排机单为Excel（严格对齐实际排单表格式）
  */
 async function exportScheduleExcel(scheduleId) {
@@ -44,7 +53,8 @@ async function exportScheduleExcel(scheduleId) {
     LEFT JOIN machines m ON si.machine_no = m.machine_no AND m.workshop = ?
     WHERE si.schedule_id = ?
     ORDER BY CAST(REPLACE(REPLACE(REPLACE(si.machine_no, '#', ''), 'C-', ''), 'A-', '') AS INTEGER), si.sort_order, si.id
-  `).all(schedule.workshop || 'B', scheduleId);
+  `).all(schedule.workshop || 'B', scheduleId)
+    .filter(it => !isFullyProduced(it));
 
   // 查询所有机台信息用于显示
   const machineMap = {};
@@ -306,7 +316,8 @@ async function exportScheduleExcel(scheduleId) {
       LEFT JOIN machines m ON si.machine_no = m.machine_no AND m.workshop = ?
       WHERE si.schedule_id = ?
       ORDER BY CAST(REPLACE(REPLACE(REPLACE(si.machine_no, '#', ''), 'C-', ''), 'A-', '') AS INTEGER), si.sort_order, si.id
-    `).all(prevSchedule.workshop || schedule.workshop || 'B', prevSchedule.id);
+    `).all(prevSchedule.workshop || schedule.workshop || 'B', prevSchedule.id)
+      .filter(it => !isFullyProduced(it));
 
     if (prevItems.length > 0) {
       const prevSheetName = `${prevSchedule.schedule_date} ${prevSchedule.shift}`;

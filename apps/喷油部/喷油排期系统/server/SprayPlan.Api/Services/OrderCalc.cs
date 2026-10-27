@@ -11,7 +11,7 @@ public static class OrderCalc
 {
     // 每道工序分别比较：需求 vs 已生产 + 尚未报工的计划量。
     // 已报工计划以实绩计入，避免原计划数掩盖少生产的缺口；减排仅针对未报工计划。
-    public static List<PartScheduleBalance> ScheduleBalances(IEnumerable<OrderPartQty> parts, IEnumerable<ProductionPlan> sourcePlans)
+    public static List<PartScheduleBalance> ScheduleBalances(IEnumerable<OrderPartQty> parts, IEnumerable<ProductionPlan> sourcePlans, ISet<int>? inboundSources = null)
     {
         var plans = sourcePlans.Where(plan => plan.DeletedAt is null).ToList();
         var result = new List<PartScheduleBalance>();
@@ -27,7 +27,7 @@ public static class OrderCalc
             foreach (var step in steps)
             {
                 var recorded = step.Sum(plan => (long)(plan.GoodQty ?? 0));
-                var pending = step.Where(plan => plan.GoodQty is null).Sum(plan => (long)plan.PlannedQty);
+                var pending = step.Where(plan => !PlanDateRules.HasActuals(plan) && inboundSources?.Contains(plan.Id) != true).Sum(plan => (long)plan.PlannedQty);
                 result.Add(new(part.Key, step.Key,
                     string.Join("/", step.Select(plan => plan.Craft).Where(craft => !string.IsNullOrWhiteSpace(craft)).Distinct()),
                     demand, recorded, pending, Math.Max(0, demand - recorded - pending),
@@ -65,7 +65,7 @@ public static class OrderCalc
     {
         var plans = sourcePlans.Where(plan => plan.DeletedAt is null).ToList();
         if (plans.Count == 0) return currentStatus == "draft" ? "draft" : "received";
-        if (!plans.Any(plan => plan.GoodQty is not null || plan.InboundQty is not null)) return "scheduled";
+        if (!plans.Any(PlanDateRules.HasActuals)) return "scheduled";
 
         var demand = parts.GroupBy(part => part.PartName)
             .Select(group => new { Name = group.Key, Qty = group.Sum(part => (long)part.Qty) })

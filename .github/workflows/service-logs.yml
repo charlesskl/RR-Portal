@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '19dd60f5910811b18c0d5caf43d724f23971634acee4f1ad56607b024c324162'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
+  SCOPED_RELEASE_HELPER_SHA256: 'f022af5f807a4d8c2378eb9e7c4cef26fccd16ba114d0924e9dd2a5cfd1c9d31'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -56,7 +56,7 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/pr1018-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1018-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 19dd60f5910811b18c0d5caf43d724f23971634acee4f1ad56607b024c324162 ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = f022af5f807a4d8c2378eb9e7c4cef26fccd16ba114d0924e9dd2a5cfd1c9d31 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1012-compose-library-v2.py" > "$scoped_release_tmp/pr1012-compose-library-v2.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/pr1012-compose-library-v2.py" | cut -d ' ' -f1)" = bbf49ca20451f5c503bc807f71590dca8f20061590d0e78300551f302c386027 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1012-data-library.py" > "$scoped_release_tmp/pr1012-data-library.py" 2>/dev/null || exit 1

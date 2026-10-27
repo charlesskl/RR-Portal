@@ -58,7 +58,7 @@ public class OrderOverviewEditTests : IAsyncLifetime
         Assert.Equal(200, list[0].GetProperty("totalQty").GetInt32());
         var overview = await client.GetFromJsonAsync<JsonElement>("/api/orders/overview");
         Assert.Equal(200, overview[0].GetProperty("demandQty").GetInt32());
-        Assert.Equal(200, overview[0].GetProperty("remainingQty").GetInt32());
+        Assert.Equal(180, overview[0].GetProperty("remainingQty").GetInt32());
         Assert.False(overview[0].GetProperty("scheduleCovered").GetBoolean());
         await factory.WithDbAsync(async db => {
             var plan = await db.ProductionPlans.SingleAsync(p => p.OrderId == orderId);

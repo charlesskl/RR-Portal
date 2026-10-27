@@ -1,8 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { STATUS_META } from "@/lib/orderStatus";
+import { invalidateClientCache } from "@/lib/clientCache";
 import { apiFetch } from "@/lib/apiFetch";
 
 type PartQtyDto = { id: number; partName: string; sourcePartId: number | null; qty: number; partOrder: number };
@@ -12,16 +13,19 @@ type ProductionLineDto = { id: number; name: string; craftType: string; isActive
 type ProcessRow = { partQtyId: number; startDate: string; lineId: number | ""; laborPrice: number; dailyTarget: number };
 type ActualsDay = { date: string; productionQty: number; inboundQty: number };
 type ActualsSummary = { orderId: number; productionQty: number; inboundQty: number; days: ActualsDay[] };
+type ScheduleBalance = { partName: string; stepNo: number; craft: string; demandQty: number; recordedQty: number; pendingQty: number; supplementQty: number; reduceQty: number; overproducedQty: number };
 export type OrderDetailDto = {
   id: number; externalOrderNo: string; productId: number | null; orderDate: string; deliveryDate: string | null;
   status: string; isMA: boolean; isUrgent: boolean; remark: string | null; createdBy: string;
   product: OrderProductDto | null; partQtys: PartQtyDto[]; qtyEditable: boolean;
   products?: OrderProductDto[];
+  scheduleBalances?: ScheduleBalance[];
 };
 const pad = (n: number) => String(n).padStart(2, "0");
 const ymd = (value: string | null) => { if (!value) return ""; const d = new Date(value); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 
-export default function OrderDetailEditor({ order, lines, isAdmin, canAdjustDates = false }: { order: OrderDetailDto; lines: ProductionLineDto[]; isAdmin: boolean; canAdjustDates?: boolean }) {
+export default function OrderDetailEditor({ order: initialOrder, lines, isAdmin, canEdit, canAdjustDates = false }: { order: OrderDetailDto; lines: ProductionLineDto[]; isAdmin: boolean; canEdit: boolean; canAdjustDates?: boolean }) {
+  const [order, setOrder] = useState(initialOrder);
   const router = useRouter();
   const products = order.products?.length ? order.products : (order.product ? [order.product] : []);
   const product = order.product!;
@@ -43,6 +47,11 @@ export default function OrderDetailEditor({ order, lines, isAdmin, canAdjustDate
   const [qtys, setQtys] = useState<Record<number, number>>(() => Object.fromEntries(order.partQtys.map(q => [q.id, q.qty])));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  useEffect(() => {
+    setOrder(initialOrder);
+    setQtys(Object.fromEntries(initialOrder.partQtys.map(part => [part.id, part.qty])));
+  }, [initialOrder]);
   const [processRows, setProcessRows] = useState<ProcessRow[]>(() => order.partQtys
     .filter(part => part.qty > 0)
     .map(part => ({ partQtyId: part.id, startDate: "", lineId: lines[0]?.id ?? "", ...defaultsFor(part.id, lines[0]?.craftType ?? "") })));
@@ -53,12 +62,35 @@ export default function OrderDetailEditor({ order, lines, isAdmin, canAdjustDate
   const [revoking, setRevoking] = useState(false);
   const canUnschedule = order.status === "scheduled" || order.status === "in_production";
 
+  function validQuantities() {
+    const values = order.partQtys.map(part => qtys[part.id] ?? part.qty);
+    if (values.some(qty => !Number.isInteger(qty) || qty < 0 || qty > 2147483647)) {
+      setError("部位数量必须是 0 至 2,147,483,647 之间的整数"); return false;
+    }
+    if (values.every(qty => qty === 0)) { setError("订单至少需要一个数量大于 0 的部位"); return false; }
+    return true;
+  }
   async function save() {
-    setLoading(true); setError("");
-    const partQtys = order.qtyEditable ? order.partQtys.map(q => ({ id: q.id, qty: qtys[q.id] ?? q.qty })) : undefined;
-    const res = await apiFetch(`/api/orders/${order.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderDate: orderDate || undefined, deliveryDate: deliveryDate || null, remark, isMA, isUrgent, partQtys }) });
-    if (res.ok) router.refresh(); else { const body = await res.json().catch(() => ({})); setError(body.error || "保存失败"); }
-    setLoading(false);
+    if (!canEdit || loading || (order.qtyEditable && !validQuantities())) return;
+    setLoading(true); setError(""); setSuccess("");
+    let committed = false;
+    try {
+      const changed = order.partQtys.filter(part => (qtys[part.id] ?? part.qty) !== part.qty);
+      const partQtys = order.qtyEditable && changed.length ? changed.map(part => ({ id: part.id, qty: qtys[part.id] })) : undefined;
+      const res = await apiFetch(`/api/orders/${order.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderDate: orderDate || undefined, deliveryDate, remark, isMA, isUrgent, partQtys }) });
+      if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.error || "保存失败"); }
+      committed = true;
+      for (const prefix of ["/api/orders", "/api/schedule", "/api/recording", "/api/dashboard"]) invalidateClientCache(prefix);
+      const detail = await apiFetch(`/api/orders/${order.id}`, { cache: "no-store" });
+      if (!detail.ok) throw new Error("详情刷新失败");
+      const saved = await detail.json() as OrderDetailDto;
+      setOrder(saved);
+      setQtys(Object.fromEntries(saved.partQtys.map(part => [part.id, part.qty])));
+      setSuccess("已保存，订单统计和状态已更新。请按下方提示调整排期；历史实绩和库存已保留。");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "请检查网络后重试";
+      setError(committed ? `订单已保存，但页面更新失败，请刷新页面查看（${message}）` : message);
+    } finally { setLoading(false); }
   }
   async function unschedule() {
     if (!confirm(`确认撤销订单 ${order.externalOrderNo} 的全部排期？`)) return;
@@ -87,6 +119,7 @@ export default function OrderDetailEditor({ order, lines, isAdmin, canAdjustDate
     setRevoking(false);
   }
   async function createProcessSchedule() {
+    if (!canEdit || !validQuantities()) return;
     setScheduling(true); setError("");
     const activeParts = order.partQtys.filter(part => (qtys[part.id] ?? part.qty) > 0);
     if (processRows.some(row => !row.startDate || !row.lineId || row.dailyTarget <= 0)) {
@@ -119,17 +152,20 @@ export default function OrderDetailEditor({ order, lines, isAdmin, canAdjustDate
       <h1 className="text-2xl font-bold text-text border-l-4 border-mint-400 pl-3">📋 订单 {order.externalOrderNo}</h1>
       <div className="flex items-center gap-3">{isAdmin && <button onClick={openRevokeActuals} className="text-amber-700 border border-amber-400 rounded-btn px-3 py-1 text-sm">撤销实绩</button>}{canUnschedule && canAdjustDates && <Link href={`/schedule?orderId=${order.id}&orderNo=${encodeURIComponent(order.externalOrderNo)}`} className="text-sky border border-sky/40 rounded-btn px-3 py-1 text-sm">调整排期日期</Link>}{canUnschedule && <button onClick={unschedule} className="text-rose border border-rose/40 rounded-btn px-3 py-1 text-sm">撤销排期</button>}<span className={`px-3 py-1 rounded-full text-sm ${STATUS_META[order.status]?.cls ?? "bg-gray-100"}`}>{STATUS_META[order.status]?.text ?? order.status}</span></div>
     </div>
-    <div className="bg-white p-5 rounded-card border border-app-border mb-6 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+    <fieldset disabled={loading || !canEdit} className="bg-white p-5 rounded-card border border-app-border mb-6 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
       <Field label="款号（不可修改）"><div className="font-mono py-2">{products.map(item => item.productNo).join("、") || product.productNo}</div></Field>
       <Field label="下单日期"><input className={input} type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)} /></Field>
       <Field label="交货日期"><input className={input} type="date" value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} /></Field>
       <div className="md:col-span-2"><Field label="备注"><input className={input} value={remark} onChange={e => setRemark(e.target.value)} /></Field></div>
       <div className="flex flex-col justify-end gap-2"><label><input type="checkbox" checked={isUrgent} onChange={e => setIsUrgent(e.target.checked)} /> 急单</label><label><input type="checkbox" checked={isMA} onChange={e => setIsMA(e.target.checked)} /> MA 单</label></div>
-    </div>
-    {!order.qtyEditable && <p className="text-xs text-text-secondary mb-2">订单已有排期或已进入生产，数量已锁定。</p>}
-    <div className="bg-white rounded-card border border-app-border overflow-hidden mb-3"><table className="w-full text-sm"><thead className="bg-[#f0fdf4] text-[#047857] text-xs"><tr><th className="px-4 py-2 text-left">部位</th><th className="px-4 py-2 text-right">数量</th></tr></thead><tbody>{order.partQtys.map((q, index) => <tr key={q.id} className={index % 2 ? "bg-[#fafdfb]" : ""}><td className="px-4 py-2">{q.partName}</td><td className="px-4 py-2 text-right">{order.qtyEditable ? <input type="number" min="0" className="w-32 border border-app-border rounded-btn px-2 py-1 text-right" value={qtys[q.id] ?? q.qty} onChange={e => setQtys(current => ({ ...current, [q.id]: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))} /> : (qtys[q.id] ?? q.qty).toLocaleString("zh-CN")}</td></tr>)}</tbody></table></div>
-    <div className="text-right text-sm mb-4">订单总数 <b className="text-mint-700">{Math.max(0, ...order.partQtys.map(q => qtys[q.id] ?? q.qty)).toLocaleString("zh-CN")}</b></div>
-    {(order.status === "draft" || order.status === "received") && <div className="bg-white rounded-card border border-app-border p-5 mb-4">
+    </fieldset>
+    <p className="text-xs text-text-secondary mb-2">{order.qtyEditable && canEdit
+      ? "各部位数量可单独修改，其他部位不变。保存后更新统计和状态，保留原排期、历史实绩和库存；补排或减排请按下方提示处理。"
+      : "当前订单或账号不允许修改部位数量。"}</p>
+    <div className="bg-white rounded-card border border-app-border overflow-hidden mb-3"><table className="w-full text-sm"><thead className="bg-[#f0fdf4] text-[#047857] text-xs"><tr><th className="px-4 py-2 text-left">部位</th><th className="px-4 py-2 text-right">数量</th></tr></thead><tbody>{order.partQtys.map((q, index) => <tr key={q.id} className={index % 2 ? "bg-[#fafdfb]" : ""}><td className="px-4 py-2">{q.partName}</td><td className="px-4 py-2 text-right">{order.qtyEditable && canEdit ? <input aria-label={`${q.partName} 数量`} disabled={loading || scheduling} type="number" min="0" max="2147483647" step="1" className="w-32 border border-app-border rounded-btn px-2 py-1 text-right" value={Number.isNaN(qtys[q.id]) ? "" : (qtys[q.id] ?? q.qty)} onChange={e => { setQtys(current => ({ ...current, [q.id]: e.target.value === "" ? NaN : e.target.valueAsNumber })); setSuccess(""); }} /> : (qtys[q.id] ?? q.qty).toLocaleString("zh-CN")}</td></tr>)}</tbody></table></div>
+    <div className="text-right text-sm mb-4">订单总数 <b className="text-mint-700">{Math.max(0, ...order.partQtys.map(q => Number.isFinite(qtys[q.id] ?? q.qty) ? (qtys[q.id] ?? q.qty) : 0)).toLocaleString("zh-CN")}</b></div>
+    <ScheduleBalanceTable balances={order.scheduleBalances ?? []} />
+    {canEdit && (order.status === "draft" || order.status === "received") && <div className="bg-white rounded-card border border-app-border p-5 mb-4">
       <div className="mb-4"><h2 className="font-semibold text-text">工序排期</h2><p className="text-xs text-text-secondary mt-1">按部位分别填写；各工序独立计算并可同时进行。人工和每日目标数自动带入核价表中同部位、同工序的上次保存值，可手动修改。保存后同时更新部位级核价表和生产计划。</p></div>
       <table className="w-full text-sm"><thead className="bg-[#f0fdf4] text-[#047857] text-xs"><tr><th className="px-3 py-2 text-left">部位</th><th className="px-3 py-2 text-center">开始日期</th><th className="px-3 py-2 text-center">拉别</th><th className="px-3 py-2 text-center">人工</th><th className="px-3 py-2 text-center">每日目标数</th><th className="px-3 py-2 text-center">预计生产天数</th><th className="px-3 py-2 text-right">操作</th></tr></thead><tbody>{processRows.map((row, index) => {
         const part = order.partQtys.find(item => item.id === row.partQtyId)!;
@@ -145,8 +181,9 @@ export default function OrderDetailEditor({ order, lines, isAdmin, canAdjustDate
       </tr>; })}</tbody></table>
       <div className="flex justify-end mt-4"><button type="button" disabled={scheduling} onClick={createProcessSchedule} className="bg-mint-400 hover:bg-mint-700 text-white px-5 py-2 rounded-btn text-sm disabled:opacity-60">{scheduling ? "生成中…" : "保存并生成生产计划"}</button></div>
     </div>}
-    {error && <p className="text-rose text-sm text-right mb-2">{error}</p>}
-    <div className="flex justify-between"><Link href="/orders" className="text-sky text-sm hover:underline">← 返回订单列表</Link><button disabled={loading} onClick={save} className="bg-mint-400 hover:bg-mint-700 text-white px-4 py-2 rounded-btn text-sm disabled:opacity-60">{loading ? "保存中..." : "保存"}</button></div>
+    {success && <p role="status" className="text-mint-700 text-sm mb-2">{success}</p>}
+    {error && <p role="alert" aria-label="保存错误" className="text-rose text-sm text-right mb-2">{error}</p>}
+    <div className="flex justify-between"><Link href="/orders" className="text-sky text-sm hover:underline">← 返回订单列表</Link><button disabled={loading || scheduling || !canEdit} onClick={save} className="bg-mint-400 hover:bg-mint-700 text-white px-4 py-2 rounded-btn text-sm disabled:opacity-60">{loading ? "保存中..." : "保存"}</button></div>
     {actualsSummary && <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4" onClick={() => !revoking && setActualsSummary(null)}>
       <div className="w-full max-w-lg rounded-card bg-white border border-rose/30 shadow-xl p-5" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="撤销实绩预警">
         <h2 className="text-lg font-bold text-rose mb-3">⚠ 撤销实绩预警</h2>
@@ -163,3 +200,18 @@ export default function OrderDetailEditor({ order, lines, isAdmin, canAdjustDate
 }
 const input = "w-full border border-app-border rounded-btn px-3 py-2 text-sm focus:outline-none focus:border-mint-400";
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <div><div className="text-xs text-text-secondary mb-1">{label}</div>{children}</div>; }
+
+function ScheduleBalanceTable({ balances }: { balances: ScheduleBalance[] }) {
+  const actionable = balances.filter(row => row.supplementQty > 0 || row.reduceQty > 0 || row.overproducedQty > 0);
+  return <section aria-label="排期调整提示" className="mb-5 rounded-card border border-app-border bg-white p-4">
+    <h2 className="text-sm font-semibold text-text mb-2">排期调整提示（按已保存数量）</h2>
+    <p className="text-xs text-text-secondary mb-3">按每道工序分别比较需求、已生产和未报工计划，不跨工序相加。补排、减排仅提示，不会自动改动原排期；已超产数量保留原实绩及库存。</p>
+    {actionable.length === 0 ? <p className="text-sm text-mint-700">当前无需补排或减排。</p> : <div className="overflow-x-auto"><table className="w-full text-sm min-w-[760px]">
+      <thead className="bg-[#f0fdf4] text-[#047857] text-xs"><tr>{["部位", "工序", "需求", "已生产", "未报工计划", "需补排", "需减排", "已超产"].map(label => <th key={label} className="px-3 py-2 text-left">{label}</th>)}</tr></thead>
+      <tbody>{actionable.map(row => <tr key={`${row.partName}-${row.stepNo}`} className="border-b border-app-border-light">
+        <td className="px-3 py-2">{row.partName}</td><td className="px-3 py-2">{row.stepNo > 0 ? `第${row.stepNo}道 ${row.craft}` : "未排期"}</td>
+        {[row.demandQty, row.recordedQty, row.pendingQty, row.supplementQty, row.reduceQty, row.overproducedQty].map((qty, index) => <td key={index} className={`px-3 py-2 tabular-nums ${index >= 3 && qty > 0 ? "text-amber-700 font-semibold" : ""}`}>{qty.toLocaleString("zh-CN")}</td>)}
+      </tr>)}</tbody>
+    </table></div>}
+  </section>;
+}

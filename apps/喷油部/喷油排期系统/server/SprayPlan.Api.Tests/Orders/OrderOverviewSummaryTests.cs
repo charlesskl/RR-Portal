@@ -44,8 +44,9 @@ public class OrderOverviewSummaryTests : IAsyncLifetime
         var body = await _client.GetFromJsonAsync<JsonElement>("/api/orders/overview");
         var row = body.EnumerateArray().Single(x => x.GetProperty("id").GetInt32() == orderId);
         Assert.True(row.GetProperty("scheduled").GetBoolean());
-        Assert.True(row.GetProperty("scheduleCovered").GetBoolean());
-        Assert.Equal("2026-07-21", row.GetProperty("scheduleFinishDate").GetString());
+        // 首日计划 60 但仅完成 40，另有未报工计划 40，仍需补排 20。
+        Assert.False(row.GetProperty("scheduleCovered").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("scheduleFinishDate").ValueKind);
         Assert.Equal(100, row.GetProperty("plannedQty").GetInt32());
         Assert.Equal(40, row.GetProperty("recordedQty").GetInt32());
         Assert.Equal(40, row.GetProperty("progressPct").GetInt32());

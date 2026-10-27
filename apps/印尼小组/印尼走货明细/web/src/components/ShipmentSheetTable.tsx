@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { App, Button, Space, Table, Typography } from 'antd'
 import type { TableProps } from 'antd'
-import { parseSheetClipboard, sheetPasteEdits, type SheetEdit, type SheetPoint } from '../utils/shipmentSheet'
+import { parseSheetClipboard, sheetFillDownEdits, sheetPasteEdits, type SheetEdit, type SheetPoint } from '../utils/shipmentSheet'
 
 type Props<T extends object> = TableProps<T> & {
   fields: readonly string[]
@@ -46,17 +46,8 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     ;(input || cell).focus()
   }
   const fillDown = () => {
-    if (!anchor || !end || anchor.row === end.row) { message.info('按住 Shift 点击下方单元格，选中需要填充的范围'); return }
-    const top = Math.min(anchor.row, end.row); const bottom = Math.max(anchor.row, end.row)
-    if (bottom >= count) { message.warning('明细已变化，请重新选择范围'); return }
-    const edits: SheetEdit[] = []
-    for (let col = Math.min(anchor.col, end.col); col <= Math.max(anchor.col, end.col); col++) {
-      if (!fields[col]) continue
-      const value = String(valueAt(top, fields[col]) ?? '')
-      for (let row = top + 1; row <= bottom; row++) edits.push({ row, field: fields[col], value })
-    }
-    if (!edits.length) { message.info('所选范围没有可填充的列'); return }
-    onEdits(edits)
+    try { onEdits(sheetFillDownEdits(anchor, end, count, fields, valueAt)) }
+    catch (error) { message.info((error as Error).message) }
   }
   const mapped = columns.map((column, col) => ({
     ...column,
@@ -116,7 +107,11 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     }}
     onKeyDownCapture={event => {
       if (event.nativeEvent.isComposing) return
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') { event.preventDefault(); fillDown(); return }
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'd') {
+        event.preventDefault(); event.stopPropagation()
+        if (!event.repeat) fillDown()
+        return
+      }
       const p = point(event.target); if (!p) return
       // Existing pickers in protected columns (new-row material selection,
       // category selection) keep their own keyboard behaviour.
@@ -142,7 +137,8 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     <Space wrap className="shipment-sheet-toolbar">
       <Typography.Text strong>表格编辑</Typography.Text>
       <Typography.Text type="secondary">Tab 左右切换 · Enter 下一行 · Shift 点击选区 · Ctrl/Cmd+C 复制 · 粘贴 Excel 多格数据</Typography.Text>
-      <Button size="small" onClick={fillDown}>向下填充选区</Button>
+      <Button size="small" onClick={fillDown} title="Ctrl/⌘D：单选复制上一行；多行选区按首行向下填充">向下填充选区</Button>
+      <Typography.Text type="secondary">Ctrl/⌘D：单选复制上一行，多行按首行填充</Typography.Text>
       <Typography.Text type="secondary">灰底列禁止批量覆盖；拖动表头右边线调整列宽。修改后请保存。</Typography.Text>
     </Space>
     <Table<T> {...props} bordered columns={mapped} scroll={{ ...props.scroll, x: mapped.reduce((total, col) => total + Number(col.width), 40) }} />

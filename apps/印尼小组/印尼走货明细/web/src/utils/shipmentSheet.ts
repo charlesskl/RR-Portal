@@ -16,6 +16,27 @@ export const shipmentSheetFields = [
 export interface SheetEdit { row: number; field: string; value: string }
 export interface SheetPoint { row: number; col: number }
 
+/** Excel fill-down: a single row copies from the row above; a range uses its top row. */
+export function sheetFillDownEdits(anchor: SheetPoint | null, end: SheetPoint | null, rowCount: number,
+  fields: readonly string[], valueAt: (row: number, field: string) => string | number | undefined): SheetEdit[] {
+  if (!anchor || !end) throw new Error('请先点击要填充的单元格，或按住 Shift 点击选择多行')
+  if ([anchor, end].some(p => !Number.isInteger(p.row) || !Number.isInteger(p.col)
+    || p.row < 0 || p.row >= rowCount || p.col < 0 || p.col >= fields.length))
+    throw new Error('明细已变化，请重新选择范围')
+  const first = Math.min(anchor.row, end.row), bottom = Math.max(anchor.row, end.row)
+  const source = first === bottom ? first - 1 : first
+  if (source < 0) throw new Error('第一行没有上一行；请选中第一行及下方目标行后向下填充')
+  const edits: SheetEdit[] = []
+  for (let col = Math.min(anchor.col, end.col); col <= Math.max(anchor.col, end.col); col++) {
+    const field = fields[col]
+    if (!field) continue
+    const value = String(valueAt(source, field) ?? '')
+    for (let row = source + 1; row <= bottom; row++) edits.push({ row, field, value })
+  }
+  if (!edits.length) throw new Error('所选范围没有可填充的列')
+  return edits
+}
+
 /** Excel clipboard TSV, including quoted multiline cells and escaped quotes. */
 export function parseSheetClipboard(text: string): string[][] {
   if (text.length > 1_000_000) throw new Error('粘贴内容过大，请分批操作')

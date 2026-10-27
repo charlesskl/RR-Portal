@@ -14,7 +14,7 @@ LIVE_IMAGE='sha256:d8080518f8c97d9837af7cf44d74953edda402e0ebf7a2f6cbaf026eb410b
 STATIC_BASE_IMAGE='sha256:c3c381f6dbefe6bea43cfaf4c0fdbd20001d42ad490bb67f345bef208e4f5462'
 COMPOSE_TAG='rr-portal-indo-shipping:latest'
 BRANCH='refs/heads/ops/pr-1021-20261027'
-EXECUTE=True
+EXECUTE=False
 PUBLIC='http://127.0.0.1/indo-shipping/'
 PHASE='inspect'
 STAGE='entry';SERIAL=0;SCHEMA_OBSERVED=None

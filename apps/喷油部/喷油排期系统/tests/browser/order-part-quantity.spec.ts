@@ -15,9 +15,11 @@ let releaseSave: (() => void) | undefined;
 let schedulePayload: { rows: Array<{ partQtyId: number; startDate: string }> } | undefined;
 let unschedules = 0;
 let qtyEditable = true;
+let simulateAutoSchedule = false;
+let pendingHeadQty = 40;
 let pendingProduct = false;
 let headers = { orderDate: "2026-10-08", deliveryDate: "2026-10-26", isMA: true, isUrgent: false, remark: "" };
-let patches: Array<{ partQtys?: Array<{ id: number; qty: number }> }> = [];
+let patches: Array<{ partQtys?: Array<{ id: number; qty: number }>; autoAdjustSchedule?: boolean }> = [];
 const part = { id: 1, partName: "头", craft: "喷油", partGroupId: 1, unitCost: 1, laborPrice: 1, paintCost: 0, quotedPrice: 2, dailyCapacity: 50 };
 const product = { id: 1, productNo: "77711", parts: [part, { ...part, id: 2, partName: "脚" }] };
 function detail() {
@@ -25,8 +27,8 @@ function detail() {
     ...headers, status: orderStatus ?? (headQty <= 60 ? "completed" : "in_production"),
     createdBy: "test", qtyEditable,
     partQtys: [{ id: 11, partName: "头", sourcePartId: 1, qty: headQty, partOrder: 0 }, { id: 12, partName: samePartName ? "头" : "脚", sourcePartId: 2, qty: footQty, partOrder: 1 }],
-    scheduleBalances: [{ partName: "头", stepNo: 1, craft: "喷油", demandQty: headQty, recordedQty: 60, pendingQty: 40,
-      supplementQty: Math.max(0, headQty - 100), reduceQty: Math.min(40, Math.max(0, 100 - headQty)), overproducedQty: Math.max(0, 60 - headQty) }],
+    scheduleBalances: [{ partName: "头", stepNo: 1, craft: "喷油", demandQty: headQty, recordedQty: 60, pendingQty: pendingHeadQty,
+      supplementQty: Math.max(0, headQty - 60 - pendingHeadQty), reduceQty: Math.min(pendingHeadQty, Math.max(0, 60 + pendingHeadQty - headQty)), overproducedQty: Math.max(0, 60 - headQty) }],
   };
 }
 
@@ -55,7 +57,13 @@ test.beforeAll(async () => {
       }
       headers = { ...headers, orderDate: payload.orderDate, deliveryDate: payload.deliveryDate, remark: payload.remark, isMA: payload.isMA, isUrgent: payload.isUrgent };
       if (holdSave) await new Promise<void>(resolve => { releaseSave = resolve; });
-      return response.end(JSON.stringify({ id: 1, status: detail().status }));
+      let scheduleAdjustment;
+      if (simulateAutoSchedule && payload.autoAdjustSchedule) {
+        const target = Math.max(0, headQty - 60);
+        scheduleAdjustment = { addedQty: Math.max(0, target - pendingHeadQty), reducedQty: Math.max(0, pendingHeadQty - target), createdPlans: 1, warnings: [] };
+        pendingHeadQty = target;
+      }
+      return response.end(JSON.stringify({ id: 1, status: detail().status, scheduleAdjustment }));
     }
     if (request.url === "/api/orders/1") {
       if (malformedReadback && patches.length > 0) { malformedReadback = false; return response.end("{}"); }
@@ -69,6 +77,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => { await new Promise<void>((resolve, reject) => api.close(error => error ? reject(error) : resolve())); });
 test.beforeEach(async ({ context }) => {
   headQty = 100; footQty = 50; orderStatus = null; samePartName = false;
+  simulateAutoSchedule = false; pendingHeadQty = 40;
   failSave = false; failReadback = false; malformedReadback = false; patches = [];
   holdSave = false; releaseSave = undefined; schedulePayload = undefined; unschedules = 0;
   qtyEditable = true; pendingProduct = false;
@@ -244,4 +253,40 @@ test("待补产品订单仅显示补全提示，不提供数量或排期编辑",
   await expect(page.getByLabel("头 数量", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "保存", exact: true })).toHaveCount(0);
   expect(patches).toHaveLength(0);
+});
+
+
+test("默认自动补排，保存后缺口清零并显示调整数量", async ({ page }, testInfo) => {
+  simulateAutoSchedule = true;
+  await page.goto("/orders/1");
+  await expect(page.getByRole("checkbox", { name: /保存时自动补排/ })).toBeChecked();
+  await page.getByLabel("头 数量", { exact: true }).fill("120");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("已自动补排 20 件、减排 0 件");
+  expect(patches[0].autoAdjustSchedule).toBe(true);
+  await expect(page.getByRole("region", { name: "排期调整提示" })).toContainText("当前无需补排或减排");
+  await page.screenshot({ path: testInfo.outputPath("auto-adjust-schedule.png"), fullPage: true });
+});
+
+test("自动减排只减未报工数量，超产仍保留提示", async ({ page }) => {
+  simulateAutoSchedule = true;
+  await page.goto("/orders/1");
+  await page.getByLabel("头 数量", { exact: true }).fill("30");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("已自动补排 0 件、减排 40 件");
+  const cells = page.getByRole("region", { name: "排期调整提示" }).getByRole("row").nth(1).getByRole("cell");
+  await expect(cells.nth(6)).toHaveText("0"); await expect(cells.nth(7)).toHaveText("30");
+});
+
+test("已保存缺口可以直接保存自动补齐，也可取消自动调整", async ({ page }) => {
+  simulateAutoSchedule = true; headQty = 120;
+  await page.goto("/orders/1");
+  await page.getByRole("checkbox", { name: /保存时自动补排/ }).uncheck();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("已保存");
+  expect(patches[0].autoAdjustSchedule).toBe(false); expect(pendingHeadQty).toBe(40);
+  await page.getByRole("checkbox", { name: /保存时自动补排/ }).check();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("已自动补排 20 件");
+  expect(patches[1].partQtys).toBeUndefined(); expect(pendingHeadQty).toBe(60);
 });

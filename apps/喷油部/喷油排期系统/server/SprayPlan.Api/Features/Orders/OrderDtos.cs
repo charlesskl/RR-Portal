@@ -6,7 +6,7 @@ namespace SprayPlan.Api.Features.Orders;
 public record CreateOrderPartQtyDto(string? PartName, int? SourcePartId, int? Qty, int? PartOrder);
 public record CreateOrderRequest(string? ExternalOrderNo, int? ProductId, string? OrderDate, string? DeliveryDate, string? Remark, bool? IsMA, bool? IsUrgent, List<CreateOrderPartQtyDto>? PartQtys);
 
-public record UpdateOrderRequest(string? DeliveryDate, string? Remark, string? Status, bool? IsMA, bool? IsUrgent, string? OrderDate, List<UpdateOrderPartQtyDto>? PartQtys, int? TotalQty = null);
+public record UpdateOrderRequest(string? DeliveryDate, string? Remark, string? Status, bool? IsMA, bool? IsUrgent, string? OrderDate, List<UpdateOrderPartQtyDto>? PartQtys, int? TotalQty = null, bool AutoAdjustSchedule = false);
 // 按订单部位明细主键独立更正需求，保留历史排期、实绩和库存。
 public record UpdateOrderPartQtyDto(int Id, int Qty);
 public record OrderProcessScheduleRow(string? StartDate, int? LineId, int? DailyTarget, int? PartQtyId = null, double? LaborPrice = null);
@@ -24,7 +24,7 @@ public record OrderOverviewSummary(int Id, bool Scheduled, string? FirstPlanDate
     bool ScheduleCovered, int PlannedQty, int RecordedQty, int DemandQty, int ProgressPct,
     int PlanProductionDays, int FinishedQty, int RemainingQty, int InProductionRemainingQty);
 public record OrderCreated(int Id, string ExternalOrderNo, string Status, bool IsMA, bool IsUrgent);
-public record OrderHeadUpdated(int Id, string ExternalOrderNo, string Status, bool IsMA, bool IsUrgent);
+public record OrderHeadUpdated(int Id, string ExternalOrderNo, string Status, bool IsMA, bool IsUrgent, DemandScheduleResult? ScheduleAdjustment = null);
 public record OrderIdStatus(int Id, string Status);
 
 // 详情嵌套

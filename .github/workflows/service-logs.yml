@@ -1,8 +1,8 @@
-name: PR 1012 SprayPlan Readonly Inventory
+name: PR 1014 SprayPlan Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [inspect]}
+      mode: {type: choice, required: true, options: [prepare]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'ba99c105eac2cb700d5702ba134aa1899877a74af37dc43ab93cdbee9bf0c0c2'
+  SCOPED_RELEASE_HELPER_SHA256: '5acbf071ad91249087c57dd01e28c2aef30a724f68d8a0ef0801a9770b650a9b'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1014-20261027 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = inspect ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1014-20261027 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed sprayplan inspect
+      - name: Run only reviewed sprayplan prepare
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,13 +48,19 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1014-20261027 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = inspect && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1014-20261027 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1014-20261027:refs/remotes/origin/ops/pr-1014-20261027 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1014-20261027)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/pr1014-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1014-inspect.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = ba99c105eac2cb700d5702ba134aa1899877a74af37dc43ab93cdbee9bf0c0c2 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1014-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 5acbf071ad91249087c57dd01e28c2aef30a724f68d8a0ef0801a9770b650a9b ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1012-compose-library-v2.py" > "$scoped_release_tmp/pr1012-compose-library-v2.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr1012-compose-library-v2.py" | cut -d ' ' -f1)" = bbf49ca20451f5c503bc807f71590dca8f20061590d0e78300551f302c386027 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1012-data-library.py" > "$scoped_release_tmp/pr1012-data-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/pr1012-data-library.py" | cut -d ' ' -f1)" = b937a93ac5d08ba93bb684270e3d05d13d58dc6ecf90af5e1306aec30cec0eb3 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

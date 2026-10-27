@@ -41,10 +41,10 @@ async function exportScheduleExcel(scheduleId) {
   const items = db.prepare(`
     SELECT si.*, m.arm_type, m.tonnage, m.brand
     FROM schedule_items si
-    LEFT JOIN machines m ON si.machine_no = m.machine_no
+    LEFT JOIN machines m ON si.machine_no = m.machine_no AND m.workshop = ?
     WHERE si.schedule_id = ?
     ORDER BY CAST(REPLACE(REPLACE(REPLACE(si.machine_no, '#', ''), 'C-', ''), 'A-', '') AS INTEGER), si.sort_order, si.id
-  `).all(scheduleId);
+  `).all(schedule.workshop || 'B', scheduleId);
 
   // 查询所有机台信息用于显示
   const machineMap = {};
@@ -303,10 +303,10 @@ async function exportScheduleExcel(scheduleId) {
     const prevItems = db.prepare(`
       SELECT si.*, m.arm_type, m.tonnage, m.brand
       FROM schedule_items si
-      LEFT JOIN machines m ON si.machine_no = m.machine_no
+      LEFT JOIN machines m ON si.machine_no = m.machine_no AND m.workshop = ?
       WHERE si.schedule_id = ?
       ORDER BY CAST(REPLACE(REPLACE(REPLACE(si.machine_no, '#', ''), 'C-', ''), 'A-', '') AS INTEGER), si.sort_order, si.id
-    `).all(prevSchedule.id);
+    `).all(prevSchedule.workshop || schedule.workshop || 'B', prevSchedule.id);
 
     if (prevItems.length > 0) {
       const prevSheetName = `${prevSchedule.schedule_date} ${prevSchedule.shift}`;

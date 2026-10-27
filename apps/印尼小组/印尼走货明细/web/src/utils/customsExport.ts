@@ -56,10 +56,12 @@ export function customsFormulaName(item: CustomsItem, material?: Material, custo
 }
 
 import { customsInvoicePrice, customsInvoiceFormula, invoiceCustomsCompany } from './shipmentInvoice'
+import { shipmentDeclarationPrice, shipmentPurchaseAmount } from './shipmentPurchase'
 export { customsInvoicePrice } from './shipmentInvoice'
 
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
 export interface CustomsItem {
+  material_snapshot?: unknown
   outbound_id?: number
   material_id?: number
   kg?: number
@@ -1148,6 +1150,10 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     return effectiveCustomsCompany(it, m, tf.exportCompany)
   }
   const sorted = sortShipmentItems(consolidateShipmentItems(items, materials, tf.exportCompany), materials, tf.exportCompany)
+  sorted.forEach((item, index) => {
+    if (shipmentPurchaseAmount(item) !== 0 && !(Number(item.kg) > 0))
+      throw new Error(`第 ${index + 1} 行（${matOf(item)?.name_zh || '未命名物料'}）有采购金额但送货重量/申报数量为零，请补齐后导出`)
+  })
   const cartonRows = cartonLayout(sorted, materials, tf.exportCompany)
   const supplierOf = (it: CustomsItem) => (it.supplier || matOf(it)?.supplier || '').trim()
   const companyColor = new Map<string, string>()
@@ -1239,8 +1245,13 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 11, it.qty || 0, 'n')
     const paperRope = isPaperRope(m?.name_zh)
     setCell(ws, ri, 12, it.purchase_unit || (paperRope ? '米' : '个'), 's')
-    setCell(ws, ri, 13, '=AO' + (ri + 1) + '/$N$1', 'n')
+    // AO is per declaration unit; N is per purchase unit for the L quantity.
+    setCell(ws, ri, 13, '=IFERROR(AO' + (ri + 1) + '*K' + (ri + 1) + '/L' + (ri + 1) + '/$N$1,0)', 'n')
     setCell(ws, ri, 14, '=N' + (ri + 1) + '*L' + (ri + 1), 'n')
+    const purchaseAmount = shipmentPurchaseAmount(it)
+    const convertedUnitPrice = Number(it.qty) > 0 && tf.rate > 0 ? purchaseAmount / Number(it.qty) / tf.rate : 0
+    ws[XLSX.utils.encode_cell({ r: ri, c: 13 })].v = convertedUnitPrice
+    ws[XLSX.utils.encode_cell({ r: ri, c: 14 })].v = convertedUnitPrice * (Number(it.qty) || 0)
     const weightDivisor = paperRope ? '/1000' : ''
     setCell(ws, ri, 15, '=ROUND(BA' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
     setCell(ws, ri, 16, '=ROUND(BB' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
@@ -1253,11 +1264,13 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     if (it.invoice_date) setCell(ws, ri, 24, excelDate(it.invoice_date), 'n')
     const customsCompany = invoiceCustomsCompany(it, m)
     const isLastCompanyItem = !sorted.slice(i + 1).some(next => invoiceCustomsCompany(next, matOf(next)) === customsCompany)
-    const invoicePrice = customsInvoicePrice(it.price, customsCompany, it.kg, isLastCompanyItem, it.currency)
+    const declarationPrice = shipmentDeclarationPrice(it)
+    const invoicePrice = customsInvoicePrice(declarationPrice, customsCompany, it.kg, isLastCompanyItem, it.currency)
     setCell(ws, ri, 25, invoicePrice, 'n')
     ws[XLSX.utils.encode_cell({ r: ri, c: 25 })].f = customsInvoiceFormula(ri + 1, customsCompany, isLastCompanyItem, it.currency)
     // 发票金额 = 发票单价 × 送货 KG 重量。
     setCell(ws, ri, 26, '=Z' + (ri + 1) + '*K' + (ri + 1), 'n')
+    ws[XLSX.utils.encode_cell({ r: ri, c: 26 })].v = invoicePrice * (Number(it.kg) || 0)
     setCell(ws, ri, 28, tf.containerNo, 's')
     if (tf.shipDate) setCell(ws, ri, 29, excelDate(tf.shipDate), 'n')
     setCell(ws, ri, 30, tf.blNo, 's')
@@ -1266,12 +1279,15 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 34, tf.freightCN, 'n')
     setCell(ws, ri, 35, tf.freightID, 'n')
     setCell(ws, ri, 37, it.supplier || m?.supplier || '', 's')
-    if (it.po_date) setCell(ws, ri, 38, excelDate(it.po_date), 'n')
+    const purchaseDates = [...new Set(it.sources.map(source => source.po_date?.trim()).filter(Boolean))]
+    if (purchaseDates.length > 1) setCell(ws, ri, 38, purchaseDates.join(' / '), 's')
+    else if (it.po_date) setCell(ws, ri, 38, excelDate(it.po_date), 'n')
     else if (it.contract_date) setCell(ws, ri, 38, excelDate(it.contract_date), 'n')
     setCell(ws, ri, 39, it.po_no || '', 's')
-    setCell(ws, ri, 40, it.price || 0, 'n')
-    // 采购金额 = 采购单价 × 送货 KG 重量。
+    setCell(ws, ri, 40, declarationPrice, 'n')
+    // Converted declaration-unit price × K preserves the original PO-unit amount.
     setCell(ws, ri, 41, '=AO' + (ri + 1) + '*K' + (ri + 1), 'n')
+    ws[XLSX.utils.encode_cell({ r: ri, c: 41 })].v = purchaseAmount
     const fmt = purchaseCurrencyFormat(it.currency)
     ;['AO', 'AP'].forEach((_col, j) => {
       const addr = XLSX.utils.encode_cell({ r: ri, c: 40 + j })

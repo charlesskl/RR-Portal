@@ -32,7 +32,7 @@ it('同柜分批出库只显示一行，数量、重量和实际箱数累加，�
 
 it.each([
   { material_id: 975 }, { supplier: '另一供应商' }, { customs_company: '另一报关公司' },
-  { price: 3 }, { currency: '¥' }, { purchase_unit: '米' }, { contract_no: '另一合同' },
+  { currency: '¥' }, { purchase_unit: '米' }, { contract_no: '另一合同' },
   { invoice_no: '另一发票' }, { bl_head: '另一抬头' }, { weighing_qty: 5 },
   { qty_per_carton: '200' }, { pallet: '1-2/1卡' },
   { material_snapshot: { id: 974 } }, { outbound_id: undefined }, { material_id: undefined },
@@ -55,11 +55,19 @@ it.each([
   expect(rows).toEqual(before)
 })
 
-it('不同采购单但其他资料一致时保留全部采购单号及出库来源', () => {
-  const result = consolidateShipmentItems([batches[0], { ...batches[1], po_no: 'IRRIHS0402' }], materials)
+it('不同采购单、日期和单价合并，保留全部来源并按各批金额加权', () => {
+  const rows = [{ ...batches[0], po_date: '2026-10-01' },
+    { ...batches[1], po_no: 'IRRIHS0402', po_date: '2026-10-02', price: 3 }]
+  const before = structuredClone(rows)
+  const result = consolidateShipmentItems(rows, materials)
   expect(result).toHaveLength(1)
   expect(result[0].po_no).toBe('IRRIHS0401 / IRRIHS0402')
   expect(result[0].outbound_ids).toEqual([74, 75])
+  expect(result[0].po_date).toBeUndefined()
+  expect(result[0].price).toBeCloseTo((8150 * 2 + 82 * 3) / 8232, 12)
+  expect(shipmentPurchaseAmount(result[0])).toBeCloseTo(8150 * 2 + 82 * 3, 9)
+  expect(result[0].sources).toEqual(before)
+  expect(rows).toEqual(before)
 })
 
 it('已合并箱数只计一次，独立批次不重新向上取整箱数', () => {
@@ -193,7 +201,7 @@ it.each(['RRI', 'RRM'])('真实模板导出合并明细，公式引用合并后�
   expect(book.Sheets[customer === 'RRI' ? '实业合同' : '全球合同'].D24.f).toContain("'MERGED-BATCHES'!K:K")
 }, 60000)
 
-it.each(['RRI', 'RRM'])('零重量末批保留原来的附加费边界和整柜金额（%s）', async customer => {
+it.each(['RRI', 'RRM'])('零重量有采购金额的末批不得被合并隐藏或静默导出为零（%s）', async customer => {
   const rows = [
     { ...batches[0], qty: 10, kg: 10, contract_no: 'A', invoice_no: 'A' },
     { ...batches[1], qty: 10, kg: 0, contract_no: 'A', invoice_no: 'A' },
@@ -205,14 +213,8 @@ it.each(['RRI', 'RRM'])('零重量末批保留原来的附加费边界和整柜�
   expect(consolidated).toHaveLength(2)
   expect(amount(after)).toBeCloseTo(amount(before), 9)
   const templateBuffer = Uint8Array.from(readFileSync(new URL(`../../public/template-customs-${customer.toLowerCase()}.xlsx`, import.meta.url))).buffer
-  const blob = await buildCustomsWorkbook({ templateBuffer, items: rows, materials, productHs: new Map(), images: new Map(),
-    form: { containerNo: 'ZERO-LAST-BATCH', customer, rate: 7.2 } })
-  const sheet = XLSX.read(await blob.arrayBuffer(), { type: 'array' }).Sheets['ZERO-LAST-BATCH']
-  expect(sheet.K4.v).toBe(10)
-  expect(sheet.K5.v).toBe(0)
-  expect(sheet.Z4.f).not.toContain('1248')
-  expect(sheet.Z5.f).toContain('IF(K5>0,1248/K5/7.2,0)')
-  expect(Number(sheet.K4.v) * Number(sheet.Z4.v) + Number(sheet.K5.v) * Number(sheet.Z5.v)).toBeCloseTo(amount(before), 9)
+  await expect(buildCustomsWorkbook({ templateBuffer, items: rows, materials, productHs: new Map(), images: new Map(),
+    form: { containerNo: 'ZERO-LAST-BATCH', customer, rate: 7.2 } })).rejects.toThrow('第 2 行（彩盒-FSC）有采购金额')
 }, 60000)
 
 it.each(['RRI', 'RRM'])('共箱先按共享顺序排序，页面与导出保留原合同附加费归属（%s）', async customer => {

@@ -13,15 +13,15 @@ const materials = new Map([[974, {
   net_per_pc: 0.0906, weight_per_carton: 10, length: 24.5, width: 11.5, height: 18,
 }]])
 const batches = [
-  { outbound_id: 74, material_id: 974, qty: 8150, kg: 738.39, cartons: 82, qty_per_carton: '100', price: 2, currency: 'US$', po_no: 'IRRIHS0401' },
-  { outbound_id: 75, material_id: 974, qty: 82, kg: 7.4292, cartons: 1, qty_per_carton: '100', price: 2, currency: 'US$', po_no: 'IRRIHS0401' },
+  { outbound_id: 74, material_id: 974, qty: 8150, kg: 738.39, cartons: 82, carton_no: '1-82', qty_per_carton: '100', price: 2, currency: 'US$', po_no: 'IRRIHS0401' },
+  { outbound_id: 75, material_id: 974, qty: 82, kg: 7.4292, cartons: 1, carton_no: '83', qty_per_carton: '100', price: 2, currency: 'US$', po_no: 'IRRIHS0401' },
 ]
 
 it('同柜分批出库只显示一行，数量、重量和实际箱数累加，原始分配不变', () => {
   const before = structuredClone(batches)
   const result = consolidateShipmentItems(batches, materials)
   expect(result).toHaveLength(1)
-  expect(result[0]).toMatchObject({ qty: 8232, kg: 745.8192, cartons: 83, outbound_ids: [74, 75] })
+  expect(result[0]).toMatchObject({ qty: 8232, kg: 745.8192, cartons: 83, carton_no: '1-82 / 83', outbound_ids: [74, 75] })
   expect(result[0].sources).toEqual(before)
   expect(batches).toEqual(before)
   expect(shipmentPurchaseAmount(result[0])).toBeCloseTo(batches.reduce((sum, row) => sum + shipmentPurchaseAmount(row), 0), 10)
@@ -34,10 +34,25 @@ it.each([
   { material_id: 975 }, { supplier: '另一供应商' }, { customs_company: '另一报关公司' },
   { price: 3 }, { currency: '¥' }, { purchase_unit: '米' }, { contract_no: '另一合同' },
   { invoice_no: '另一发票' }, { bl_head: '另一抬头' }, { weighing_qty: 5 },
-  { qty_per_carton: '200' }, { carton_no: '另一个箱号' }, { pallet: '1-2/1卡' },
+  { qty_per_carton: '200' }, { pallet: '1-2/1卡' },
   { material_snapshot: { id: 974 } }, { outbound_id: undefined }, { material_id: undefined },
 ])('不合并资料不同或不能确认来源的明细 %j', override => {
   expect(consolidateShipmentItems([batches[0], { ...batches[1], ...override }], materials)).toHaveLength(2)
+})
+
+it.each([
+  [' A01-A82 ', 'B03', 'A01-A82 / B03'],
+  ['1-82', ' 1-82 ', '1-82'],
+  ['', '83', '83'],
+  ['1-82', '', '1-82'],
+])('箱号只是批次标签，保留完整值且不影响实际箱数：%s、%s', (first, last, label) => {
+  const rows = [{ ...batches[0], carton_no: first }, { ...batches[1], carton_no: last }]
+  const before = structuredClone(rows)
+  const result = consolidateShipmentItems(rows, materials)
+  expect(result).toHaveLength(1)
+  expect(result[0]).toMatchObject({ carton_no: label, cartons: 83, qty: 8232, kg: 745.8192 })
+  expect(result[0].sources).toEqual(before)
+  expect(rows).toEqual(before)
 })
 
 it('不同采购单但其他资料一致时保留全部采购单号及出库来源', () => {

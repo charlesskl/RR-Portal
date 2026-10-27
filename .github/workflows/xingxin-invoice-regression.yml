@@ -37,7 +37,8 @@ jobs:
           docker build -t xingxin-invoice:test .
           docker run -d --name xingxin-invoice-test -p 127.0.0.1:3480:80 xingxin-invoice:test
           trap 'docker logs xingxin-invoice-test; docker rm -f xingxin-invoice-test' EXIT
-          curl --retry 10 --retry-connrefused --retry-delay 1 -fsS http://127.0.0.1:3480/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["service"] == "xingxin-invoice"'
+          curl --retry 10 --retry-all-errors --retry-delay 1 --retry-max-time 30 --max-time 5 -fsS http://127.0.0.1:3480/health -o /tmp/xingxin-health.json
+          python3 -c 'import json; assert json.load(open("/tmp/xingxin-health.json"))["service"] == "xingxin-invoice"'
           curl -fsS http://127.0.0.1:3480/ | grep -q '兴信大陆发票系统'
           curl -fsS http://127.0.0.1:3480/base-master.xlsx -o /tmp/xingxin-template.xlsx
           python3 -c 'import zipfile; assert zipfile.is_zipfile("/tmp/xingxin-template.xlsx")'

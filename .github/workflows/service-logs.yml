@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '4bce281442c55ec7a111443cde8b861d14d8fec42a0bb6099c31bd7adbd39124'
+  SCOPED_RELEASE_HELPER_SHA256: '063655dd1a756ddc43f0a22221ab9c9e2303cef7fc479ceb36f3806e16e5290d'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -55,6 +55,6 @@ jobs:
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/pr1021-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1021-inspect-v2.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 4bce281442c55ec7a111443cde8b861d14d8fec42a0bb6099c31bd7adbd39124 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1021-inspect-v4.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 063655dd1a756ddc43f0a22221ab9c9e2303cef7fc479ceb36f3806e16e5290d ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

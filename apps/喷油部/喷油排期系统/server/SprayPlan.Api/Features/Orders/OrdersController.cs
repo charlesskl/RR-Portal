@@ -358,7 +358,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             var proposed = parts.Select(part => new OrderPartQty {
                 Id = part.Id, PartName = part.PartName, Qty = updates.GetValueOrDefault(part.Id, part.Qty)
             }).ToList();
-            if (proposed.All(part => part.Qty == 0))
+            if (!proposed.Any(part => part.Qty > 0))
                 return BadRequest(new { error = "订单至少需要一个数量大于 0 的部位" });
             if (proposed.GroupBy(part => part.PartName).Any(group => group.Sum(part => (long)part.Qty) > int.MaxValue))
                 return BadRequest(new { error = "同名部位的合计数量不能超过 2,147,483,647" });

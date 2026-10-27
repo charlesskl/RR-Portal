@@ -2,6 +2,7 @@ import type { Material } from '../api/client'
 import type { CustomsItem } from './customsExport'
 import { effectiveCustomsCompany, sortShipmentItems } from './shipmentOrder'
 import { invoiceCustomsCompany } from './shipmentInvoice'
+import { shipmentPurchaseAmount } from './shipmentPurchase'
 import { isPaperRope, parseShipmentPacking, shipmentWeightQuantity } from './shipmentWeight'
 
 type BatchItem = CustomsItem & { outbound_id?: number; carton_no?: string; material_snapshot?: unknown }
@@ -24,14 +25,15 @@ export function consolidateShipmentItems<T extends BatchItem>(
     // not different goods: retain all labels on the consolidated display row.
     const eligible = !!material && Number(item.material_id) > 0 && Number(item.outbound_id) > 0
       && Number.isFinite(Number(item.kg)) && Number(item.kg) > 0
+      && Number.isFinite(Number(item.qty)) && Number(item.qty) > 0
       && !item.material_snapshot && ['uniform', 'empty'].includes(packing.mode)
     const key = eligible ? JSON.stringify([
       item.material_id, text(item.supplier || material?.supplier),
       effectiveCustomsCompany(item, material, fallback), invoiceCustomsCompany(item, material),
       text(material?.unit_kg || 'KGM'), text(item.purchase_unit || (isPaperRope(material?.name_zh) ? '米' : '个')),
-      Number(item.price) || 0, text(item.currency || '¥'),
+      text(item.currency || '¥'),
       text(item.bl_head), text(item.contract_no), text(item.contract_date),
-      text(item.invoice_no), text(item.invoice_date), text(item.po_date),
+      text(item.invoice_no), text(item.invoice_date),
       text(item.formula_name || material?.name_zh), text(item.product_use),
       packing.averageQty, item.weighing_qty ?? shipmentWeightQuantity(material?.name_zh, packing.averageQty),
       text(item.pallet), text(item.carton_group),
@@ -46,6 +48,11 @@ export function consolidateShipmentItems<T extends BatchItem>(
     group.outbound_ids = [...new Set([...group.outbound_ids, item.outbound_id!])]
     group.qty = sum(group.qty, item.qty)
     group.kg = sum(group.kg, item.kg)
+    // PO prices may differ. Preserve each batch's amount instead of applying
+    // the first purchase order's price to the combined quantity.
+    group.price = group.sources.reduce((amount, source) => amount + shipmentPurchaseAmount(source), 0) / group.qty
+    const dates = [...new Set(group.sources.map(source => text(source.po_date)).filter(Boolean))]
+    group.po_date = dates.length === 1 ? dates[0] : undefined
     // Shared cartons are counted once; independent batches retain their actual
     // carton counts, never ceil(total quantity / standard packing).
     if (!group.carton_group) group.cartons = sum(group.cartons, item.cartons)

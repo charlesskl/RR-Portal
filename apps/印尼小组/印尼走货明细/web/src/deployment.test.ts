@@ -90,8 +90,8 @@ describe('deployment base paths', () => {
     const output = await buildCustomsWorkbook({
       templateBuffer: Uint8Array.from(templateBytes).buffer,
       items: [
-        { material_id: 1, kg: 13.312, qty: 1, cartons: 1, price: 0.04, currency: 'US$', supplier: 'Same Supplier', customs_company: '' },
-        { material_id: 2, kg: 0.174, qty: 1, cartons: 1, price: 0.45, currency: 'US$', supplier: 'Same Supplier', customs_company: '' },
+        { material_id: 1, material_snapshot: {}, kg: 13.312, qty: 1, cartons: 1, price: 0.04, currency: 'US$', supplier: 'Same Supplier', customs_company: '' },
+        { material_id: 2, material_snapshot: {}, kg: 0.174, qty: 1, cartons: 1, price: 0.45, currency: 'US$', supplier: 'Same Supplier', customs_company: '' },
       ],
       materials: new Map([
         [1, { id: 1, product_code: '46720J', name_zh: 'PWB螺丝', customs_company: '' }],
@@ -162,7 +162,7 @@ describe('deployment base paths', () => {
         { material_id: 7, qty: 12, price: 3.5, currency: 'US$', cartons: 2, qty_per_carton: '6', weighing_qty: 6, pallet: '1-2/1卡', po_no: 'PO-TEST', supplier: 'Shared Supplier', contract_no: 'RWCRRM2600206', contract_date: '2026-09-01', invoice_no: 'RW202600206', invoice_date: '2026-09-02', customs_company: 'A 报关公司' },
         { material_id: 8, qty: 20000, price: 0.1, cartons: 1, qty_per_carton: '20000', weighing_qty: 20, po_no: 'PO-ROPE', supplier: 'Other Supplier', contract_no: 'RWCRRM2600206', invoice_no: 'RW202600206', customs_company: 'B 报关公司' },
         { material_id: 9, qty: 10000, price: 0.2, cartons: 3, qty_per_carton: '1-2/3000 3/4000', weighing_qty: 2500, po_no: 'PO-MIXED', supplier: 'Shared Supplier', contract_no: 'RWCRRM2600206', invoice_no: 'RW202600206', customs_company: 'B 报关公司' },
-      ],
+      ].map(item => ({ ...item, kg: ({ 7: 6, 8: 14, 9: 20 } as Record<number, number>)[item.material_id] })),
       materials: new Map([[7, {
         id: 7,
         product_code: 'ITEM-TEST',
@@ -209,8 +209,8 @@ describe('deployment base paths', () => {
     expect(sheet.A4?.v).toBe(1)
     expect(sheet.D4?.v).toBe('ITEM-TEST')
     expect(sheet.N1?.v).toBe(7.8)
-    expect(sheet.N4).toMatchObject({ f: 'AO4/$N$1' })
-    expect(sheet.Z4).toMatchObject({ f: 'AO4', v: 3.5 })
+    expect(sheet.N4).toMatchObject({ f: 'IFERROR(AO4*K4/L4/$N$1,0)' })
+    expect(sheet.Z4).toMatchObject({ f: 'AO4', v: 7 })
     expect(sheet.AA4).toMatchObject({ f: 'Z4*K4' })
     expect(sheet.AP4).toMatchObject({ f: 'AO4*K4' })
     expect(sheet.P4).toMatchObject({ f: 'ROUND(BA4*L4,2)' })

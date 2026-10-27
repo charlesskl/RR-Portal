@@ -4,6 +4,7 @@ using System.Diagnostics;
 using Dapper;
 using IndoShipping.Api.Auth;
 using IndoShipping.Api.Controllers;
+using IndoShipping.Api.Features.Bootstrap;
 using IndoShipping.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -15,6 +16,38 @@ namespace IndoShipping.Api.Tests;
 
 public class ShipmentOutboundLinkTests
 {
+    [Fact]
+    public async Task Purchase_unit_price_survives_create_update_and_reload_at_eight_decimals()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        await f.Db.ExecuteAsync("ALTER TABLE shipment_items ALTER COLUMN price TYPE numeric(18,4); UPDATE outbound SET qty=900000 WHERE id=1");
+        var legacy = Body(1); legacy.items![0].outbound_id = null;
+        legacy.items[0].price = 99999999999999.1234m;
+        var legacyId = Id(await f.Controller.Create(legacy));
+        await f.Db.ExecuteAsync(PurchasePricePrecision.SchemaSql);
+        await f.Db.ExecuteAsync(PurchasePricePrecision.SchemaSql);
+        Assert.Equal(99999999999999.1234m, await f.Db.ExecuteScalarAsync<decimal>(
+            "SELECT price FROM shipment_items WHERE shipment_id=@id", new { id = legacyId }));
+
+        var body = Body(300000); body.items![0].price = .00056m; body.items[0].kg = 87;
+        var id = Id(await f.Controller.Create(body));
+        var saved = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(id)).Value)
+            .GetProperty("items")[0];
+        Assert.Equal(.00056m, saved.GetProperty("price").GetDecimal());
+        Assert.Equal(168m, await f.Db.ExecuteScalarAsync<decimal>(
+            "SELECT price*qty FROM shipment_items WHERE shipment_id=@id", new { id }));
+        body.items[0].qty = 100000; body.items[0].price = .00068m;
+        Assert.IsType<OkObjectResult>(await f.Controller.Update(id, body));
+        var updated = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(id)).Value)
+            .GetProperty("items")[0];
+        Assert.Equal(.00068m, updated.GetProperty("price").GetDecimal());
+        Assert.Equal(68m, await f.Db.ExecuteScalarAsync<decimal>(
+            "SELECT price*qty FROM shipment_items WHERE shipment_id=@id", new { id }));
+        Assert.Equal(99999999999999.1234m, await f.Db.ExecuteScalarAsync<decimal>(
+            "SELECT price FROM shipment_items WHERE shipment_id=@id", new { id = legacyId }));
+        Assert.Equal(900000m, await f.Db.ExecuteScalarAsync<decimal>("SELECT qty FROM outbound WHERE id=1"));
+    }
+
     [Fact]
     public async Task Existing_imported_row_can_be_linked_and_reloaded_without_changing_packing_or_stock()
     {

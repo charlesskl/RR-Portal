@@ -77,7 +77,7 @@ describe('independent spreadsheet boundaries', () => {
     const result = applyShipmentSheetEdits(input, materials, [{ row: 1, field: 'price', value: '.45' }])
     const displayAndSaveRows = withShipmentInvoicePrices(sortShipmentItems(result.items, result.materials), result.materials)
     expect(displayAndSaveRows.map(row => [row.outbound_id, row.qty, row.price, row.invoice_price]))
-      .toEqual([[21, 10, .04, .04], [22, 20, .45, .45]])
+      .toEqual([[21, 10, .04, .2], [22, 20, .45, 2.25]])
     for (const field of ['outbound_id', 'material_id', 'invoice_price', 'gross_per_pc', 'netTotal']) {
       expect(shipmentSheetFields).not.toContain(field)
       expect(() => applyShipmentSheetEdits(input, materials, [{ row: 0, field, value: '999' }])).toThrow('不允许')

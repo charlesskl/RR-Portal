@@ -22,7 +22,7 @@ describe('existing visible quantity unit is preserved when linking', () => {
   it('uses the current imported snapshot name for the fallback before mapping identity', () => {
     const imported = { ...row, material_id: -1, material_snapshot: { name_zh: '纸绳', length: 22 } }
     const mapped = new Map([[-1, imported.material_snapshot]])
-    expect(linkShipmentOutbound([imported], 1, source, material, mapped)[0].material_snapshot).toMatchObject({ id: 66, length: 22 })
-    expect(() => linkShipmentOutbound([imported], 1, { ...source, purchase_unit: '个' }, material, mapped)).toThrow('单位')
+    expect(linkShipmentOutbound([imported], 1, { ...source, price: 0 }, material, mapped)[0].material_snapshot).toMatchObject({ id: 66, length: 22 })
+    expect(() => linkShipmentOutbound([imported], 1, { ...source, price: 0, purchase_unit: '个' }, material, mapped)).toThrow('单位')
   })
 })

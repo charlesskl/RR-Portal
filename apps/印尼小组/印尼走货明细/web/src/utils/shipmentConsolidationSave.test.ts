@@ -22,8 +22,8 @@ const executable = ts.transpileModule(functions.join('\n'), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText
 const rows = [
-  { _rowKey: 1, material_id: 974, outbound_id: 74, qty: 8150, kg: 738.39, cartons: 82, qty_per_carton: '100', price: 2 },
-  { _rowKey: 2, material_id: 974, outbound_id: 75, qty: 82, kg: 7.4292, cartons: 1, qty_per_carton: '100', price: 2 },
+  { _rowKey: 1, material_id: 974, outbound_id: 74, qty: 8150, kg: 738.39, cartons: 82, carton_no: '1-82', qty_per_carton: '100', price: 2 },
+  { _rowKey: 2, material_id: 974, outbound_id: 75, qty: 82, kg: 7.4292, cartons: 1, carton_no: '83', qty_per_carton: '100', price: 2 },
 ]
 const materials = new Map([[974, { id: 974, name_zh: '彩盒-FSC', net_per_pc: 0.0906 }]])
 
@@ -31,6 +31,7 @@ it.each([true, false])('汇总视图保存仍逐批保留出库数量（新建=%
   const items = structuredClone(rows)
   const consolidatedItems = consolidateShipmentItems(items, materials)
   expect(consolidatedItems).toHaveLength(1)
+  expect(consolidatedItems[0].carton_no).toBe('1-82 / 83')
   const api = { post: vi.fn(async (..._args: any[]) => ({ data: { id: 9 } })), put: vi.fn(async (..._args: any[]) => ({})) }
   const context = createContext({
     items, consolidatedItems, showConsolidated: true, creating, editing: creating ? null : { id: 9 },
@@ -48,6 +49,7 @@ it.each([true, false])('汇总视图保存仍逐批保留出库数量（新建=%
   expect(saved.map((row: any) => [row.outbound_id, row.qty, row.kg, row.cartons]))
     .toEqual([[74, 8150, 738.39, 82], [75, 82, 7.4292, 1]])
   expect(saved.every((row: any) => !row.sources && !row.outbound_ids)).toBe(true)
+  expect(saved.map((row: any) => row.carton_no)).toEqual(['1-82', '83'])
   expect(items).toEqual(rows)
 
   // Editing one batch changes only its allocation; display consolidation must

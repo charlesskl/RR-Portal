@@ -1303,7 +1303,7 @@ export default function ShipmentsPage() {
         >
           {showConsolidated ? <>
             <Typography.Paragraph type="secondary">
-              同柜相同物料已汇总，导出使用同一汇总规则。出库分配仍按原批次保存；供应商、价格、单据或装箱资料不同的明细保留分行。
+              同柜相同物料已汇总，箱号不同的出库批次也会合并显示，导出使用同一汇总规则。原始箱号和出库分配仍按批次保存；供应商、价格、单据或其他装箱资料不同的明细保留分行。
             </Typography.Paragraph>
             <Table
               rowKey={r => String(r._rowKey)}
@@ -1327,6 +1327,7 @@ export default function ShipmentsPage() {
                 { title: '毛重总重', width: 110, render: (_, r) => calc(r).grossTotal.toFixed(2) },
                 { title: '净重总重', width: 110, render: (_, r) => calc(r).netTotal.toFixed(2) },
                 { title: '箱数', width: 80, render: (_, _r, i) => consolidatedCartons[i]?.count || 0 },
+                { title: '箱号（全部批次）', dataIndex: 'carton_no', width: 180 },
                 { title: '采购单价', width: 110, render: (_, r) => num(r.price).toFixed(4) },
                 { title: '采购金额', width: 110, render: (_, r) => calc(r).purchaseAmount.toFixed(2) },
                 { title: '采购单号', dataIndex: 'po_no', width: 160 },

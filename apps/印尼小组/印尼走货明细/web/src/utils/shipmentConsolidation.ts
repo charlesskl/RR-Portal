@@ -19,8 +19,9 @@ export function consolidateShipmentItems<T extends BatchItem>(
   sortShipmentItems(items, materials, fallback).forEach((item, index) => {
     const material = materials.get(item.material_id!)
     const packing = parseShipmentPacking(item.qty_per_carton)
-    // Imported/unidentified materials and explicit box ranges cannot safely be
-    // collapsed: range labels and per-batch packing must remain intact.
+    // Imported/unidentified materials and per-box packing schedules cannot
+    // safely be collapsed. Carton number labels, however, identify batches,
+    // not different goods: retain all labels on the consolidated display row.
     const eligible = !!material && Number(item.material_id) > 0 && Number(item.outbound_id) > 0
       && Number.isFinite(Number(item.kg)) && Number(item.kg) > 0
       && !item.material_snapshot && ['uniform', 'empty'].includes(packing.mode)
@@ -33,7 +34,7 @@ export function consolidateShipmentItems<T extends BatchItem>(
       text(item.invoice_no), text(item.invoice_date), text(item.po_date),
       text(item.formula_name || material?.name_zh), text(item.product_use),
       packing.averageQty, item.weighing_qty ?? shipmentWeightQuantity(material?.name_zh, packing.averageQty),
-      text(item.pallet), text(item.carton_no), text(item.carton_group),
+      text(item.pallet), text(item.carton_group),
       item.carton_group ? Number(item.cartons) || 0 : null,
     ]) : JSON.stringify(['single', index])
     const group = groups.get(key)
@@ -48,6 +49,9 @@ export function consolidateShipmentItems<T extends BatchItem>(
     // Shared cartons are counted once; independent batches retain their actual
     // carton counts, never ceil(total quantity / standard packing).
     if (!group.carton_group) group.cartons = sum(group.cartons, item.cartons)
+    // Preserve complete labels (including ranges and alphanumeric numbers).
+    // Do not infer counts from these labels or overwrite the source batches.
+    group.carton_no = [...new Set(group.sources.map(source => text(source.carton_no)).filter(Boolean))].join(' / ')
     group.po_no = [...new Set(group.sources.map(source => text(source.po_no)).filter(Boolean))].join(' / ')
     // Keep the last batch's position. Company surcharges belong to the last
     // line, so a non-adjacent merge must not move that fee to another contract.

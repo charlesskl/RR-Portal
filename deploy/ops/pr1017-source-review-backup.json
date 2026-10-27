@@ -1,0 +1,45 @@
+{
+  "independent": true,
+  "reviewer": "/root/pr1014_backend",
+  "base": "2fe302c1e65138a056fba0f21c172de11a5de2ee",
+  "baseTree": "6f0264da45fc34aa3eb4933b3657be61568e2ee5",
+  "checkedUTC": "2026-10-27T06:25:25.963878+00:00",
+  "limits": [
+    "Local pure fixtures and sealed local inventory evidence only; no new remote observation.",
+    "Backup is an individually consistent exported PostgreSQL snapshot; sequence states are bracketed independently, not MVCC atomic.",
+    "DataProtection ancestor metadata is an explicit running pre-stop reference, not a claim of fresh stopped-container observation.",
+    "Any unexpected source/runtime/schema/writable-path drift must reject before deployment; no blind retry after ambiguous publication or dispatch."
+  ],
+  "remoteOrOpsOrStateWrites": false,
+  "disposition": "CHECKED",
+  "helperSHA256": "7c1d1126e31d0b0e9b27dcd7a836e807d75a9ec4b591968e5b9db3fc9e15a8eb",
+  "helperGatesFrozen": true,
+  "allowedPhases": [
+    "backup"
+  ],
+  "dependencies": {
+    "factory-review-backup-library.py": "79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666",
+    "release-data-ops-library.py": "ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5",
+    "release-data-library.py": "d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9",
+    "qc-source-library.py": "4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5",
+    "portable-pdb-library.py": "cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5"
+  },
+  "findings": [],
+  "evidence": {
+    "independentFixtureReport": "pr1017-independent-ops-fixtures-result.json",
+    "independentFixtureReportSHA256": "486f03dbf8b72291527958cb2dcc190321a880739993ac95739190d808fbe4d2",
+    "authorFixturesIndependentlyRerun": 12,
+    "authorRerunReportSHA256": "4d26fbbee0914b7e92754cd90e1838ab8ee03e56ca38f9f471d368c1df364d22",
+    "inventoryRunId": 40459404107,
+    "inventoryLogSHA256": "adf00f111fbd454ef58e870d8ff3cd873c4f764975779cc70642d5760727dd12",
+    "inventoryResultSHA256": "1b85de669b92697c11fa2da43878518dc9e5bc00d81d89b71f4ff6fb715c0172"
+  },
+  "reviewed": [
+    "Complete delta against mature PR1001 backup and full current helper. Only writable_layer_guard/application_proof/prior_indo_proof AST functions differ after PR label normalization.",
+    "All five transitive dependencies have exact frozen bytes; original readonly exported snapshot/custom-format dump/schema+typed-row+owner/ACL/security state/sequence/startup checks unchanged.",
+    "Zero Indo mounts and all46 runtime identity/config/environment/45 unrelated-container equality retained, full production environment+four unrelated dirty files private archival and exact comparison retained.",
+    "Actual 1001 backend/PDB/copy hashes and sealed archives proven separately from PR1016 static image/de46 labels, full frontend compiled inventory and durable default alias.",
+    "Historical public stage parent directories derive only from known compiled-file inventory; unrelated paths, deletions, malformed and unknown stage paths rejected.",
+    "Full DataProtection keyring private tar regular files, mode/owner/count/XML identity/no links/no entity, explicit ancestor reference, replay hash unchanged."
+  ]
+}

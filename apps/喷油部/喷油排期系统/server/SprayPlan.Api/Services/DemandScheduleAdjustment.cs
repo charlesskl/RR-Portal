@@ -14,8 +14,10 @@ public static class DemandScheduleAdjustment
         HashSet<string> selectedParts, string by)
     {
         var plans = await db.ProductionPlans.Where(plan => plan.OrderId == order.Id && plan.DeletedAt == null).ToListAsync();
-        var original = plans.ToList();
-        var planIds = plans.Select(plan => plan.Id).ToList();
+        // 配置快照不参与减排修改。整道工序曾因需求归零而自动减排时，允许沿用其配置，
+        // 但不恢复已删除的原记录，也不采用人工撤销或已有实绩/入库关联的历史计划。
+        var original = await db.ProductionPlans.AsNoTracking().Where(plan => plan.OrderId == order.Id).ToListAsync();
+        var planIds = original.Select(plan => plan.Id).ToList();
         var inboundSources = (await db.InboundApplications.Where(app => planIds.Contains(app.SourcePlanId))
             .Select(app => app.SourcePlanId).ToListAsync()).ToHashSet();
         bool Protected(ProductionPlan plan) => PlanDateRules.HasActuals(plan) || inboundSources.Contains(plan.Id);
@@ -45,7 +47,15 @@ public static class DemandScheduleAdjustment
         foreach (var part in parts.Where(part => selectedParts.Contains(part.PartName)).GroupBy(part => part.PartName))
         {
             var demand = part.Sum(part => (long)part.Qty);
-            var steps = original.Where(plan => plan.PartName == part.Key).GroupBy(plan => plan.StepNo).OrderBy(step => step.Key).ToList();
+            var configuration = original.Where(plan => plan.PartName == part.Key).GroupBy(plan => plan.StepNo).SelectMany(step => {
+                var active = step.Where(plan => plan.DeletedAt is null).ToList();
+                if (active.Count > 0) return active;
+                // 人工撤销晚于自动减排时不能借用更早的配置；同毫秒混合撤销也保守跳过。
+                var latestDeletion = step.Max(plan => plan.DeletedAt);
+                var latest = step.Where(plan => plan.DeletedAt == latestDeletion).ToList();
+                return latest.All(plan => IsAutomaticReductionTemplate(plan, inboundSources)) ? latest : new List<ProductionPlan>();
+            });
+            var steps = configuration.GroupBy(plan => plan.StepNo).OrderBy(step => step.Key).ToList();
             if (steps.Count == 0)
             {
                 if (demand > 0) warnings.Add($"{part.Key}：尚未配置工序和拉别，请先生成首次排期");
@@ -54,8 +64,9 @@ public static class DemandScheduleAdjustment
             // 先减排所有工序，再按工序顺序补排，后工序只使用前一天已可用的上道产量。
             foreach (var step in steps)
             {
-                var actual = step.Sum(plan => (long)(plan.GoodQty ?? 0));
-                var pending = step.Where(plan => !Protected(plan)).OrderByDescending(plan => plan.PlanDate).ThenByDescending(plan => plan.Id).ToList();
+                var active = plans.Where(plan => plan.DeletedAt == null && plan.PartName == part.Key && plan.StepNo == step.Key).ToList();
+                var actual = active.Sum(plan => (long)(plan.GoodQty ?? 0));
+                var pending = active.Where(plan => !Protected(plan)).OrderByDescending(plan => plan.PlanDate).ThenByDescending(plan => plan.Id).ToList();
                 var excess = Math.Max(0, actual + pending.Sum(plan => (long)plan.PlannedQty) - demand);
                 foreach (var plan in pending)
                 {
@@ -135,5 +146,28 @@ public static class DemandScheduleAdjustment
         if (added > 0 || reduced > 0)
             order.Status = OrderCalc.DemandStatus(order.Status, parts, plans);
         return new(added, reduced, created, warnings);
+    }
+
+    private static bool IsAutomaticReductionTemplate(ProductionPlan plan, ISet<int> inboundSources)
+    {
+        if (plan.DeletedAt is null || PlanDateRules.HasActuals(plan) || inboundSources.Contains(plan.Id)
+            || plan.PlannedQty <= 0 || string.IsNullOrWhiteSpace(plan.DeletedBy)
+            || plan.LastModifiedBy != plan.DeletedBy || plan.LastModifiedAt != plan.DeletedAt.Value
+            || string.IsNullOrWhiteSpace(plan.ModificationHistory)) return false;
+        try
+        {
+            using var history = JsonDocument.Parse(plan.ModificationHistory);
+            if (history.RootElement.ValueKind != JsonValueKind.Array || history.RootElement.GetArrayLength() == 0) return false;
+            var last = history.RootElement[history.RootElement.GetArrayLength() - 1];
+            return last.ValueKind == JsonValueKind.Object
+                && last.TryGetProperty("action", out var action) && action.ValueKind == JsonValueKind.String && action.GetString() == "demand_reduce"
+                && last.TryGetProperty("oldValue", out var before) && before.ValueKind == JsonValueKind.Number && before.TryGetInt32(out var oldQty) && oldQty == plan.PlannedQty
+                && last.TryGetProperty("newValue", out var after) && after.ValueKind == JsonValueKind.Number && after.TryGetInt32(out var newQty) && newQty == 0
+                && last.TryGetProperty("by", out var actor) && actor.ValueKind == JsonValueKind.String && actor.GetString() == plan.DeletedBy
+                && last.TryGetProperty("at", out var timestamp) && timestamp.ValueKind == JsonValueKind.String && timestamp.TryGetDateTimeOffset(out var at)
+                // SQLite 的原有时间转换器只保存毫秒；审计 JSON 保留完整时间精度。
+                && at.ToUnixTimeMilliseconds() == new DateTimeOffset(plan.DeletedAt.Value).ToUnixTimeMilliseconds();
+        }
+        catch (JsonException) { return false; }
     }
 }

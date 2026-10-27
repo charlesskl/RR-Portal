@@ -191,4 +191,235 @@ public class OrderAutoScheduleTests : IAsyncLifetime
     {
         var before = await Snapshot(); (await Save(120, false)).EnsureSuccessStatusCode(); Assert.Equal(before, await Snapshot());
     }
+
+    [Fact]
+    public async Task ReducePartToZero_ThenIncrease_ReusesOnlyAutomaticReductionConfiguration()
+    {
+        var armId = 0;
+        await factory.WithDbAsync(async db => {
+            var arm = new OrderPartQty { OrderId = orderId, PartName = "臂", Qty = 100 };
+            db.OrderPartQtys.Add(arm); await db.SaveChangesAsync(); armId = arm.Id;
+            var first = new ProductionCalendar([]).NextWorkday(today.AddDays(1));
+            db.ProductionPlans.AddRange(
+                new ProductionPlan { OrderId = orderId, PartName = "臂", StepNo = 1, LineId = firstLine,
+                    PlanDate = first, PlannedQty = 100, MachineNos = "[\"5#\"]", Craft = "移印", CreatedBy = "original" },
+                new ProductionPlan { OrderId = orderId, PartName = "臂", StepNo = 2, LineId = secondLine,
+                    PlanDate = new ProductionCalendar([]).NextWorkday(first.AddDays(1)), PlannedQty = 100,
+                    Craft = "手喷", CreatedBy = "original" });
+            await db.SaveChangesAsync();
+        });
+        var zero = await client.PatchAsJsonAsync($"/api/orders/{orderId}", new {
+            partQtys = new[] { new { id = armId, qty = 0 } }, autoAdjustSchedule = true,
+        });
+        zero.EnsureSuccessStatusCode();
+        string historical = "";
+        await factory.WithDbAsync(async db => {
+            var rows = await db.ProductionPlans.AsNoTracking().Where(plan => plan.OrderId == orderId && plan.PartName == "臂").OrderBy(plan => plan.Id).ToListAsync();
+            Assert.All(rows, plan => Assert.NotNull(plan.DeletedAt));
+            historical = JsonSerializer.Serialize(rows);
+        });
+        var restore = await client.PatchAsJsonAsync($"/api/orders/{orderId}", new {
+            partQtys = new[] { new { id = armId, qty = 120 } }, autoAdjustSchedule = true,
+        });
+        restore.EnsureSuccessStatusCode();
+        var response = await restore.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(240, response.GetProperty("scheduleAdjustment").GetProperty("addedQty").GetInt64());
+        Assert.Empty(response.GetProperty("scheduleAdjustment").GetProperty("warnings").EnumerateArray());
+        await factory.WithDbAsync(async db => {
+            var rows = await db.ProductionPlans.AsNoTracking().Where(plan => plan.OrderId == orderId && plan.PartName == "臂").OrderBy(plan => plan.Id).ToListAsync();
+            Assert.Equal(historical, JsonSerializer.Serialize(rows.Where(plan => plan.DeletedAt != null).ToList()));
+            var active = rows.Where(plan => plan.DeletedAt == null).ToList();
+            Assert.All(active, plan => { Assert.Equal("clerk", plan.CreatedBy); Assert.Null(plan.GoodQty); Assert.Null(plan.InboundQty); Assert.True(plan.PlanDate >= today); });
+            Assert.Equal(120, active.Where(plan => plan.StepNo == 1).Sum(plan => plan.PlannedQty));
+            Assert.Equal(120, active.Where(plan => plan.StepNo == 2).Sum(plan => plan.PlannedQty));
+            Assert.All(active.Where(plan => plan.StepNo == 1), plan => Assert.Equal("[\"5#\"]", plan.MachineNos));
+            Assert.All(active, plan => Assert.True(plan.PlannedQty <= 100));
+            foreach (var plan in active.Where(plan => plan.StepNo == 2))
+                Assert.True(active.Where(up => up.StepNo == 1 && up.PlanDate < plan.PlanDate).Sum(up => up.PlannedQty)
+                    >= active.Where(down => down.StepNo == 2 && down.PlanDate <= plan.PlanDate).Sum(down => down.PlannedQty));
+        });
+        // 无数量变更的主动保存会先处理其他部位原有缺口；全部补齐后再次保存才应幂等。
+        (await client.PatchAsJsonAsync($"/api/orders/{orderId}", new { autoAdjustSchedule = true })).EnsureSuccessStatusCode();
+        var beforeRepeat = await Snapshot();
+        (await client.PatchAsJsonAsync($"/api/orders/{orderId}", new { autoAdjustSchedule = true })).EnsureSuccessStatusCode();
+        Assert.Equal(beforeRepeat, await Snapshot());
+    }
+
+    [Theory]
+    [InlineData("manual")]
+    [InlineData("later-manual")]
+    [InlineData("malformed")]
+    [InlineData("wrong-actor")]
+    [InlineData("wrong-quantity")]
+    [InlineData("wrong-time")]
+    [InlineData("reported")]
+    [InlineData("inbound")]
+    public async Task MissingStep_DoesNotReuseCancelledUnverifiedOrProtectedHistory(string marker)
+    {
+        var partId = 0;
+        await factory.WithDbAsync(async db => {
+            var part = new OrderPartQty { OrderId = orderId, PartName = "臂", Qty = 0 };
+            db.OrderPartQtys.Add(part); await db.SaveChangesAsync(); partId = part.Id;
+            var when = today.AddDays(-1);
+            var history = new[] { new { action = "demand_reduce", oldValue = marker == "wrong-quantity" ? 99 : 100, newValue = 0,
+                by = marker == "wrong-actor" ? "someone-else" : "clerk", at = marker == "wrong-time" ? when.AddMinutes(-1) : when } };
+            var plan = new ProductionPlan { OrderId = orderId, PartName = "臂", StepNo = 1, LineId = firstLine,
+                PlannedQty = 100, PlanDate = today.AddDays(2), DeletedAt = when, DeletedBy = "clerk",
+                LastModifiedAt = when, LastModifiedBy = "clerk", ModificationHistory = JsonSerializer.Serialize(history) };
+            if (marker == "manual") plan.ModificationHistory = "[{\"action\":\"unschedule\"}]";
+            if (marker == "later-manual") plan.ModificationHistory = plan.ModificationHistory.TrimEnd(']') + ",{\"action\":\"unschedule\"}]";
+            if (marker == "malformed") plan.ModificationHistory = "not-json";
+            if (marker == "reported") plan.ReportedQty = 0;
+            db.ProductionPlans.Add(plan); await db.SaveChangesAsync();
+            if (marker == "inbound") { db.InboundApplications.Add(new() { SourcePlanId = plan.Id, ApplicationNo = "CANCELLED-HISTORY-APP", Quantity = 1 }); await db.SaveChangesAsync(); }
+        });
+        var before = await Snapshot();
+        var response = await client.PatchAsJsonAsync($"/api/orders/{orderId}", new {
+            partQtys = new[] { new { id = partId, qty = 120 } }, autoAdjustSchedule = true,
+        });
+        response.EnsureSuccessStatusCode();
+        Assert.Contains("请先生成首次排期", await response.Content.ReadAsStringAsync());
+        Assert.Equal(before, await Snapshot());
+    }
+
+    [Fact]
+    public async Task MissingDownstreamStep_UsesAutomaticHistory_WhileExistingActualStepRemainsUntouched()
+    {
+        var partId = 0;
+        await factory.WithDbAsync(async db => {
+            var part = new OrderPartQty { OrderId = orderId, PartName = "臂", Qty = 100 };
+            db.OrderPartQtys.Add(part); await db.SaveChangesAsync(); partId = part.Id;
+            db.ProductionPlans.AddRange(
+                new ProductionPlan { OrderId = orderId, PartName = "臂", StepNo = 1, LineId = firstLine,
+                    PlannedQty = 100, GoodQty = 100, ReportedQty = 100, Status = "recorded", ProductionValue = 50, PlanDate = today.AddDays(-1) },
+                new ProductionPlan { OrderId = orderId, PartName = "臂", StepNo = 2, LineId = secondLine,
+                    PlannedQty = 100, PlanDate = new ProductionCalendar([]).NextWorkday(today.AddDays(1)) });
+            await db.SaveChangesAsync();
+        });
+        (await client.PatchAsJsonAsync($"/api/orders/{orderId}", new { partQtys = new[] { new { id = partId, qty = 0 } }, autoAdjustSchedule = true })).EnsureSuccessStatusCode();
+        string retained = "";
+        await factory.WithDbAsync(async db => retained = JsonSerializer.Serialize(await db.ProductionPlans.AsNoTracking().Where(plan => plan.OrderId == orderId && plan.PartName == "臂").OrderBy(plan => plan.Id).ToListAsync()));
+        var response = await client.PatchAsJsonAsync($"/api/orders/{orderId}", new { partQtys = new[] { new { id = partId, qty = 120 } }, autoAdjustSchedule = true });
+        response.EnsureSuccessStatusCode();
+        Assert.Equal(140, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("scheduleAdjustment").GetProperty("addedQty").GetInt64());
+        await factory.WithDbAsync(async db => {
+            var rows = await db.ProductionPlans.AsNoTracking().Where(plan => plan.OrderId == orderId && plan.PartName == "臂").OrderBy(plan => plan.Id).ToListAsync();
+            Assert.Equal(retained, JsonSerializer.Serialize(rows.Where(plan => plan.GoodQty != null || plan.DeletedAt != null).ToList()));
+            Assert.Equal(120, rows.Where(plan => plan.DeletedAt == null && plan.StepNo == 1).Sum(plan => plan.GoodQty ?? plan.PlannedQty));
+            Assert.Equal(120, rows.Where(plan => plan.DeletedAt == null && plan.StepNo == 2).Sum(plan => plan.GoodQty ?? plan.PlannedQty));
+        });
+    }
+
+    [Fact]
+    public async Task ConcurrentOrders_AutomaticSupplement_DoesNotDoubleBookLineCapacity()
+    {
+        var orders = new List<(int Order, int Part)>();
+        var first = new ProductionCalendar([]).NextWorkday(today.AddDays(1));
+        await factory.WithDbAsync(async db => {
+            foreach (var number in new[] { "AUTO-CONCURRENT-A", "AUTO-CONCURRENT-B" }) {
+                var order = new Order { ExternalOrderNo = number, ProductId = (await db.Orders.SingleAsync(value => value.Id == orderId)).ProductId,
+                    Status = "scheduled", PartQtys = new() { new() { PartName = "轮", Qty = 100 } } };
+                db.Orders.Add(order); await db.SaveChangesAsync(); orders.Add((order.Id, order.PartQtys[0].Id));
+                db.ProductionPlans.Add(new() { OrderId = order.Id, PartName = "轮", LineId = firstLine, PlanDate = first, PlannedQty = 100 });
+            }
+            await db.SaveChangesAsync();
+        });
+        var responses = await Task.WhenAll(orders.Select(order => client.PatchAsJsonAsync($"/api/orders/{order.Order}", new {
+            partQtys = new[] { new { id = order.Part, qty = 200 } }, autoAdjustSchedule = true,
+        })));
+        Assert.All(responses, response => response.EnsureSuccessStatusCode());
+        await factory.WithDbAsync(async db => {
+            var rows = await db.ProductionPlans.AsNoTracking().Where(plan => plan.DeletedAt == null && plan.LineId == firstLine && plan.PlanDate > first).ToListAsync();
+            Assert.Equal(200, rows.Sum(plan => plan.PlannedQty));
+            Assert.All(rows.GroupBy(plan => plan.PlanDate), day => Assert.True(day.Sum(plan => plan.PlannedQty) <= 100));
+            foreach (var order in orders)
+                Assert.Equal(200, await db.ProductionPlans.Where(plan => plan.DeletedAt == null && plan.OrderId == order.Order).SumAsync(plan => plan.PlannedQty));
+        });
+    }
+
+    [Theory]
+    [InlineData("active")]
+    [InlineData("latest")]
+    [InlineData("latest-disabled")]
+    [InlineData("capacity-rollback")]
+    public async Task HistoricalConfiguration_UsesActiveOrLatestAutomaticBatch_WithoutGuessingResources(string mode)
+    {
+        var partId = 0;
+        await factory.WithDbAsync(async db => {
+            var part = new OrderPartQty { OrderId = orderId, PartName = "臂", Qty = mode == "active" ? 40 : 0 };
+            db.OrderPartQtys.Add(part); await db.SaveChangesAsync(); partId = part.Id;
+            ProductionPlan Reduced(int qty, int line, DateTime date, DateTime at) => new() {
+                OrderId = orderId, PartName = "臂", LineId = line, StepNo = 1, PlannedQty = qty, PlanDate = date,
+                DeletedAt = at, DeletedBy = "clerk", LastModifiedAt = at, LastModifiedBy = "clerk",
+                ModificationHistory = JsonSerializer.Serialize(new[] { new { action = "demand_reduce", oldValue = qty, newValue = 0, by = "clerk", at } }),
+            };
+            // Older configuration has a later original plan date: deletion provenance, not
+            // the furthest old date, must choose the configuration for a missing step.
+            db.ProductionPlans.AddRange(Reduced(100, firstLine, today.AddDays(365), today.AddDays(-2)),
+                Reduced(50, secondLine, today.AddDays(1), today.AddDays(-1)));
+            if (mode == "active") db.ProductionPlans.Add(new() {
+                OrderId = orderId, PartName = "臂", StepNo = 1, LineId = firstLine, PlannedQty = 40,
+                PlanDate = new ProductionCalendar([]).NextWorkday(today.AddDays(2)),
+            });
+            if (mode == "latest-disabled") (await db.ProductionLines.SingleAsync(line => line.Id == secondLine)).IsActive = false;
+            if (mode == "capacity-rollback") (await db.ProductionLines.SingleAsync(line => line.Id == secondLine)).DailyCapacityLimit = 1;
+            await db.SaveChangesAsync();
+        });
+        var before = await Snapshot();
+        var response = await client.PatchAsJsonAsync($"/api/orders/{orderId}", new {
+            partQtys = new[] { new { id = partId, qty = mode == "capacity-rollback" ? 2000 : 120 } }, autoAdjustSchedule = true,
+        });
+        if (mode == "capacity-rollback") {
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode); Assert.Contains("本次修改未保存", await response.Content.ReadAsStringAsync());
+            Assert.Equal(before, await Snapshot());
+            await factory.WithDbAsync(async db => Assert.Equal(0, (await db.OrderPartQtys.SingleAsync(part => part.Id == partId)).Qty));
+            return;
+        }
+        response.EnsureSuccessStatusCode();
+        if (mode == "latest-disabled") {
+            Assert.Contains("原拉别已停用", await response.Content.ReadAsStringAsync()); Assert.Equal(before, await Snapshot()); return;
+        }
+        await factory.WithDbAsync(async db => {
+            var added = await db.ProductionPlans.AsNoTracking().Where(plan => plan.OrderId == orderId && plan.PartName == "臂" && plan.CreatedBy == "clerk").ToListAsync();
+            Assert.NotEmpty(added);
+            Assert.All(added, plan => {
+                Assert.Equal(mode == "active" ? firstLine : secondLine, plan.LineId);
+                Assert.InRange(plan.PlannedQty, 1, mode == "active" ? 40 : 50);
+                Assert.InRange(plan.PlanDate, today, today.AddDays(30));
+            });
+            Assert.Equal(mode == "active" ? 80 : 120, added.Sum(plan => plan.PlannedQty));
+            Assert.Equal(2, await db.ProductionPlans.CountAsync(plan => plan.OrderId == orderId && plan.PartName == "臂" && plan.DeletedAt != null));
+        });
+    }
+
+    [Fact]
+    public async Task LaterManualCancellation_SuppressesOlderAutomaticReductionConfiguration()
+    {
+        var partId = 0;
+        await factory.WithDbAsync(async db => {
+            var part = new OrderPartQty { OrderId = orderId, PartName = "臂", Qty = 100 };
+            db.OrderPartQtys.Add(part); await db.SaveChangesAsync(); partId = part.Id;
+            var day = new ProductionCalendar([]).NextWorkday(today.AddDays(1));
+            db.ProductionPlans.AddRange(
+                new ProductionPlan { OrderId = orderId, PartName = "臂", StepNo = 1, LineId = firstLine, PlanDate = day, PlannedQty = 50 },
+                new ProductionPlan { OrderId = orderId, PartName = "臂", StepNo = 1, LineId = firstLine,
+                    PlanDate = new ProductionCalendar([]).NextWorkday(day.AddDays(1)), PlannedQty = 50 });
+            await db.SaveChangesAsync();
+        });
+        (await client.PatchAsJsonAsync($"/api/orders/{orderId}", new {
+            partQtys = new[] { new { id = partId, qty = 50 } }, autoAdjustSchedule = true,
+        })).EnsureSuccessStatusCode();
+        var remaining = new List<int>();
+        await factory.WithDbAsync(async db => remaining = await db.ProductionPlans
+            .Where(plan => plan.OrderId == orderId && plan.PartName == "臂" && plan.DeletedAt == null).Select(plan => plan.Id).ToListAsync());
+        Assert.Single(remaining);
+        (await client.PostAsJsonAsync("/api/plans/batch-unschedule", new { planIds = remaining, reason = "停止该部位排期" })).EnsureSuccessStatusCode();
+        var before = await Snapshot();
+        var response = await client.PatchAsJsonAsync($"/api/orders/{orderId}", new {
+            partQtys = new[] { new { id = partId, qty = 120 } }, autoAdjustSchedule = true,
+        });
+        response.EnsureSuccessStatusCode();
+        Assert.Equal(0, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("scheduleAdjustment").GetProperty("addedQty").GetInt64());
+        Assert.Equal(before, await Snapshot());
+    }
 }

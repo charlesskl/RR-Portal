@@ -46,6 +46,7 @@ RR-Portal/
 │   │   ├── ZURU总排期入单/          — zuru-master-schedule (Flask)
 │   │   ├── 报价系统/                — baojia (Node.js, SPIN/TOMY 供应商报价)
 │   │   ├── TOMY排期核对系统/        — tomy-paiqi (Node.js + React)
+│   │   ├── 兴信大陆发票系统/        — xingxin-invoice (React/Vite 静态应用，浏览器本地处理)
 │   │   └── 内部报价系统/            — internal-quote (Node.js + node:sqlite, 多部门分工报价)
 │   ├── 印尼小组/
 │   │   └── 印尼走货明细/              — indo-shipping (ASP.NET Core + React + PostgreSQL schema indo_shipping)
@@ -217,6 +218,7 @@ curl http://localhost:<port>/health
 | zuru-master-schedule (ZURU总排期入单) | Flask | 5003 | /zuru-master/ |
 | zuru-order-system (ZURU接单表入单系统) | Flask | 5005 | /zuru-order-system/ |
 | tomy-paiqi TOMY排期核对系统 | Node.js/React | 3006 | /tomy-paiqi/ |
+| xingxin-invoice 兴信大陆发票系统 | React/Vite + Nginx | 80 | /xingxin-invoice/ |
 | liwenjuan 成品核对系统 | Flask | 5004 | /liwenjuan/ |
 | peise 配色库存管理 | Flask | 5006 | /peise/ |
 | huadeng 华登包材管理 | Flask | 5007 | /huadeng/ |
@@ -473,6 +475,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | zuru-master-schedule | ZURU总排期入单 | 业务部 | Standalone (Python/Flask) | /zuru-master/ | (PR #59) |
 | zuru-order-system | ZURU接单表入单系统 | 业务部 | Standalone (Python/Flask) | /zuru-order-system/ | https://github.com/hanson678/zuru-order-system |
 | tomy-paiqi | TOMY排期核对系统 | 业务部 | Standalone (Node.js/React) | /tomy-paiqi/ | — |
+| xingxin-invoice | 兴信大陆发票系统 | 业务部 | Standalone (React/Vite 静态站点，无服务端数据) | /xingxin-invoice/ | — |
 | liwenjuan | 成品核对系统 | PMC跟仓管 | Standalone (Python/Flask) | /liwenjuan/ | — |
 | peise | 配色库存管理 | PMC跟仓管 | Standalone (Python/Flask) | /peise/ | https://github.com/fxxaxxx/peisecangku |
 | huadeng | 华登包材管理 | PMC跟仓管 | Standalone (Python/Flask) | /huadeng/ | — |

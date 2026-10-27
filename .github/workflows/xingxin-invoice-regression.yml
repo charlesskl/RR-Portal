@@ -1,0 +1,43 @@
+name: Xingxin invoice regression
+
+on:
+  pull_request:
+    paths:
+      - 'apps/业务部/兴信大陆发票系统/**'
+      - '.github/workflows/xingxin-invoice-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/业务部/兴信大陆发票系统
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/业务部/兴信大陆发票系统/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Portal routing and isolated deployment checks
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nginx
+          NGINX_BIN=$(command -v nginx) python3 -m unittest discover -s deploy/tests -p test_service_maintenance.py -v
+      - name: Container smoke check
+        run: |
+          docker build -t xingxin-invoice:test .
+          docker run -d --name xingxin-invoice-test -p 127.0.0.1:3480:80 xingxin-invoice:test
+          trap 'docker logs xingxin-invoice-test; docker rm -f xingxin-invoice-test' EXIT
+          curl --retry 10 --retry-connrefused --retry-delay 1 -fsS http://127.0.0.1:3480/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["service"] == "xingxin-invoice"'
+          curl -fsS http://127.0.0.1:3480/ | grep -q '兴信大陆发票系统'
+          curl -fsS http://127.0.0.1:3480/base-master.xlsx -o /tmp/xingxin-template.xlsx
+          python3 -c 'import zipfile; assert zipfile.is_zipfile("/tmp/xingxin-template.xlsx")'

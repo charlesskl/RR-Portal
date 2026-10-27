@@ -62,5 +62,15 @@
     "entrypoint": "app.py",
     "department": "PMC",
     "addedAt": "2026-04-08T00:00:00Z"
+  },
+  "xingxin-invoice": {
+    "stack": "static",
+    "port": 80,
+    "status": "container-monitored",
+    "entrypoint": "dist/index.html",
+    "department": "Business",
+    "path": "apps/业务部/兴信大陆发票系统",
+    "healthPath": "/xingxin-invoice/health",
+    "addedAt": "2026-10-27T00:00:00Z"
   }
 }

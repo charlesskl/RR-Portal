@@ -1279,9 +1279,16 @@ export default function ShipmentsPage() {
             fields={shipmentSheetFields}
             onEdits={editSheetCells}
             rowOrder={items.map(item => item._rowKey).join(',')}
-            valueAt={(row, field) => field.startsWith('material:')
-              ? matMap.get(items[row]?.material_id!)?.[field.slice(9)]
-              : items[row]?.[field as keyof ShipmentItem] as string | number | undefined}
+            valueAt={(row, field) => {
+              const item = items[row]
+              const material = matMap.get(item?.material_id!)
+              // Copy/fill the value displayed by the existing editor, including its defaults.
+              if (field === 'currency') return item?.currency || '¥'
+              if (field === 'material:unit_kg') return material?.unit_kg || 'KGM'
+              if (field === 'weighing_qty') return effectiveWeighingQty(item, material)
+              return field.startsWith('material:') ? material?.[field.slice(9)]
+                : item?.[field as keyof ShipmentItem] as string | number | undefined
+            }}
             rowKey={r => String(r._rowKey)}
             rowSelection={{ selectedRowKeys: cartonSelection.map(String), onChange: keys => setCartonSelection(keys.map(Number)), fixed: true }}
             size="small"

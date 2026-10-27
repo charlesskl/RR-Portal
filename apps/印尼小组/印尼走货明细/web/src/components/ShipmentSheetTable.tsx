@@ -42,7 +42,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     if (!cell) return
     setAnchor(p); setEnd(p)
     cell.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    const input = cell.querySelector<HTMLElement>('input:not([readonly]):not([disabled]),textarea:not([readonly]):not([disabled])')
+    const input = cell.querySelector<HTMLElement>('input:not([readonly]):not([disabled]),textarea:not([readonly]):not([disabled]),input[role="combobox"]:not([disabled])')
     ;(input || cell).focus()
   }
   const fillDown = () => {
@@ -96,7 +96,8 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       if (!start) return
       const text = event.clipboardData.getData('text/plain')
       // Quoted Excel multiline cells are parsed as one value, not unrelated rows.
-      if (!text.includes('\t') && !text.includes('\n') && fields[start.col]) return
+      const nativeEditor = (event.target as HTMLElement).closest('input:not([readonly]):not([disabled]),textarea:not([readonly]):not([disabled])')
+      if (!text.includes('\t') && !text.includes('\n') && (fields[start.col] || nativeEditor)) return
       event.preventDefault(); event.stopPropagation()
       try { onEdits(sheetPasteEdits(parseSheetClipboard(text), start, count, fields)) }
       catch (error) { message.error((error as Error).message) }

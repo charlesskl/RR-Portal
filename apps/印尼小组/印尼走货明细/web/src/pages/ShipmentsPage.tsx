@@ -12,6 +12,8 @@ import { consolidateShipmentItems } from '../utils/shipmentConsolidation'
 import { createCartonGroupId } from '../utils/cartonGroupId'
 import { shipmentPurchaseAmount } from '../utils/shipmentPurchase'
 import ShipmentImport from '../components/ShipmentImport'
+import ShipmentSheetTable from '../components/ShipmentSheetTable'
+import { applyShipmentSheetEdits, shipmentSheetFields, type SheetEdit } from '../utils/shipmentSheet'
 import type { ShipmentImportItem } from '../utils/shipmentImport'
 import { MATERIAL_CATEGORIES } from '../utils/engineeringImport'
 import { HUASHENGYI_FULL_NAME } from '../utils/supplierProfiles'
@@ -224,6 +226,9 @@ export default function ShipmentsPage() {
   }, [baseMatMap, rawItems])
   const orderedItems = (values: ShipmentItem[]) => withShipmentInvoicePrices(sortShipmentItems(values, matMap), matMap).map((it, i) => ({ ...it, seq: i + 1 }))
   const items = useMemo(() => orderedItems(rawItems), [rawItems, matMap])
+  const sheetRevision = useRef({ rawItems, matMap })
+  const sheetConfirmOpen = useRef(false)
+  sheetRevision.current = { rawItems, matMap }
   const consolidatedItems = useMemo(() => withShipmentInvoicePrices(
     sortShipmentItems(consolidateShipmentItems(items, matMap), matMap), matMap,
   ), [items, matMap])
@@ -858,6 +863,39 @@ export default function ShipmentsPage() {
         ? { ...it, [k]: v, carton_group: ['supplier', 'customs_company', 'material_id'].includes(k) ? undefined : it.carton_group } : it)
     })
   }
+
+  function editSheetCells(edits: SheetEdit[]) {
+    if (!edits.length || sheetConfirmOpen.current) return
+    try {
+      for (const edit of edits) if (edit.field === 'customs_company' && edit.value.trim()
+        && !customsOptions.some(option => option.value === edit.value.trim()))
+        throw new Error(`第 ${edit.row + 1} 行：报关出口公司不在可选名单中，请先维护供应商资料`)
+      const result = applyShipmentSheetEdits(items, matMap, edits)
+      const original = { ...sheetRevision.current }
+      sheetConfirmOpen.current = true
+      Modal.confirm({
+        title: `确认写入 ${edits.length} 个单元格？`,
+        content: <Space direction="vertical">
+          <span>涉及 {new Set(edits.map(edit => edit.row)).size} 行。数量、重量及箱数按现有规则联动计算，填写的空格会清空文字或将数字设为 0。确认后仍需保存走货单。</span>
+          {result.dirtyMaterials.size > 0 && <Typography.Text type="warning">单位、尺寸、单个净重等属于物料资料；同物料所有行同步更新，保存时会写回货号库。Excel 导入资料仅更新本单。</Typography.Text>}
+        </Space>,
+        okText: '确认写入', cancelText: '取消',
+        afterClose: () => { sheetConfirmOpen.current = false },
+        onOk: () => {
+          if (sheetRevision.current.rawItems !== original.rawItems || sheetRevision.current.matMap !== original.matMap) {
+            message.warning('明细已变化，请重新选择粘贴位置'); return
+          }
+          setItems(result.items)
+          if (result.dirtyMaterials.size) {
+            setMatMap(result.materials)
+            setDirtyMatIds(current => new Set([...current, ...result.dirtyMaterials]))
+          }
+          setEditorDirty(true)
+          message.success(`已写入 ${edits.length} 个单元格，请核对后保存`)
+        },
+      })
+    } catch (error) { message.error((error as Error).message) }
+  }
   // 送货重量按所选单位：KGM 显示净重 KG，TNE/TON 显示净重吨数。
   function kgForItem(it: ShipmentItem, m: any): number {
     return shipmentKgWeight(m?.unit_kg, it.qty, m?.net_per_pc, m?.name_zh)
@@ -1237,7 +1275,20 @@ export default function ShipmentsPage() {
                 { title: '操作', width: 110, fixed: 'right', render: () => <Button size="small" onClick={() => setShowBatchDetails(true)}>编辑批次</Button> },
               ]}
             />
-          </> : <Table
+          </> : <ShipmentSheetTable<ShipmentItem>
+            fields={shipmentSheetFields}
+            onEdits={editSheetCells}
+            rowOrder={items.map(item => item._rowKey).join(',')}
+            valueAt={(row, field) => {
+              const item = items[row]
+              const material = matMap.get(item?.material_id!)
+              // Copy/fill the value displayed by the existing editor, including its defaults.
+              if (field === 'currency') return item?.currency || '¥'
+              if (field === 'material:unit_kg') return material?.unit_kg || 'KGM'
+              if (field === 'weighing_qty') return effectiveWeighingQty(item, material)
+              return field.startsWith('material:') ? material?.[field.slice(9)]
+                : item?.[field as keyof ShipmentItem] as string | number | undefined
+            }}
             rowKey={r => String(r._rowKey)}
             rowSelection={{ selectedRowKeys: cartonSelection.map(String), onChange: keys => setCartonSelection(keys.map(Number)), fixed: true }}
             size="small"
@@ -1247,13 +1298,13 @@ export default function ShipmentsPage() {
             columns={[
               { title: '序号', dataIndex: 'seq', width: 50, fixed: 'left', align: 'center' },
               {
-                title: '出库来源', dataIndex: 'outbound_id', width: 95, fixed: 'left',
+                title: '出库来源', dataIndex: 'outbound_id', width: 95,
                 render: (v) => v
                   ? <Tag bordered={false} color="blue">OUT-{v}</Tag>
                   : <Tag bordered={false}>未关联</Tag>,
               },
               {
-                title: '图片', width: 56, fixed: 'left', align: 'center',
+                title: '图片', width: 56, align: 'center',
                 render: (_v, r) => {
                   const m = r.material_id != null ? matMap.get(r.material_id) : null
                   return m?.image
@@ -1261,7 +1312,7 @@ export default function ShipmentsPage() {
                     : <span style={{ color: '#bbb', fontSize: 12 }}>无</span>
                 },
               },
-              { title: '物料ID', width: 80, fixed: 'left', render: (_v, r, i) => r.material_snapshot ? <Tag title="Excel 导入资料只保存在本次走货单">{r.material_snapshot.id || '导入'}</Tag> : fillable(i, 'material_id', <InputNumber size="small" controls={false} value={r.material_id} onChange={(v) => { patchItem(i, 'material_id', v); loadMatsForItems([v as number]) }} style={{ width: '100%' }} />) },
+              { title: '物料ID', width: 80, render: (_v, r, i) => r.material_snapshot ? <Tag title="Excel 导入资料只保存在本次走货单">{r.material_snapshot.id || '导入'}</Tag> : r.material_id ? <Tag>{r.material_id}</Tag> : <Input.Search size="small" placeholder="物料ID" enterButton="选" onSearch={value => { const id = Number(value); if (Number.isInteger(id) && id > 0) { patchItem(i, 'material_id', id); loadMatsForItems([id]) } else message.warning('请输入有效物料 ID') }} /> },
               { title: '产品中文名称', width: 160, fixed: 'left', render: (_v, r) => matMap.get(r.material_id!)?.name_zh ?? '' },
               { title: '货号', width: 100, fixed: 'left', render: (_v, r) => matMap.get(r.material_id!)?.product_code ?? '' },
               { title: '中国HSCODE', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.hs_cn ?? '' },
@@ -1286,7 +1337,7 @@ export default function ShipmentsPage() {
               } },
               { title: '单位', width: 130, render: (_v, r, i) => fillableMaterial(i, 'unit_kg', <Select size="small" value={matMap.get(r.material_id!)?.unit_kg || 'KGM'} options={UNIT_LIST.map(u => ({ value: u, label: u }))} onChange={(v) => patchMatDim(r.material_id, 'unit_kg', v)} style={{ width: '100%' }} />) },
               { title: '送货重量', width: 120, render: (_v, r, i) => fillable(i, 'kg', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.kg} onChange={(v) => patchItem(i, 'kg', v ?? 0)} style={{ width: '100%' }} />) },
-              { title: '送货数量', width: 90, render: (_v, r, i) => fillable(i, 'qty', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.qty} onChange={(v) => patchQtyOrPack(i, 'qty', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '送货数量', width: 120, render: (_v, r, i) => fillable(i, 'qty', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.qty} onChange={(v) => patchQtyOrPack(i, 'qty', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '单位', width: 60, align: 'center', render: (_v, r) => r.purchase_unit || (isPaperRope(matMap.get(r.material_id!)?.name_zh) ? '米' : '个') },
               { title: '毛重总重', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.grossTotal ? c.grossTotal.toFixed(2) : '' } },
               { title: '净重总重', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.netTotal ? c.netTotal.toFixed(2) : '' } },

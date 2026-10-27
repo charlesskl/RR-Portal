@@ -4,6 +4,7 @@ import ts from 'typescript'
 import { expect, it, vi } from 'vitest'
 import { consolidateShipmentItems } from './shipmentConsolidation'
 import { shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
+import { applyShipmentSheetEdits } from './shipmentSheet'
 
 // Execute the actual page save handler against a mock API. No business records
 // are created while verifying that the one-row view still saves both batches.
@@ -54,4 +55,30 @@ it.each([true, false])('汇总视图保存仍逐批保留出库数量（新建=%
   expect(await runInContext('save()', context)).toBe(true)
   const revised = calls[1][1].items
   expect(revised.map((row: any) => [row.outbound_id, row.qty])).toEqual([[74, 8150], [75, 40]])
+})
+
+it('表格批量编辑后保存仍保留每批关联，并将导入物料修改仅写入快照', async () => {
+  const snapshot = { name_zh: '导入裁片', net_per_pc: .001, unit_kg: 'KGM' }
+  const input = [...structuredClone(rows), { _rowKey: 3, material_id: -3, material_snapshot: snapshot, qty: 100, kg: .1, cartons: 1, qty_per_carton: '100' }]
+  const mats = new Map<number, any>([...materials, [-3, snapshot]])
+  const result = applyShipmentSheetEdits(input, mats, [
+    { row: 1, field: 'qty', value: '40' }, { row: 2, field: 'material:net_per_pc', value: '.002' },
+  ])
+  const api = { put: vi.fn(async (..._args: any[]) => ({})) }
+  const context = createContext({
+    items: result.items, creating: false, editing: { id: 9 },
+    matMap: result.materials, dirtyMatIds: result.dirtyMaterials, api,
+    form: { validateFields: async () => ({ container_no: 'TEST-ONLY', customer: 'RRI' }) },
+    setSaving: vi.fn(), setEditing: vi.fn(), setCreating: vi.fn(), setEditorDirty: vi.fn(),
+    setDirtyMatIds: vi.fn(), closeEditor: vi.fn(), load: vi.fn(), message: { success: vi.fn() },
+    shipmentPackingAverageQty, shipmentWeightQuantity, num: (value: any) => Number(value) || 0,
+  })
+  runInContext(executable, context)
+  expect(await runInContext('save()', context)).toBe(true)
+  expect(api.put.mock.calls).toHaveLength(1)
+  const saved = api.put.mock.calls[0][1].items
+  expect(saved.slice(0, 2).map((row: any) => [row.outbound_id, row.material_id, row.qty])).toEqual([[74, 974, 8150], [75, 974, 40]])
+  expect(saved[2]).toMatchObject({ material_id: null, material_snapshot: { net_per_pc: .002 }, kg: .2 })
+  expect(saved[2]._rowKey).toBeUndefined()
+  expect(snapshot.net_per_pc).toBe(.001)
 })

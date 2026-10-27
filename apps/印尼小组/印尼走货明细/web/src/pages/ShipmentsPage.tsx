@@ -1504,32 +1504,32 @@ export default function ShipmentsPage() {
 
       {/* 从出库拉物料 */}
       <Modal open={linkRowKey != null} title="给当前明细关联出库（不新增行）" width="90vw"
-        onCancel={closeOutboundLink} onOk={confirmOutboundLink} confirmLoading={linkBusy}
-        okText="确认物料并关联" cancelText="取消" okButtonProps={{ disabled: !linkSelected || !linkConfirmed || linkBusy }} destroyOnClose>
+        onCancel={closeOutboundLink} onOk={confirmOutboundLink}
+        okText="确认物料并关联" cancelText="取消" okButtonProps={{ loading: linkBusy, disabled: !linkSelected || !linkConfirmed || linkBusy }} destroyOnClose>
         {(() => {
           const row = items.find(r => r._rowKey === linkRowKey)
           const m = row ? matMap.get(row.material_id!) : undefined
           const knownId = row?.material_snapshot?.id || (!row?.material_snapshot ? row?.material_id : undefined)
           return <>
-            <Typography.Paragraph>当前明细：{m?.product_code || '未填货号'} / {m?.name_zh || '未填物料'} / {m?.spec || '无规格'}；送货数量：{row?.qty ?? 0} {row?.purchase_unit || '个'}</Typography.Paragraph>
-            <Typography.Paragraph type="secondary">请核对对应物料与出库批次。保留本行数量、重量、箱号、箱数、卡板和尺寸；PO、供应商、报关公司及采购价格按出库来源带入。关联不会重复扣库存，点击走货单“保存”后生效。</Typography.Paragraph>
+            <Typography.Paragraph>当前明细：{m?.product_code || '未填货号'} / {m?.name_zh || '未填物料'} / {m?.spec || '无规格'}；送货数量：{row?.qty ?? 0} {row?.purchase_unit || (isPaperRope(m?.name_zh) ? '米' : '个')}</Typography.Paragraph>
+            <Typography.Paragraph type="secondary">请核对对应物料与出库批次；关联按物料 ID，下方名称、规格为采购快照，可能与当前物料库不同。保留本行数量、重量、箱号、箱数、卡板和尺寸；PO、供应商、报关公司及采购价格按出库来源带入。关联不会重复扣库存，点击走货单“保存”后生效。</Typography.Paragraph>
             {row?.material_snapshot && <Typography.Paragraph type="warning">这是导入资料：请先确认下方所选物料与当前行一致。确认后绑定真实物料 ID，导入的装箱资料仍保留在本单，不写回物料库。</Typography.Paragraph>}
-            <Input.Search allowClear value={linkFilter} placeholder="搜索货号 / 名称 / 规格 / PO；可清空搜索查看候选" style={{ width: 480, maxWidth: '100%', marginBottom: 12 }} onChange={e => { setLinkFilter(e.target.value); setLinkSelected(null); setLinkConfirmed(false) }} />
+            <Input.Search allowClear disabled={linkBusy} value={linkFilter} placeholder="搜索货号 / 名称 / 规格 / PO；可清空搜索查看候选" style={{ width: 480, maxWidth: '100%', marginBottom: 12 }} onChange={e => { setLinkFilter(e.target.value); setLinkSelected(null); setLinkConfirmed(false) }} />
             <Table<OutByMat> size="small" loading={linkBusy} rowKey="outbound_id" scroll={{ x: 1250, y: 350 }} pagination={{ pageSize: 10 }}
               locale={{ emptyText: '暂无符合条件的可分配出库。请核对搜索条件，或先在出库页面完成对应物料的出库。' }}
               dataSource={linkRows.filter(r => (!knownId || knownId < 0 || r.material_id === knownId) &&
                 [r.code, r.name_zh, r.spec, r.po_no, String(r.outbound_id)].join(' ').toLowerCase().includes(linkFilter.trim().toLowerCase()))}
               rowSelection={{ type: 'radio', selectedRowKeys: linkSelected ? [linkSelected] : [],
                 onChange: keys => { setLinkSelected(Number(keys[0]) || null); setLinkConfirmed(false) },
-                getCheckboxProps: r => ({ disabled: !r.material_id || remainingOutboundQuantity(items, linkRowKey!, r) < (row?.qty || 0) }) }}
+                getCheckboxProps: r => ({ disabled: linkBusy || !r.material_id || remainingOutboundQuantity(items, linkRowKey!, r) < (row?.qty || 0) }) }}
               columns={[
                 { title: '出库记录', dataIndex: 'outbound_id', render: v => `OUT-${v}` },
                 { title: '物料 ID', dataIndex: 'material_id' }, { title: '货号', dataIndex: 'code' },
-                { title: '物料', dataIndex: 'name_zh' }, { title: '规格', dataIndex: 'spec' },
+                { title: '采购物料名称', dataIndex: 'name_zh' }, { title: '采购规格', dataIndex: 'spec' },
                 { title: 'PO', dataIndex: 'po_no' }, { title: '供应商', dataIndex: 'supplier' },
                 { title: '出库日期', dataIndex: 'out_date', render: v => v?.slice(0, 10) },
                 { title: '本行可分配', render: (_, r) => remainingOutboundQuantity(items, linkRowKey!, r) },
-                { title: '数量单位', dataIndex: 'purchase_unit', render: v => v || '个' },
+                { title: '数量单位', dataIndex: 'purchase_unit', render: (v, r) => v || (isPaperRope(r.name_zh) ? '米' : '个') },
                 { title: '采购单价', dataIndex: 'price' }, { title: '币种', dataIndex: 'currency' },
               ]} />
             <Typography.Paragraph type="secondary">本行可分配量已扣除其他柜及当前柜其他明细的占用；不足时请先调整或拆分本行数量，不会自动截减。</Typography.Paragraph>

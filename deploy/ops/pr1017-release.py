@@ -12,7 +12,7 @@ BASE_TREE='6f0264da45fc34aa3eb4933b3657be61568e2ee5'
 BRANCH='refs/heads/ops/pr-1017-20261027'
 ROOT=pathlib.Path('/opt/rr-portal')
 BACKUP=ROOT/'deploy/backups/pr-1017-20261027-backup'
-PREPARE=BACKUP.with_name('pr-1017-20261027-prepare')
+PREPARE=BACKUP.with_name('pr-1017-20261027-prepare-r2')
 DEPLOY=BACKUP.with_name('pr-1017-20261027-deploy')
 VERIFY=BACKUP.with_name('pr-1017-20261027-verify')
 BACKUP_MANIFEST='9cf202aba946d1c0e034e91f2e3d0afe4d513cb0c300edc5fce80e3287f30a1f';BACKUP_RESULT='deef46a9a914176b81fcbad6bce4a9aa43f0af655c1d47d319f7e53e4fed153b';PREPARE_MANIFEST='';PREPARE_RESULT='';DEPLOY_MANIFEST='';DEPLOY_RESULT=''
@@ -24,6 +24,19 @@ ADMIN_INSERT_SHA='13bbcce66881899060d460e753d61a2755e6fd1029e9d77b782a198489d0f2
 DEPS={'pr1017-backup-library.py': '7c1d1126e31d0b0e9b27dcd7a836e807d75a9ec4b591968e5b9db3fc9e15a8eb', 'factory-review-backup-library.py': '79d76bb47312dd08c121ebe2797f54d958666f8b72d00721f67712b152fc4666', 'release-data-ops-library.py': 'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5', 'release-data-library.py': 'd63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9', 'qc-source-library.py': '4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5', 'portable-pdb-library.py': 'cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5', 'batch-host-config-library.py': 'bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1'}
 COMPOSE=['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production')]
 COMPOSE_IMAGE_ALIAS='rr-portal-indo-shipping:latest'
+
+DIAGNOSED_IMAGE='sha256:a89203ae3dae0277a7760aece0b7d8a58b758b078738d86b1dba0733b756cb37'
+DIAGNOSED_TARGET='b9f72141b44e7a692d2ccbab32d6846f8e9d3dcb'
+DIAGNOSED_TREE='3a57ff94c283d51a0d1c8fae614fc5340fb47ce0'
+DIAGNOSED_TAG='rr-portal-indo-shipping-pr1017:'+DIAGNOSED_TARGET
+DIAGNOSED_RESULT=ROOT/'deploy/backups/pr-1017-20261027-image-env-diagnose/result.private.json'
+DIAGNOSED_RESULT_SHA='0163214f9379f5583f0aac26c35e77f3a3f185840635c0b7b2cad272c07813a0'
+FAILED_PREPARE=BACKUP.with_name('pr-1017-20261027-prepare')
+FAILED_PREPARE_MANIFEST='5f5e26bfdc928b3e7d7b2ae1ce47cd3fb3445bb2714dabc14bf0193c9823405f'
+FAILED_PREPARE_RESULT='0a40d0c2115a034da79c155828e26ea17d447b60a3e4e01c968b22cde6364a47'
+OLD_DEFAULT_ENV_SHA='a3a314116b2febd6ad95d3d6668da82eeb1dffd28da15d30191198992bfe49cf'
+NEW_DEFAULT_ENV_SHA='a68947acee19b22bd764d374a6a8be6d55eeeb8885b9691c87033b7200994f8f'
+
 B=None;H=None;OUT=None;ENV=None;EXPECTED_ENV=None;STAGE='entrypoint';SERIAL=0
 def need(v,label):
  global STAGE
@@ -82,11 +95,29 @@ def overlay(images,literal,name,build=False):
 def proof(service,image,cid=None,revision=None):
  need(service=='indo-shipping','only-indo-source-proof');revision=revision or TARGET;value=B.Q.service_source_proof(service,{'id':cid or image},revision=revision,candidate=cid is None);need(value['reviewedSourceMatch']is True,'full-reviewed-dotnet-pdb-copied-files-and-frontend-assets');return value
 
+def candidate_environment_exact(old,new):
+ need(type(old)is list and type(new)is list and sha(enc(old))==OLD_DEFAULT_ENV_SHA and sha(enc(new))==NEW_DEFAULT_ENV_SHA,'exact-diagnosed-old-new-env-list-seals');expected=[];seen=set()
+ for value in old:
+  need(type(value)is str,'exact-env-string');key,sep,item=value.partition('=');need(bool(sep),'exact-env-entry')
+  if key in{'DOTNET_VERSION','ASPNET_VERSION'}:
+   need(key not in seen and item=='8.0.32','exact-two-old-public-patch-values');seen.add(key);expected.append(key+'=8.0.33')
+  else:expected.append(value)
+ need(seen=={'DOTNET_VERSION','ASPNET_VERSION'}and new==expected,'only-two-exact-ordered-public-patch-updates')
+
+def diagnosed_build():
+ need(TARGET==DIAGNOSED_TARGET and TREE==DIAGNOSED_TREE,'same-reviewed-diagnosed-source');failed=sealed(FAILED_PREPARE,FAILED_PREPARE_MANIFEST,FAILED_PREPARE_RESULT,'prepare',success=False);need(failed.get('failedStage')=='candidate-default-env-byte-list-unchanged','same-sealed-failed-v1-prepare')
+ p=DIAGNOSED_RESULT;need(p.is_file()and not p.is_symlink()and stat.S_IMODE(p.stat().st_mode)==0o600 and p.stat().st_size<=131072,'private-known-successful-diagnosis');raw=p.read_bytes();need(sha(raw)==DIAGNOSED_RESULT_SHA,'exact-successful-diagnosis-bytes');d=json.loads(raw);e=d.get('environment',{})
+ need(d.get('success')is True and d.get('phase')=='diagnose'and d.get('target')==TARGET and d.get('image')==DIAGNOSED_IMAGE and d.get('liveBackendImage')==B.PRIOR_INDO_IMAGE and e.get('changedKeys')==['ASPNET_VERSION','DOTNET_VERSION']and e.get('keyOrderEqual')is True and e.get('oldEnvSHA256')==OLD_DEFAULT_ENV_SHA and e.get('newEnvSHA256')==NEW_DEFAULT_ENV_SHA and e.get('onlyStrictPublicVersionChanges')is True and d.get('otherConfigDifferences')==[]and all(d.get(k)is True for k in('checkedImageDefaultFieldsEqual','candidateDefaultsCoveredByOriginalLiteral','originalLiveRuntimeUnchanged','databaseRuntimeUnchanged','wholeEnvironmentFileAndFixedSourceConfigUnchanged','candidateSourceRevisionLabelMatchesTarget')),'same-successful-narrow-image-diagnosis')
+ rows=e.get('changed',[]);need(len(rows)==2 and {x.get('key')for x in rows}=={'ASPNET_VERSION','DOTNET_VERSION'}and all(x.get('oldPublicVersion')=='8.0.32'and x.get('newPublicVersion')=='8.0.33'for x in rows),'diagnosed-public-version-values')
+ for name in(DIAGNOSED_IMAGE,DIAGNOSED_TAG):
+  image=json.loads(run(['docker','image','inspect',name]));need(len(image)==1 and image[0]['Id']==DIAGNOSED_IMAGE and(image[0]['Config'].get('Labels')or{}).get('org.opencontainers.image.revision')==TARGET and sha(enc(image[0]['Config'].get('Env')))==NEW_DEFAULT_ENV_SHA,'same-immutable-diagnosed-built-image-and-tag')
+ private('consumed-diagnosis.private.json',raw);private('consumed-failed-prepare.private.json',failed);return{'indo-shipping':DIAGNOSED_IMAGE}
+
 def candidate(s,image,old,label='candidate'):
  need(label in {'build','candidate'},'fixed-candidate-evidence-label')
  i=json.loads(run(['docker','image','inspect',image]))[0];original=read(BACKUP/(s+'-image.private.json'));need(i['Id']==image and original['Id']==old['Image']and i['Architecture']==original['Architecture']=='amd64'and i['Os']==original['Os']=='linux'and(i['Config'].get('Labels')or{}).get('org.opencontainers.image.revision')==TARGET,'exact-candidate-platform-revision')
  for k in('Cmd','Entrypoint','User','WorkingDir','Healthcheck','ExposedPorts','Volumes','StopSignal','Shell','ArgsEscaped','StopTimeout'):need(i['Config'].get(k)==original['Config'].get(k),'candidate-image-default-'+k.lower())
- oldlabels=original['Config'].get('Labels')or{};newlabels=i['Config'].get('Labels')or{};need({k:v for k,v in oldlabels.items()if k!='org.opencontainers.image.revision'}=={k:v for k,v in newlabels.items()if k!='org.opencontainers.image.revision'},'unchanged-other-image-labels');need(dict(B.F.envmap(i['Config'].get('Env')or[]),**envs()[s])==envs()[s],'candidate-default-environment-covered-by-original-literal');need(i['Config'].get('Env')==original['Config'].get('Env'),'candidate-default-env-byte-list-unchanged');private(s+'-'+label+'-image.private.json',i);return proof(s,image)
+ oldlabels=original['Config'].get('Labels')or{};newlabels=i['Config'].get('Labels')or{};need({k:v for k,v in oldlabels.items()if k!='org.opencontainers.image.revision'}=={k:v for k,v in newlabels.items()if k!='org.opencontainers.image.revision'},'unchanged-other-image-labels');need(dict(B.F.envmap(i['Config'].get('Env')or[]),**envs()[s])==envs()[s],'candidate-default-environment-covered-by-original-literal');candidate_environment_exact(original['Config'].get('Env'),i['Config'].get('Env'));private(s+'-'+label+'-image.private.json',i);return proof(s,image)
 
 def prepared():
  sealed(PREPARE,PREPARE_MANIFEST,PREPARE_RESULT,'prepare');p=read(PREPARE/'prepared.private.json');need(p['target']==TARGET and p['tree']==TREE and set(p['images'])==set(p['proofs'])==set(ORDER),'exact-prepared-source-and-services');need(all(re.fullmatch('sha256:[a-f0-9]{64}',v)for v in p['images'].values()),'immutable-prepared-image-identities');return p
@@ -231,8 +262,7 @@ def prepare(result,b):
  runtime,raw=B.runtime();need(json.loads(run(['docker','image','inspect',COMPOSE_IMAGE_ALIAS]))[0]['Id']==B.STATIC_BASE_IMAGE,'current-accepted-1016-default-image');need(runtime==b['runtime']and B.flags()==b['maintenanceInventory'],'original-runtime-before-build');environment_exact(b);operation(['git','-c','core.hooksPath=/dev/null','fetch','--no-write-fetch-head','origin','main'],'fetch-reviewed-main');need(run(['git','rev-parse','origin/main']).decode().strip()==TARGET,'exact-current-remote-main');head=run(['git','rev-parse','HEAD']).decode().strip();source(b,head)
  if head==BASE:operation(['git','-c','core.hooksPath=/dev/null','merge','--ff-only',TARGET],'source-fast-forward')
  configuration(b);compose_contract(b);replay_snapshot('indo-shipping',b['storage']['indo-shipping'],BACKUP/'indo-shipping-baseline');literal=envs();private('literal-environments.private.json',literal);tags={s:'rr-portal-'+s+'-pr1017:'+TARGET for s in ORDER};args=overlay(tags,literal,'build.private.yml',True)
- for service in ORDER:operation([*args,'build',service],'build-'+service,1800)
- images={s:json.loads(run(['docker','image','inspect',tags[s]]))[0]['Id']for s in ORDER};built_proofs={s:candidate(s,images[s],raw[s],'build')for s in ORDER};images={s:static_compatibility_image(s,images[s],raw[s],b,built_proofs[s])for s in ORDER};proofs={s:candidate(s,images[s],raw[s])for s in ORDER};rehearsals={s:key_restore_rehearsal(s,images[s],b['storage'][s],BACKUP/(s+'-baseline'),runtime)for s in ORDER};need(B.runtime()[0]==runtime and B.flags()==b['maintenanceInventory'],'all46-originals-serve-through-indo-build');configuration(b);private('prepared.private.json',{'target':TARGET,'tree':TREE,'images':images,'proofs':proofs,'originalRuntime':runtime,'keyRestoreRehearsals':rehearsals,'defaultImageBefore':B.STATIC_BASE_IMAGE});result.update(success=True,prestartKeyRestoreRehearsalPassed=True,candidatesBuiltBeforeAnyMaintenance=True,targetContainerCount=1,otherContainerCount=45,all46OriginalContainersUnchanged=True,environmentFileUnchanged=True,images=images)
+ images=diagnosed_build();built_proofs={s:candidate(s,images[s],raw[s],'build')for s in ORDER};images={s:static_compatibility_image(s,images[s],raw[s],b,built_proofs[s])for s in ORDER};proofs={s:candidate(s,images[s],raw[s])for s in ORDER};rehearsals={s:key_restore_rehearsal(s,images[s],b['storage'][s],BACKUP/(s+'-baseline'),runtime)for s in ORDER};need(B.runtime()[0]==runtime and B.flags()==b['maintenanceInventory'],'all46-originals-serve-through-indo-build');configuration(b);private('prepared.private.json',{'target':TARGET,'tree':TREE,'images':images,'proofs':proofs,'originalRuntime':runtime,'keyRestoreRehearsals':rehearsals,'defaultImageBefore':B.STATIC_BASE_IMAGE,'reusedDiagnosedBuild':DIAGNOSED_IMAGE,'diagnosisSHA256':DIAGNOSED_RESULT_SHA,'failedPrepareResultSHA256':FAILED_PREPARE_RESULT});result.update(success=True,backendBuildPerformed=False,reusedDiagnosedImmutableBuild=DIAGNOSED_IMAGE,diagnosisSHA256=DIAGNOSED_RESULT_SHA,failedPrepareResultSHA256=FAILED_PREPARE_RESULT,prestartKeyRestoreRehearsalPassed=True,candidatesBuiltBeforeAnyMaintenance=True,targetContainerCount=1,otherContainerCount=45,all46OriginalContainersUnchanged=True,environmentFileUnchanged=True,images=images)
 
 def key_restore_rehearsal(service,image,snapshot,path,before):
  need(service=='indo-shipping'and pin(image.removeprefix('sha256:'))and B.runtime()[0]==before,'exact-isolated-key-restore-rehearsal-image-and-original-runtime');cid=None;restored=False

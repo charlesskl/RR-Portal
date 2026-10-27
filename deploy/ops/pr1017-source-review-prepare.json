@@ -2,7 +2,7 @@
   "disposition": "CHECKED",
   "independent": true,
   "reviewer": "/root/pr1014_backend",
-  "helperSHA256": "aaf1f2c2aa831affd0727cceb92791dd448d9983c705a967062be1f247e405d3",
+  "helperSHA256": "d930ec414515ee6156cbfe597841cbb4bcaec4a08c1e237790b74211eb7b3f50",
   "helperGatesFrozen": true,
   "base": "2fe302c1e65138a056fba0f21c172de11a5de2ee",
   "baseTree": "6f0264da45fc34aa3eb4933b3657be61568e2ee5",
@@ -20,37 +20,25 @@
     "portable-pdb-library.py": "cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5",
     "batch-host-config-library.py": "bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1"
   },
-  "checkedUTC": "2026-10-27T06:27:42.883845+00:00",
-  "reviewedHead": "a65761a5cb371d6f0d4483d99f5359d74d7bb002",
-  "reviewedCandidateTree": "3a57ff94c283d51a0d1c8fae614fc5340fb47ce0",
-  "reviewedSourceManifestSHA256": "0e6d264695ef225ea53f63a93a8c4faf2dd436d084c51666e5f9d33380d24353",
-  "changedFileCount": 11,
+  "checkedUTC": "2026-10-27T07:11:09.376241+00:00",
   "findings": [],
+  "baselineIndependentSourceReviewSHA256": "27969a076f6150e3f6a8a989989af2a5617e9b15f6737d4bcbe2f6c426527dea",
   "checks": [
-    "Read complete delta against mature PR1001 release and full current release implementation; 40 mature functions AST-identical after PR-label normalization; changed seven functions and one static compatibility helper reviewed, two automatic old-recovery functions removed.",
-    "All seven transitive dependencies exact; backup helper remains inert; release EXECUTE false with phase/target/tree and all six prior seals empty on disk.",
-    "Exact11 manifest paths match actual final candidate git diff and every blob SHA256. Fixed Docker/global env/startup/schema/auth/dependency guards remain exact.",
-    "Existing full typed PostgreSQL rows/schema/security/owners/ACL/RLS, separately bracketed sequences and unchanged startup source comparator retained. Only precise single unchanged bootstrap admin identity conflict increment allowed, no reset/actor attribution.",
-    "One Indo service recreated: all45 unrelated containers and full original env/mount/config/PID1 context remain exact. Original closed DataProtection keyring replayed and proven before only first start; key restore rehearsal is isolated never-started scratch, no network/logs/restarts.",
-    "Composite1001 backend+1016 staticde46 baseline accepted by exact sealed provenance; all old and new public resource bytes bound, existing nonindex file overwrite or new nonasset rejected. Derivative image retains complete backend layer prefix, platform, runtime Config/labels and project PDB source hashes.",
-    "Compatibility build context contains public wwwroot plus a fixed two-line Dockerfile only, finally every child becomes700 directory/600 file for strict sealed archives; full build and final candidate image evidence use distinct names.",
-    "Prepare proves full image+key restoration before any maintenance; deploy captures fresh live and closed evidence, performs strict same-data comparison; unexpected lifecycle/data failure keeps only Indo maintenance and never blind retries or recreates old97 image.",
-    "Final verify reproduces sealed closed/prestart/poststart evidence, validates actual image/PDB/public assets and six anonymous APIs401, retains other45/env/flags, then promotes exact immutable canonical default alias."
+    "Complete narrow diff read against aaf1 reviewed source; all existing functions except candidate/prepare AST unchanged, only two narrow helpers added. Backup/deps/manifest, full PG/schema/security/sequence/keyring/firststart/runtime/PDB/staticunion/verification contracts unchanged.",
+    "Actual successful diagnosis40464612523 canonical core0163214f, exact target/tree/a892 immutable image, exact old/new default-list hashes and public8.0.32-to8.0.33 two-key ordered normalization pinned. Any unrelated value/order/missing/duplicate/other version rejected.",
+    "Reused image and its exact tag are both re-inspected; same diagnosed failed-prepare private seals+stage and successful diagnostic bytes loaded. Full candidate/PDB/source proof retained for reused image and final union derivative.",
+    "New prepare-r2 private output separate from preserved first failed archive. No automatic retry, no backend rebuild; strict static compatibility image build and never-started existing-key rehearsal retained.",
+    "29 new independent pure checks pass: normalizer boundaries and complete diagnosed_build with controlled synthetic temp evidence, wrong ID/tag/source/stage/version/env/hash/mode negatives. Existing 15 closure tests adapted to r2 pass including required active diagnostic ownership."
   ],
   "evidence": {
-    "independentChecks": 16,
-    "independentFixtureScriptSHA256": "a37c32c91ad72baa63db91ce73a99ffdef73cc84f5426371b696ead14f56d966",
-    "independentFixtureResultSHA256": "cc34b7e6e34b518e2c68800d66ed45cdf884d1e6979abd9d8524f4ee1df8b34e",
-    "authorFixturesIndependentlyRerun": 18,
-    "authorFixtureResultSHA256": "1c0fb1c8d4ebd422b73d778aa397dcda2b4298ede24dbdfd92ffadca3046a937",
-    "backupIndependentReviewSHA256": "1e00f456c404f5e31869acbbb1e1359ac5e5316aad9b10831c037eb05c01e576",
-    "transportIndependentReviewSHA256": "f591706f45c5e2565b5e15d25dce6e7f418c59ff1e9d4b3423a418aaccd67e96"
+    "releaseFixtureSHA256": "c44043b7e488b6d23275cf0e2806d78eb2e0b86e5f940390eabe3d5ba5ebc9fd",
+    "closureFixtureSHA256": "1825d226d8c3f539a773a7754cfdab26f2e8fcb0783753f22f335a3167752bd0",
+    "actualDiagnosisFileSHA256": "826c609bbb4aa06c9517e6b2d6592f3fe0c8c37578de37ff6f491bc3c2c2efd8"
   },
   "limits": [
-    "Pure fixtures mock Docker/Git/network lifecycle operations; no real image build or remote execution by this reviewer.",
-    "No authenticated business write, mail/model request, SQL/SSH/Docker command, remote mutation or OPS/state write performed.",
-    "Strict data assurance is bounded to closed snapshot comparator and sealed evidence; later live user edits are preserved and cannot be automatically attributed.",
-    "Failure keeps service-specific maintenance for explicit review; no automatic rollback to the old incomplete runtime image."
+    "No real remote operation/image build executed by this reviewer.",
+    "Synthetic structural fixtures replace list-hash constants for their synthetic records; unchanged production constants independently match the actual sealed diagnosis.",
+    "Failed v1 source/reports/state snapshot/archive/reservation must stay preserved."
   ],
   "remoteOrOpsOrStateWrites": false
 }

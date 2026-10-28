@@ -1,6 +1,6 @@
 """One fixed read-only observation during the already running PR1025 R2 prepare."""
 import os,json,pathlib,re,stat,subprocess,sys,hashlib,urllib.request,urllib.error
-EXECUTE=True
+EXECUTE=False
 BRANCH='refs/heads/ops/pr-1025-readonly-20261028'
 ROOT=pathlib.Path('/opt/rr-portal')
 PREPARE=ROOT/'deploy/backups/pr1025-sprayplan-20261028-v2/prepare'

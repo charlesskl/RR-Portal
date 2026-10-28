@@ -7,16 +7,16 @@ maintenance switch is used. A timeout is reconciled read-only, never replayed.
 import copy, datetime, hashlib, io, ipaddress, json, os, pathlib, re, stat
 import subprocess, sys, tarfile, time, urllib.error, urllib.parse, urllib.request
 
-EXECUTE = True
-TARGET = 'e63786d1157a29f0bbb7e8ca3e89e4c2c9163fe5'
-TREE = '09d82c97bd7ee6290f0c511f372f2d1c81203a29'
-PHASE = 'prepare'
+EXECUTE = False
+TARGET = ''
+TREE = ''
+PHASE = ''
 PREPARED_SHA256 = ''
 DEPLOY_SHA256 = ''
-EXISTING_VERIFY_SHA256 = '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a'
-EXISTING_TARGET = 'daa878ce6ed661d9b84288e7869b37e9118ce5bc'
-EXISTING_TREE = '05f17716f3cb93a7c3d06d2c604d5a4948fb8374'
-EXISTING_ARCHIVE_PATH = '/opt/rr-portal/deploy/backups/batch-1015-1019-1022-20261028-existing-v4'
+EXISTING_VERIFY_SHA256 = ''
+EXISTING_TARGET = ''
+EXISTING_TREE = ''
+EXISTING_ARCHIVE_PATH = ''
 BASE = '4b3d8f3e319e41dcc8720d759e1af0726a2b2381'
 APP = 'apps/业务部/兴信大陆发票系统'
 APP_TREE = '6b2b403938304d323a59505d59fd9d1d25427ba6'

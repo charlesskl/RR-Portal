@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '52694b09b524294d556ac498ce236e8d21537ae1b4fed2a8a0f10ddb36a3fb21'
+  SCOPED_RELEASE_HELPER_SHA256: 'a1805240b168ab92c21b3abc2861a9e5a204dab3f086b4d3e48fbb54c8087407'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -57,6 +57,6 @@ jobs:
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/batch1022-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/batch1022-invoice-release-v3.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 52694b09b524294d556ac498ce236e8d21537ae1b4fed2a8a0f10ddb36a3fb21 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/batch1022-invoice-release-v4.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = a1805240b168ab92c21b3abc2861a9e5a204dab3f086b4d3e48fbb54c8087407 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

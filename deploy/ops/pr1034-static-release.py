@@ -4,7 +4,7 @@ All final application pins remain blank until source review finishes.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,shutil,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error,urllib.parse
 ROOT=pathlib.Path('/opt/rr-portal')
-ARCHIVE_ROOT=ROOT/'deploy/backups/pr1034-indo-static-20261028'
+ARCHIVE_ROOT=ROOT/'deploy/backups/pr1034-indo-static-20261028-r2'
 OUT=None
 PREPARE_OUT=ARCHIVE_ROOT/'prepare'
 BASE='70590f6d0dc1c691cfcc7c6b85c67e4a3574e571'
@@ -19,10 +19,10 @@ EXPECTED_TARGET='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c'
 EXPECTED_TREE='97f1a01c37dc8c1219b1af0b56cc1c8e2854d1eb'
 REVIEWED_PATHS=('web/src/components/ShipmentImport.tsx', 'web/src/components/ShipmentSheetTable.tsx', 'web/src/pages/ShipmentsPage.tsx', 'web/src/utils/customsExport.ts', 'web/src/utils/shipmentConsolidationSave.test.ts', 'web/src/utils/shipmentDates.ts', 'web/src/utils/shipmentDeclaration.test.ts', 'web/src/utils/shipmentDeclaration.ts', 'web/src/utils/shipmentDeclarationSaveValidation.test.ts', 'web/src/utils/shipmentDeclarationSaveValidation.ts', 'web/src/utils/shipmentFreezePanes.test.ts', 'web/src/utils/shipmentImport.ts', 'web/src/utils/shipmentImportedHs.test.ts', 'web/src/utils/shipmentInvoice.ts', 'web/src/utils/shipmentSheet.test.ts', 'web/src/utils/shipmentSheet.ts', 'web/src/utils/shipmentSheetNavigation.test.ts', 'web/src/utils/shipmentSheetNavigation.ts', 'web/src/utils/supplierDocuments.test.ts')
 REVIEWED_PATH_COUNT=19
-TARGET=''
-TREE=''
-PHASE=''
-EXECUTE=False
+TARGET='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c'
+TREE='97f1a01c37dc8c1219b1af0b56cc1c8e2854d1eb'
+PHASE='prepare'
+EXECUTE=True
 PREPARED_SHA256=''
 DEPLOY_SHA256=''
 BRANCH='refs/heads/ops/pr-1034-20261028-indo-static'
@@ -418,9 +418,13 @@ def source_check():
  for name in('src','db','seed','Dockerfile','.dockerignore','web/package.json','web/package-lock.json'):
   need(git('rev-parse',BACKEND_REVISION+':'+APP+'/'+name)==git('rev-parse',TARGET+':'+APP+'/'+name),'unchanged-entire-backend-db-seed-build-and-dependencies')
 
-def ensure_build_space():
- value=json.loads(run(['docker','info','--format','{{json .DockerRootDir}}']));need(type(value)is str and value.startswith('/')and len(value)<4096,'bounded-docker-root');s=os.statvfs(value);available=s.f_bavail*s.f_frsize
- private(OUT/'docker-space.private.json',{'root':value,'available':available});need(available>=4*1024**3,'four-gib-free-no-prune');return available
+def ensure_build_space(label='before'):
+ need(label in('before','after','preapply'),'fixed-frontend-space-check-label')
+ value=json.loads(run(['docker','info','--format','{{json .DockerRootDir}}']));need(type(value)is str and value.startswith('/')and len(value)<4096,'bounded-docker-root');s=os.statvfs(value);available=s.f_bavail*s.f_frsize;free=s.f_bfree*s.f_frsize
+ # Only the already-cached frontend target and a public static derivative are built.
+ # Preserve at least3GiB ordinary-user space and10GiB physical free space;
+ # repeat after the complete build/readback and before any live file publication.
+ private(OUT/('docker-space-'+label+'.private.json'),{'root':value,'available':available,'free':free,'minimumOrdinaryAvailable':3221225472,'minimumPhysicalFree':10737418240});need(available>=3221225472 and free>=10737418240,'frontend-three-gib-user-and-ten-gib-physical-free');return available
 
 def derivative_contract(base_image,derivative):
  need(derivative['Architecture']==base_image['Architecture']and derivative['Os']==base_image['Os']and derivative['RootFS']['Layers'][:len(base_image['RootFS']['Layers'])]==base_image['RootFS']['Layers'],'derivative-retains-whole-base-layers-and-platform')
@@ -479,6 +483,7 @@ def prepare():
     derived_proof=backend_proof(image,True); same_backend(original_proof,derived_proof); need({n.removeprefix('wwwroot/'):v['sha256']for n,v in derived_proof['compiledArtifactInventory'].items()}==files(merged),'durable-full-proof-static-union-exact')
     need(image_id(COMPOSE_TAG)==prior_alias,'original-canonical-alias-unchanged-through-prepare')
     data = {'base': BASE, 'hostBase': HOST_BASE, 'sourceCheckoutDeferredToReviewedHostBaseline': True, 'target': TARGET, 'tree': TREE, 'head': HEAD, 'appTree': APP_TREE, 'container': r['Id'], 'runtime': rows, 'hostFiles': preserved, 'oldManifest': old_manifest, 'newManifest': new_manifest, 'templateProofs': template_proofs, 'newAssets': additions, 'oldHeaders': old_headers, 'oldIndexMetadata': old_meta, 'composeTag': COMPOSE_TAG, 'composeTagBefore': prior_alias, 'originalContainerImageName': r['Config']['Image'], 'durableTag': durable_tag, 'durableImage': image, 'imageContextManifest': files(merged), 'oldProof': original_proof, 'protected': protection, 'compiledBackendRevision': BACKEND_REVISION}
+    ensure_build_space('after')
     private(OUT / 'prepared.private.json', enc(data))
     return {'durableImage': image, 'newFileCount': len(new_manifest), 'databaseReadOrWritten': False, 'runtimeNotRestarted': True, 'liveRuntimeUnchanged': True,
             'hostSourceHead': HOST_BASE, 'logicalPrBase': BASE, 'sourceCheckoutDeferredToReviewedHostBaseline': True}
@@ -505,6 +510,7 @@ def deploy():
     index_time = max(int(time.time()), p['oldIndexMetadata']['mtime'] + 2)
     need(index_time <= int(time.time()) + 3, 'no-unbounded-future-index-cache-time')
     while int(time.time()) < index_time: time.sleep(0.1)
+    ensure_build_space('preapply')
     private(OUT / 'deploy.reservation', enc({'target': TARGET, 'utc': datetime.datetime.now(datetime.timezone.utc).isoformat()}))
     stage = '/app/.pr1034-static-' + TARGET
     next_index, old_index = stage + '/new/index.html', stage + '/old-index'

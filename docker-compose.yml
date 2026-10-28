@@ -221,6 +221,30 @@ services:
       timeout: 10s
       retries: 3
 
+  # 兴信大陆发票系统：浏览器本地处理文件，静态 Nginx 容器，无服务端业务数据。
+  xingxin-invoice:
+    build:
+      context: ./apps/业务部/兴信大陆发票系统
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:${XINGXIN_INVOICE_PORT:-3480}:80"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 128m
+    memswap_limit: 128m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   tomy-paiqi:
     build:
       context: ./apps/业务部/TOMY排期核对系统

@@ -175,6 +175,7 @@ declare -A PATH_MAP=(
   ["jiangping"]="/jiangping/health"
   ["baojia"]="/baojia/health"
   ["tomy-paiqi"]="/tomy-paiqi/health"
+  ["xingxin-invoice"]="/xingxin-invoice/health"
   ["liwenjuan"]="/liwenjuan/health"
   ["zuru-master-schedule"]="/zuru-master/health"
   ["zuru-order-system"]="/zuru-order-system/health"

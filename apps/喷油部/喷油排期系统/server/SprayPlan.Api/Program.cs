@@ -72,6 +72,10 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 
 var app = builder.Build();
 
+// 持久化 SQLite 卷也需要更新旧拉别名称；只改名称，保留排期和机台关联。
+using (var scope = app.Services.CreateScope())
+    await LineNamesUpgrade.Ensure(scope.ServiceProvider.GetRequiredService<AppDbContext>());
+
 // --- 中间件管道 ---
 if (app.Environment.IsDevelopment())
 {

@@ -4,7 +4,7 @@ import { formatShipmentPackingLines, shipmentCartonCount, shipmentKgWeight } fro
 // Same physical column order as the detail table; protected columns still occupy
 // a position during paste, so data can never slide into a neighbouring field.
 export const shipmentSheetFields = [
-  '', '', '', '', '', '', '', '', 'formula_name', '', '', '',
+  '', '', '', '', '', '', 'snapshot:hs_cn', 'snapshot:hs_id', 'formula_name', '', '', '',
   'material:unit_kg', 'kg', 'qty', '', '', '', '', '', 'product_use',
   'contract_no', 'contract_date', 'invoice_no', 'invoice_date', '', '',
   'supplier', 'po_date', 'po_no', 'price', 'currency', '', 'customs_company',
@@ -87,6 +87,12 @@ export function parseShipmentSheetValue(field: string, raw: string): string | nu
   if (!field || !shipmentSheetFields.includes(field as typeof shipmentSheetFields[number]))
     throw new Error('此列不允许批量修改')
   const value = raw.trim()
+  if (field === 'snapshot:hs_cn' || field === 'snapshot:hs_id') {
+    const limit = field === 'snapshot:hs_cn' ? 10 : 8
+    if (!new RegExp(`^\\d{0,${limit}}$`).test(value))
+      throw new Error(`海关编码只可填写最多 ${limit} 位数字（可留空，保留前导零）`)
+    return value
+  }
   if (numbers.has(field)) {
     // Accept standard thousands separators, not arbitrary commas or expressions.
     if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(value) && value !== '' && !/^\.\d+$/.test(value))
@@ -113,6 +119,7 @@ export function parseShipmentSheetValue(field: string, raw: string): string | nu
 interface EditableShipment {
   material_id?: number; qty?: number; kg?: number; cartons?: number; qty_per_carton?: string
   carton_group?: string; supplier?: string; customs_company?: string
+  material_snapshot?: unknown
 }
 
 /** Validate first; operate on copies, recalculate once, never remap IDs/sources. */
@@ -120,6 +127,9 @@ export function applyShipmentSheetEdits<T extends EditableShipment>(items: T[], 
   const parsed = edits.map(edit => {
     try {
       if (!items[edit.row]) throw new Error('明细行已不存在')
+      if (edit.field.startsWith('snapshot:') && (!items[edit.row].material_snapshot
+        || typeof items[edit.row].material_snapshot !== 'object' || !(items[edit.row].material_id! < 0)))
+        throw new Error('只有 Excel 导入行可在本单编辑海关编码，货号库物料仍为只读')
       if (edit.field.startsWith('material:') && !materials.has(items[edit.row].material_id!))
         throw new Error('请先选择物料，再填写单位或尺寸')
       return { ...edit, value: parseShipmentSheetValue(edit.field, edit.value) }
@@ -131,7 +141,14 @@ export function applyShipmentSheetEdits<T extends EditableShipment>(items: T[], 
   const materialValues = new Map<string, string | number>()
   for (const { row, field, value } of parsed) {
     const item = next[row]
-    if (field.startsWith('material:')) {
+    if (field.startsWith('snapshot:')) {
+      const id = item.material_id!
+      // Imported rows have unique negative editor IDs, even when their snapshot
+      // references a real material. Never mark the real material as dirty.
+      const snapshot = { ...(nextMaterials.get(id) || item.material_snapshot), [field.slice(9)]: value }
+      item.material_snapshot = snapshot
+      nextMaterials.set(id, snapshot)
+    } else if (field.startsWith('material:')) {
       const id = item.material_id!; const key = `${id}:${field}`
       if (materialValues.has(key) && materialValues.get(key) !== value)
         throw new Error('相同物料的单位或尺寸填写了不同值，请统一后再粘贴')

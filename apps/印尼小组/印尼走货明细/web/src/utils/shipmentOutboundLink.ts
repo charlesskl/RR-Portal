@@ -1,6 +1,7 @@
 import type { Material } from '../api/client'
 import { shipmentScope } from './shipmentOrder'
 import { isPaperRope } from './shipmentWeight'
+import { shipmentUsesDeclarationPrice } from './shipmentPurchase'
 
 export interface LinkableShipmentRow {
   _rowKey?: number; material_id?: number; material_snapshot?: Material; outbound_id?: number
@@ -31,6 +32,10 @@ export function linkShipmentOutbound<T extends LinkableShipmentRow>(rows: readon
   if (row.outbound_id) throw new Error('该行已有出库关联，请勿重复关联')
   if (!Number.isInteger(source.outbound_id) || source.outbound_id <= 0 || !material.id || material.id !== source.material_id)
     throw new Error('出库对应物料无效，请刷新重试')
+  // Imported prices use declaration units. Linking switches to purchase units,
+  // so a legacy outbound without a PO price cannot reuse that imported price.
+  if (shipmentUsesDeclarationPrice(row) && source.price == null)
+    throw new Error('该出库缺少采购单价，不能将导入的申报单价直接用于采购计价，请先补齐采购资料')
   const knownId = row.material_snapshot?.id || (!row.material_snapshot ? row.material_id : undefined)
   if (knownId && knownId > 0 && knownId !== material.id) throw new Error('出库物料与当前明细不一致')
   if (!Number.isFinite(row.qty) || !(row.qty! > 0)) throw new Error('请先填写大于 0 的本柜送货数量')

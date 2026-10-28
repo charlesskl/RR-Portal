@@ -10,7 +10,7 @@ import { sortShipmentItems, cartonLayout, cartonGroupKey, shipmentScope } from '
 import { withShipmentInvoicePrices } from '../utils/shipmentInvoice'
 import { consolidateShipmentItems } from '../utils/shipmentConsolidation'
 import { createCartonGroupId } from '../utils/cartonGroupId'
-import { shipmentPurchaseAmount } from '../utils/shipmentPurchase'
+import { shipmentPurchaseAmount, shipmentUsesDeclarationPrice } from '../utils/shipmentPurchase'
 import ShipmentImport from '../components/ShipmentImport'
 import ShipmentSheetTable from '../components/ShipmentSheetTable'
 import { applyShipmentSheetEdits, shipmentSheetFields, type SheetEdit } from '../utils/shipmentSheet'
@@ -809,7 +809,8 @@ export default function ShipmentsPage() {
         warn.push(tag + `每箱数量分段合计 ${packing.totalQty} 与送货数量 ${it.qty} 不一致`)
       if (!(Number(it.price) > 0)) hard.push(tag + '采购单价必须 > 0')
       if (decimals(it.kg) > 4) hard.push(tag + '送货 KG 小数超过 4 位')
-      if (it.price && decimals(it.price) > 4) hard.push(tag + '采购单价小数超过 4 位')
+      // Per-piece purchase prices may need more than four decimal places.
+      // Display precision must not reject or round the source PO price.
       if (it.pallet && !/^\d+-\d+\/.+/.test(it.pallet) && !/^\d+-\d+$/.test(it.pallet))
         hard.push(tag + '卡板格式不合法（"1-22/2卡" 或 "1-22"）')
       const m = it.material_id != null ? matById.get(it.material_id) : null
@@ -1303,7 +1304,7 @@ export default function ShipmentsPage() {
         >
           {showConsolidated ? <>
             <Typography.Paragraph type="secondary">
-              同柜相同物料已汇总，导出使用同一汇总规则。出库分配仍按原批次保存；供应商、价格、单据或装箱资料不同的明细保留分行。
+              同柜相同物料已汇总，箱号、采购单号或采购日期不同也会合并显示及导出。不同单价按各批金额合计，原始采购和出库分配仍按批次保存；供应商、币种、合同、发票或其他装箱资料不同的明细保留分行。
             </Typography.Paragraph>
             <Table
               rowKey={r => String(r._rowKey)}
@@ -1327,9 +1328,11 @@ export default function ShipmentsPage() {
                 { title: '毛重总重', width: 110, render: (_, r) => calc(r).grossTotal.toFixed(2) },
                 { title: '净重总重', width: 110, render: (_, r) => calc(r).netTotal.toFixed(2) },
                 { title: '箱数', width: 80, render: (_, _r, i) => consolidatedCartons[i]?.count || 0 },
-                { title: '采购单价', width: 110, render: (_, r) => num(r.price).toFixed(4) },
+                { title: '箱号（全部批次）', dataIndex: 'carton_no', width: 180 },
+                { title: '采购单价（加权）', width: 140, render: (_, r) => num(r.price).toFixed(4) },
                 { title: '采购金额', width: 110, render: (_, r) => calc(r).purchaseAmount.toFixed(2) },
                 { title: '采购单号', dataIndex: 'po_no', width: 160 },
+                { title: '采购日期（全部批次）', width: 180, render: (_, r) => [...new Set(r.sources.map(source => source.po_date).filter(Boolean))].join(' / ') },
                 { title: '供应商', dataIndex: 'supplier', width: 180 },
                 { title: '操作', width: 110, fixed: 'right', render: () => <Button size="small" onClick={() => setShowBatchDetails(true)}>编辑批次</Button> },
               ]}
@@ -1412,7 +1415,7 @@ export default function ShipmentsPage() {
               { title: '供应商', width: 160, render: (_v, r, i) => fillable(i, 'supplier', <Input size="small" value={r.supplier} onChange={(e) => patchItem(i, 'supplier', e.target.value)} />) },
               { title: '采购单日期', width: 130, render: (_v, r, i) => fillable(i, 'po_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.po_date ? dayjs(r.po_date) : null} onChange={(v) => patchItem(i, 'po_date', v ? v.format('YYYY-MM-DD') : '')} />) },
               { title: '采购单号', width: 130, render: (_v, r, i) => fillable(i, 'po_no', <Input size="small" value={r.po_no} onChange={(e) => patchItem(i, 'po_no', e.target.value)} />) },
-              { title: '采购单价', width: 100, render: (_v, r, i) => fillable(i, 'price', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.price} onChange={(v) => patchItem(i, 'price', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '采购单价', width: 100, render: (_v, r, i) => fillable(i, 'price', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.price} title={shipmentUsesDeclarationPrice(r) ? '导入单价：按送货重量/申报数量计价' : `原采购单价：按送货数量（${r.purchase_unit || '个'}）计价；导出时换算申报单位单价`} onChange={(v) => patchItem(i, 'price', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '币种', width: 90, render: (_v, r, i) => fillable(i, 'currency', <Select size="small" value={r.currency || '¥'} options={CURR} onChange={(v) => patchItem(i, 'currency', v)} style={{ width: '100%' }} />) },
               { title: '采购金额', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.purchaseAmount ? c.purchaseAmount.toFixed(2) : '' } },
               { title: '报关出口公司', width: 240, render: (_v, r, i) => fillable(i, 'customs_company',

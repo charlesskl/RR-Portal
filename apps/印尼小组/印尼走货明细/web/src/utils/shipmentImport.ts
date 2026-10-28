@@ -131,7 +131,9 @@ export function parseShipmentWorkbook(wb: XLSX.WorkBook): ShipmentImportResult {
       // Preserve a supplied per-piece gross weight without treating total weight as per-carton weight.
       const effectiveWeighing = weighing > 0 ? weighing : material.gross_per_pc != null ? 1 : undefined
       if (material.weight_per_carton == null && material.gross_per_pc != null && effectiveWeighing) material.weight_per_carton = material.gross_per_pc * effectiveWeighing
-      const price = readToolPrice(cell(col('采购单价')), str('币种', 'Currency'))
+      // RRM has an earlier converted-currency purchase-price column (N).
+      // Prefer the original purchase price (AO), including its bilingual header.
+      const price = readToolPrice(cell(col('采购单价', '采购单价Purchase price')), str('币种', 'Currency'))
       if (price.price != null && !price.currency) notices.push('采购币种未明确，请选择后导入')
       if (price.conflict) notices.push('采购单价格式与币种冲突，请核对')
       let po = str('采购单号')

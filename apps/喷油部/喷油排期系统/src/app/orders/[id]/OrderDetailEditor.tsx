@@ -48,6 +48,7 @@ export default function OrderDetailEditor({ order: initialOrder, lines, isAdmin,
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [autoAdjustSchedule, setAutoAdjustSchedule] = useState(true);
   useEffect(() => {
     setOrder(initialOrder);
     setQtys(Object.fromEntries(initialOrder.partQtys.map(part => [part.id, part.qty])));
@@ -78,9 +79,10 @@ export default function OrderDetailEditor({ order: initialOrder, lines, isAdmin,
     try {
       const changed = order.partQtys.filter(part => (qtys[part.id] ?? part.qty) !== part.qty);
       const partQtys = order.qtyEditable && changed.length ? changed.map(part => ({ id: part.id, qty: qtys[part.id] })) : undefined;
-      const res = await apiFetch(`/api/orders/${order.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderDate: orderDate || undefined, deliveryDate, remark, isMA, isUrgent, partQtys }) });
+      const res = await apiFetch(`/api/orders/${order.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderDate: orderDate || undefined, deliveryDate, remark, isMA, isUrgent, partQtys, autoAdjustSchedule: autoAdjustSchedule && order.qtyEditable }) });
       if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.error || "保存失败"); }
       committed = true;
+      const result = await res.json().catch(() => ({}));
       for (const prefix of ["/api/orders", "/api/schedule", "/api/recording", "/api/dashboard"]) invalidateClientCache(prefix);
       const detail = await apiFetch(`/api/orders/${order.id}`, { cache: "no-store" });
       if (!detail.ok) throw new Error("详情刷新失败");
@@ -107,7 +109,12 @@ export default function OrderDetailEditor({ order: initialOrder, lines, isAdmin,
       setOrder(saved); setQtys(savedQtys);
       setOrderDate(ymd(saved.orderDate)); setDeliveryDate(ymd(saved.deliveryDate));
       setRemark(saved.remark ?? ""); setIsMA(saved.isMA); setIsUrgent(saved.isUrgent);
-      setSuccess("已保存，订单统计和状态已更新。请按下方提示调整排期；历史实绩和库存已保留。");
+      const adjustment = result.scheduleAdjustment;
+      const adjustmentText = adjustment && Number.isFinite(adjustment.addedQty) && Number.isFinite(adjustment.reducedQty)
+        ? `已自动补排 ${adjustment.addedQty.toLocaleString("zh-CN")} 件、减排 ${adjustment.reducedQty.toLocaleString("zh-CN")} 件（按工序合计）。`
+        : "";
+      const warnings = Array.isArray(adjustment?.warnings) ? adjustment.warnings.filter((item: unknown) => typeof item === "string").join("；") : "";
+      setSuccess(`已保存，订单统计和状态已更新。${adjustmentText}历史实绩和库存已保留。${warnings ? `未自动处理：${warnings}` : ""}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "请检查网络后重试";
       setError(committed ? `订单已保存，但页面更新失败，请刷新页面查看（${message}）` : message);
@@ -192,10 +199,14 @@ export default function OrderDetailEditor({ order: initialOrder, lines, isAdmin,
       <div className="flex flex-col justify-end gap-2"><label><input type="checkbox" checked={isUrgent} onChange={e => setIsUrgent(e.target.checked)} /> 急单</label><label><input type="checkbox" checked={isMA} onChange={e => setIsMA(e.target.checked)} /> MA 单</label></div>
     </fieldset>
     <p className="text-xs text-text-secondary mb-2">{order.qtyEditable && canEdit
-      ? "各部位数量可单独修改，其他部位不变。保存后更新统计和状态，保留原排期、历史实绩和库存；补排或减排请按下方提示处理。"
+      ? "各部位数量可单独修改，其他部位不变。保存后更新统计和状态；勾选自动调整时同步补排或减排，历史实绩和库存保留。"
       : "当前订单或账号不允许修改部位数量。"}</p>
     <div className="bg-white rounded-card border border-app-border overflow-hidden mb-3"><table className="w-full text-sm"><thead className="bg-[#f0fdf4] text-[#047857] text-xs"><tr><th className="px-4 py-2 text-left">部位</th><th className="px-4 py-2 text-right">数量</th></tr></thead><tbody>{order.partQtys.map((q, index) => <tr key={q.id} className={index % 2 ? "bg-[#fafdfb]" : ""}><td className="px-4 py-2">{q.partName}</td><td className="px-4 py-2 text-right">{order.qtyEditable && canEdit ? <input aria-label={`${q.partName} 数量`} disabled={busy} type="number" min="0" max="2147483647" step="1" className="w-32 border border-app-border rounded-btn px-2 py-1 text-right" value={Number.isNaN(qtys[q.id]) ? "" : (qtys[q.id] ?? q.qty)} onChange={e => { setQtys(current => ({ ...current, [q.id]: e.target.value === "" ? NaN : e.target.valueAsNumber })); setSuccess(""); }} /> : (qtys[q.id] ?? q.qty).toLocaleString("zh-CN")}</td></tr>)}</tbody></table></div>
     <div className="text-right text-sm mb-4">订单总数 <b className="text-mint-700">{Math.max(0, ...Array.from(demandByPart.values())).toLocaleString("zh-CN")}</b></div>
+    {canEdit && order.qtyEditable && <label className="flex items-center gap-2 text-sm text-text mb-3">
+      <input type="checkbox" checked={autoAdjustSchedule} disabled={busy} onChange={event => setAutoAdjustSchedule(event.target.checked)} />
+      保存时自动补排/减排（沿用原工序和拉别，仅调整未报工计划）
+    </label>}
     <ScheduleBalanceTable balances={order.scheduleBalances ?? []} />
     {canEdit && (order.status === "draft" || order.status === "received") && <div className="bg-white rounded-card border border-app-border p-5 mb-4">
       <div className="mb-4"><h2 className="font-semibold text-text">工序排期</h2><p className="text-xs text-text-secondary mt-1">按部位分别填写；各工序独立计算并可同时进行。人工和每日目标数自动带入核价表中同部位、同工序的上次保存值，可手动修改。保存后同时更新部位级核价表和生产计划。</p></div>
@@ -238,7 +249,7 @@ function ScheduleBalanceTable({ balances }: { balances: ScheduleBalance[] }) {
   const actionable = balances.filter(row => row.supplementQty > 0 || row.reduceQty > 0 || row.overproducedQty > 0);
   return <section aria-label="排期调整提示" className="mb-5 rounded-card border border-app-border bg-white p-4">
     <h2 className="text-sm font-semibold text-text mb-2">排期调整提示（按已保存数量）</h2>
-    <p className="text-xs text-text-secondary mb-3">按每道工序分别比较需求、已生产和未报工计划，不跨工序相加。补排、减排仅提示，不会自动改动原排期；已超产数量保留原实绩及库存。</p>
+    <p className="text-xs text-text-secondary mb-3">按每道工序分别比较需求、已生产和未报工计划，不跨工序相加。勾选自动调整后，保存时按原日产量、工作日和可用产能补排，从末尾缩减未报工计划；缺少配置的部分仍列在下方。已超产数量保留原实绩及库存。</p>
     {actionable.length === 0 ? <p className="text-sm text-mint-700">当前无需补排或减排。</p> : <div className="overflow-x-auto"><table className="w-full text-sm min-w-[760px]">
       <thead className="bg-[#f0fdf4] text-[#047857] text-xs"><tr>{["部位", "工序", "需求", "已生产", "未报工计划", "需补排", "需减排", "已超产"].map(label => <th key={label} className="px-3 py-2 text-left">{label}</th>)}</tr></thead>
       <tbody>{actionable.map(row => <tr key={`${row.partName}-${row.stepNo}`} className="border-b border-app-border-light">

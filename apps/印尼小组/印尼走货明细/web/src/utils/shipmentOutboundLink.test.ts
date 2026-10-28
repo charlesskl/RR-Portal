@@ -22,6 +22,22 @@ it('maps imported snapshot to confirmed material without discarding local dimens
   expect(result).toMatchObject({ qty: 2, kg: 4, carton_no: '3-4', outbound_id: 75 })
   expect(snapshot).not.toHaveProperty('id')
 })
+it.each([undefined, null])('does not reinterpret an imported declaration price as a purchase-unit price when the outbound source has no price (%s)', price => {
+  const imported = { ...row, material_id: -1, material_snapshot: { name_zh: 'Imported', unit_kg: 'KGM' },
+    qty: 1000, kg: 1, price: 10, currency: 'US$' }
+  const unpriced = { ...source, allocatable_qty: 1000, price } as unknown as typeof source
+  expect(() => linkShipmentOutbound([imported], 1, unpriced, material,
+    new Map([[-1, imported.material_snapshot]]))).toThrow('采购单价')
+  expect(imported).toMatchObject({ qty: 1000, kg: 1, price: 10 })
+  expect(imported).not.toHaveProperty('outbound_id')
+})
+it('accepts an explicit zero PO price and retains a native purchase-unit price when legacy source price is missing', () => {
+  const imported = { ...row, material_id: -1, material_snapshot: { name_zh: 'Imported' }, price: 10 }
+  expect(linkShipmentOutbound([imported], 1, { ...source, price: 0 }, material,
+    new Map([[-1, imported.material_snapshot]]))[0]).toMatchObject({ outbound_id: 75, price: 0 })
+  expect(linkShipmentOutbound([{ ...row, price: 4 }], 1, { ...source, price: undefined }, material,
+    materials)[0]).toMatchObject({ outbound_id: 75, price: 4 })
+})
 it('deducts unsaved allocations in the same container and allows exact balance', () => {
   const rows = [row, { ...row, _rowKey: 2, outbound_id: 75, qty: 8 }]
   expect(remainingOutboundQuantity(rows, 1, source)).toBe(2)

@@ -15,9 +15,9 @@ it('按排序及主资料确定每组末行，删除后重新计算附加费用�
   const rows = [{ material_id: 1, supplier: 'A', price: 10, kg: 2, qty: 99 },
     { material_id: 2, supplier: 'B', price: 20, kg: 4, qty: 50 }]
   const result = withShipmentInvoicePrices(sortShipmentItems(rows, mats), mats)
-  expect(result[0].invoice_price).toBe(10 * 1.05 / 7.2)
-  expect(result[1].invoice_price * result[1].kg).toBeCloseTo(((20 * 1.05 + 1248 / 4) / 7.2) * 4, 10)
-  expect(withShipmentInvoicePrices([rows[0]], mats)[0].invoice_price).toBeCloseTo((10 * 1.05 + 1248 / 2) / 7.2, 10)
+  expect(result[0].invoice_price).toBeCloseTo(10 * 99 / 2 * 1.05 / 7.2, 10)
+  expect(result[1].invoice_price * result[1].kg).toBeCloseTo((20 * 50 * 1.05 + 1248) / 7.2, 10)
+  expect(withShipmentInvoicePrices([rows[0]], mats)[0].invoice_price).toBeCloseTo((10 * 99 / 2 * 1.05 + 1248 / 2) / 7.2, 10)
 })
 
 it('美元采购不加价、不重复换汇，明确华胜益末行仅换算人民币附加费', () => {
@@ -32,10 +32,10 @@ it('美元采购不加价、不重复换汇，明确华胜益末行仅换算人�
 it('空白或清空报关公司不使用显示默认值，附加费只在明确华胜益的最后一行计一次', () => {
   const mats = new Map([[1, { customs_company: CUSTOMS_FIXED }]])
   const rows = [
-    { price: 35.34, kg: 2, currency: 'USD', customs_company: CUSTOMS_FIXED },
-    { price: 12.0453, kg: 3.97, currency: 'USD' },
-    { price: 9.09, kg: 2, currency: 'USD', customs_company: CUSTOMS_FIXED },
-    { price: 10, kg: 2, currency: 'USD', material_id: 1, customs_company: '' },
+    { price: 35.34, kg: 2, qty: 2, currency: 'USD', customs_company: CUSTOMS_FIXED },
+    { price: 12.0453, kg: 3.97, qty: 4000, material_snapshot: {}, currency: 'USD' },
+    { price: 9.09, kg: 2, qty: 2, currency: 'USD', customs_company: CUSTOMS_FIXED },
+    { price: 10, kg: 2, qty: 2, currency: 'USD', material_id: 1, customs_company: '' },
   ]
   expect(withShipmentInvoicePrices(rows, mats).map(row => row.invoice_price)).toEqual([
     35.34, 12.0453, 9.09 + 1248 / 2 / 7.2, 10,

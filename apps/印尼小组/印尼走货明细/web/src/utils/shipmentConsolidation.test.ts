@@ -13,15 +13,15 @@ const materials = new Map([[974, {
   net_per_pc: 0.0906, weight_per_carton: 10, length: 24.5, width: 11.5, height: 18,
 }]])
 const batches = [
-  { outbound_id: 74, material_id: 974, qty: 8150, kg: 738.39, cartons: 82, qty_per_carton: '100', price: 2, currency: 'US$', po_no: 'IRRIHS0401' },
-  { outbound_id: 75, material_id: 974, qty: 82, kg: 7.4292, cartons: 1, qty_per_carton: '100', price: 2, currency: 'US$', po_no: 'IRRIHS0401' },
+  { outbound_id: 74, material_id: 974, qty: 8150, kg: 738.39, cartons: 82, carton_no: '1-82', qty_per_carton: '100', price: 2, currency: 'US$', po_no: 'IRRIHS0401' },
+  { outbound_id: 75, material_id: 974, qty: 82, kg: 7.4292, cartons: 1, carton_no: '83', qty_per_carton: '100', price: 2, currency: 'US$', po_no: 'IRRIHS0401' },
 ]
 
 it('同柜分批出库只显示一行，数量、重量和实际箱数累加，原始分配不变', () => {
   const before = structuredClone(batches)
   const result = consolidateShipmentItems(batches, materials)
   expect(result).toHaveLength(1)
-  expect(result[0]).toMatchObject({ qty: 8232, kg: 745.8192, cartons: 83, outbound_ids: [74, 75] })
+  expect(result[0]).toMatchObject({ qty: 8232, kg: 745.8192, cartons: 83, carton_no: '1-82 / 83', outbound_ids: [74, 75] })
   expect(result[0].sources).toEqual(before)
   expect(batches).toEqual(before)
   expect(shipmentPurchaseAmount(result[0])).toBeCloseTo(batches.reduce((sum, row) => sum + shipmentPurchaseAmount(row), 0), 10)
@@ -32,19 +32,42 @@ it('同柜分批出库只显示一行，数量、重量和实际箱数累加，�
 
 it.each([
   { material_id: 975 }, { supplier: '另一供应商' }, { customs_company: '另一报关公司' },
-  { price: 3 }, { currency: '¥' }, { purchase_unit: '米' }, { contract_no: '另一合同' },
+  { currency: '¥' }, { purchase_unit: '米' }, { contract_no: '另一合同' },
   { invoice_no: '另一发票' }, { bl_head: '另一抬头' }, { weighing_qty: 5 },
-  { qty_per_carton: '200' }, { carton_no: '另一个箱号' }, { pallet: '1-2/1卡' },
+  { qty_per_carton: '200' }, { pallet: '1-2/1卡' },
   { material_snapshot: { id: 974 } }, { outbound_id: undefined }, { material_id: undefined },
 ])('不合并资料不同或不能确认来源的明细 %j', override => {
   expect(consolidateShipmentItems([batches[0], { ...batches[1], ...override }], materials)).toHaveLength(2)
 })
 
-it('不同采购单但其他资料一致时保留全部采购单号及出库来源', () => {
-  const result = consolidateShipmentItems([batches[0], { ...batches[1], po_no: 'IRRIHS0402' }], materials)
+it.each([
+  [' A01-A82 ', 'B03', 'A01-A82 / B03'],
+  ['1-82', ' 1-82 ', '1-82'],
+  ['', '83', '83'],
+  ['1-82', '', '1-82'],
+])('箱号只是批次标签，保留完整值且不影响实际箱数：%s、%s', (first, last, label) => {
+  const rows = [{ ...batches[0], carton_no: first }, { ...batches[1], carton_no: last }]
+  const before = structuredClone(rows)
+  const result = consolidateShipmentItems(rows, materials)
+  expect(result).toHaveLength(1)
+  expect(result[0]).toMatchObject({ carton_no: label, cartons: 83, qty: 8232, kg: 745.8192 })
+  expect(result[0].sources).toEqual(before)
+  expect(rows).toEqual(before)
+})
+
+it('不同采购单、日期和单价合并，保留全部来源并按各批金额加权', () => {
+  const rows = [{ ...batches[0], po_date: '2026-10-01' },
+    { ...batches[1], po_no: 'IRRIHS0402', po_date: '2026-10-02', price: 3 }]
+  const before = structuredClone(rows)
+  const result = consolidateShipmentItems(rows, materials)
   expect(result).toHaveLength(1)
   expect(result[0].po_no).toBe('IRRIHS0401 / IRRIHS0402')
   expect(result[0].outbound_ids).toEqual([74, 75])
+  expect(result[0].po_date).toBeUndefined()
+  expect(result[0].price).toBeCloseTo((8150 * 2 + 82 * 3) / 8232, 12)
+  expect(shipmentPurchaseAmount(result[0])).toBeCloseTo(8150 * 2 + 82 * 3, 9)
+  expect(result[0].sources).toEqual(before)
+  expect(rows).toEqual(before)
 })
 
 it('已合并箱数只计一次，独立批次不重新向上取整箱数', () => {
@@ -60,6 +83,74 @@ it('不同共箱组及分段箱号不错误折叠', () => {
   expect(consolidateShipmentItems(batches.map((row, index) => ({ ...row, carton_group: String(index) })), materials)).toHaveLength(2)
   expect(consolidateShipmentItems(batches.map(row => ({ ...row, qty_per_carton: '1-2/100' })), materials)).toHaveLength(2)
 })
+
+it('多物料共箱中只汇总相同物料批次，保持物理箱数及各合同发票金额', () => {
+  const mats = new Map([
+    ...materials,
+    [975, { ...materials.get(974)!, id: 975, name_zh: '另一物料' }] as const,
+  ])
+  const rows = [
+    { ...batches[0], qty: 50, kg: 4.53, cartons: 2, carton_group: 'G', carton_no: 'A01', contract_no: 'A', invoice_no: 'A' },
+    { ...batches[1], material_id: 975, outbound_id: 76, qty: 10, kg: 1, cartons: 2, carton_group: 'G', carton_no: 'B01', contract_no: 'B', invoice_no: 'B' },
+    { ...batches[1], qty: 50, kg: 4.53, cartons: 2, carton_group: 'G', carton_no: 'A02', contract_no: 'A', invoice_no: 'A' },
+  ].map(row => Object.freeze({ ...row, customs_company: '深圳市华胜益出口贸易有限公司' }))
+  const original = structuredClone(rows)
+  const before = withShipmentInvoicePrices(sortShipmentItems(Object.freeze(rows), mats), mats)
+  const result = consolidateShipmentItems(rows, mats)
+  const after = withShipmentInvoicePrices(sortShipmentItems(result, mats), mats)
+  expect(result).toHaveLength(2)
+  expect(result.find(row => row.material_id === 974)).toMatchObject({
+    qty: 100, kg: 9.06, cartons: 2, carton_no: 'A01 / A02', outbound_ids: [74, 75],
+    sources: [original[0], original[2]],
+  })
+  expect(result.find(row => row.material_id === 975)).toMatchObject({ qty: 10, kg: 1, carton_no: 'B01' })
+  expect(cartonLayout(result, mats).reduce((sum, row) => sum + row.count, 0)).toBe(2)
+  for (const contract of ['A', 'B']) {
+    const amount = (items: typeof before) => items.filter(row => row.contract_no === contract)
+      .reduce((sum, row) => sum + row.kg * row.invoice_price, 0)
+    expect(amount(after)).toBeCloseTo(amount(before), 9)
+  }
+  expect(rows).toEqual(original)
+})
+
+it('同名共箱组跨供应商仍各自计箱，批次标签汇总不扩大共箱范围', () => {
+  const rows = [
+    { ...batches[0], supplier: 'A供应商', qty: 50, kg: 4.53, cartons: 2, carton_group: 'G', carton_no: 'A01' },
+    { ...batches[0], supplier: 'B供应商', outbound_id: 76, qty: 40, kg: 3.624, cartons: 3, carton_group: 'G', carton_no: 'B01' },
+    { ...batches[1], supplier: 'A供应商', qty: 50, kg: 4.53, cartons: 2, carton_group: 'G', carton_no: 'A02' },
+    { ...batches[1], supplier: 'B供应商', outbound_id: 77, qty: 40, kg: 3.624, cartons: 3, carton_group: 'G', carton_no: 'B02' },
+  ]
+  const original = structuredClone(rows)
+  const result = consolidateShipmentItems(rows, materials)
+  expect(result).toHaveLength(2)
+  expect(result.map(row => [row.supplier, row.qty, row.cartons, row.carton_no]))
+    .toEqual([['A供应商', 100, 2, 'A01 / A02'], ['B供应商', 80, 3, 'B01 / B02']])
+  expect(cartonLayout(result, materials).reduce((sum, row) => sum + row.count, 0)).toBe(5)
+  expect(rows).toEqual(original)
+})
+
+it.each(['RRI', 'RRM'])('真实模板保留两个半箱的实际箱数，数量重量与源批次一致（%s）', async customer => {
+  const rows = batches.map((row, index) => ({
+    ...row, qty: 50, kg: 4.53, cartons: 1, carton_no: index ? 'HALF-B' : 'HALF-A',
+    contract_no: 'C-HALF', invoice_no: 'I-HALF',
+  }))
+  const original = structuredClone(rows)
+  const templateBuffer = Uint8Array.from(readFileSync(new URL(`../../public/template-customs-${customer.toLowerCase()}.xlsx`, import.meta.url))).buffer
+  const blob = await buildCustomsWorkbook({ templateBuffer, items: rows, materials,
+    productHs: new Map(), images: new Map(), form: { containerNo: 'HALF-CARTONS', customer, rate: 7.2 } })
+  const book = XLSX.read(await blob.arrayBuffer(), { type: 'array' })
+  const sheet = book.Sheets['HALF-CARTONS']
+  expect(sheet.L4.v).toBe(100)
+  expect(sheet.K4.v).toBe(9.06)
+  expect(sheet.AT4.v).toBe(2)
+  expect(sheet.S4.f).toBe('R4*AT4')
+  expect(sheet.P4.f).toBe('ROUND(BA4*L4,2)')
+  expect(sheet.Q4.f).toBe('ROUND(BB4*L4,2)')
+  expect(sheet.AP4.f).toBe('AO4*K4')
+  expect(sheet.F5?.v).not.toBe('彩盒-FSC')
+  expect(book.Sheets['装箱单'][customer === 'RRI' ? 'A25' : 'A24']?.v).toBe(1)
+  expect(rows).toEqual(original)
+}, 60000)
 
 it('华胜益附加费在合并后重新分摊，整柜发票总额不变', () => {
   const rows = batches.map(row => ({ ...row, customs_company: '深圳市华胜益出口贸易有限公司' }))
@@ -110,7 +201,7 @@ it.each(['RRI', 'RRM'])('真实模板导出合并明细，公式引用合并后�
   expect(book.Sheets[customer === 'RRI' ? '实业合同' : '全球合同'].D24.f).toContain("'MERGED-BATCHES'!K:K")
 }, 60000)
 
-it.each(['RRI', 'RRM'])('零重量末批保留原来的附加费边界和整柜金额（%s）', async customer => {
+it.each(['RRI', 'RRM'])('零重量有采购金额的末批不得被合并隐藏或静默导出为零（%s）', async customer => {
   const rows = [
     { ...batches[0], qty: 10, kg: 10, contract_no: 'A', invoice_no: 'A' },
     { ...batches[1], qty: 10, kg: 0, contract_no: 'A', invoice_no: 'A' },
@@ -122,14 +213,8 @@ it.each(['RRI', 'RRM'])('零重量末批保留原来的附加费边界和整柜�
   expect(consolidated).toHaveLength(2)
   expect(amount(after)).toBeCloseTo(amount(before), 9)
   const templateBuffer = Uint8Array.from(readFileSync(new URL(`../../public/template-customs-${customer.toLowerCase()}.xlsx`, import.meta.url))).buffer
-  const blob = await buildCustomsWorkbook({ templateBuffer, items: rows, materials, productHs: new Map(), images: new Map(),
-    form: { containerNo: 'ZERO-LAST-BATCH', customer, rate: 7.2 } })
-  const sheet = XLSX.read(await blob.arrayBuffer(), { type: 'array' }).Sheets['ZERO-LAST-BATCH']
-  expect(sheet.K4.v).toBe(10)
-  expect(sheet.K5.v).toBe(0)
-  expect(sheet.Z4.f).not.toContain('1248')
-  expect(sheet.Z5.f).toContain('IF(K5>0,1248/K5/7.2,0)')
-  expect(Number(sheet.K4.v) * Number(sheet.Z4.v) + Number(sheet.K5.v) * Number(sheet.Z5.v)).toBeCloseTo(amount(before), 9)
+  await expect(buildCustomsWorkbook({ templateBuffer, items: rows, materials, productHs: new Map(), images: new Map(),
+    form: { containerNo: 'ZERO-LAST-BATCH', customer, rate: 7.2 } })).rejects.toThrow('第 2 行（彩盒-FSC）有采购金额')
 }, 60000)
 
 it.each(['RRI', 'RRM'])('共箱先按共享顺序排序，页面与导出保留原合同附加费归属（%s）', async customer => {

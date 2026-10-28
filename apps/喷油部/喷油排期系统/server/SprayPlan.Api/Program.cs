@@ -72,6 +72,9 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins("http://localhost:8400").AllowCredentials().AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+    await DailyLineNoteSchema.Ensure(scope.ServiceProvider.GetRequiredService<AppDbContext>());
 using (var scope = app.Services.CreateScope())
     await MaterialSchema.Ensure(scope.ServiceProvider.GetRequiredService<AppDbContext>());
 

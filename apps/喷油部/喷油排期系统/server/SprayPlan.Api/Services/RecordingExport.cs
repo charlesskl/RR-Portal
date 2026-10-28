@@ -21,8 +21,10 @@ public static class RecordingExport
         string ProductNo, string Name, int TotalDemand, int WorkerCount,
         double WorkHours, int PlannedQty, int RemainingQty, int ActualQty, string Remark);
 
+    public record ExportLine(int LineId, string Name, string? LeaderName, string CraftType);
+
     public static byte[] BuildDetailWorkbook(string date, string mode,
-        IEnumerable<ExportRow> rows, IReadOnlyDictionary<int, LineNote> notes)
+        IEnumerable<ExportRow> rows, IReadOnlyDictionary<int, LineNote> notes, IEnumerable<ExportLine>? noteLines = null)
     {
         var rowList = rows.ToList();
         using var ms = new MemoryStream();
@@ -39,16 +41,20 @@ public static class RecordingExport
             var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             uint sheetId = 1;
 
-            if (rowList.Count == 0)
+            var groups = rowList.GroupBy(r => r.LineId).ToDictionary(g => g.Key, g => g.ToList());
+            var lines = rowList.Select(r => new ExportLine(r.LineId, r.LineName, r.LeaderName, r.CraftType))
+                .Concat(noteLines ?? []).DistinctBy(l => l.LineId).OrderBy(l => l.Name).ToList();
+            if (lines.Count == 0)
             {
                 AddSheet(wbPart, sheets, sheetId, "日报表", date, mode, Array.Empty<ExportRow>(), null, usedNames);
             }
             else
             {
-                foreach (var grp in rowList.GroupBy(r => r.LineId))
+                foreach (var line in lines)
                 {
-                    notes.TryGetValue(grp.Key, out var note);
-                    AddSheet(wbPart, sheets, sheetId++, grp.First().LineName, date, mode, grp, note, usedNames);
+                    notes.TryGetValue(line.LineId, out var note);
+                    AddSheet(wbPart, sheets, sheetId++, line.Name, date, mode,
+                        groups.GetValueOrDefault(line.LineId) ?? [], note, usedNames, line);
                 }
             }
 
@@ -58,7 +64,7 @@ public static class RecordingExport
     }
 
     static void AddSheet(WorkbookPart wbPart, Sheets sheets, uint sheetId, string requestedName,
-        string date, string mode, IEnumerable<ExportRow> sourceRows, LineNote? note, HashSet<string> usedNames)
+        string date, string mode, IEnumerable<ExportRow> sourceRows, LineNote? note, HashSet<string> usedNames, ExportLine? line = null)
     {
         var rows = sourceRows.ToList();
         var first = rows.FirstOrDefault();
@@ -69,8 +75,8 @@ public static class RecordingExport
         var top = new Row { RowIndex = 1, Height = 30, CustomHeight = true };
         for (var c = 1; c <= ColumnCount; c++)
         {
-            var value = c == 1 ? $"拉长：{first?.LeaderName ?? ""}"
-                : c == 2 ? first?.CraftType ?? ""
+            var value = c == 1 ? $"拉长：{first?.LeaderName ?? line?.LeaderName ?? ""}"
+                : c == 2 ? first?.CraftType ?? line?.CraftType ?? ""
                 : c == 6 ? note?.HeaderText ?? "" : "";
             top.Append(TextCell($"{Col(c)}1", value, 2));
         }
@@ -131,7 +137,7 @@ public static class RecordingExport
         rowIndex++;
 
         var miscCount = Math.Max(0, note?.MiscCount ?? 0);
-        var footer = new Row { RowIndex = rowIndex, Height = 32, CustomHeight = true };
+        var footer = new Row { RowIndex = rowIndex, Height = Math.Min(300, 32 + 16 * Math.Max(0, (note?.MiscText?.Length ?? 0) / 80 + (note?.MiscText?.Count(c => c == '\n') ?? 0))), CustomHeight = true };
         for (var c = 1; c <= ColumnCount; c++)
         {
             if (c == 1) footer.Append(TextCell($"A{rowIndex}", "备注：", 5));

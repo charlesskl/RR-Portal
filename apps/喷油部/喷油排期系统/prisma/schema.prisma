@@ -141,6 +141,7 @@ model ProductionLine {
   craftType          String           @default("移印") // 工艺类型：手喷 / 移印 / 自动喷 / UV（整条拉一种工艺；机台默认继承）
   dailyCapacityLimit Int              @default(0) // 该拉一天产能上限（件）；0=不卡。B自动喷30万/C移印30万/UV40万/A手喷20万
   isActive           Boolean          @default(true)
+  dailyNotes         DailyLineNote[]
   machines           Machine[]
   plans              ProductionPlan[]
 
@@ -320,4 +321,20 @@ model OrderMaterial {
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   @@unique([factoryId, orderId, partName])
   @@map("order_materials")
+}
+
+// 每天每拉一条独立备注，排期移动或撤销时保留。
+model DailyLineNote {
+  id        Int @id @default(autoincrement())
+  factoryId String @default("XINGXIN")
+  lineId    Int
+  line      ProductionLine @relation(fields: [lineId], references: [id], onDelete: Restrict)
+  noteDate  DateTime
+  text      String @default("")
+  version   Int @default(0)
+  updatedAt DateTime @updatedAt
+  updatedBy String
+
+  @@unique([factoryId, lineId, noteDate])
+  @@map("daily_line_notes")
 }

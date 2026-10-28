@@ -69,7 +69,19 @@ public class RecordingController(AppDbContext db) : ControllerBase
         var notes = (req.LineNotes ?? new())
             .GroupBy(x => x.LineId)
             .ToDictionary(g => g.Key, g => g.First());
-        var buf = RecordingExport.BuildDetailWorkbook(date, mode, rows, notes);
+        // 每天每拉持久化备注始终带入底部 C:L；弹窗杂工明细仍可追加。
+        var savedNotes = await db.DailyLineNotes.Where(n => n.NoteDate == day && n.Text != "").ToListAsync();
+        foreach (var saved in savedNotes)
+        {
+            notes.TryGetValue(saved.LineId, out var temporary);
+            var text = string.Join("\n", new[] { saved.Text, temporary?.MiscText }
+                .Where(t => !string.IsNullOrWhiteSpace(t)));
+            notes[saved.LineId] = new LineNote(saved.LineId, temporary?.HeaderText, text, temporary?.MiscCount ?? 0);
+        }
+        var noteLineIds = savedNotes.Select(n => n.LineId).ToList();
+        var noteLines = await db.ProductionLines.Where(l => noteLineIds.Contains(l.Id))
+            .Select(l => new RecordingExport.ExportLine(l.Id, l.Name, l.LeaderName, l.CraftType)).ToListAsync();
+        var buf = RecordingExport.BuildDetailWorkbook(date, mode, rows, notes, noteLines);
         return File(buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"recording-{date}.xlsx");
     }
 

@@ -309,25 +309,27 @@ async function exportScheduleExcel(scheduleId) {
   // ========== 冻结前3行+前1列 ==========
   ws.views = [{ state: 'frozen', xSplit: 1, ySplit: 3, activeCell: 'B4' }];
 
-  // ========== Sheet 2: 上一班次排单（历史记录） ==========
-  const prevSchedule = findPreviousSchedule(schedule);
-  if (prevSchedule) {
-    const prevItems = db.prepare(`
+  // ========== Sheet 2+: 近一个月的全部排单（白班/夜班都要，按日期倒序） ==========
+  const monthSchedules = findMonthSchedules(schedule);
+  const usedSheetNames = new Set(['排机单']);
+  for (const past of monthSchedules) {
+    const pastItems = db.prepare(`
       SELECT si.*, m.arm_type, m.tonnage, m.brand
       FROM schedule_items si
       LEFT JOIN machines m ON si.machine_no = m.machine_no AND m.workshop = ?
       WHERE si.schedule_id = ?
       ORDER BY CAST(REPLACE(REPLACE(REPLACE(si.machine_no, '#', ''), 'C-', ''), 'A-', '') AS INTEGER), si.sort_order, si.id
-    `).all(prevSchedule.workshop || schedule.workshop || 'B', prevSchedule.id)
+    `).all(past.workshop || schedule.workshop || 'B', past.id)
       .filter(it => !isFullyProduced(it));
 
-    if (prevItems.length > 0) {
-      const prevSheetName = `${prevSchedule.schedule_date} ${prevSchedule.shift}`;
-      const ws2 = wb.addWorksheet(prevSheetName, {
-        pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
-      });
-      writeScheduleSheet(ws2, prevSchedule, prevItems, machineMap, wsName);
-    }
+    if (pastItems.length === 0) continue;
+    let sheetName = `${past.schedule_date} ${past.shift}`;
+    if (usedSheetNames.has(sheetName)) sheetName = `${past.schedule_date} ${past.shift}-${past.id}`;
+    usedSheetNames.add(sheetName);
+    const wsn = wb.addWorksheet(sheetName, {
+      pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+    });
+    writeScheduleSheet(wsn, past, pastItems, machineMap, wsName);
   }
 
   const buffer = await wb.xlsx.writeBuffer();
@@ -338,16 +340,22 @@ async function exportScheduleExcel(scheduleId) {
 }
 
 /**
- * 查找上一班次的排机单
+ * 查找同车间近一个月的全部排机单（含白班/夜班，不含当前这张）。
+ * 日期范围：[排单日期-1个月, 排单日期]，按日期倒序、同日期夜班在前。
  */
-function findPreviousSchedule(schedule) {
-  // 找同车间、当前排单之前的最近一个排单
+function findMonthSchedules(schedule) {
+  const dateStr = String(schedule.schedule_date || '').slice(0, 10);
+  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return [];
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  d.setMonth(d.getMonth() - 1);
+  const pad = (n) => String(n).padStart(2, '0');
+  const monthAgo = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   return db.prepare(`
     SELECT * FROM schedules
-    WHERE workshop = ? AND id < ?
-    ORDER BY schedule_date DESC, shift DESC, id DESC
-    LIMIT 1
-  `).get(schedule.workshop || 'B', schedule.id);
+    WHERE workshop = ? AND id != ? AND schedule_date >= ? AND schedule_date <= ?
+    ORDER BY schedule_date DESC, CASE WHEN shift LIKE '%夜%' THEN 0 ELSE 1 END, id DESC
+  `).all(schedule.workshop || 'B', schedule.id, monthAgo, dateStr);
 }
 
 /**

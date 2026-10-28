@@ -121,7 +121,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.WeighingQty).HasColumnName("weighing_qty").HasColumnType("decimal(18,4)");
             e.Property(x => x.PurchaseUnit).HasColumnName("purchase_unit").HasMaxLength(32);
             e.Property(x => x.Pallet).HasColumnName("pallet").HasMaxLength(64);
-            e.Property(x => x.Price).HasColumnName("price").HasColumnType("decimal(18,4)");
+            e.Property(x => x.Price).HasColumnName("price").HasColumnType("decimal(22,8)");
             e.Property(x => x.Currency).HasColumnName("currency").HasMaxLength(8);
             e.Property(x => x.PoNo).HasColumnName("po_no").HasMaxLength(64);
             e.Property(x => x.PoDate).HasColumnName("po_date");

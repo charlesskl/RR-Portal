@@ -4,7 +4,7 @@ Only this preflight's new private EXCL evidence directory is written.
 TARGET is observation metadata; root may bind it to then-current merged main.
 """
 import os,json,pathlib,re,subprocess,sys,hashlib
-EXECUTE=True
+EXECUTE=False
 BRANCH='refs/heads/ops/pr-1027-clone-diagnostic-20261028'
 ROOT=pathlib.Path('/opt/rr-portal')
 OUT=ROOT/'deploy/backups/pr1028-1031-runtime-preflight-1'

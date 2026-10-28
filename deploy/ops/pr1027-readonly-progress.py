@@ -3,7 +3,7 @@ Only safe command/file metadata is observed, never log bodies/env/argv/business/
 Only this observer's new private evidence directory is written.
 """
 import os,json,pathlib,re,stat,subprocess,sys,hashlib,time,math
-EXECUTE=True
+EXECUTE=False
 BRANCH='refs/heads/ops/pr-1027-readonly-20261028'
 ROOT=pathlib.Path('/opt/rr-portal')
 PREPARE=ROOT/'deploy/backups/pr1027-indo-20261028/prepare'

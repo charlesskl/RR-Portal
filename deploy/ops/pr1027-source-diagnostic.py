@@ -3,7 +3,7 @@ No Docker, SQL, environment, logs, business data or lifecycle is accessed.
 Only the new private diagnostic evidence directory is written.
 """
 import os,json,pathlib,re,stat,sys,hashlib,tarfile,io,html.parser,urllib.parse
-EXECUTE=True
+EXECUTE=False
 BRANCH='refs/heads/ops/pr-1027-clone-diagnostic-20261028'
 ROOT=pathlib.Path('/opt/rr-portal')
 PREPARE=ROOT/'deploy/backups/pr1027-1029-indo-20261028-r3/prepare'

@@ -106,7 +106,7 @@ test('工程同页保存新总货号后，新文件按新总号归共有，旧�
 });
 
 test('生成预览后保存新总货号，旧预览不可替换或追加费用', async () => {
-  for (const mode of ['replace', 'append']) {
+  for (const mode of ['replace', 'append', 'update']) {
     const s = setup();
     await s.choose('77957');
     await s.saveHeader('NEW-TOTAL');

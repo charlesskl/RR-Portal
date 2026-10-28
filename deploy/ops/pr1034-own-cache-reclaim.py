@@ -1,6 +1,6 @@
 """INERT exact fixed-ID nonshared reclaimable BuildKit cache cleanup only."""
 import hashlib,json,os,pathlib,re,subprocess,sys
-EXECUTE=True
+EXECUTE=False
 TARGET='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c'
 BRANCH='refs/heads/ops/pr-1034-20261028-indo-static'
 OUT=pathlib.Path('/opt/rr-portal/deploy/backups/pr1034-own-cache-reclaim-1')

@@ -4,7 +4,7 @@ Mutable private PGDATA is neither traversed nor described as sealed/static.
 No rows, credentials, environment or log bodies output. Differing constraint definitions expose only SQL structure, with every SQL string literal hashed; escaped/unsupported definitions fail closed.
 """
 import os,json,pathlib,re,stat,subprocess,sys,hashlib,collections
-EXECUTE=True
+EXECUTE=False
 BRANCH='refs/heads/ops/pr-1027-clone-diagnostic-20261028'
 ROOT=pathlib.Path('/opt/rr-portal')
 PREPARE=ROOT/'deploy/backups/pr1027-indo-20261028/prepare'

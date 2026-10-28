@@ -172,7 +172,7 @@ while IFS= read -r file; do
   # helper 缺失、读取失败或任意其他 compose 变动都回到保守全量。
   if [[ "$file" == "docker-compose.cloud.yml" ]]; then
     if COMPOSE_INCREMENTAL_SERVICE=$(python3 "$INSTALL_DIR/deploy/compose-mailbox-only-change.py" --service "$BEFORE_HEAD" "$AFTER_HEAD") &&
-       [[ "$COMPOSE_INCREMENTAL_SERVICE" == voyageplex-api || "$COMPOSE_INCREMENTAL_SERVICE" == printlink || "$COMPOSE_INCREMENTAL_SERVICE" == peise ]]; then
+       [[ "$COMPOSE_INCREMENTAL_SERVICE" == voyageplex-api || "$COMPOSE_INCREMENTAL_SERVICE" == printlink || "$COMPOSE_INCREMENTAL_SERVICE" == peise || "$COMPOSE_INCREMENTAL_SERVICE" == paiji ]]; then
       if [[ ! " ${AFFECTED_SERVICES[*]} " =~ " $COMPOSE_INCREMENTAL_SERVICE " ]]; then
         AFFECTED_SERVICES+=("$COMPOSE_INCREMENTAL_SERVICE")
       fi
@@ -470,6 +470,12 @@ ensure_service_base_images() {
 }
 
 # ─── Step 6: 执行部署 ───
+# Paiji starts schema migrations inside its new process. Back up the old live
+# database immediately before any Paiji recreate, including full Compose deploys.
+# Failure is fatal; never replace a WAL database with a raw-file copy or restore.
+if [[ "$COMPOSE_CHANGED" -eq 1 ]] || [[ " ${AFFECTED_SERVICES[*]} " == *" paiji "* ]]; then
+  bash "$INSTALL_DIR/deploy/paiji-online-backup.sh"
+fi
 save_state "deploy"
 echo "[6/6] Deploying..."
 docker compose version | sed 's/^/  /' || true

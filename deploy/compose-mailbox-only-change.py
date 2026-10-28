@@ -18,6 +18,8 @@ MAILBOX_KEY = b"VOYAGEPLEX_HUADENG_MAILBOXES_JSON"
 ADDED_LINE = b"      " + MAILBOX_KEY + b": ${" + MAILBOX_KEY + b":-}\n"
 STATION_KEY = b"BUSINESS_SYNC_STATION"
 STATION_LINE = b"      " + STATION_KEY + b": ${" + STATION_KEY + b":-}\n"
+PAIJI_RETURN_KEY = b"ERP_RECEIPT_RETURN_TOKEN"
+PAIJI_RETURN_LINE = b"      - ERP_RECEIPT_RETURN_TOKEN=${PAIJI_ERP_RECEIPT_RETURN_TOKEN:-}\n"
 PEISE_MODEL_BEFORE = ("      # 注意: 阿里云已关闭 -latest 别名模型的访问权限(403 access_denied), 必须用稳定版模型名\n"
                       "      - BAILIAN_MODEL=${PEISE_BAILIAN_MODEL:-qwen-vl-max}\n").encode()
 PEISE_MODEL_AFTER = ("      # 使用已验证可访问的视觉模型；API Key 所属地域与模型权限需匹配\n"
@@ -49,7 +51,39 @@ def incremental_service(before: bytes, after: bytes):
         return "printlink"
     if is_peise_model_only_change(before, after):
         return "peise"
+    if is_paiji_return_token_only_addition(before, after):
+        return "paiji"
     return None
+
+
+def is_paiji_return_token_only_addition(before: bytes, after: bytes) -> bool:
+    # Only this secret reference in Paiji's existing list-style environment.
+    # No literal secret, duplicate key, unrelated byte change, or YAML alias.
+    if (PAIJI_RETURN_KEY in before or after.count(PAIJI_RETURN_LINE) != 1
+            or after.replace(PAIJI_RETURN_LINE, b"", 1) != before):
+        return False
+    old = _plain_service_block(before, b"paiji")
+    new = _plain_service_block(after, b"paiji")
+    if old is None or new is None or new[2].replace(PAIJI_RETURN_LINE, b"", 1) != old[2]:
+        return False
+    in_environment = False
+    environments_seen = 0
+    keys = set()
+    eligible = False
+    for line in new[2].splitlines(keepends=True)[1:]:
+        if not line.strip() or line.lstrip().startswith(b"#"):
+            continue
+        if line.startswith(b"    ") and not line.startswith(b"     "):
+            in_environment = line == b"    environment:\n"
+            environments_seen += int(in_environment)
+        elif in_environment:
+            entry = re.fullmatch(rb"      - ([A-Za-z_][A-Za-z0-9_]*)=([^\r\n]+)\n", line)
+            if (not entry or entry.group(1) in keys
+                    or not _is_single_line_environment_value(entry.group(2))):
+                return False
+            keys.add(entry.group(1))
+            eligible |= line == PAIJI_RETURN_LINE
+    return eligible and environments_seen == 1
 
 
 def _plain_service_block(blob: bytes, target: bytes):

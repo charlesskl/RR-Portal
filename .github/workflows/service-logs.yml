@@ -1,21 +1,21 @@
-name: PR 1034 Readonly R2 Capacity Evidence
+name: PR 1034 Exact Own R2 Evidence Dedup
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [diagnose]}
+      mode: {type: choice, required: true, options: [dedup]}
 permissions:
   contents: read
 concurrency:
-  group: deploy-cloud-readonly-pr1034
+  group: deploy-cloud
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
-  SCOPED_RELEASE_HELPER_SHA256: 'dc8b43a5c363db64b92f2e8bebe68b0f2173ae7e81cad971fa45755d357c7d94'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
+  SCOPED_RELEASE_HELPER_SHA256: '057b3b06ae834266fe3752bcddf7b050fbc5a2340e23f3b4f0b32a2d393a1ad3'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Validate exact phase, branch and first attempt
         shell: bash
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1034-20261028-indo-static && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1034-20261028-indo-static && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = dedup ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed readonly diagnose diagnose
+      - name: Run only reviewed exact own failed evidence dedup
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -43,18 +43,18 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 4m
+          command_timeout: 9m
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1034-20261028-indo-static && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1034-20261028-indo-static && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = dedup && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1034-20261028-indo-static:refs/remotes/origin/ops/pr-1034-20261028-indo-static >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1034-20261028-indo-static)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            scoped_release_tmp=$(mktemp -d /tmp/pr1034-runtime-preflight.XXXXXX)
+            scoped_release_tmp=$(mktemp -d /tmp/pr1034-evidence-dedup.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1034-r2-capacity-observation.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = dc8b43a5c363db64b92f2e8bebe68b0f2173ae7e81cad971fa45755d357c7d94 ]] || exit 1
-            timeout --signal=TERM --kill-after=20s 3m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"
+            git show "$RELEASE_SHA:deploy/ops/pr1034-owned-r2-dedup-root.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 057b3b06ae834266fe3752bcddf7b050fbc5a2340e23f3b4f0b32a2d393a1ad3 ]] || exit 1
+            timeout --signal=TERM --kill-after=20s 8m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

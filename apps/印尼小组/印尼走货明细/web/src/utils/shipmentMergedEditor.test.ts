@@ -84,3 +84,67 @@ it.each([[1, [1, 2, 3]], [100, [7, 11, 13]], [0, [1, 2]], [5, [0, 0]]] as const)
     expect(result.reduce((sum, value) => sum + value, 0)).toBe(total)
     expect(result.every(value => value >= 0 && Number.isInteger(value))).toBe(true)
   })
+
+it.each(['supplier', 'customs_company'])('共箱合并行统一修改 %s 不拆箱或放大实际箱数', field => {
+  const rows = batches.map(row => ({ ...row, carton_group: 'SHARED', cartons: 3, supplier: 'SUP-A', customs_company: 'COMP-A' }))
+  const result = applyMergedShipmentEdits(rows, materials, consolidateShipmentItems(rows, materials), [edit(field, 'NEW')])
+  const display = merged(result.items)
+  expect(display).toHaveLength(1)
+  expect(cartonLayout(display, materials).reduce((sum, row) => sum + row.count, 0)).toBe(3)
+  expect(result.items.map(row => [row.carton_group, row.cartons])).toEqual([['SHARED', 3], ['SHARED', 3]])
+})
+
+it('部分物料更换报关公司不能静默拆开跨物料的共箱', () => {
+  const rows = [...batches.map(row => ({ ...row, carton_group: 'SHARED', cartons: 3, supplier: 'SUP-A', customs_company: 'COMP-A' })),
+    { ...batches[0], _rowKey: 3, outbound_id: 76, material_id: 975, carton_group: 'SHARED', cartons: 3, supplier: 'SUP-A', customs_company: 'COMP-A' }]
+  const mats = new Map([...materials, [975, { id: 975, name_zh: '其他物料', unit_kg: 'KGM', net_per_pc: 1 }]])
+  const before = structuredClone(rows)
+  const beforeMaterials = structuredClone(mats)
+  expect(() => applyMergedShipmentEdits(rows, mats, consolidateShipmentItems(rows, mats), [
+    edit('material:length', '30'), edit('customs_company', 'COMP-B'),
+  ]))
+    .toThrow('共箱')
+  expect(rows).toEqual(before)
+  expect(mats).toEqual(beforeMaterials)
+})
+
+it('同一共箱全部物料一起改公司和箱数仍按一个物理箱数组合处理', () => {
+  const rows = [...batches.map(row => ({ ...row, carton_group: 'SHARED', cartons: 3, supplier: 'SUP-A', customs_company: 'COMP-A' })),
+    { ...batches[0], _rowKey: 3, outbound_id: 76, material_id: 975, carton_group: 'SHARED', cartons: 3, supplier: 'SUP-A', customs_company: 'COMP-A' }]
+  const mats = new Map([...materials, [975, { id: 975, name_zh: '其他物料', unit_kg: 'KGM', net_per_pc: 1 }]])
+  const result = applyMergedShipmentEdits(rows, mats, consolidateShipmentItems(rows, mats), [
+    edit('customs_company', 'COMP-B', 0), edit('customs_company', 'COMP-B', 1), edit('cartons', '5', 0),
+  ])
+  expect(result.items.map(row => row.cartons)).toEqual([5, 5, 5])
+  expect(cartonLayout(consolidateShipmentItems(result.items, mats), mats).reduce((sum, row) => sum + row.count, 0)).toBe(5)
+})
+
+it('共箱统一改公司和每箱数量不重新推算原物理箱数，且保留每批采购与出库资料', () => {
+  const rows = batches.map((row, index) => ({ ...row, id: 101 + index, seq: 1 + index,
+    price: index ? .003141592653 : .002718281828,
+    carton_group: 'SHARED', cartons: 3, supplier: 'SUP-A', customs_company: 'COMP-A' }))
+  const before = structuredClone(rows)
+  const result = applyMergedShipmentEdits(rows, materials, consolidateShipmentItems(rows, materials), [
+    edit('customs_company', 'COMP-B'), edit('qty_per_carton', '5000'),
+  ])
+  expect(result.items.map(row => [row.carton_group, row.cartons])).toEqual([['SHARED', 3], ['SHARED', 3]])
+  expect(result.items.map(row => [row.outbound_id, row.qty, row.kg, row.price, row.po_no, row.po_date]))
+    .toEqual(rows.map(row => [row.outbound_id, row.qty, row.kg, row.price, row.po_no, row.po_date]))
+  expect(result.items).toEqual(rows.map(row => ({ ...row, customs_company: 'COMP-B', qty_per_carton: '5000' })))
+  expect(rows).toEqual(before)
+})
+
+it('统一更换共箱范围后仍拒绝相互冲突的箱数且不污染输入', () => {
+  const rows = [...batches.map(row => ({ ...row, carton_group: 'SHARED', cartons: 3, supplier: 'SUP-A', customs_company: 'COMP-A' })),
+    { ...batches[0], _rowKey: 3, outbound_id: 76, material_id: 975, carton_group: 'SHARED', cartons: 3, supplier: 'SUP-A', customs_company: 'COMP-A' }]
+  const mats = new Map([...materials, [975, { id: 975, name_zh: '其他物料', unit_kg: 'KGM', net_per_pc: 1 }]])
+  const before = structuredClone(rows)
+  const beforeMaterials = structuredClone(mats)
+  expect(() => applyMergedShipmentEdits(rows, mats, consolidateShipmentItems(rows, mats), [
+    edit('material:length', '30'),
+    edit('customs_company', 'COMP-B', 0), edit('customs_company', 'COMP-B', 1),
+    edit('cartons', '5', 0), edit('cartons', '6', 1),
+  ])).toThrow('箱数不一致')
+  expect(rows).toEqual(before)
+  expect(mats).toEqual(beforeMaterials)
+})

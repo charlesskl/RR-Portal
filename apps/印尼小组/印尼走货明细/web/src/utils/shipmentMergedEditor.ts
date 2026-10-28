@@ -1,5 +1,6 @@
 import { applyShipmentSheetEdits, parseShipmentSheetValue, type SheetEdit } from './shipmentSheet'
 import { parseShipmentPacking } from './shipmentWeight'
+import { cartonGroupKey, shipmentScope } from './shipmentOrder'
 
 interface EditorItem {
   _rowKey?: number; material_id?: number; outbound_id?: number
@@ -72,6 +73,31 @@ export function applyMergedShipmentEdits<T extends EditorItem>(
     sources.forEach((source, i) => put(edit.indices[i], 'cartons', source.carton_group ? edit.value : shares[i]))
   }
   const result = applyShipmentSheetEdits(items, materials, [...expanded.values()])
+  // A common supplier/company edit may clear the legacy batch editor's group
+  // marker. Keep a complete physical group intact when its final scope is still
+  // uniform; splitting it needs the explicit unmerge action and carton review.
+  const cartonGroups = new Map<string, number[]>()
+  items.forEach((item, index) => {
+    const key = cartonGroupKey(item, materials)
+    if (key) cartonGroups.set(key, [...(cartonGroups.get(key) || []), index])
+  })
+  let restoredCartonGroup = false
+  for (const indices of cartonGroups.values()) {
+    if (indices.length < 2 || !indices.some(index => !result.items[index].carton_group)) continue
+    if (new Set(indices.map(index => shipmentScope(result.items[index], result.materials))).size !== 1)
+      throw new Error('修改供应商或报关公司会拆开共箱，请先取消箱数组合并核对实际箱数')
+    indices.forEach(index => {
+      result.items[index].carton_group = items[index].carton_group
+      result.items[index].cartons = items[index].cartons
+    })
+    restoredCartonGroup = true
+  }
+  if (restoredCartonGroup) {
+    // Apply explicit carton edits again with the retained group identity so the
+    // shared propagation and conflicting-total checks cover all its materials.
+    result.items = applyShipmentSheetEdits(result.items, result.materials,
+      [...expanded.values()].filter(edit => edit.field === 'cartons')).items
+  }
   const changedOutbound = new Set(result.items.flatMap((item, index) =>
     item.outbound_id && Number(item.qty) > Number(items[index].qty || 0) ? [item.outbound_id] : []))
   for (const outboundId of changedOutbound) {

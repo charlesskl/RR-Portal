@@ -1,5 +1,34 @@
 import { expect, it } from 'vitest'
-import { shipmentDeclarationPrice, shipmentPurchaseAmount } from './shipmentPurchase'
+import { receiptChargeRatio, shipmentChargeQuantity, shipmentDeclarationPrice, shipmentPurchaseAmount } from './shipmentPurchase'
+
+it.each([
+  { qty: 3667, kg: 502.379, paid: 3630, price: .227, amount: 824.01 },
+  { qty: 15251, kg: 1250.582, paid: 15100, price: .3032, amount: 4578.32 },
+])('免费备品不计费，实际走货数量重量及采购单价不变：$qty', ({ qty, kg, paid, price, amount }) => {
+  const row = Object.freeze({ qty, kg, price, outbound_id: 99, purchase_charge_ratio: paid / qty })
+  expect(shipmentChargeQuantity(row)).toBeCloseTo(paid, 10)
+  expect(shipmentPurchaseAmount(row)).toBeCloseTo(amount, 10)
+  expect(shipmentDeclarationPrice(row) * kg).toBeCloseTo(amount, 10)
+  expect(row).toMatchObject({ qty, kg, price })
+})
+it('入库收费比例覆盖部分入库、纯备品、无入库及错误元数据', () => {
+  expect(receiptChargeRatio({ received_qty: 100, spare_qty: 10 })).toBeCloseTo(100 / 110)
+  expect(receiptChargeRatio({ received_qty: 0, spare_qty: 10 })).toBe(0)
+  expect(receiptChargeRatio()).toBe(1)
+  expect(receiptChargeRatio({ received_qty: 0, spare_qty: 0 })).toBe(1)
+  expect(shipmentPurchaseAmount({ qty: 100, price: 3, purchase_charge_ratio: 0 })).toBe(0)
+  expect(shipmentPurchaseAmount({ qty: 100, price: 3 })).toBe(300)
+  for (const purchase_charge_ratio of [-1, 1.1, NaN, Infinity])
+    expect(() => shipmentPurchaseAmount({ qty: 100, price: 3, purchase_charge_ratio })).toThrow('计费比例无效')
+})
+it('分批出库及跨柜部分分配只分摊一次费用，合计不超过收费数量', () => {
+  const basis = { price: .3032, purchase_charge_ratio: 15100 / 15251 }
+  const rows = [9000, 6000, 251].map(qty => ({ ...basis, qty }))
+  expect(rows.reduce((s, r) => s + shipmentPurchaseAmount(r), 0)).toBeCloseTo(4578.32, 10)
+  expect(rows.reduce((s, r) => s + r.qty, 0)).toBe(15251)
+  const imported = { qty: 4000, kg: 3.97, price: 12, purchase_charge_ratio: .5, material_snapshot: { id: 8 } }
+  expect(shipmentPurchaseAmount(imported)).toBeCloseTo(47.64)
+})
 
 it('Excel 导入单价按申报单位计算；关联出库后恢复采购计价', () => {
   const item = { price: 12.0453, kg: 3.97, qty: 4000, material_snapshot: { id: 8 } }

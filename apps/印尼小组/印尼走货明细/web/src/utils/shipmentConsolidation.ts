@@ -2,7 +2,7 @@ import type { Material } from '../api/client'
 import type { CustomsItem } from './customsExport'
 import { effectiveCustomsCompany, sortShipmentItems } from './shipmentOrder'
 import { invoiceCustomsCompany } from './shipmentInvoice'
-import { shipmentPurchaseAmount } from './shipmentPurchase'
+import { shipmentChargeQuantity, shipmentPurchaseAmount } from './shipmentPurchase'
 import { isPaperRope, parseShipmentPacking, shipmentWeightQuantity } from './shipmentWeight'
 
 type BatchItem = CustomsItem & { outbound_id?: number; carton_no?: string; material_snapshot?: unknown }
@@ -11,8 +11,8 @@ type BatchItem = CustomsItem & { outbound_id?: number; carton_no?: string; mater
 // Call once for a single shipment/container, not across a list of shipments.
 export function consolidateShipmentItems<T extends BatchItem>(
   items: readonly T[], materials: ReadonlyMap<number, Material>, fallback?: string,
-): Array<T & { sources: T[]; outbound_ids: number[] }> {
-  const groups = new Map<string, T & { sources: T[]; outbound_ids: number[] }>()
+): Array<T & { sources: T[]; outbound_ids: number[]; purchase_charge_ratio?: number }> {
+  const groups = new Map<string, T & { sources: T[]; outbound_ids: number[]; purchase_charge_ratio?: number }>()
   const text = (value: unknown) => String(value ?? '').trim()
   const sum = (a: unknown, b: unknown) => Number(((Number(a) || 0) + (Number(b) || 0)).toPrecision(15))
   // Sort before choosing the surviving position: shared-carton ordering also
@@ -50,7 +50,11 @@ export function consolidateShipmentItems<T extends BatchItem>(
     group.kg = sum(group.kg, item.kg)
     // PO prices may differ. Preserve each batch's amount instead of applying
     // the first purchase order's price to the combined quantity.
-    group.price = group.sources.reduce((amount, source) => amount + shipmentPurchaseAmount(source), 0) / group.qty
+    const chargeQty = group.sources.reduce((qty, source) => qty + shipmentChargeQuantity(source), 0)
+    // Summed decimal purchase quantities can exceed their normalized total by
+    // float dust (0.1 + 0.2). The fraction is never physically greater than one.
+    group.purchase_charge_ratio = Math.min(1, chargeQty / group.qty)
+    group.price = chargeQty > 0 ? group.sources.reduce((amount, source) => amount + shipmentPurchaseAmount(source), 0) / chargeQty : 0
     const dates = [...new Set(group.sources.map(source => text(source.po_date)).filter(Boolean))]
     group.po_date = dates.length === 1 ? dates[0] : undefined
     // Shared cartons are counted once; independent batches retain their actual

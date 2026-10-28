@@ -70,6 +70,33 @@ it('不同采购单、日期和单价合并，保留全部来源并按各批金�
   expect(rows).toEqual(before)
 })
 
+it('不同采购单的备品比例及价格分别计费，合并不重复扣费，纯备品可合并为零金额', () => {
+  const rows = [
+    { ...batches[0], qty: 110, kg: 11, price: 2, purchase_charge_ratio: 100 / 110 },
+    { ...batches[1], qty: 60, kg: 6, price: 3, purchase_charge_ratio: 50 / 60, po_no: 'IRRIHS0402' },
+    { ...batches[1], outbound_id: 76, qty: 10, kg: 1, price: 99, purchase_charge_ratio: 0 },
+  ]
+  const before = structuredClone(rows)
+  const result = consolidateShipmentItems(rows, materials)
+  expect(result).toHaveLength(1)
+  expect(result[0]).toMatchObject({ qty: 180, kg: 18 })
+  expect(shipmentPurchaseAmount(result[0])).toBeCloseTo(350, 10)
+  expect(result[0].price).toBeCloseTo(350 / 150, 12)
+  expect(result[0].sources).toEqual(before)
+  expect(rows).toEqual(before)
+  const freeOnly = consolidateShipmentItems(rows.map(row => ({ ...row, purchase_charge_ratio: 0 })), materials)
+  expect(shipmentPurchaseAmount(freeOnly[0])).toBe(0)
+  expect(freeOnly[0].qty).toBe(180)
+})
+
+it('小数采购数量合并不因浮点尾差产生大于一的收费比例', () => {
+  const rows = [.1, .2].map((qty, i) => ({ ...batches[i], qty, kg: qty, price: 2, purchase_unit: '千克' }))
+  const result = consolidateShipmentItems(rows, materials)[0]
+  expect(result.qty).toBe(.3)
+  expect(result.purchase_charge_ratio).toBe(1)
+  expect(shipmentPurchaseAmount(result)).toBeCloseTo(.6, 12)
+})
+
 it('已合并箱数只计一次，独立批次不重新向上取整箱数', () => {
   const shared = batches.map(row => ({ ...row, carton_group: 'shared', cartons: 83 }))
   const result = consolidateShipmentItems(shared, materials)

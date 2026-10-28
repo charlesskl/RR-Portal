@@ -1,6 +1,7 @@
 """Only the new Paiji integration secret reference permits a Paiji-only rollout."""
 import importlib.util
 from pathlib import Path
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,9 +18,17 @@ class PaijiComposeOnlyTests(unittest.TestCase):
         self.assertEqual(guard.incremental_service(BEFORE, AFTER), 'paiji')
 
     def test_actual_compose_is_supported(self):
-        after = (ROOT / 'docker-compose.cloud.yml').read_bytes()
-        before = after.replace(guard.PAIJI_RETURN_LINE, b'', 1)
-        self.assertEqual(guard.incremental_service(before, after), 'paiji')
+        # Ops ships before the feature's Compose line. Exercise both the checked
+        # out file and committed blob; neither requires deploying the feature.
+        blobs = [(ROOT / 'docker-compose.cloud.yml').read_bytes(),
+                 subprocess.check_output(['git', 'show', 'HEAD:docker-compose.cloud.yml'], cwd=ROOT)]
+        for blob in blobs:
+            before = blob.replace(guard.PAIJI_RETURN_LINE, b'', 1)
+            block = guard._plain_service_block(before, b'paiji')
+            self.assertIsNotNone(block)
+            changed = block[2].replace(b'    environment:\n', b'    environment:\n' + guard.PAIJI_RETURN_LINE, 1)
+            after = before[:block[0]] + changed + before[block[1]:]
+            self.assertEqual(guard.incremental_service(before, after), 'paiji')
 
     def test_noop_reverse_literal_secret_and_extra_change_fail_closed(self):
         for before, after in [(BEFORE, BEFORE), (AFTER, AFTER), (AFTER, BEFORE),

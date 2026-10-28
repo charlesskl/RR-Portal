@@ -1,6 +1,6 @@
 """Inert exact failed R2 evidence dedup; every path/body/owner/mode remains."""
 import hashlib,json,os,pathlib,re,stat,subprocess,sys,collections
-EXECUTE=True
+EXECUTE=False
 TARGET='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c'
 BRANCH='refs/heads/ops/pr-1034-20261028-indo-static'
 OUT=pathlib.Path('/opt/rr-portal/deploy/backups/pr1034-r2-evidence-dedup-1')

@@ -3,8 +3,10 @@ name: Paiji Data Ops
 # 注塑啤机排产系统（paiji，SQLite，容器内 /app/data/paiji.db）数据运维。
 #
 #   mode=check-outsource       —— 只读：打印四张外发表的当前行数。
+#   mode=backup-only           —— SQLite 在线备份、完整性检查和 SHA256；不改库、不重启。
+#   mode=prepare-erp-receipt-return —— 先在线备份，再同步独立集成密钥；不重启/迁移。
 #   mode=apply-outsource-seed  —— 应用 server/seed/outsource-2026-07-22.sql：
-#                                 先在容器内备份 paiji.db（paiji.db.bak-时间戳），
+#                                 先做 SQLite 在线备份（包含已提交 WAL），
 #                                 再用 better-sqlite3 执行种子 SQL（事务包裹，只 DELETE+INSERT
 #                                 四张外发表），最后打印行数与 stats/summary 接口结果。
 #
@@ -14,11 +16,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check-outsource / apply-outsource-seed"
+        description: "只读检查 / 在线备份 / ERP退回密钥准备 / 外发种子"
         type: choice
         required: true
         default: check-outsource
-        options: [check-outsource, apply-outsource-seed]
+        options: [check-outsource, backup-only, prepare-erp-receipt-return, apply-outsource-seed]
 
 permissions:
   contents: read
@@ -37,10 +39,16 @@ jobs:
         shell: bash
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_MODE: ${{ inputs.mode }}
+          PAIJI_ERP_RECEIPT_RETURN_TOKEN: ${{ secrets.PAIJI_ERP_RECEIPT_RETURN_TOKEN }}
         run: |
           set -euo pipefail
           if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
             echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+          if [[ "$OPS_MODE" == prepare-erp-receipt-return && ! "$PAIJI_ERP_RECEIPT_RETURN_TOKEN" =~ ^[a-fA-F0-9]{64}$ ]]; then
+            echo 'PAIJI_ERP_RECEIPT_RETURN_TOKEN must be a configured 64-character hex secret.' >&2
             exit 1
           fi
 
@@ -48,6 +56,8 @@ jobs:
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           OPS_MODE: ${{ inputs.mode }}
+          OPS_REVISION: ${{ github.sha }}
+          PAIJI_ERP_RECEIPT_RETURN_TOKEN: ${{ secrets.PAIJI_ERP_RECEIPT_RETURN_TOKEN }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -55,19 +65,30 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 8m
-          envs: OPS_MODE
+          envs: OPS_MODE,OPS_REVISION,PAIJI_ERP_RECEIPT_RETURN_TOKEN
           script: |
             set -euo pipefail
             MODE="${OPS_MODE:-check-outsource}"
+            case "$MODE" in check-outsource|backup-only|prepare-erp-receipt-return|apply-outsource-seed) ;; *) echo '[FAIL] 未知 mode' >&2; exit 1 ;; esac
             echo "=================== MODE: $MODE ==================="
+            cd /opt/rr-portal
+            CT="$(docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production ps -q paiji)"
+            [[ "$CT" =~ ^[a-f0-9]{12,64}$ ]] || { echo '[FAIL] 需要唯一运行中的 paiji 容器' >&2; exit 1; }
 
-            CT="$(docker ps --format '{{.Names}}' | grep -i paiji | head -1)"
-            [ -n "$CT" ] || { echo '[FAIL] 找不到 paiji 容器' >&2; exit 1; }
-            echo "paiji 容器: $CT"
+            online_backup() (
+              umask 077
+              [[ "$OPS_REVISION" =~ ^[a-f0-9]{40}$ ]] || { echo '[FAIL] 无效运维版本' >&2; exit 1; }
+              git fetch origin main
+              git merge-base --is-ancestor "$OPS_REVISION" origin/main || { echo '[FAIL] 运维版本必须已合入 main' >&2; exit 1; }
+              runner=$(mktemp)
+              trap 'rm -f "$runner"' EXIT
+              git show "$OPS_REVISION:deploy/paiji-online-backup.sh" > "$runner"
+              bash "$runner"
+            )
 
             counts() {
               docker exec "$CT" node -e "
-                const db = require('better-sqlite3')('/app/data/paiji.db');
+                const db = require('better-sqlite3')('/app/data/paiji.db', { readonly: true, fileMustExist: true });
                 for (const t of ['outsource_orders','outsource_suppliers','outsource_pc_orders','outsource_mold_mappings']) {
                   console.log(t + '=' + db.prepare('SELECT COUNT(*) c FROM ' + t).get().c);
                 }
@@ -81,12 +102,27 @@ jobs:
               exit 0
             fi
 
+            if [ "$MODE" = "backup-only" ] || [ "$MODE" = "prepare-erp-receipt-return" ]; then
+              online_backup
+              if [ "$MODE" = "prepare-erp-receipt-return" ]; then
+                # Empty values never overwrite an existing production secret.
+                [[ "${PAIJI_ERP_RECEIPT_RETURN_TOKEN:-}" =~ ^[a-fA-F0-9]{64}$ ]] || { echo '[FAIL] 集成密钥未配置或格式无效' >&2; exit 1; }
+                if grep -q '^PAIJI_ERP_RECEIPT_RETURN_TOKEN=' .env.cloud.production; then
+                  sed -i "s|^PAIJI_ERP_RECEIPT_RETURN_TOKEN=.*|PAIJI_ERP_RECEIPT_RETURN_TOKEN=${PAIJI_ERP_RECEIPT_RETURN_TOKEN}|" .env.cloud.production
+                else
+                  printf '\nPAIJI_ERP_RECEIPT_RETURN_TOKEN=%s\n' "$PAIJI_ERP_RECEIPT_RETURN_TOKEN" >> .env.cloud.production
+                fi
+                chmod 600 .env.cloud.production
+                echo '[OK] ERP退回集成密钥已同步；未重启容器、未迁移数据库'
+              fi
+              echo '[OK] 在线备份完成；没有恢复、种子写入或容器重建'
+              exit 0
+            fi
+
             if [ "$MODE" = "apply-outsource-seed" ]; then
               SEED=/app/seed/outsource-2026-07-22.sql
               docker exec "$CT" sh -c "test -f $SEED" || { echo "[FAIL] 容器内没有 $SEED（镜像未包含种子文件？）" >&2; exit 1; }
-              TS="$(date +%Y%m%d-%H%M%S)"
-              echo "-- 备份数据库到容器内 /app/data/paiji.db.bak-$TS --"
-              docker exec "$CT" sh -c "cp /app/data/paiji.db /app/data/paiji.db.bak-$TS && ls -lh /app/data/paiji.db*"
+              online_backup
               echo '== 应用前行数 =='
               counts
               echo "-- 执行种子 SQL（事务包裹，只动四张外发表） --"
@@ -101,7 +137,7 @@ jobs:
               echo '== stats/summary 接口 =='
               docker exec "$CT" sh -c 'curl -s http://localhost:3000/api/outsource/stats/summary' | head -c 400
               echo
-              echo "[OK] apply-outsource-seed 完成（备份在容器内 paiji.db.bak-$TS）"
+              echo '[OK] apply-outsource-seed 完成（已保留在线备份）'
               exit 0
             fi
 

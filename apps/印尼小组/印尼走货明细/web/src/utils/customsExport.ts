@@ -57,6 +57,8 @@ export function customsFormulaName(item: CustomsItem, material?: Material, custo
 
 import { customsInvoicePrice, customsInvoiceFormula, invoiceCustomsCompany } from './shipmentInvoice'
 import { shipmentDeclarationPrice, shipmentPurchaseAmount } from './shipmentPurchase'
+import { normalizeShipmentDeclarations } from './shipmentDeclaration'
+import { shipmentPurchaseDates } from './shipmentDates'
 export { customsInvoicePrice } from './shipmentInvoice'
 
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
@@ -1098,6 +1100,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
 
   // RRI/RRM 模板此区域的列序不同；导出统一采用走货明细抬头与数据列序。
   const packingHeaders: Record<string, string> = {
+    J: '申报单位\nDeclaration unit', K: '申报数量\nDeclaration quantity', M: '数量单位\nQuantity unit',
     AU: '长\nLength', AV: '宽\nWidth', AW: '高\nHeight',
     AX: '物料编码', AY: '每箱数量', AZ: '每箱重量',
     BA: '单个毛重', BB: '单个净重', BC: '卡板', BD: '',
@@ -1150,7 +1153,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     // 仅用于展示及分组；发票计算另取明确的报关公司，不使用默认值。
     return effectiveCustomsCompany(it, m, tf.exportCompany)
   }
-  const sorted = sortShipmentItems(consolidateShipmentItems(items, materials, tf.exportCompany), materials, tf.exportCompany)
+  const sorted = sortShipmentItems(consolidateShipmentItems(normalizeShipmentDeclarations(items, materials), materials, tf.exportCompany), materials, tf.exportCompany)
   sorted.forEach((item, index) => {
     if (shipmentPurchaseAmount(item) !== 0 && !(Number(item.kg) > 0))
       throw new Error(`第 ${index + 1} 行（${matOf(item)?.name_zh || '未命名物料'}）有采购金额但送货重量/申报数量为零，请补齐后导出`)
@@ -1282,9 +1285,9 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 34, tf.freightCN, 'n')
     setCell(ws, ri, 35, tf.freightID, 'n')
     setCell(ws, ri, 37, it.supplier || m?.supplier || '', 's')
-    const purchaseDates = [...new Set(it.sources.map(source => source.po_date?.trim()).filter(Boolean))]
+    const purchaseDates = shipmentPurchaseDates(it.sources)
     if (purchaseDates.length > 1) setCell(ws, ri, 38, purchaseDates.join(' / '), 's')
-    else if (it.po_date) setCell(ws, ri, 38, excelDate(it.po_date), 'n')
+    else if (purchaseDates.length) setCell(ws, ri, 38, excelDate(purchaseDates[0]), 'n')
     else if (it.contract_date) setCell(ws, ri, 38, excelDate(it.contract_date), 'n')
     setCell(ws, ri, 39, it.po_no || '', 's')
     setCell(ws, ri, 40, declarationPrice, 'n')
@@ -1550,6 +1553,8 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     const mainSheetIdx = wbObj.SheetNames.indexOf(newName) + 1
     await injectOoxmlImages(outZip, mainSheetIdx, floatImages)
   }
+  // Apply after every template merge: SheetJS does not retain native pane state.
+  await freezeMainWorksheet(outZip, newName)
   // Force Excel/WPS to calculate preserved formulas, not display old template caches.
   const calculationDoc = new DOMParser().parseFromString(await outZip.file('xl/workbook.xml')!.async('string'), 'application/xml')
   let calc = directChild(calculationDoc.documentElement as XmlElement, 'calcPr')
@@ -1560,6 +1565,45 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   for (const [key, value] of Object.entries({ calcMode: 'auto', fullCalcOnLoad: '1', forceFullCalc: '1' })) calc.setAttribute(key, value)
   outZip.file('xl/workbook.xml', new XMLSerializer().serializeToString(calculationDoc))
   return await outZip.generateAsync({ type: 'blob' })
+}
+
+/** Freeze rows 1:3 and columns A:M on the final main detail worksheet only. */
+export async function freezeMainWorksheet(zip: JSZip, mainName: string) {
+  const path = (await workbookSheetParts(zip)).get(mainName)
+  const file = path ? zip.file(path) : null
+  if (!path || !file) throw new Error('导出主明细不存在，无法设置冻结窗格')
+  const doc = new DOMParser().parseFromString((await file.async('string')).replace(/^\uFEFF/, ''), 'application/xml')
+  const root = doc.documentElement as XmlElement
+  if (root?.namespaceURI !== SPREADSHEET_NS || root.localName !== 'worksheet')
+    throw new Error('导出主明细格式无效，无法设置冻结窗格')
+  let views = directChild(root, 'sheetViews')
+  if (!views) {
+    views = doc.createElementNS(SPREADSHEET_NS, 'sheetViews') as XmlElement
+    const next = (Array.from(root.childNodes) as XmlElement[])
+      .find(node => node.nodeType === 1 && !['sheetPr', 'dimension'].includes(node.localName))
+    root.insertBefore(views, next || null)
+  }
+  if (!directChildren(views, 'sheetView').length) {
+    const view = doc.createElementNS(SPREADSHEET_NS, 'sheetView') as XmlElement
+    view.setAttribute('workbookViewId', '0')
+    views.appendChild(view)
+  }
+  for (const view of directChildren(views, 'sheetView')) {
+    // Replace stale splits/selections without changing zoom, gridlines or cells.
+    for (const child of [...directChildren(view, 'pane'), ...directChildren(view, 'selection')]) view.removeChild(child)
+    view.removeAttribute('topLeftCell')
+    const pane = doc.createElementNS(SPREADSHEET_NS, 'pane') as XmlElement
+    for (const [key, value] of Object.entries({ xSplit: '13', ySplit: '3', topLeftCell: 'N4', activePane: 'bottomRight', state: 'frozen' }))
+      pane.setAttribute(key, value)
+    const following = view.firstChild
+    view.insertBefore(pane, following)
+    for (const [position, cell] of [['topRight', 'N1'], ['bottomLeft', 'A4'], ['bottomRight', 'N4']]) {
+      const selection = doc.createElementNS(SPREADSHEET_NS, 'selection') as XmlElement
+      for (const [key, value] of Object.entries({ pane: position, activeCell: cell, sqref: cell })) selection.setAttribute(key, value)
+      view.insertBefore(selection, following)
+    }
+  }
+  zip.file(path, new XMLSerializer().serializeToString(doc))
 }
 
 export async function mergeMainCartonCells(zip: JSZip, mainName: string, layout: { span: number; count: number }[]) {

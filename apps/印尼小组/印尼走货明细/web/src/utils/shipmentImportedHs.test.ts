@@ -9,6 +9,7 @@ import { consolidateShipmentItems } from './shipmentConsolidation'
 import { shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
 import { buildCustomsWorkbook } from './customsExport'
 import { parseShipmentWorkbook } from './shipmentImport'
+import { shipmentDeclarationSaveError } from './shipmentDeclarationSaveValidation'
 
 const master = { id: 137, name_zh: '条码扫描仪', product_code: 'TOOL-01', hs_cn: '8471605000', hs_id: '84716050',
   name_en: 'Barcode Scanner', category: '工具', unit_kg: 'PCE', net_per_pc: 1, length: 23, image: 'preserved-image' }
@@ -88,12 +89,12 @@ it('实际页面输入后刷新快照缓存，保存仅调用走货 API，重读
     applyMergedShipmentEdits, outRows: [], editing: { id: 9 }, creating: false, sheetEditing: false,
     sheetConfirmOpen: { current: false }, sheetRevision: { current: { rawItems: rows, matMap: materials, session: 1 } },
     customsOptions: [], dirtyMatIds: new Set(), setDirtyMatIds: vi.fn(),
-    api: { put: vi.fn(async (..._args: any[]) => ({})), get: vi.fn() },
+    api: { put: vi.fn(async (..._args: any[]) => { void _args; return {} }), get: vi.fn() },
     form: { validateFields: async () => ({ container_no: 'HS-LOCAL', customer: 'RRI' }) },
     setItems: vi.fn(), setMatMap: vi.fn(), setEditorDirty: vi.fn(), setSheetEditing: vi.fn(),
     setSaving: vi.fn(), setEditing: vi.fn(), closeEditor: vi.fn(), load: vi.fn(),
     message: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
-    shipmentPackingAverageQty, shipmentWeightQuantity,
+    shipmentPackingAverageQty, shipmentWeightQuantity, shipmentDeclarationSaveError,
     num: (v: unknown) => Number(v) || 0,
     edits: [{ row: 0, field: 'snapshot:hs_id', value: '00123456' }],
   }

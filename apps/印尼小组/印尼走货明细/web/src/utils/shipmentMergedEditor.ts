@@ -11,6 +11,7 @@ interface EditorItem {
 export type MergedEditorRow<T extends EditorItem> = T & { sources: T[]; outbound_ids: number[] }
 export interface OutboundBalance { outbound_id: number; allocatable_qty?: number }
 export const mergedReadOnlyFields = new Set(['po_no', 'po_date', 'qty', 'kg'])
+const directTextFields = new Set(['formula_name', 'product_use', 'contract_no', 'invoice_no', 'supplier', 'po_no', 'pallet', 'carton_no'])
 
 // Distribute an entered integer carton total without losing rounding remainders.
 export function allocateShipmentCartons(total: number, weights: number[]): number[] {
@@ -33,6 +34,7 @@ export function allocateShipmentCartons(total: number, weights: number[]): numbe
 export function applyMergedShipmentEdits<T extends EditorItem>(
   items: T[], materials: Map<number, any>, rows: MergedEditorRow<T>[], edits: SheetEdit[],
   balances: readonly OutboundBalance[] = [],
+  options: { preserveTextWhitespace?: boolean } = {},
 ) {
   const sourceIndex = new Map(items.map((item, index) => [item._rowKey, index]))
   const expanded = new Map<string, SheetEdit>()
@@ -53,7 +55,7 @@ export function applyMergedShipmentEdits<T extends EditorItem>(
     const value = parseShipmentSheetValue(edit.field, edit.value)
     if (indices.length > 1 && edit.field === 'qty_per_carton' && !['empty', 'uniform'].includes(parseShipmentPacking(String(value)).mode))
       throw new Error('合并行的每箱数量请填写统一数量，例如 3000')
-    return { ...edit, value, group, indices }
+    return { ...edit, value, rawValue: edit.value, group, indices }
   })
   // First propagate common cells; material edits still use the shared conflict
   // checks and recalculation in the existing spreadsheet editor.
@@ -73,6 +75,14 @@ export function applyMergedShipmentEdits<T extends EditorItem>(
     sources.forEach((source, i) => put(edit.indices[i], 'cartons', source.carton_group ? edit.value : shares[i]))
   }
   const result = applyShipmentSheetEdits(items, materials, [...expanded.values()])
+  // Controlled text inputs submit on every keystroke. Keep intermediate spaces
+  // and newlines after validation so the next character does not join words.
+  // Pasted and filled cells retain the shared editor's normalization.
+  if (options.preserveTextWhitespace) for (const edit of parsed) {
+    if (directTextFields.has(edit.field)) edit.indices.forEach(index => {
+      Object.assign(result.items[index], { [edit.field]: edit.rawValue })
+    })
+  }
   // A common supplier/company edit may clear the legacy batch editor's group
   // marker. Keep a complete physical group intact when its final scope is still
   // uniform; splitting it needs the explicit unmerge action and carton review.

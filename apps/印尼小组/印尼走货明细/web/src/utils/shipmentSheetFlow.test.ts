@@ -31,9 +31,9 @@ function setup() {
   }
   const context = createContext(state)
   runInContext(executable, context)
-  const edit = (field = 'qty', value = '20') => {
+  const edit = (field = 'qty', value = '20', confirm = true) => {
     context.edits = [{ row: 0, field, value }]
-    return runInContext('editSheetCells(edits)', context) as Promise<boolean>
+    return runInContext(confirm ? 'editSheetCells(edits)' : 'writeMergedCells(edits, false)', context) as Promise<boolean>
   }
   return { state, edit }
 }
@@ -99,4 +99,32 @@ it('does not apply a response to an editor that has been closed or reopened', as
   state.sheetRevision.current.session++
   await expect(state.Modal.confirm.mock.calls[0][0].onOk()).rejects.toThrow('明细已变化')
   expect(state.setItems).not.toHaveBeenCalled()
+})
+
+it('direct typing preserves intermediate spaces and newlines in controlled text cells', async () => {
+  const { state, edit } = setup()
+  state.setItems.mockImplementation(next => {
+    state.items = next
+    state.consolidatedItems = [{ ...next[0], sources: next, outbound_ids: [7] }]
+    state.sheetRevision.current.rawItems = next
+  })
+  for (const char of 'Royal Regent')
+    await edit('contract_no', String((state.items[0] as any).contract_no || '') + char, false)
+  for (const char of '1-2\n3-4')
+    await edit('pallet', String((state.items[0] as any).pallet || '') + char, false)
+  expect(state.items[0]).toMatchObject({ contract_no: 'Royal Regent', pallet: '1-2\n3-4' })
+  const before = structuredClone(state.items)
+  expect(await edit('contract_no', ' =1+2', false)).toBe(false)
+  expect(state.items).toEqual(before)
+})
+
+it('confirmed paste still normalizes text and cannot submit formulas', async () => {
+  const { state, edit } = setup()
+  await edit('contract_no', ' Royal Regent ')
+  await state.Modal.confirm.mock.calls[0][0].onOk()
+  expect(state.setItems.mock.calls[0][0][0]).toMatchObject({ contract_no: 'Royal Regent' })
+  state.Modal.confirm.mock.calls[0][0].afterClose()
+  const writes = state.setItems.mock.calls.length
+  expect(await edit('contract_no', ' =1+2')).toBe(false)
+  expect(state.setItems).toHaveBeenCalledTimes(writes)
 })

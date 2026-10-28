@@ -972,7 +972,7 @@ export default function ShipmentsPage() {
           setOutRows(balances)
         }
         if (!unchanged()) throw new Error('明细已变化，请重新选择编辑位置')
-        return applyMergedShipmentEdits(items, matMap, consolidatedItems, edits, balances)
+        return applyMergedShipmentEdits(items, matMap, consolidatedItems, edits, balances, { preserveTextWhitespace: !confirm })
       }
       const apply = (result: ReturnType<typeof applyMergedShipmentEdits<ShipmentItem>>) => {
         setItems(result.items)

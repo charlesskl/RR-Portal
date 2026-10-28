@@ -1,8 +1,8 @@
-name: Batch 1015 1019 1022 existing finalize-internal-quote
+name: Batch 1015 1019 1022 existing deploy-paiji
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [finalize-internal-quote]}
+      mode: {type: choice, required: true, options: [deploy-paiji]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'c5fdcd173c4320fe8f62dda4abd07ff17a993e2d1c8688560592bc097d5079bb'
+  SCOPED_RELEASE_HELPER_SHA256: '8b9caa7c6b907db8a4dcf1e5e60ed57054b5a22c7fbb458524048fe95593962e'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-1015-1019-1022-20261028 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = finalize-internal-quote ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-1015-1019-1022-20261028 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy-paiji ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed requested services finalize-internal-quote
+      - name: Run only reviewed requested services deploy-paiji
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,7 +48,7 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-1015-1019-1022-20261028 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = finalize-internal-quote && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/batch-1015-1019-1022-20261028 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy-paiji && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/main:refs/remotes/origin/main >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/main)" = daa878ce6ed661d9b84288e7869b37e9118ce5bc ]] || exit 1
@@ -58,7 +58,7 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/batch1022-scoped.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/batch1022-existing-release-v8.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = c5fdcd173c4320fe8f62dda4abd07ff17a993e2d1c8688560592bc097d5079bb ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 8b9caa7c6b907db8a4dcf1e5e60ed57054b5a22c7fbb458524048fe95593962e ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1

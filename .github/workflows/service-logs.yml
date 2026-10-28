@@ -2,7 +2,7 @@ name: PR 1027 Indo Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [prepare]}
+      mode: {type: choice, required: true, options: [deploy]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '2419e7f482d51d5117463cbda70ae1abe330f247d4757ee3960f3cbf45cb727d'
+  SCOPED_RELEASE_HELPER_SHA256: '9472fb8c3f80d590dfa370a478740cd95baf2f8a0ebb844733422b5833ddb5c2'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1027-r5-20261028-indo && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1027-r5-20261028-indo && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed indo prepare
+      - name: Run only reviewed indo deploy
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,7 +48,7 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1027-r5-20261028-indo && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1027-r5-20261028-indo && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1027-r5-20261028-indo:refs/remotes/origin/ops/pr-1027-r5-20261028-indo >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1027-r5-20261028-indo)" = "$RELEASE_SHA" ]] || exit 1
@@ -56,7 +56,7 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/pr1027-indo.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1027-indo-release-v5.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 2419e7f482d51d5117463cbda70ae1abe330f247d4757ee3960f3cbf45cb727d ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 9472fb8c3f80d590dfa370a478740cd95baf2f8a0ebb844733422b5833ddb5c2 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch-host-config-library.py" > "$scoped_release_tmp/batch-host-config-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/batch-host-config-library.py" | cut -d ' ' -f1)" = bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/portable-pdb-library.py" > "$scoped_release_tmp/portable-pdb-library.py" 2>/dev/null || exit 1

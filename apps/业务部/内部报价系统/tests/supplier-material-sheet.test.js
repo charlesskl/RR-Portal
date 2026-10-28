@@ -227,6 +227,30 @@ test('different explicit usages are not merged into one material and invalid usa
   assert.match((await parseWorkbook(await workbook.xlsx.writeBuffer())).error, /第 4 行用量无效/);
 });
 
+test('supplier order quantities never become per-product usages or split MOQ tiers', async () => {
+  for (const quantityHeader of ['订单数量', '訂單數量', '数量', 'QTY']) {
+    const workbook = new ExcelJS.Workbook(), sheet = workbook.addWorksheet('报价');
+    sheet.addRow(['序号', '产品编号', '物料名称', 'MOQ', '单价(元)不含税', quantityHeader]);
+    sheet.addRow([1, 'A', '纸袋', '20K', 0.1, 20000]);
+    sheet.addRow([2, 'A', '纸袋', '100K', 0.08, 100000]);
+    const result = await parseWorkbook(await workbook.xlsx.writeBuffer(), { targetQty: 100000 });
+    assert.equal(result.error, undefined);
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].qty, 1);
+    assert.equal(result.items[0].price_tiers.length, 2);
+    assert.equal(result.items[0].unit_price_rmb, 0.08);
+  }
+});
+
+test('supplier generic usage takes priority over an earlier order quantity', async () => {
+  const workbook = new ExcelJS.Workbook(), sheet = workbook.addWorksheet('报价');
+  sheet.addRow(['序号', '产品编号', '物料名称', 'MOQ', '单价(元)不含税', '订单数量', '用量']);
+  sheet.addRow([1, 'A', '纸袋', '20K', 0.1, 20000, 0.5]);
+  const result = await parseWorkbook(await workbook.xlsx.writeBuffer());
+  assert.equal(result.error, undefined);
+  assert.equal(result.items[0].qty, 0.5);
+});
+
  test('mixed supplier import separates identical material names by product code and blocks unknown codes', async () => {
   const wb=new ExcelJS.Workbook(),ws=wb.addWorksheet('报价');
   ws.addRow(['序号','货号','产品名称','规格','MOQ','单价(元)不含税']);

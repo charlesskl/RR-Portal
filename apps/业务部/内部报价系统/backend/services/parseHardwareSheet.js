@@ -63,6 +63,12 @@ function indexHeader(row) {
   if (usageColumn >= 0) cols.qty = usageColumn;
   cols.supplierTemplate = cols.moq != null
     && (cols.unitPriceUntaxed != null || cols.unitPriceTaxed != null || cols.unitPriceUsd != null);
+  if (cols.supplierTemplate) {
+    // A supplier's QTY/order quantity is a batch size, not per-product usage.
+    // Keep the former default of one when no usage column is provided.
+    const genericUsageColumn = (row || []).findIndex(value => /^用量$/.test(norm(value)));
+    cols.qty = usageColumn >= 0 ? usageColumn : genericUsageColumn >= 0 ? genericUsageColumn : null;
+  }
   return cols;
 }
 

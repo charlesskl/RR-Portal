@@ -268,7 +268,7 @@ function buildQuoteSummary(quote, sections) {
   }));
   const sewingPayload = parseJson((sections || []).find(section => section.dept === 'sewing')?.payload_json);
   const sewingTaxable = calculated.hasSourceData && calculated.sewing_taxable
-    ? calculated.sewing_taxable : require('../../frontend/sewing-tax').taxableAmounts(sewingPayload, beforeTaxComponents);
+    ? calculated.sewing_taxable : require('../../frontend/sewing-tax').taxableAmounts(sewingPayload, beforeTaxComponents, quote.customer);
   const components = afterTaxComponents(beforeTaxComponents, sewingTaxable);
   const qty = num(quote.qty);
   const quotedPrice = calculated.hasSourceData ? num(calculated.quotedPrice) : num(pricing.t1?.base_price);

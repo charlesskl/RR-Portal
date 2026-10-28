@@ -205,7 +205,7 @@ function calculateSingleQuoteCosts(quote, sections, options = {}) {
     assembly.assembly_labor, assembly.packaging_labor,
     assembly.assembly_step_groups, assembly.packaging_step_groups, cartons,
   ].some(rows => Array.isArray(rows) && rows.length > 0);
-  return { components, sewing_taxable: require('../../frontend/sewing-tax').taxableAmounts(sewing, components), quotedPrice: hasSourceData ? (options.mixed ? +detailPricing.quotedPrice.toFixed(4) : detailPricing.quotedPrice) : 0, hasSourceData,
+  return { components, sewing_taxable: require('../../frontend/sewing-tax').taxableAmounts(sewing, components, quote.customer), quotedPrice: hasSourceData ? (options.mixed ? +detailPricing.quotedPrice.toFixed(4) : detailPricing.quotedPrice) : 0, hasSourceData,
     rawQuotedPrice: hasSourceData ? detailPricing.quotedPrice : 0, indoFreight, detailPricing };
 
 }

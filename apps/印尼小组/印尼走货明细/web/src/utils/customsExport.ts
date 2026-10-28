@@ -1553,6 +1553,8 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     const mainSheetIdx = wbObj.SheetNames.indexOf(newName) + 1
     await injectOoxmlImages(outZip, mainSheetIdx, floatImages)
   }
+  // Apply after every template merge: SheetJS does not retain native pane state.
+  await freezeMainWorksheet(outZip, newName)
   // Force Excel/WPS to calculate preserved formulas, not display old template caches.
   const calculationDoc = new DOMParser().parseFromString(await outZip.file('xl/workbook.xml')!.async('string'), 'application/xml')
   let calc = directChild(calculationDoc.documentElement as XmlElement, 'calcPr')
@@ -1563,6 +1565,45 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   for (const [key, value] of Object.entries({ calcMode: 'auto', fullCalcOnLoad: '1', forceFullCalc: '1' })) calc.setAttribute(key, value)
   outZip.file('xl/workbook.xml', new XMLSerializer().serializeToString(calculationDoc))
   return await outZip.generateAsync({ type: 'blob' })
+}
+
+/** Freeze rows 1:3 and columns A:M on the final main detail worksheet only. */
+export async function freezeMainWorksheet(zip: JSZip, mainName: string) {
+  const path = (await workbookSheetParts(zip)).get(mainName)
+  const file = path ? zip.file(path) : null
+  if (!path || !file) throw new Error('导出主明细不存在，无法设置冻结窗格')
+  const doc = new DOMParser().parseFromString((await file.async('string')).replace(/^\uFEFF/, ''), 'application/xml')
+  const root = doc.documentElement as XmlElement
+  if (root?.namespaceURI !== SPREADSHEET_NS || root.localName !== 'worksheet')
+    throw new Error('导出主明细格式无效，无法设置冻结窗格')
+  let views = directChild(root, 'sheetViews')
+  if (!views) {
+    views = doc.createElementNS(SPREADSHEET_NS, 'sheetViews') as XmlElement
+    const next = (Array.from(root.childNodes) as XmlElement[])
+      .find(node => node.nodeType === 1 && !['sheetPr', 'dimension'].includes(node.localName))
+    root.insertBefore(views, next || null)
+  }
+  if (!directChildren(views, 'sheetView').length) {
+    const view = doc.createElementNS(SPREADSHEET_NS, 'sheetView') as XmlElement
+    view.setAttribute('workbookViewId', '0')
+    views.appendChild(view)
+  }
+  for (const view of directChildren(views, 'sheetView')) {
+    // Replace stale splits/selections without changing zoom, gridlines or cells.
+    for (const child of [...directChildren(view, 'pane'), ...directChildren(view, 'selection')]) view.removeChild(child)
+    view.removeAttribute('topLeftCell')
+    const pane = doc.createElementNS(SPREADSHEET_NS, 'pane') as XmlElement
+    for (const [key, value] of Object.entries({ xSplit: '13', ySplit: '3', topLeftCell: 'N4', activePane: 'bottomRight', state: 'frozen' }))
+      pane.setAttribute(key, value)
+    const following = view.firstChild
+    view.insertBefore(pane, following)
+    for (const [position, cell] of [['topRight', 'N1'], ['bottomLeft', 'A4'], ['bottomRight', 'N4']]) {
+      const selection = doc.createElementNS(SPREADSHEET_NS, 'selection') as XmlElement
+      for (const [key, value] of Object.entries({ pane: position, activeCell: cell, sqref: cell })) selection.setAttribute(key, value)
+      view.insertBefore(selection, following)
+    }
+  }
+  zip.file(path, new XMLSerializer().serializeToString(doc))
 }
 
 export async function mergeMainCartonCells(zip: JSZip, mainName: string, layout: { span: number; count: number }[]) {

@@ -10,7 +10,7 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
   SCOPED_RELEASE_HELPER_SHA256: '44802aa05d92b15600b9860858b66a72bb0d7ec20dcf7625e960253d3cfffec2'
 jobs:
   fixed-scoped-release:

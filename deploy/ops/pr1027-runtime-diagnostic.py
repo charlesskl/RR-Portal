@@ -3,7 +3,7 @@ No environment/config bodies, SQL, log bodies, lifecycle or alias changes.
 Only this diagnostic's new EXCL private evidence directory is written.
 """
 import os,json,pathlib,re,stat,subprocess,sys,hashlib
-EXECUTE=True
+EXECUTE=False
 BRANCH='refs/heads/ops/pr-1027-clone-diagnostic-20261028'
 ROOT=pathlib.Path('/opt/rr-portal')
 PREPARE=ROOT/'deploy/backups/pr1027-1029-indo-20261028-r2/prepare'

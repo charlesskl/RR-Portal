@@ -381,7 +381,7 @@ const routes: Record<string, { method: string; handler: Handler }> = {
       const items = docTypes.map((dt) => {
         // 同名资料同时存在 .xls 与 .xlsx 时优先 .xlsx（可在网页编辑器打开）
         const hit =
-          projectFiles.find((f) => f.name.includes(dt.name) && f.ext === ".xlsx") ??
+          projectFiles.find((f) => f.name.includes(dt.name) && f.name.endsWith(".xlsx")) ??
           projectFiles.find((f) => f.name.includes(dt.name));
         return {
           name: dt.name,
@@ -477,6 +477,97 @@ const routes: Record<string, { method: string; handler: Handler }> = {
       }
       const st = await fsp.stat(abs);
       json(res, 200, { mtime: st.mtimeMs, size: st.size });
+    },
+  },
+
+  /* ---------- EPMS 制单台：表单草稿 + 防串单编辑锁 + 审核归档 ---------- */
+
+  "/api/epms": {
+    method: "GET",
+    handler: async ({ res, url, root }) => {
+      const rec = await epmsRead(root, url.searchParams.get("path") || "", url.searchParams.get("doc") || "");
+      if (!rec) return json(res, 200, { status: "none" });
+      json(res, 200, epmsPublic(rec));
+    },
+  },
+
+  "/api/epms/save": {
+    method: "POST",
+    handler: async ({ req, res, root }) => {
+      const body = JSON.parse(await readBody(req));
+      const { path: proj, doc, data, by } = body;
+      if (!by) return fail(res, 400, "缺少填报人");
+      const old = await epmsRead(root, String(proj), String(doc));
+      const lockedBy = epmsLockedBy(old, String(by));
+      if (lockedBy) return fail(res, 409, `单据正被 ${lockedBy} 编辑锁定`);
+      const rec: EpmsRecord = {
+        status: old?.status === "approved" ? "approved" : "draft",
+        data: data ?? old?.data ?? null,
+        by: String(by),
+        updatedAt: Date.now(),
+        docNo: old?.docNo || epmsDocNo(),
+        // 自己持有的锁保存后续期，避免保存瞬间被他人抢锁
+        lock: old?.lock?.by === String(by) ? { by: String(by), at: Date.now() } : null,
+        history: [...(old?.history || []), { at: Date.now(), by: String(by), action: "保存草稿" }].slice(-50),
+      };
+      await epmsWrite(root, String(proj), String(doc), rec);
+      json(res, 200, epmsPublic(rec));
+    },
+  },
+
+  "/api/epms/lock": {
+    method: "POST",
+    handler: async ({ req, res, root }) => {
+      const body = JSON.parse(await readBody(req));
+      const { path: proj, doc, by } = body;
+      if (!by) return fail(res, 400, "缺少操作人");
+      const old = await epmsRead(root, String(proj), String(doc));
+      const lockedBy = epmsLockedBy(old, String(by));
+      if (lockedBy) {
+        return json(res, 409, { error: `单据正被 ${lockedBy} 编辑锁定`, lockBy: lockedBy, lockAt: old!.lock!.at });
+      }
+      const rec: EpmsRecord = old || { status: "draft", data: null, by: String(by), updatedAt: Date.now(), docNo: epmsDocNo() };
+      rec.lock = { by: String(by), at: Date.now() };
+      await epmsWrite(root, String(proj), String(doc), rec);
+      json(res, 200, epmsPublic(rec));
+    },
+  },
+
+  "/api/epms/unlock": {
+    method: "POST",
+    handler: async ({ req, res, root }) => {
+      const body = JSON.parse(await readBody(req));
+      const { path: proj, doc, by } = body;
+      const old = await epmsRead(root, String(proj), String(doc));
+      if (old && old.lock && old.lock.by === String(by)) {
+        old.lock = null;
+        await epmsWrite(root, String(proj), String(doc), old);
+      }
+      json(res, 200, { ok: true });
+    },
+  },
+
+  "/api/epms/status": {
+    method: "POST",
+    handler: async ({ req, res, root }) => {
+      const body = JSON.parse(await readBody(req));
+      const { path: proj, doc, by, action } = body;
+      if (!by) return fail(res, 400, "缺少操作人");
+      const rec = await epmsRead(root, String(proj), String(doc));
+      if (!rec) return fail(res, 404, "单据不存在");
+      const lockedBy = epmsLockedBy(rec, String(by));
+      if (lockedBy) return fail(res, 409, `单据正被 ${lockedBy} 编辑锁定`);
+      const label: Record<string, string> = { submit: "提交工程师审核", approve: "审核通过并归档", return: "审核驳回" };
+      if (action === "submit") rec.status = "pending";
+      else if (action === "approve") rec.status = "approved";
+      else if (action === "return") rec.status = "draft";
+      else return fail(res, 400, "非法操作");
+      rec.by = String(by);
+      rec.updatedAt = Date.now();
+      rec.lock = null;
+      rec.history = [...(rec.history || []), { at: Date.now(), by: String(by), action: label[action] }].slice(-50);
+      await epmsWrite(root, String(proj), String(doc), rec);
+      json(res, 200, epmsPublic(rec));
     },
   },
 
@@ -668,6 +759,69 @@ const routes: Record<string, { method: string; handler: Handler }> = {
 };
 
 /* ---------- 插件入口 ---------- */
+
+/* ---------- EPMS 制单台辅助 ---------- */
+
+interface EpmsRecord {
+  status: "draft" | "pending" | "approved";
+  data: unknown;
+  by: string;
+  updatedAt: number;
+  docNo: string;
+  lock?: { by: string; at: number } | null;
+  history?: { at: number; by: string; action: string }[];
+}
+
+const EPMS_LOCK_TTL = 15 * 60 * 1000; // 编辑锁 15 分钟无操作自动释放
+
+function epmsDocNo(): string {
+  const d = new Date();
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  return `DOC-${ymd}-${String(Math.floor(Math.random() * 10000)).padStart(4, "0")}`;
+}
+
+function epmsFile(root: string, project: string, doc: string): string | null {
+  if (!/^[\w一-龥-]+$/.test(doc)) return null;
+  return resolveSafe(root, path.join(project, ".epms", `${doc}.json`));
+}
+
+async function epmsRead(root: string, project: string, doc: string): Promise<EpmsRecord | null> {
+  const abs = epmsFile(root, project, doc);
+  if (!abs || !fs.existsSync(abs)) return null;
+  try {
+    return JSON.parse(await fsp.readFile(abs, "utf8")) as EpmsRecord;
+  } catch {
+    return null;
+  }
+}
+
+async function epmsWrite(root: string, project: string, doc: string, rec: EpmsRecord): Promise<void> {
+  const abs = epmsFile(root, project, doc);
+  if (!abs) throw new Error("非法单据类型");
+  await fsp.mkdir(path.dirname(abs), { recursive: true });
+  await fsp.writeFile(abs, JSON.stringify(rec, null, 2), "utf8");
+}
+
+/** 若单据被他人锁定且未过期，返回锁定人；否则返回 null */
+function epmsLockedBy(rec: EpmsRecord | null, by: string): string | null {
+  if (!rec?.lock) return null;
+  if (rec.lock.by === by) return null;
+  if (Date.now() - rec.lock.at > EPMS_LOCK_TTL) return null;
+  return rec.lock.by;
+}
+
+function epmsPublic(rec: EpmsRecord) {
+  return {
+    status: rec.status,
+    data: rec.data,
+    by: rec.by,
+    updatedAt: rec.updatedAt,
+    docNo: rec.docNo,
+    lock: rec.lock && Date.now() - rec.lock.at <= EPMS_LOCK_TTL ? rec.lock : null,
+    lockTtl: EPMS_LOCK_TTL,
+    history: rec.history || [],
+  };
+}
 
 export function docsApi(): Plugin {
   let root = "";

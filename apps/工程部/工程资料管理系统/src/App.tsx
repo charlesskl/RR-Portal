@@ -7,6 +7,7 @@ import ClientView from "@/sections/ClientView";
 import ProjectView from "@/sections/ProjectView";
 import ExplorerView from "@/sections/ExplorerView";
 import DocEditor from "@/sections/DocEditor";
+import WorkbenchView from "@/sections/WorkbenchView";
 import SearchView from "@/sections/SearchView";
 import RecentView from "@/sections/RecentView";
 import TrashView from "@/sections/TrashView";
@@ -122,7 +123,17 @@ export default function App() {
       )}
 
       <main className="min-h-0 flex-1 overflow-hidden">
-        {view.type === "editor" ? (
+        {view.type === "workbench" ? (
+          <div className="h-full overflow-y-auto">
+            <WorkbenchView
+              client={view.client}
+              year={view.year}
+              project={view.project}
+              onNavigate={navigate}
+              onOpenEditor={openEditor}
+            />
+          </div>
+        ) : view.type === "editor" ? (
           <DocEditor
             path={view.path}
             name={view.name}

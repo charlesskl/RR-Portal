@@ -118,4 +118,43 @@ export const api = {
       xhr.send(file);
     });
   },
+
+  /* ---------- EPMS 制单台 ---------- */
+  epmsGet: (path: string, doc: string) =>
+    req<EpmsRecordPublic>(`api/epms?path=${enc(path)}&doc=${enc(doc)}`),
+  epmsSave: (path: string, doc: string, data: unknown, by: string) =>
+    req<EpmsRecordPublic>("api/epms/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, doc, data, by }),
+    }),
+  epmsLock: (path: string, doc: string, by: string) =>
+    req<EpmsRecordPublic>("api/epms/lock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, doc, by }),
+    }),
+  epmsUnlock: (path: string, doc: string, by: string) =>
+    req<{ ok: true }>("api/epms/unlock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, doc, by }),
+    }),
+  epmsStatus: (path: string, doc: string, action: "submit" | "approve" | "return", by: string) =>
+    req<EpmsRecordPublic>("api/epms/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, doc, action, by }),
+    }),
 };
+
+export interface EpmsRecordPublic {
+  status: "none" | "draft" | "pending" | "approved";
+  data?: unknown;
+  by?: string;
+  updatedAt?: number;
+  docNo?: string;
+  lock?: { by: string; at: number } | null;
+  lockTtl?: number;
+  history?: { at: number; by: string; action: string }[];
+}

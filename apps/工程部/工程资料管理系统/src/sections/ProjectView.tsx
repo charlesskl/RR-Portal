@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   BadgeCheck,
   CircleDashed,
+  ClipboardList,
   Download,
   ExternalLink,
   FilePlus2,
@@ -162,6 +163,13 @@ export default function ProjectView({
             )}
           >
             <Files className="h-4 w-4" /> 全部文件
+          </button>
+          <button
+            onClick={() => onNavigate({ type: "workbench", client, year, project })}
+            className="flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-cyan-300 hover:bg-slate-800"
+            title="按 EPMS 制单台流程做资料（草稿/审核/归档/防串单锁）"
+          >
+            <ClipboardList className="h-4 w-4" /> 制单台
           </button>
           <Button size="sm" variant="ghost" onClick={load} title="重新扫描">
             <RefreshCw className="h-4 w-4" />

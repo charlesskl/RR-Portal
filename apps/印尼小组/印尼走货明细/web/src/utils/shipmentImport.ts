@@ -213,6 +213,23 @@ export async function importShipmentFile(file: File) {
   return parsed
 }
 
+/** Updating a shipment must not replace its HS with defaults for blank source cells. */
+export function mergeShipmentImportMaterial(current: Material | undefined, imported: Material): Material {
+  const provided = Object.fromEntries(Object.entries(imported).filter(([, value]) => value != null && value !== ''))
+  if (imported.import_source) {
+    const hsLabels = { hs_cn: ['中国HSCODE'], hs_id: ['印尼HSCODE', '印尼编码'] }
+    for (const [field, labels] of Object.entries(hsLabels)) {
+      const candidates = labels.map(norm)
+      const cells = imported.import_source.cells
+      // Use the same exact-first, first-column rule as the workbook parser.
+      const source = cells.find(cell => candidates.includes(norm(cell.label)))
+        ?? cells.find(cell => candidates.some(label => norm(cell.label).startsWith(label)))
+      if (!source || source.error || text(source.value) === '') delete provided[field]
+    }
+  }
+  return { ...current, ...provided }
+}
+
 export function matchShipmentMaterial(source: Material, candidates: Material[]) {
   const matches = candidates.filter(m => m.active !== false && norm(m.name_zh) === norm(source.name_zh) &&
     (!source.product_code || norm(m.product_code || m.related_product_code) === norm(source.product_code)) &&

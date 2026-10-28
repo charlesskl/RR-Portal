@@ -19,7 +19,7 @@ import { applyMergedShipmentEdits, mergedReadOnlyFields, type MergedEditorRow } 
 import { shipmentSheetFields, type SheetEdit } from '../utils/shipmentSheet'
 import { linkShipmentOutbound, remainingOutboundQuantity } from '../utils/shipmentOutboundLink'
 import { outboundCandidates, planOutboundPull } from '../utils/shipmentOutboundRemaining'
-import type { ShipmentImportItem } from '../utils/shipmentImport'
+import { mergeShipmentImportMaterial, type ShipmentImportItem } from '../utils/shipmentImport'
 import { MATERIAL_CATEGORIES } from '../utils/engineeringImport'
 import { HUASHENGYI_FULL_NAME } from '../utils/supplierProfiles'
 import { publicAsset } from '../deployment'
@@ -1341,8 +1341,8 @@ export default function ShipmentsPage() {
                     if (target < 0) { next.push(row); return }
                     const old = next[target]
                     const provided = Object.fromEntries(Object.entries(row).filter(([, value]) => value != null && value !== ''))
-                    const material = Object.fromEntries(Object.entries(row.material_snapshot).filter(([, value]) => value != null && value !== ''))
-                    next[target] = { ...old, ...provided, material_snapshot: { ...matMap.get(old.material_id!), ...material } }
+                    next[target] = { ...old, ...provided, material_snapshot:
+                      mergeShipmentImportMaterial(matMap.get(old.material_id!), row.material_snapshot) }
                   })
                   return next
                 })

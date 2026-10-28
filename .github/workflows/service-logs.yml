@@ -1,4 +1,4 @@
-name: PR 1027 Indo Scoped Release
+name: PR 1028 Quote Static Scoped Release
 on:
   workflow_dispatch:
     inputs:
@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
-  SCOPED_RELEASE_HELPER_SHA256: '44802aa05d92b15600b9860858b66a72bb0d7ec20dcf7625e960253d3cfffec2'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
+  SCOPED_RELEASE_HELPER_SHA256: '6bdf9a5a4baa955ba53ba56fa0346aa4650c8e94ea08c67c1f6a54475f56aaa4'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1027-r3-20261028-indo && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1028-20261028-static && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed indo prepare
+      - name: Run only reviewed quote-static prepare
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,23 +48,13 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1027-r3-20261028-indo && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1028-20261028-static && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
-            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1027-r3-20261028-indo:refs/remotes/origin/ops/pr-1027-r3-20261028-indo >/dev/null 2>&1 || exit 1
-            [[ "$(git rev-parse refs/remotes/origin/ops/pr-1027-r3-20261028-indo)" = "$RELEASE_SHA" ]] || exit 1
+            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1028-20261028-static:refs/remotes/origin/ops/pr-1028-20261028-static >/dev/null 2>&1 || exit 1
+            [[ "$(git rev-parse refs/remotes/origin/ops/pr-1028-20261028-static)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            scoped_release_tmp=$(mktemp -d /tmp/pr1027-indo.XXXXXX)
+            scoped_release_tmp=$(mktemp -d /tmp/pr1028-static.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1027-indo-release-v3.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 44802aa05d92b15600b9860858b66a72bb0d7ec20dcf7625e960253d3cfffec2 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/batch-host-config-library.py" > "$scoped_release_tmp/batch-host-config-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/batch-host-config-library.py" | cut -d ' ' -f1)" = bd1842dc6847f3e0e5c0c38374c3604791f66d1c94dc651457607dc338f38ff1 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/portable-pdb-library.py" > "$scoped_release_tmp/portable-pdb-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/portable-pdb-library.py" | cut -d ' ' -f1)" = cf66f655a1e166491c4da67da0824f42ac8cdae3f844044cb5d8f7233ba105c5 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/qc-source-library.py" > "$scoped_release_tmp/qc-source-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/qc-source-library.py" | cut -d ' ' -f1)" = 4745c90f126cf46106b0f170a3ebc6b24ccb64c0e963e427d13308d5cb5b54f5 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1028-static-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 6bdf9a5a4baa955ba53ba56fa0346aa4650c8e94ea08c67c1f6a54475f56aaa4 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

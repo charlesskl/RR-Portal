@@ -44,14 +44,23 @@ async function main() {
 
   // —— 第 2 章基础数据：4 条拉别（业务方定：名字含工艺、车间兴信A）+ 示例机台（幂等：先查后建）——
   // 工艺类型贴在拉别上（手喷/移印/自动喷/UV），机台工艺继承所属拉别
+  // 兼容已有数据库：保留拉别 ID、机台、排期和产能，只纠正兴信拉别名称。
+  await prisma.productionLine.updateMany({
+    where: { factoryId: "XINGXIN", craftType: "自动喷", name: { in: ["A拉", "A拉：自动喷"] } },
+    data: { name: "B拉：自动喷" },
+  });
+  await prisma.productionLine.updateMany({
+    where: { factoryId: "XINGXIN", craftType: "手喷", name: { in: ["B拉", "B拉：手喷"] } },
+    data: { name: "A拉：手喷" },
+  });
   const lineDefs = [
-    { name: "A拉：自动喷", workshop: "兴信A", leaderName: "宋沛霖", craftType: "自动喷", dailyCapacityLimit: 120000, factoryId: "XINGXIN" },
-    { name: "B拉：手喷",   workshop: "兴信A", leaderName: "宋沛霖", craftType: "手喷",   dailyCapacityLimit: 22000,  factoryId: "XINGXIN" },
+    { name: "B拉：自动喷", workshop: "兴信A", leaderName: "宋沛霖", craftType: "自动喷", dailyCapacityLimit: 120000, factoryId: "XINGXIN" },
+    { name: "A拉：手喷",   workshop: "兴信A", leaderName: "宋沛霖", craftType: "手喷",   dailyCapacityLimit: 22000,  factoryId: "XINGXIN" },
     { name: "C拉：移印",   workshop: "兴信A", leaderName: "胡旗",   craftType: "移印",   dailyCapacityLimit: 120000, factoryId: "XINGXIN" },
     { name: "UV拉：UV",    workshop: "兴信A", leaderName: "唐龙",   craftType: "UV",     dailyCapacityLimit: 360000, factoryId: "XINGXIN" },
   ];
   for (const ld of lineDefs) {
-    const exist = await prisma.productionLine.findFirst({ where: { name: ld.name } });
+    const exist = await prisma.productionLine.findFirst({ where: { factoryId: ld.factoryId, name: ld.name } });
     const line = exist ?? (await prisma.productionLine.create({ data: ld }));
     // 给 C拉 建几台示例机（工艺继承拉别=移印；机台号同拉别内唯一）
     if (ld.name === "C拉：移印") {

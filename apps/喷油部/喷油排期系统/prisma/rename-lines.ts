@@ -3,24 +3,23 @@
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
-// 当前名 → 目标名（craftType 字段保持不变，仅改显示名 + 车间）
-const renames: { match: string; name: string }[] = [
-  { match: "A拉", name: "A拉：自动喷" },
-  { match: "B拉", name: "B拉：手喷" },
-  { match: "C拉", name: "C拉：移印" },
-  { match: "UV拉", name: "UV拉：UV" },
+// 按工艺识别兴信拉别，避免交换 A/B 后将工艺名称写错。
+const renames = [
+  { craftType: "手喷", names: ["B拉", "B拉：手喷", "A拉：手喷"], name: "A拉：手喷" },
+  { craftType: "自动喷", names: ["A拉", "A拉：自动喷", "B拉：自动喷"], name: "B拉：自动喷" },
+  { craftType: "移印", names: ["C拉", "C拉：移印"], name: "C拉：移印" },
+  { craftType: "UV", names: ["UV拉", "UV拉：UV"], name: "UV拉：UV" },
 ];
 
 async function main() {
   for (const r of renames) {
-    // 用 startsWith 语义找：名字以「A拉」开头（含已改成「A拉：自动喷」的，保证可重复运行）
-    const line = await prisma.productionLine.findFirst({ where: { name: { startsWith: r.match } } });
-    if (!line) { console.warn(`⚠️ 未找到拉别 ${r.match}，跳过`); continue; }
-    await prisma.productionLine.update({
-      where: { id: line.id },
+    // 新旧标准名称可能并存；一次更新全部匹配项，避免先命中已改名记录。
+    const result = await prisma.productionLine.updateMany({
+      where: { factoryId: "XINGXIN", craftType: r.craftType, name: { in: r.names } },
       data: { name: r.name, workshop: "兴信A" },
     });
-    console.log(`✓ id=${line.id} → ${r.name}（车间 兴信A）`);
+    if (!result.count) { console.warn(`⚠️ 未找到拉别 ${r.name}，跳过`); continue; }
+    console.log(`✓ ${result.count} 条 → ${r.name}（车间 兴信A）`);
   }
   console.log("—— 结果 ——");
   for (const l of await prisma.productionLine.findMany({ orderBy: { id: "asc" } }))

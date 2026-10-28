@@ -1,6 +1,6 @@
 """Inert readonly host/shared-file/Indo baseline observation; no Env/keyring/SQL."""
 import hashlib,json,os,pathlib,re,stat,subprocess,sys
-EXECUTE=True
+EXECUTE=False
 TARGET='4db83f857811cdb92836dea02893a6c59203beb8'
 BRANCH='refs/heads/ops/pr-1034-20261028-indo-static'
 ROOT=pathlib.Path('/opt/rr-portal')

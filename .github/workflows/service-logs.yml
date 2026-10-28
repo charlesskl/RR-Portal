@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '39a5df2680846aa3ff73a5d07006bd5323e5afd961c79f237ec9f46bb47a0a48'
+  SCOPED_RELEASE_HELPER_SHA256: '2496187e15f0db2c582d085372d7fa1fce99de046294289abcfb0518ceab6971'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -55,8 +55,8 @@ jobs:
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/pr1026-sprayplan.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1026-sprayplan-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 39a5df2680846aa3ff73a5d07006bd5323e5afd961c79f237ec9f46bb47a0a48 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1026-sprayplan-release-v2.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 2496187e15f0db2c582d085372d7fa1fce99de046294289abcfb0518ceab6971 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1012-compose-library-v2.py" > "$scoped_release_tmp/pr1012-compose-library-v2.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/pr1012-compose-library-v2.py" | cut -d ' ' -f1)" = bbf49ca20451f5c503bc807f71590dca8f20061590d0e78300551f302c386027 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1012-data-library.py" > "$scoped_release_tmp/pr1012-data-library.py" 2>/dev/null || exit 1

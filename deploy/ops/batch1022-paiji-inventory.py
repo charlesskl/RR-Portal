@@ -4,7 +4,7 @@ import datetime, hashlib, json, os, pathlib, re, sys
 ROOT = pathlib.Path('/opt/rr-portal')
 BASE = '4b3d8f3e319e41dcc8720d759e1af0726a2b2381'
 BRANCH = 'refs/heads/ops/batch-1015-1019-1022-20261028'
-EXECUTE = True
+EXECUTE = False
 PHASE = 'paiji-inventory'
 FAILED = ROOT / 'deploy/backups/batch-1015-1019-1022-20261028-existing-v2/prepare'
 OUT = ROOT / 'deploy/backups/batch-1015-1019-1022-20261028-paiji-inventory'

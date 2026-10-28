@@ -1,6 +1,6 @@
 """Inert selected sealed writable-layer classification; no Docker/SQL/key contents."""
 import ast,hashlib,json,os,pathlib,re,stat,sys
-EXECUTE=True
+EXECUTE=False
 TARGET='70590f6d0dc1c691cfcc7c6b85c67e4a3574e571'
 BRANCH='refs/heads/ops/pr-1027-clone-diagnostic-20261028'
 PREPARE=pathlib.Path('/opt/rr-portal/deploy/backups/pr1027-1029-indo-20261028-r4/prepare')

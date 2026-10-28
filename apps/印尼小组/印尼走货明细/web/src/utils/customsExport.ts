@@ -61,6 +61,7 @@ export { customsInvoicePrice } from './shipmentInvoice'
 
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
 export interface CustomsItem {
+  purchase_charge_ratio?: number
   material_snapshot?: unknown
   outbound_id?: number
   material_id?: number

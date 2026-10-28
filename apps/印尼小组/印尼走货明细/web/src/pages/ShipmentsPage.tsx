@@ -10,13 +10,14 @@ import { sortShipmentItems, cartonLayout, cartonGroupKey, shipmentScope } from '
 import { withShipmentInvoicePrices } from '../utils/shipmentInvoice'
 import { consolidateShipmentItems } from '../utils/shipmentConsolidation'
 import { createCartonGroupId } from '../utils/cartonGroupId'
-import { shipmentPurchaseAmount, shipmentUsesDeclarationPrice } from '../utils/shipmentPurchase'
+import { receiptChargeRatio, shipmentChargeQuantity, shipmentPurchaseAmount, shipmentUsesDeclarationPrice } from '../utils/shipmentPurchase'
 import ShipmentImport from '../components/ShipmentImport'
 import ShipmentSheetTable from '../components/ShipmentSheetTable'
 import ShipmentNumberCell from '../components/ShipmentNumberCell'
 import { applyMergedShipmentEdits, mergedReadOnlyFields, type MergedEditorRow } from '../utils/shipmentMergedEditor'
 import { shipmentSheetFields, type SheetEdit } from '../utils/shipmentSheet'
 import { linkShipmentOutbound, remainingOutboundQuantity } from '../utils/shipmentOutboundLink'
+import { outboundCandidates, planOutboundPull } from '../utils/shipmentOutboundRemaining'
 import type { ShipmentImportItem } from '../utils/shipmentImport'
 import { MATERIAL_CATEGORIES } from '../utils/engineeringImport'
 import { HUASHENGYI_FULL_NAME } from '../utils/supplierProfiles'
@@ -42,6 +43,7 @@ interface ShipmentSummary {
 }
 
 interface ShipmentItem {
+  purchase_charge_ratio?: number
   _rowKey?: number
   material_snapshot?: Material
   carton_no?: string
@@ -78,6 +80,7 @@ interface ShipmentDetail extends ShipmentSummary {
 }
 
 interface OutByMat {
+  purchase_charge_ratio?: number
   outbound_id: number
   po_item_id?: number
   material_id?: number
@@ -206,6 +209,10 @@ export default function ShipmentsPage() {
   const [outOpen, setOutOpen] = useState(false)
   const [outFilter, setOutFilter] = useState('')
   const [outSel, setOutSel] = useState<React.Key[]>([])
+  const [outLoading, setOutLoading] = useState(false)
+  const [outPulling, setOutPulling] = useState(false)
+  const outRequest = useRef(0)
+  const outPullPending = useRef<number | null>(null)
   const [linkRowKey, setLinkRowKey] = useState<number | null>(null)
   const [linkRows, setLinkRows] = useState<OutByMat[]>([])
   const [linkFilter, setLinkFilter] = useState('')
@@ -237,6 +244,8 @@ export default function ShipmentsPage() {
   }, [baseMatMap, rawItems])
   const orderedItems = (values: ShipmentItem[]) => withShipmentInvoicePrices(sortShipmentItems(values, matMap), matMap).map((it, i) => ({ ...it, seq: i + 1 }))
   const items = useMemo(() => orderedItems(rawItems), [rawItems, matMap])
+  const outCandidates = useMemo(() => outboundCandidates(outRows, items), [outRows, items])
+  const selectedOutIds = outSel.filter(key => outCandidates.some(row => String(row.outbound_id) === String(key)))
   const sheetRevision = useRef({ rawItems, matMap, session: editorSession.current })
   const sheetConfirmOpen = useRef(false)
   sheetRevision.current = { rawItems, matMap, session: editorSession.current }
@@ -365,6 +374,7 @@ export default function ShipmentsPage() {
       weighing_qty: shipmentWeightQuantity(m.name_zh, qtyPerCarton),
       purchase_unit: poInfo?.it?.purchase_unit || (isPaperRope(m.name_zh) ? '米' : '个'),
       price: poInfo?.it?.price ?? 0,
+      purchase_charge_ratio: receiptChargeRatio(poInfo?.it),
       currency: poInfo?.it?.currency ?? 'US$',
       po_no: opts.poNo ?? poInfo?.po?.po_no ?? '',
       po_date: poInfo?.po?.order_date ?? '',
@@ -473,12 +483,16 @@ export default function ShipmentsPage() {
   }
 
   async function loadOutbound(shipmentId?: number) {
+    const request = ++outRequest.current
+    setOutLoading(true)
+    setOutRows([])
     try {
       const { data } = await api.get<OutByMat[]>('/outbound/allocatable', {
         params: shipmentId ? { shipment_id: shipmentId } : {},
       })
-      setOutRows(Array.isArray(data) ? data : [])
-    } catch {}
+      if (request === outRequest.current) setOutRows(Array.isArray(data) ? data : [])
+    } catch { if (request === outRequest.current) setOutRows([]) }
+    finally { if (request === outRequest.current) setOutLoading(false) }
   }
   function closeOutboundLink() {
     linkRequest.current++
@@ -512,7 +526,7 @@ export default function ShipmentsPage() {
       if (revision.rawItems !== sheetRevision.current.rawItems || revision.matMap !== sheetRevision.current.matMap)
         throw new Error('明细已变化，请重新核对后关联')
       const previous = linkRows.find(r => r.outbound_id === linkSelected)
-      if (!previous || ['material_id', 'po_no', 'po_date', 'supplier', 'price', 'currency', 'purchase_unit', 'customs_company', 'code', 'name_zh', 'spec'].some(key =>
+      if (!previous || ['material_id', 'po_no', 'po_date', 'supplier', 'price', 'currency', 'purchase_unit', 'purchase_charge_ratio', 'customs_company', 'code', 'name_zh', 'spec'].some(key =>
         previous[key as keyof OutByMat] !== source[key as keyof OutByMat])) {
         setLinkRows(data); setLinkConfirmed(false)
         throw new Error('出库资料已更新，请核对后重新确认')
@@ -535,29 +549,58 @@ export default function ShipmentsPage() {
   }
 
   // 从出库拉物料：每行绑定具体出库记录，数量可拆分到不同柜。
+  function closeOutboundPicker() {
+    outRequest.current++
+    outPullPending.current = null
+    setOutPulling(false)
+    setOutOpen(false); setOutSel([]); setOutLoading(false)
+  }
   async function pullFromOutbound() {
-    const picked = outSel.map(k => outRows.find(o => String(o.outbound_id) === String(k))).filter(Boolean) as OutByMat[]
-    if (!picked.length) { message.warning('请先勾选出库物料'); return }
-    const matToPo = await buildMatToPo()
-    const { data: pickedMaterials } = await api.get<any[]>('/materials/by-ids', { params: { ids: picked.map(o => o.material_id).join(',') } })
-    const newItems: ShipmentItem[] = []
-    for (const o of picked) {
-      const m = pickedMaterials.find(x => String(x.id) === String(o.material_id))
-      if (!m) continue
-      const poInfo = {
-        po: { po_no: o.po_no, order_date: o.po_date, supplier: o.supplier },
-        it: { price: o.price, currency: o.currency, purchase_unit: o.purchase_unit },
+    if (outPullPending.current != null || outLoading) return
+    const selected = selectedOutIds.map(Number)
+    if (!selected.length) { message.warning('请先勾选出库物料'); return }
+    const original = { ...sheetRevision.current }
+    const request = ++outRequest.current
+    const unchanged = () => request === outRequest.current && original.session === sheetRevision.current.session
+      && original.rawItems === sheetRevision.current.rawItems && original.matMap === sheetRevision.current.matMap
+    outPullPending.current = request
+    setOutPulling(true)
+    try {
+      const { data } = await api.get<OutByMat[]>('/outbound/allocatable', { params: editing?.id ? { shipment_id: editing.id } : {} })
+      if (!unchanged()) return
+      const sources = Array.isArray(data) ? data : []
+      setOutRows(sources)
+      const picked = planOutboundPull(sources, original.rawItems, selected)
+      const [matToPo, materialResponse] = await Promise.all([
+        picked.some(row => !row.po_no) ? buildMatToPo() : Promise.resolve(new Map()),
+        api.get<any[]>('/materials/by-ids', { params: { ids: [...new Set(picked.map(row => row.material_id))].join(',') } }),
+      ])
+      if (!unchanged()) return
+      const newItems = picked.map(o => {
+        const m = materialResponse.data.find(x => String(x.id) === String(o.material_id))
+        if (!m) throw new Error(`OUT-${o.outbound_id} 的物料资料不可用，请刷新后重试`)
+        const poInfo = {
+          po: { po_no: o.po_no, order_date: o.po_date, supplier: o.supplier },
+          it: { price: o.price, currency: o.currency, purchase_unit: o.purchase_unit, purchase_charge_ratio: o.purchase_charge_ratio },
+        }
+        return makeItem(m, o.remaining_qty, {
+          poInfo: o.po_no ? poInfo : (m.id ? matToPo.get(m.id) : undefined),
+          poNo: o.po_no || undefined,
+          outboundId: o.outbound_id,
+        })
+      })
+      appendItems(newItems)
+      applyPartition([...items, ...newItems])
+      setOutOpen(false); setOutSel([])
+      message.success(`已从出库拉出 ${newItems.length} 条物料明细`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '拉入失败，请重试')
+    } finally {
+      if (outPullPending.current === request) {
+        outPullPending.current = null
+        setOutPulling(false)
       }
-      newItems.push(makeItem(m, Number(o.allocatable_qty) || 0, {
-        poInfo: o.po_no ? poInfo : (m.id ? matToPo.get(m.id) : undefined),
-        poNo: o.po_no || undefined,
-        outboundId: o.outbound_id,
-      }))
     }
-    appendItems(newItems)
-    applyPartition([...items, ...newItems])
-    setOutOpen(false); setOutSel([])
-    message.success(`已从出库拉出 ${newItems.length} 条物料明细`)
   }
 
   // 按货号选物料（补充）：出库量有则带入，否则 0
@@ -1268,7 +1311,7 @@ export default function ShipmentsPage() {
           }
           extra={
             <Space wrap>
-              <Button size="small" type="primary" onClick={() => { loadOutbound(editing?.id || undefined); setOutOpen(true) }}>📦 从出库精确分配</Button>
+              <Button size="small" type="primary" onClick={() => { setOutSel([]); loadOutbound(editing?.id || undefined); setOutOpen(true) }}>📦 从出库精确分配</Button>
               <Button size="small" onClick={() => { setManOpen(true); if (!manMats.length) loadManMats(manCode) }}>🗂 按货号选物料</Button>
               <Button size="small" onClick={openTools}>从工具库选择</Button>
               <Button size="small" onClick={() => setSchedPickerOpen(true)}>🔗 从排期勾选</Button>
@@ -1303,6 +1346,9 @@ export default function ShipmentsPage() {
         >
           {showConsolidated && <Typography.Paragraph type="secondary">
             同柜相同物料已合并，可直接在本表编辑、粘贴或向下填充。合并行的数量和重量只显示汇总，采购单号和日期保留各自来源。修改后请保存。
+          </Typography.Paragraph>}
+          {items.some(item => !shipmentUsesDeclarationPrice(item) && (item.purchase_charge_ratio ?? 1) < 1) && <Typography.Paragraph type="secondary">
+            备品不收费：数量和重量保留实际走货（含备品），采购金额按对应采购明细的正常入库／总入库比例折算；分批及合并走货不重复计费。
           </Typography.Paragraph>}
           <ShipmentSheetTable<MergedEditorRow<ShipmentItem>>
             fields={shipmentSheetFields}
@@ -1374,9 +1420,9 @@ export default function ShipmentsPage() {
               { title: '供应商', width: 160, render: (_v, r, i) => fillable(i, 'supplier', <Input size="small" value={r.supplier} onChange={(e) => patchItem(i, 'supplier', e.target.value)} />) },
               { title: '采购单日期', width: 160, onCell: r => ({ style: r.sources.length > 1 ? GRAY : undefined }), render: (_v, r, i) => r.sources.length > 1 ? mergedCellValue(i, 'po_date') : fillable(i, 'po_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.po_date ? dayjs(r.po_date) : null} onChange={(v) => patchItem(i, 'po_date', v ? v.format('YYYY-MM-DD') : '')} />) },
               { title: '采购单号', width: 160, onCell: r => ({ style: r.sources.length > 1 ? GRAY : undefined }), render: (_v, r, i) => r.sources.length > 1 ? r.po_no : fillable(i, 'po_no', <Input size="small" value={r.po_no} onChange={(e) => patchItem(i, 'po_no', e.target.value)} />) },
-              { title: '采购单价', width: 120, render: (_v, r, i) => fillable(i, 'price', <ShipmentNumberCell value={r.price} title={r.sources.length > 1 ? '显示加权单价；修改后各来源批次统一采用新单价' : shipmentUsesDeclarationPrice(r) ? '导入单价：按送货重量/申报数量计价' : `原采购单价：按送货数量（${r.purchase_unit || '个'}）计价；导出时换算申报单位单价`} onCommit={v => patchItem(i, 'price', v)} />) },
+              { title: '采购单价', width: 120, render: (_v, r, i) => fillable(i, 'price', <ShipmentNumberCell value={r.price} title={r.sources.length > 1 ? '按计费数量加权的采购单价；修改后各来源批次统一采用新单价，备品不收费' : shipmentUsesDeclarationPrice(r) ? '导入单价：按送货重量/申报数量计价' : `原采购单价：按计费数量（${r.purchase_unit || '个'}）计价，备品不收费；导出时换算申报单位单价`} onCommit={v => patchItem(i, 'price', v)} />) },
               { title: '币种', width: 90, render: (_v, r, i) => fillable(i, 'currency', <Select size="small" value={r.currency || '¥'} options={CURR} onChange={(v) => patchItem(i, 'currency', v)} style={{ width: '100%' }} />) },
-              { title: '采购金额', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.purchaseAmount ? c.purchaseAmount.toFixed(2) : '' } },
+              { title: '采购金额', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return <span title={`备品不收费；计费数量 ${shipmentChargeQuantity(r).toLocaleString('en-US', { maximumFractionDigits: 6 })}，实际走货数量和重量不变`}>{c.purchaseAmount.toFixed(2)}</span> } },
               { title: '报关出口公司', width: 240, render: (_v, r, i) => fillable(i, 'customs_company',
                 <Select size="small" showSearch allowClear style={{ width: '100%' }} placeholder="选择报关出口公司"
                   options={customsOptions} popupMatchSelectWidth={false} value={r.customs_company || undefined}
@@ -1502,40 +1548,44 @@ export default function ShipmentsPage() {
 
       <Modal
         open={outOpen}
-        title={`从出库精确分配到本柜（共 ${outRows.length} 笔 · 已选 ${outSel.length}）`}
-        width="80vw"
-        onCancel={() => { setOutOpen(false); setOutSel([]) }}
+        title={`从出库精确分配到本柜（共 ${outLoading ? 0 : outCandidates.length} 笔 · 已选 ${selectedOutIds.length}）`}
+        width="90vw"
+        onCancel={closeOutboundPicker}
         footer={null}
         destroyOnClose
       >
         <Space style={{ marginBottom: 8 }} wrap>
           <Input.Search allowClear placeholder="搜索 货号/物料/PO" style={{ width: 320 }}
             onSearch={setOutFilter} onChange={(e) => !e.target.value && setOutFilter('')} />
-          <Button type="primary" disabled={!outSel.length} onClick={pullFromOutbound}>📥 拉物料到本走货</Button>
+          <Button type="primary" loading={outPulling} disabled={!selectedOutIds.length || outLoading} onClick={pullFromOutbound}>📥 拉物料到本走货</Button>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            每行对应一笔出库；拉入后可修改本柜数量，保存时会校验，不能超过该笔出库的可分配量
+            仅显示尚有剩余的出库，已扣除本柜已拉入的数量（含未保存明细）；全部拉入后自动隐藏，部分拉入只带入剩余量。
           </Typography.Text>
         </Space>
         <Table
           rowKey={(r) => String(r.outbound_id)}
           size="small"
-          rowSelection={{ selectedRowKeys: outSel, onChange: (k) => setOutSel(k) }}
-          dataSource={outRows.filter(r => {
+          loading={outLoading || outPulling}
+          locale={{ emptyText: '暂无剩余可拉入的出库；已全部分配的记录自动隐藏' }}
+          rowSelection={{ selectedRowKeys: selectedOutIds, onChange: (k) => setOutSel(k),
+            getCheckboxProps: () => ({ disabled: outLoading || outPulling }) }}
+          dataSource={outCandidates.filter(r => {
             if (!outFilter) return true
             const s = outFilter.toLowerCase()
             return ((r.code || '') + (r.name_zh || '') + (r.spec || '') + (r.po_no || '')).toLowerCase().includes(s)
           })}
           pagination={{ pageSize: 30 }}
-          scroll={{ x: 900, y: 480 }}
+          scroll={{ x: 1100, y: 480 }}
           columns={[
             { title: '出库记录', dataIndex: 'outbound_id', width: 95, render: (v) => `OUT-${v}` },
             { title: '货号', dataIndex: 'code', width: 120 },
             { title: '物料', dataIndex: 'name_zh', width: 220, ellipsis: true },
             { title: '规格', dataIndex: 'spec', width: 160, ellipsis: true, render: v => v || <Typography.Text type="secondary">—</Typography.Text> },
             { title: '本次出库', dataIndex: 'outbound_qty', width: 110, align: 'right', render: (v) => Number(v ?? 0).toFixed(2) },
+            { title: '本柜已拉入', dataIndex: 'allocated_in_editor', width: 120, align: 'right', render: v => Number(v ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 }) },
             {
-              title: '本柜可分配', dataIndex: 'allocatable_qty', width: 120, align: 'right',
-              render: (v) => <Typography.Text strong type="success">{Number(v ?? 0).toFixed(2)}</Typography.Text>,
+              title: '剩余可拉入', dataIndex: 'remaining_qty', width: 120, align: 'right',
+              render: (v) => <Typography.Text strong type="success">{Number(v ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })}</Typography.Text>,
             },
             { title: 'PO号', dataIndex: 'po_no', width: 180, ellipsis: true },
             { title: '出库日期', dataIndex: 'out_date', width: 120, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '' },

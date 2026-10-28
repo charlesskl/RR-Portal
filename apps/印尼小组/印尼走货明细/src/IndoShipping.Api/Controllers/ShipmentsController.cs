@@ -1,5 +1,6 @@
 using Dapper;
 using IndoShipping.Api.Auditing;
+using IndoShipping.Api.Features.Purchasing;
 using IndoShipping.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 
@@ -36,12 +37,21 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
         using var c = factory.Create();
         var sh = await c.QueryFirstOrDefaultAsync("SELECT * FROM shipments WHERE id=@id", new { id });
         if (sh == null) return NotFound(new { error = "not found" });
-        var items = (await c.QueryAsync(@"
+        var items = (await c.QueryAsync($@"
+            WITH receipt_basis AS ({ShipmentPurchaseBasis.ReceiptBasisSql})
             SELECT si.*,
-                   COALESCE(NULLIF(pi.purchase_unit, ''), NULLIF(si.purchase_unit, ''), '个') AS purchase_unit
+                   COALESCE(NULLIF(pi.purchase_unit, ''), NULLIF(si.purchase_unit, ''), '个') AS purchase_unit,
+                   COALESCE(rb.purchase_charge_ratio, 1) AS purchase_charge_ratio
             FROM shipment_items si
             LEFT JOIN outbound o ON o.id=si.outbound_id
-            LEFT JOIN po_items pi ON pi.id=o.po_item_id
+            LEFT JOIN LATERAL (
+                SELECT MIN(p.id) AS id FROM po_items p
+                JOIN purchase_orders po ON po.id=p.po_id
+                WHERE si.outbound_id IS NULL AND p.material_id=si.material_id AND po.po_no=si.po_no
+                HAVING COUNT(*)=1
+            ) matched ON TRUE
+            LEFT JOIN po_items pi ON pi.id=COALESCE(o.po_item_id, matched.id)
+            LEFT JOIN receipt_basis rb ON rb.po_item_id=pi.id
             WHERE si.shipment_id=@id
             ORDER BY si.seq, si.id", new { id })).ToList();
         var dict = (IDictionary<string, object?>)sh!;

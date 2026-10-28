@@ -17,6 +17,15 @@ const merged = (rows = batches) => consolidateShipmentItems(rows, materials)
 const apply = (edits: ReturnType<typeof edit>[], rows = batches) =>
   applyMergedShipmentEdits(rows, materials, merged(rows), edits)
 
+it('编辑合并资料或原采购单价不会丢失各来源备品计费比例，数量重量不受影响', () => {
+  const rows = batches.map((row, i) => ({ ...row, purchase_charge_ratio: i ? .8 : .9 }))
+  const result = applyMergedShipmentEdits(rows, materials, consolidateShipmentItems(rows, materials),
+    [edit('contract_no', 'SPARE-CONTRACT'), edit('price', '2')])
+  expect(result.items.map(row => [row.qty, row.kg, row.purchase_charge_ratio, row.price]))
+    .toEqual([[9000, 3.168, .9, 2], [20000, 7.04, .8, 2]])
+  expect(shipmentPurchaseAmount(consolidateShipmentItems(result.items, materials)[0])).toBeCloseTo((8100 + 16000) * 2, 9)
+})
+
 it('合同、卡板、箱号直接修改后仍为一行，原始数量重量和采购来源完整保留', () => {
   const before = structuredClone(batches)
   const result = apply([edit('contract_no', 'C-NEW'), edit('pallet', '1-2/2卡'), edit('carton_no', '1-3')])

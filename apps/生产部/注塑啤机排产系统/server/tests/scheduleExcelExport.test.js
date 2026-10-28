@@ -22,7 +22,7 @@ db.exec(`
   CREATE TABLE schedule_items (
     id INTEGER PRIMARY KEY, schedule_id INTEGER, machine_no TEXT,
     product_code TEXT, quantity_needed INTEGER, accumulated INTEGER,
-    sort_order INTEGER DEFAULT 0
+    sort_order INTEGER DEFAULT 0, notes TEXT
   );
 `);
 
@@ -42,14 +42,14 @@ test.beforeEach(() => {
   insert.run('10#', 'B', '五轴双臂', 300, 'Fixture');
 });
 
-function schedule(id, workshop = 'B', shift = '白班') {
+function schedule(id, workshop = 'B', shift = '白班', date = `2026-10-${String(id).padStart(2, '0')}`) {
   db.prepare('INSERT INTO schedules VALUES (?, ?, ?, ?)')
-    .run(id, `2026-10-${String(id).padStart(2, '0')}`, shift, workshop);
+    .run(id, date, shift, workshop);
 }
 
-function item(id, scheduleId, machine, code, needed = 100, accumulated = 0) {
-  db.prepare('INSERT INTO schedule_items VALUES (?, ?, ?, ?, ?, ?, 0)')
-    .run(id, scheduleId, machine, code, needed, accumulated);
+function item(id, scheduleId, machine, code, needed = 100, accumulated = 0, notes = '') {
+  db.prepare('INSERT INTO schedule_items VALUES (?, ?, ?, ?, ?, ?, 0, ?)')
+    .run(id, scheduleId, machine, code, needed, accumulated, notes);
 }
 
 async function workbook(id) {
@@ -149,4 +149,68 @@ test('produces an empty current sheet and omits a fully completed history sheet'
   rowContaining(book.worksheets[0], '合计: 0 条排机记录');
   rowContaining(book.worksheets[0], '制表人：');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM schedule_items').get().n, 2);
+});
+
+
+test('round-trips white data rows in both sheets without losing highlights or red notes', async () => {
+  schedule(1);
+  schedule(2, 'B', '夜班');
+  for (const scheduleId of [1, 2]) {
+    const firstId = scheduleId * 10;
+    item(firstId, scheduleId, '2#', `FIXTURE-${scheduleId}-ZERO`, 100, 0, 'Fixture note');
+    item(firstId + 1, scheduleId, '2#', `FIXTURE-${scheduleId}-PROGRESS`, 100, 12, 'Fixture note');
+    item(firstId + 2, scheduleId, '吹气机台', `FIXTURE-${scheduleId}-SPECIAL-ZERO`);
+    item(firstId + 3, scheduleId, '吹气机台', `FIXTURE-${scheduleId}-SPECIAL-PROGRESS`, 100, 9);
+  }
+  const before = db.prepare('SELECT * FROM schedule_items ORDER BY id').all();
+  const book = await workbook(2);
+  assert.equal(book.worksheets.length, 2);
+  for (const sheet of book.worksheets) {
+    const rows = productRows(sheet);
+    assert.equal(rows.length, 4);
+    assert.ok(rows.some(({ number }) => number % 2 === 0));
+    assert.ok(rows.some(({ number }) => number % 2 === 1));
+    for (let c = 1; c <= 25; c++) {
+      assert.equal(sheet.getRow(3).getCell(c).fill.fgColor.argb, 'FFD9E1F2');
+    }
+    for (const { code, number } of rows) {
+      const row = sheet.getRow(number);
+      for (let c = 1; c <= 25; c++) {
+        const expected = c === 11 && code.endsWith('PROGRESS') ? 'FFFFC000' : 'FFFFFFFF';
+        assert.equal(row.getCell(c).fill.type, 'pattern');
+        assert.equal(row.getCell(c).fill.pattern, 'solid');
+        assert.equal(row.getCell(c).fill.fgColor.argb, expected, `${sheet.name}!${row.getCell(c).address}`);
+      }
+      if (!code.includes('SPECIAL')) {
+        assert.equal(row.getCell(19).value, 'Fixture note');
+        assert.equal(row.getCell(19).font.color.argb, 'FFFF0000');
+        assert.equal(row.getCell(19).font.bold, true);
+      }
+    }
+  }
+  assert.deepEqual(db.prepare('SELECT * FROM schedule_items ORDER BY id').all(), before);
+});
+
+test('keeps exactly the original previous schedule, not a month of history or later-created schedules', async () => {
+  schedule(7, 'B', '白班', '2026-10-20');
+  schedule(8, 'B', '夜班', '2026-10-29');
+  schedule(9, 'B', '白班', '2026-10-30');
+  schedule(10, 'B', '夜班', '2026-10-31');
+  schedule(11, 'B', '白班', '2026-10-31');
+  schedule(12, 'C', '夜班', '2026-10-31');
+  for (const id of [7, 8, 9, 10, 11, 12]) item(id, id, '其他机台', `FIXTURE-HISTORY-${id}`);
+  const book = await workbook(10);
+  assert.deepEqual(book.worksheets.map(sheet => sheet.name), ['排机单', '2026-10-30 白班']);
+  assert.deepEqual(productRows(book.worksheets[0]).map(({ code }) => code), ['FIXTURE-HISTORY-10']);
+  assert.deepEqual(productRows(book.worksheets[1]).map(({ code }) => code), ['FIXTURE-HISTORY-9']);
+});
+
+test('retains the previous schedule even when it is more than a month old', async () => {
+  schedule(8, 'B', '夜班', '2026-08-31');
+  schedule(10, 'B', '白班', '2026-10-31');
+  item(1, 8, '其他机台', 'FIXTURE-OLD-PREVIOUS');
+  item(2, 10, '其他机台', 'FIXTURE-CURRENT');
+  const book = await workbook(10);
+  assert.deepEqual(book.worksheets.map(sheet => sheet.name), ['排机单', '2026-08-31 夜班']);
+  assert.deepEqual(productRows(book.worksheets[1]).map(({ code }) => code), ['FIXTURE-OLD-PREVIOUS']);
 });

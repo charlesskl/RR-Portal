@@ -3,6 +3,7 @@ import { Card, Space, Button, Table, Tag, message, Drawer, Form, Input, InputNum
 import { PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined, RollbackOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import dayjs from 'dayjs';
+import ErpReceiptReturns from './ErpReceiptReturns';
 
 const API = '/api/warehouse-orders';
 const STATUS_META = {
@@ -61,6 +62,7 @@ export default function WarehouseOrders({ workshop = 'B' }) {
       order_no: o.order_no || '',
       mold_no: o.mold_no || o.product_code || '',
       part_name: o.mold_name || '',
+      material_name: o.material_name ?? null,
       color: o.color || '',
       color_powder_no: o.color_powder_no || '',
       material_type: o.material_type || '',
@@ -165,7 +167,8 @@ export default function WarehouseOrders({ workshop = 'B' }) {
       render: v => v ? <Tag color={v === '夜班' ? 'volcano' : 'cyan'} style={{ margin: 0 }}>{v[0]}</Tag> : '' },
     { title: '下单号', dataIndex: 'order_no', width: 130 },
     { title: '货号', dataIndex: 'mold_no', width: 90 },
-    { title: '部件名称', dataIndex: 'part_name', width: 180 },
+    { title: '部件名称', dataIndex: 'part_name', width: 220,
+      render: (_, row) => <><div>{row.part_name}</div>{row.material_name && <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{row.material_name}</div>}</> },
     { title: '颜色/色粉', width: 130,
       render: (_, r) => <span>{r.color}{r.color_powder_no ? <span style={{ color: '#999' }}> · {r.color_powder_no}</span> : ''}</span> },
     { title: '件数(PCS)', dataIndex: 'delivery_pcs', width: 85, align: 'right' },
@@ -183,19 +186,21 @@ export default function WarehouseOrders({ workshop = 'B' }) {
     { title: '操作', width: 180, fixed: 'right',
       render: (_, r) => (
         <Space size={2}>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>改</Button>
-          {r.status === 'checked-in'
+          {!r.erp_return_token && <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>改</Button>}
+          {!r.erp_return_token && (r.status === 'checked-in'
             ? <Button size="small" icon={<RollbackOutlined />} onClick={() => handleCheckIn(r)}>取消</Button>
-            : <Button size="small" type="primary" ghost icon={<CheckCircleOutlined />} onClick={() => handleCheckIn(r)}>入库</Button>}
-          <Popconfirm title="确定删除?" onConfirm={() => handleDelete(r.id)}>
+            : <Button size="small" type="primary" ghost icon={<CheckCircleOutlined />} onClick={() => handleCheckIn(r)}>入库</Button>)}
+          {!r.erp_return_token && <Popconfirm title="确定删除?" onConfirm={() => handleDelete(r.id)}>
             <Button size="small" danger icon={<DeleteOutlined />}>删</Button>
-          </Popconfirm>
+          </Popconfirm>}
+          {r.erp_return_token && <Tag color={r.erp_review_status === 'returned' ? 'red' : 'blue'}>{r.erp_review_status === 'returned' ? '请在ERP打回待办修改' : '已重新送审'}</Tag>}
         </Space>
       ) },
   ];
 
   return (
     <div>
+      <ErpReceiptReturns workshop={workshop} onChanged={fetchList} />
       <Card size="small" style={{ marginBottom: 12 }}>
         <Space wrap>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新建入库单</Button>
@@ -263,7 +268,7 @@ export default function WarehouseOrders({ workshop = 'B' }) {
                 optionFilterProp="label"
                 options={completedOrders.map(o => ({
                   value: o.id,
-                  label: `${o.mold_no || o.product_code || '-'} · ${o.mold_name || ''} · ${o.color || ''} · 单号 ${o.order_no || '-'}`,
+                  label: `${o.mold_no || o.product_code || '-'} · ${o.mold_name || ''}${o.material_name ? ' · ' + o.material_name : ''} · ${o.color || ''} · 单号 ${o.order_no || '-'}`,
                 }))}
               />
             </Form.Item>
@@ -296,6 +301,10 @@ export default function WarehouseOrders({ workshop = 'B' }) {
               <Input placeholder="MCKP-17M-01 喷水" />
             </Form.Item>
           </Space.Compact>
+
+          <Form.Item name="material_name" label="物料名称（同模多个物料可全部填写）">
+            <Input.TextArea rows={2} maxLength={4000} />
+          </Form.Item>
 
           <Space.Compact style={{ width: '100%' }}>
             <Form.Item name="color" label="颜色" style={{ width: '50%' }}>

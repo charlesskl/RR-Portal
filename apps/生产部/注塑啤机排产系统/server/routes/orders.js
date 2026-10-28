@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const db = require('../db/connection');
+router.use(require('../middleware/materialName'));
 
 const uploadDir = process.env.DATA_PATH
   ? path.join(process.env.DATA_PATH, 'uploads')
@@ -21,14 +22,14 @@ function stmts() {
         INSERT INTO orders (product_code, mold_no, mold_name, color, color_powder_no,
           material_type, shot_weight, material_kg, sprue_pct, ratio_pct,
           quantity_needed, accumulated, cavity, cycle_time, order_no,
-          is_three_plate, packing_qty, import_batch, source_file, status, order_notes, serial_no, workshop)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          is_three_plate, packing_qty, import_batch, source_file, status, order_notes, serial_no, workshop, material_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `),
       update: db.prepare(`
         UPDATE orders SET product_code=?, mold_no=?, mold_name=?, color=?, color_powder_no=?,
           material_type=?, shot_weight=?, material_kg=?, sprue_pct=?, ratio_pct=?,
           quantity_needed=?, accumulated=?, cavity=?, cycle_time=?, order_no=?,
-          is_three_plate=?, packing_qty=?, status=?, order_notes=?, serial_no=?
+          is_three_plate=?, packing_qty=?, status=?, order_notes=?, serial_no=?, material_name=?
         WHERE id=?
       `),
       deleteOne: db.prepare('DELETE FROM orders WHERE id = ?'),
@@ -64,6 +65,7 @@ function normalizeImportRow(row = {}, defaults = {}) {
     product_code: cleanText(row.product_code, 120),
     mold_no: cleanText(row.mold_no, 160),
     mold_name: cleanText(row.mold_name, 300),
+    material_name: row.material_name ?? null,
     color: cleanText(row.color, 120),
     color_powder_no: cleanText(row.color_powder_no, 120),
     material_type: cleanText(row.material_type, 200),
@@ -179,7 +181,7 @@ function insertImportRows(rows, defaults = {}) {
         o.shot_weight, o.material_kg, o.sprue_pct, o.ratio_pct,
         o.quantity_needed, o.accumulated, o.cavity, o.cycle_time,
         o.order_no, o.is_three_plate, o.packing_qty,
-        batch, o.source_file, 'pending', o.order_notes, o.serial_no, o.workshop
+        batch, o.source_file, 'pending', o.order_notes, o.serial_no, o.workshop, o.material_name
       );
       insertedIds.push(Number(result.lastInsertRowid));
     }
@@ -215,7 +217,7 @@ router.post('/', (req, res) => {
       o.quantity_needed || 0, o.accumulated || 0, o.cavity || 1, o.cycle_time || 0,
       o.order_no || '', o.is_three_plate || 0, o.packing_qty || 0,
       o.import_batch || '', o.source_file || '', o.status || 'pending', o.order_notes || '',
-      o.serial_no || '', o.workshop || 'B'
+      o.serial_no || '', o.workshop || 'B', o.material_name ?? null
     );
     res.json({ id: result.lastInsertRowid, ...o });
   } catch (err) {
@@ -287,6 +289,7 @@ router.put('/:id', (req, res) => {
       o.status ?? existing.status,
       o.order_notes ?? existing.order_notes,
       o.serial_no ?? existing.serial_no,
+      o.material_name === undefined ? existing.material_name : o.material_name,
       req.params.id
     );
     res.json({ id: Number(req.params.id), ...o });

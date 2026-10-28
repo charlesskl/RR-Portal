@@ -1,4 +1,5 @@
 const db = require('./connection');
+const { initErpReceiptReview } = require('../services/erpReceiptReview');
 
 function initDatabase() {
   // ========== 机台配置表 ==========
@@ -402,6 +403,15 @@ function initDatabase() {
   ];
   for (const [col, type] of piWhExtras) {
     try { db.prepare(`ALTER TABLE pi_warehouse_orders ADD COLUMN ${col} ${type}`).run(); } catch(e){}
+  }
+
+  initErpReceiptReview(db);
+  // Names travel independently from the immutable ERP mold/source identity.
+  // Existing rows keep NULL; no guessing or backfill by mold number.
+  for (const table of ['orders', 'pi_warehouse_orders']) {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (!columns.some(column => column.name === 'material_name'))
+      db.exec(`ALTER TABLE ${table} ADD COLUMN material_name TEXT`);
   }
 
   // Migrations

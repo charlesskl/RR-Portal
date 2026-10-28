@@ -242,13 +242,11 @@ async function exportScheduleExcel(scheduleId) {
       notesCell.font = { size: 10, bold: true, color: { argb: 'FFFF0000' }, name: '宋体' };
     }
 
-    // 交替行底色（不覆盖已有填充色的单元格）
-    if (rowNum % 2 === 1) {
-      for (let c = 1; c <= 25; c++) {
-        const cell = row.getCell(c);
-        if (!cell.fill || !cell.fill.fgColor || cell.fill.fgColor.argb === 'FF000000') {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
-        }
+    // 数据行统一白色底（保留累计数的橙色高亮）
+    for (let c = 1; c <= 25; c++) {
+      const cell = row.getCell(c);
+      if (!cell.fill || !cell.fill.fgColor || cell.fill.fgColor.argb === 'FF000000') {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
       }
     }
 
@@ -457,12 +455,11 @@ function writeScheduleSheet(ws, schedule, items, machineMap, wsName) {
       row.getCell(19).font = { size: 10, bold: true, color: { argb: 'FFFF0000' }, name: '宋体' };
     }
 
-    if (rowNum % 2 === 1) {
-      for (let c = 1; c <= 25; c++) {
-        const cell = row.getCell(c);
-        if (!cell.fill || !cell.fill.fgColor || cell.fill.fgColor.argb === 'FF000000') {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
-        }
+    // 数据行统一白色底（保留累计数的橙色高亮）
+    for (let c = 1; c <= 25; c++) {
+      const cell = row.getCell(c);
+      if (!cell.fill || !cell.fill.fgColor || cell.fill.fgColor.argb === 'FF000000') {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
       }
     }
     row.height = 22;

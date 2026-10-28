@@ -139,7 +139,7 @@ model ProductionLine {
   factoryId          String           @default("XINGXIN")
   leaderName         String? // 拉长名
   craftType          String           @default("移印") // 工艺类型：手喷 / 移印 / 自动喷 / UV（整条拉一种工艺；机台默认继承）
-  dailyCapacityLimit Int              @default(0) // 该拉一天产能上限（件）；0=不卡。A自动喷30万/C移印30万/UV40万/B手喷20万
+  dailyCapacityLimit Int              @default(0) // 该拉一天产能上限（件）；0=不卡。B自动喷30万/C移印30万/UV40万/A手喷20万
   isActive           Boolean          @default(true)
   machines           Machine[]
   plans              ProductionPlan[]

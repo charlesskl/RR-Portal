@@ -190,7 +190,7 @@ export default function BasicDataManager({ lines, machines, holidays, craftAlias
         <>
           {/* 新增拉别：含工艺类型下拉 */}
           <div className="flex gap-2 mb-4 flex-wrap items-center">
-            <input className={INPUT} placeholder="拉别名（如 A拉：自动喷）" value={newLine.name} onChange={(e) => setNewLine({ ...newLine, name: e.target.value })} />
+            <input className={INPUT} placeholder="拉别名（如 A拉：手喷）" value={newLine.name} onChange={(e) => setNewLine({ ...newLine, name: e.target.value })} />
             <input className={INPUT} placeholder="拉长名（选填）" value={newLine.leaderName} onChange={(e) => setNewLine({ ...newLine, leaderName: e.target.value })} />
             <select className={INPUT} value={newLine.craftType} onChange={(e) => {
               const craft = e.target.value;

@@ -39,6 +39,7 @@ public class AppDbContext : DbContext
     public DbSet<EquipmentKind> EquipmentKinds => Set<EquipmentKind>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderPartQty> OrderPartQtys => Set<OrderPartQty>();
+    public DbSet<OrderMaterial> OrderMaterials => Set<OrderMaterial>();
     public DbSet<ProductionPlan> ProductionPlans => Set<ProductionPlan>();
     public DbSet<Holiday> Holidays => Set<Holiday>();
     public DbSet<InventoryMove> InventoryMoves => Set<InventoryMove>();
@@ -246,6 +247,26 @@ public class AppDbContext : DbContext
         ia.Property(x => x.UpdatedBy).HasColumnName("updatedBy");
         ia.Property(x => x.Remark).HasColumnName("remark");
 
+        var material = b.Entity<OrderMaterial>();
+        material.ToTable("order_materials");
+        material.HasIndex(x => new { x.FactoryId, x.OrderId, x.PartName }).IsUnique();
+        material.HasOne(x => x.Order).WithMany().HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
+        material.Property(x => x.FactoryId).HasColumnName("factoryId");
+        material.Property(x => x.OrderId).HasColumnName("orderId");
+        material.Property(x => x.PartName).HasColumnName("partName");
+        material.Property(x => x.ArrivedQty).HasColumnName("arrivedQty");
+        material.Property(x => x.ExpectedDate).HasColumnName("expectedDate").HasConversion(NullableMsConverter);
+        material.Property(x => x.ActualDate).HasColumnName("actualDate").HasConversion(NullableMsConverter);
+        material.Property(x => x.Remark).HasColumnName("remark");
+        material.Property(x => x.Source).HasColumnName("source");
+        material.Property(x => x.AutoScheduleEnabled).HasColumnName("autoScheduleEnabled");
+        material.Property(x => x.Version).HasColumnName("version").IsConcurrencyToken();
+        material.Property(x => x.UpdatedAt).HasColumnName("updatedAt").HasConversion(MsConverter);
+        material.Property(x => x.UpdatedBy).HasColumnName("updatedBy");
+        material.Property(x => x.LastReflowDate).HasColumnName("lastReflowDate").HasConversion(NullableMsConverter);
+        material.Property(x => x.Configuration).HasColumnName("configuration");
+        material.Property(x => x.History).HasColumnName("history");
+
         // 厂区数据隔离统一放在数据库查询层，避免任何接口漏写 Where 条件。
         // 管理员的用户管理始终显示全部账号，不受当前业务厂区选择影响。
         u.HasQueryFilter(x => CanSeeAllFactories || IsAdmin || x.FactoryId == CurrentFactoryId);
@@ -255,6 +276,7 @@ public class AppDbContext : DbContext
         pl.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
         im.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
         ia.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
+        material.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
     }
 
     public override int SaveChanges()
@@ -282,6 +304,7 @@ public class AppDbContext : DbContext
                 ProductionPlan x => x.FactoryId,
                 InventoryMove x => x.FactoryId,
                 InboundApplication x => x.FactoryId,
+                OrderMaterial x => x.FactoryId,
                 _ => null,
             };
             if (factory is null) continue;
@@ -323,6 +346,7 @@ public class AppDbContext : DbContext
             case ProductionPlan x: x.FactoryId = factoryId; break;
             case InventoryMove x: x.FactoryId = factoryId; break;
             case InboundApplication x: x.FactoryId = factoryId; break;
+            case OrderMaterial x: x.FactoryId = factoryId; break;
         }
     }
 

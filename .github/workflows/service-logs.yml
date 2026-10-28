@@ -1,4 +1,4 @@
-name: PR 1027 Clone Diagnostic
+name: PR 1027 Clone Constraint Definition
 on:
   workflow_dispatch:
     inputs:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '254fbf242f73da5b2bcfcdf4923aabe2af7116412ff670550f1af7c9801e76f0'
+  SCOPED_RELEASE_HELPER_SHA256: '9c8cc2bc0593afc761fabfe0c4d8ede64725b71f5ae87b02c6bd3a514e81444d'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -53,8 +53,8 @@ jobs:
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1027-clone-diagnostic-20261028:refs/remotes/origin/ops/pr-1027-clone-diagnostic-20261028 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1027-clone-diagnostic-20261028)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            scoped_release_tmp=$(mktemp -d /tmp/pr1027-clone-diagnostic.XXXXXX)
+            scoped_release_tmp=$(mktemp -d /tmp/pr1027-clone-definition.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1027-clone-diagnostic.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 254fbf242f73da5b2bcfcdf4923aabe2af7116412ff670550f1af7c9801e76f0 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1027-clone-definition.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 9c8cc2bc0593afc761fabfe0c4d8ede64725b71f5ae87b02c6bd3a514e81444d ]] || exit 1
             timeout --signal=TERM --kill-after=20s 3m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

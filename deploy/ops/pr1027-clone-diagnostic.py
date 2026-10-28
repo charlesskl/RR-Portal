@@ -4,7 +4,7 @@ Mutable private PGDATA is neither traversed nor described as sealed/static.
 No raw SQL, rows, credentials, environment, log bodies or object definitions output.
 """
 import os,json,pathlib,re,stat,subprocess,sys,hashlib,collections
-EXECUTE=True
+EXECUTE=False
 BRANCH='refs/heads/ops/pr-1027-clone-diagnostic-20261028'
 ROOT=pathlib.Path('/opt/rr-portal')
 PREPARE=ROOT/'deploy/backups/pr1027-indo-20261028/prepare'

@@ -80,7 +80,26 @@ export interface ProductDetail extends Product {
   materials?: Material[]
 }
 
+/** Read-only import evidence, stored only in a shipment's material snapshot. */
+export interface ShipmentSourceCell {
+  address: string
+  label: string
+  value: string | number | boolean | null
+  display: string
+  formula?: string
+  error?: boolean
+}
+export interface ShipmentImportSource {
+  file?: string
+  sheet: string
+  row: number
+  cells: ShipmentSourceCell[]
+  context: ShipmentSourceCell[]
+}
+
 export interface Material {
+  import_source?: ShipmentImportSource
+  department?: string
   id?: number
   tool_kind?: '工具' | '机器设备'
   related_product_code?: string

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { App, Button, Space, Table, Typography } from 'antd'
 import type { TableProps } from 'antd'
 import { parseSheetClipboard, sheetFillDownEdits, sheetPasteEdits, type SheetEdit, type SheetPoint } from '../utils/shipmentSheet'
+import { sheetArrowKeys, sheetArrowPoint, sheetArrowUsesEditor } from '../utils/shipmentSheetNavigation'
 
 type Props<T extends object> = TableProps<T> & {
   fields: readonly string[]
@@ -38,13 +39,13 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     && row >= Math.min(anchor.row, end.row) && row <= Math.max(anchor.row, end.row)
     && col >= Math.min(anchor.col, end.col) && col <= Math.max(anchor.col, end.col)
   const cellAt = (p: SheetPoint) => root.current?.querySelector<HTMLElement>(`td[data-sheet-row="${p.row}"][data-sheet-col="${p.col}"]`) || null
-  const focus = (p: SheetPoint) => {
+  const focus = (p: SheetPoint, edit = true) => {
     const cell = cellAt(p)
     if (!cell) return
     setAnchor(p); setEnd(p)
     cell.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    const input = cell.querySelector<HTMLElement>('input:not([readonly]):not([disabled]),textarea:not([readonly]):not([disabled]),input[role="combobox"]:not([disabled])')
-    ;(input || cell).focus()
+    const input = edit ? cell.querySelector<HTMLElement>('input:not([readonly]):not([disabled]),textarea:not([readonly]):not([disabled]),input[role="combobox"]:not([disabled])') : null
+    ;(input || cell).focus({ preventScroll: true })
   }
   const fillDown = () => {
     try { onEdits(sheetFillDownEdits(anchor, end, count, fields, valueAt)) }
@@ -80,7 +81,12 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     onClickCapture={event => {
       const p = point(event.target); if (!p) return
       if (event.shiftKey && anchor) { event.preventDefault(); event.stopPropagation(); setEnd(p) }
-      else { setAnchor(p); setEnd(p) }
+      else {
+        setAnchor(p); setEnd(p)
+        // Plain/read-only cells must receive focus too, not only their inputs.
+        if (!(event.target as HTMLElement).closest('input,textarea,button,a,select,[contenteditable="true"],.ant-select,.ant-picker,.ant-input-number'))
+          cellAt(p)?.focus({ preventScroll: true })
+      }
     }}
     onMouseDownCapture={event => { if (event.shiftKey && anchor && point(event.target)) event.preventDefault() }}
     onPasteCapture={event => {
@@ -114,11 +120,28 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
         return
       }
       const p = point(event.target); if (!p) return
+      const target = event.target as HTMLElement
       // Existing pickers in protected columns (new-row material selection,
       // category selection) keep their own keyboard behaviour.
-      if (!fields[p.col] && (event.target as HTMLElement).closest('input,textarea,button,[role="combobox"]')) return
+      const protectedControl = target.closest('input,textarea,button,[role="combobox"]')
+      const readOnlyDisplay = target.closest('input[readonly],textarea[readonly]') && !target.closest('.ant-select,.ant-picker')
+      if (!fields[p.col] && protectedControl && !(sheetArrowKeys.has(event.key) && readOnlyDisplay)) return
       if (event.key === 'Escape') { setAnchor(null); setEnd(null); return }
-      if ((event.target as HTMLElement).getAttribute('aria-expanded') === 'true') return
+      if (target.getAttribute('aria-expanded') === 'true' || target.closest('[aria-expanded="true"]')
+        || cellAt(p)?.querySelector('[aria-expanded="true"]')) return
+      if (event.key === 'F2' && fields[p.col] && editableAt?.(p.row, fields[p.col]) !== false) {
+        event.preventDefault(); event.stopPropagation(); focus(p); return
+      }
+      if (sheetArrowKeys.has(event.key)) {
+        if (event.ctrlKey || event.metaKey || event.altKey || (event.shiftKey && target.closest('input,textarea'))
+          || sheetArrowUsesEditor(target, event.key)) return
+        event.preventDefault(); event.stopPropagation()
+        const next = sheetArrowPoint(p, event.key, count, fields.length, candidate => !!cellAt(candidate))
+        // Focus the cell, so following arrow presses keep navigating the grid.
+        // Leaving a numeric editor still triggers its normal blur/commit flow.
+        if (next) focus(next, false)
+        return
+      }
       if (event.key === 'Enter' && (event.target as HTMLElement).closest('.ant-picker')) return
       if (event.key !== 'Tab' && event.key !== 'Enter') return
       if (event.key === 'Enter' && (event.altKey || event.ctrlKey || event.metaKey)) return
@@ -137,7 +160,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     }}>
     <Space wrap className="shipment-sheet-toolbar">
       <Typography.Text strong>表格编辑</Typography.Text>
-      <Typography.Text type="secondary">Tab 左右切换 · Enter 下一行 · Shift 点击选区 · Ctrl/Cmd+C 复制 · 粘贴 Excel 多格数据</Typography.Text>
+      <Typography.Text type="secondary">↑↓←→ 跳转单元格 · F2 编辑 · Tab 左右切换 · Enter 下一行 · Shift 点击选区 · Ctrl/Cmd+C 复制 · 粘贴 Excel 多格数据</Typography.Text>
       <Button size="small" onClick={fillDown} title="Ctrl/⌘D：单选复制上一行；多行选区按首行向下填充">向下填充选区</Button>
       <Typography.Text type="secondary">Ctrl/⌘D：单选复制上一行，多行按首行填充</Typography.Text>
       <Typography.Text type="secondary">灰底列禁止批量覆盖；拖动表头右边线调整列宽。修改后请保存。</Typography.Text>

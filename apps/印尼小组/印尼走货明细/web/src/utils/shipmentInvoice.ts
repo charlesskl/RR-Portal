@@ -1,5 +1,6 @@
 import type { Material } from '../api/client'
 import { normalizeToolCurrency } from './toolPrice'
+import { shipmentDeclarationPrice, type ShipmentPurchaseItem } from './shipmentPurchase'
 
 // Invoice calculations must not use the legacy display/sort fallback to 华胜益.
 export function invoiceCustomsCompany(item: { customs_company?: string }, material?: Material) {
@@ -23,13 +24,13 @@ export function customsInvoiceFormula(excelRow: number, customsCompany: string, 
 }
 
 // Input must already be in the shared export order.
-export function withShipmentInvoicePrices<T extends { material_id?: number; customs_company?: string; price?: number; kg?: number; currency?: string }>(
+export function withShipmentInvoicePrices<T extends ShipmentPurchaseItem & { material_id?: number; customs_company?: string; currency?: string }>(
   items: readonly T[], materials: ReadonlyMap<number, Material>,
 ) {
   const company = (it: T) => invoiceCustomsCompany(it, it.material_id == null ? undefined : materials.get(it.material_id))
   return items.map((it, i) => ({
     ...it,
-    invoice_price: customsInvoicePrice(it.price, company(it), it.kg,
+    invoice_price: customsInvoicePrice(shipmentDeclarationPrice(it), company(it), it.kg,
       !items.slice(i + 1).some(next => company(next) === company(it)), it.currency),
   }))
 }

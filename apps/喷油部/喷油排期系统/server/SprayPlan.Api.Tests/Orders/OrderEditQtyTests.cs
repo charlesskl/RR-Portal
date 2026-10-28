@@ -6,8 +6,7 @@ using Xunit;
 
 namespace SprayPlan.Api.Tests.Orders;
 
-// 订单明细数量编辑：仅「已接单(received)且无排期计划」的订单可改数量（用于修正导入识别错误）。
-// 一旦进入排期/实绩，数量锁死。
+// 订单明细需求可独立更正，既有计划保留。
 public class OrderEditQtyTests : IAsyncLifetime
 {
     private ApiFactory _f = null!;
@@ -63,7 +62,7 @@ public class OrderEditQtyTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Patch_QtyOnScheduledOrder_Rejected()
+    public async Task Patch_QtyOnScheduledOrder_Updates()
     {
         await Login("clerk", "clerk123");
         var pid = await CreateProductAsync("Q2");
@@ -77,11 +76,11 @@ public class OrderEditQtyTests : IAsyncLifetime
 
         var r = await _c.PatchAsJsonAsync($"/api/orders/{oid}",
             new { partQtys = new[] { new { id = qid, qty = 777 } } });
-        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
     }
 
     [Fact]
-    public async Task Detail_QtyEditableFlag_TrueWhenReceivedNoPlan_FalseWithPlan()
+    public async Task Detail_QtyEditableFlag_RemainsTrueWithPlan()
     {
         await Login("clerk", "clerk123");
         var pid = await CreateProductAsync("QF");
@@ -91,7 +90,7 @@ public class OrderEditQtyTests : IAsyncLifetime
         var d1 = await (await _c.GetAsync($"/api/orders/{oid}")).Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(d1.GetProperty("qtyEditable").GetBoolean());
 
-        // 加一条排期计划 → qtyEditable=false
+        // 加一条排期计划后仍允许更正需求。
         await _f.WithDbAsync(async db =>
         {
             var lineId = db.ProductionLines.Select(l => l.Id).First();
@@ -105,17 +104,17 @@ public class OrderEditQtyTests : IAsyncLifetime
             await db.SaveChangesAsync();
         });
         var d2 = await (await _c.GetAsync($"/api/orders/{oid}")).Content.ReadFromJsonAsync<JsonElement>();
-        Assert.False(d2.GetProperty("qtyEditable").GetBoolean());
+        Assert.True(d2.GetProperty("qtyEditable").GetBoolean());
     }
 
     [Fact]
-    public async Task Patch_QtyOnOrderWithPlan_Rejected()
+    public async Task Patch_QtyOnOrderWithPlan_Updates()
     {
         await Login("clerk", "clerk123");
         var pid = await CreateProductAsync("Q3");
         var oid = await CreateOrderAsync("QO3", pid);
         var qid = await FirstPartQtyIdAsync(oid);
-        // 直插一条该订单的排期计划（即便状态仍是 received，也应锁数量）
+        // 即使已有排期计划，仍允许更正需求。
         await _f.WithDbAsync(async db =>
         {
             var lineId = db.ProductionLines.Select(l => l.Id).First();   // 用 Seed 种的拉别，满足外键
@@ -131,6 +130,6 @@ public class OrderEditQtyTests : IAsyncLifetime
 
         var r = await _c.PatchAsJsonAsync($"/api/orders/{oid}",
             new { partQtys = new[] { new { id = qid, qty = 888 } } });
-        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
     }
 }

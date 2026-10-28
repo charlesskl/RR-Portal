@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  App, AutoComplete, Button, Card, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm,
+  App, AutoComplete, Button, Card, Checkbox, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm,
   Row, Select, Space, Table, Tag, Typography,
 } from 'antd'
 import dayjs from 'dayjs'
@@ -10,8 +10,11 @@ import { sortShipmentItems, cartonLayout, cartonGroupKey, shipmentScope } from '
 import { withShipmentInvoicePrices } from '../utils/shipmentInvoice'
 import { consolidateShipmentItems } from '../utils/shipmentConsolidation'
 import { createCartonGroupId } from '../utils/cartonGroupId'
-import { shipmentPurchaseAmount } from '../utils/shipmentPurchase'
+import { shipmentPurchaseAmount, shipmentUsesDeclarationPrice } from '../utils/shipmentPurchase'
 import ShipmentImport from '../components/ShipmentImport'
+import ShipmentSheetTable from '../components/ShipmentSheetTable'
+import { applyShipmentSheetEdits, shipmentSheetFields, type SheetEdit } from '../utils/shipmentSheet'
+import { linkShipmentOutbound, remainingOutboundQuantity } from '../utils/shipmentOutboundLink'
 import type { ShipmentImportItem } from '../utils/shipmentImport'
 import { MATERIAL_CATEGORIES } from '../utils/engineeringImport'
 import { HUASHENGYI_FULL_NAME } from '../utils/supplierProfiles'
@@ -200,6 +203,13 @@ export default function ShipmentsPage() {
   const [outOpen, setOutOpen] = useState(false)
   const [outFilter, setOutFilter] = useState('')
   const [outSel, setOutSel] = useState<React.Key[]>([])
+  const [linkRowKey, setLinkRowKey] = useState<number | null>(null)
+  const [linkRows, setLinkRows] = useState<OutByMat[]>([])
+  const [linkFilter, setLinkFilter] = useState('')
+  const [linkSelected, setLinkSelected] = useState<number | null>(null)
+  const [linkConfirmed, setLinkConfirmed] = useState(false)
+  const [linkBusy, setLinkBusy] = useState(false)
+  const linkRequest = useRef(0)
   // 按货号选物料（补充）
   const [manOpen, setManOpen] = useState(false)
   const [toolOpen, setToolOpen] = useState(false)
@@ -224,6 +234,9 @@ export default function ShipmentsPage() {
   }, [baseMatMap, rawItems])
   const orderedItems = (values: ShipmentItem[]) => withShipmentInvoicePrices(sortShipmentItems(values, matMap), matMap).map((it, i) => ({ ...it, seq: i + 1 }))
   const items = useMemo(() => orderedItems(rawItems), [rawItems, matMap])
+  const sheetRevision = useRef({ rawItems, matMap })
+  const sheetConfirmOpen = useRef(false)
+  sheetRevision.current = { rawItems, matMap }
   const consolidatedItems = useMemo(() => withShipmentInvoicePrices(
     sortShipmentItems(consolidateShipmentItems(items, matMap), matMap), matMap,
   ), [items, matMap])
@@ -457,6 +470,56 @@ export default function ShipmentsPage() {
       setOutRows(Array.isArray(data) ? data : [])
     } catch {}
   }
+  function closeOutboundLink() {
+    linkRequest.current++
+    setLinkRowKey(null); setLinkRows([]); setLinkSelected(null); setLinkConfirmed(false); setLinkBusy(false)
+  }
+  async function openOutboundLink(row: ShipmentItem) {
+    const request = ++linkRequest.current
+    setLinkRowKey(row._rowKey!); setLinkRows([]); setLinkSelected(null); setLinkConfirmed(false); setLinkBusy(true)
+    const material = matMap.get(row.material_id!)
+    setLinkFilter(row.material_snapshot && !row.material_snapshot.id ? material?.product_code || material?.name_zh || '' : '')
+    try {
+      const { data } = await api.get<OutByMat[]>('/outbound/allocatable', { params: editing?.id ? { shipment_id: editing.id } : {} })
+      if (request === linkRequest.current) setLinkRows(Array.isArray(data) ? data : [])
+    } catch { /* API interceptor reports failure; stale candidates have been cleared. */ }
+    finally { if (request === linkRequest.current) setLinkBusy(false) }
+  }
+  async function confirmOutboundLink() {
+    if (linkRowKey == null || !linkSelected || !linkConfirmed || linkBusy) return
+    const request = linkRequest.current
+    const revision = { ...sheetRevision.current }
+    setLinkBusy(true)
+    try {
+      // Re-read balance at confirmation; the server checks again under lock on Save.
+      const { data } = await api.get<OutByMat[]>('/outbound/allocatable', { params: editing?.id ? { shipment_id: editing.id } : {} })
+      const source = data.find(r => r.outbound_id === linkSelected)
+      if (!source?.material_id) throw new Error('该出库已不可分配或缺少物料，请重新选择')
+      const { data: materials } = await api.get<Material[]>('/materials/by-ids', { params: { ids: String(source.material_id) } })
+      const material = materials.find(m => m.id === source.material_id)
+      if (!material) throw new Error('出库对应物料不存在，请刷新重试')
+      if (request !== linkRequest.current) return
+      if (revision.rawItems !== sheetRevision.current.rawItems || revision.matMap !== sheetRevision.current.matMap)
+        throw new Error('明细已变化，请重新核对后关联')
+      const previous = linkRows.find(r => r.outbound_id === linkSelected)
+      if (!previous || ['material_id', 'po_no', 'po_date', 'supplier', 'price', 'currency', 'purchase_unit', 'customs_company', 'code', 'name_zh', 'spec'].some(key =>
+        previous[key as keyof OutByMat] !== source[key as keyof OutByMat])) {
+        setLinkRows(data); setLinkConfirmed(false)
+        throw new Error('出库资料已更新，请核对后重新确认')
+      }
+      const next = linkShipmentOutbound(revision.rawItems, linkRowKey, source, material, revision.matMap)
+      const original = revision.rawItems.find(r => r._rowKey === linkRowKey)!
+      setMatMap(current => {
+        const map = new Map(current)
+        if (original.material_snapshot) map.delete(original.material_id!)
+        else if (!map.has(material.id!)) map.set(material.id!, material)
+        return map
+      })
+      setItems(next); setEditorDirty(true); applyPartition(next); closeOutboundLink()
+      message.success(`已关联 OUT-${source.outbound_id}，装箱资料已保留，请保存走货单`)
+    } catch (error: any) { if (request === linkRequest.current) message.error(error?.message || '关联失败，请重试') }
+    finally { if (request === linkRequest.current) setLinkBusy(false) }
+  }
   async function loadProductCodes() {
     try { const { data } = await api.get<{ code: string }[]>('/products'); setProductCodes((data || []).map(p => p.code).filter(Boolean)) } catch {}
   }
@@ -646,6 +709,7 @@ export default function ShipmentsPage() {
   }
 
   function closeEditor() {
+    closeOutboundLink()
     setShowBatchDetails(false)
     setEditing(null)
     setCreating(false)
@@ -745,7 +809,8 @@ export default function ShipmentsPage() {
         warn.push(tag + `每箱数量分段合计 ${packing.totalQty} 与送货数量 ${it.qty} 不一致`)
       if (!(Number(it.price) > 0)) hard.push(tag + '采购单价必须 > 0')
       if (decimals(it.kg) > 4) hard.push(tag + '送货 KG 小数超过 4 位')
-      if (it.price && decimals(it.price) > 4) hard.push(tag + '采购单价小数超过 4 位')
+      // Per-piece purchase prices may need more than four decimal places.
+      // Display precision must not reject or round the source PO price.
       if (it.pallet && !/^\d+-\d+\/.+/.test(it.pallet) && !/^\d+-\d+$/.test(it.pallet))
         hard.push(tag + '卡板格式不合法（"1-22/2卡" 或 "1-22"）')
       const m = it.material_id != null ? matById.get(it.material_id) : null
@@ -857,6 +922,39 @@ export default function ShipmentsPage() {
       return its.map((it, idx) => (idx === i || (k === 'cartons' && key && cartonGroupKey(it, matMap) === key))
         ? { ...it, [k]: v, carton_group: ['supplier', 'customs_company', 'material_id'].includes(k) ? undefined : it.carton_group } : it)
     })
+  }
+
+  function editSheetCells(edits: SheetEdit[]) {
+    if (!edits.length || sheetConfirmOpen.current) return
+    try {
+      for (const edit of edits) if (edit.field === 'customs_company' && edit.value.trim()
+        && !customsOptions.some(option => option.value === edit.value.trim()))
+        throw new Error(`第 ${edit.row + 1} 行：报关出口公司不在可选名单中，请先维护供应商资料`)
+      const result = applyShipmentSheetEdits(items, matMap, edits)
+      const original = { ...sheetRevision.current }
+      sheetConfirmOpen.current = true
+      Modal.confirm({
+        title: `确认写入 ${edits.length} 个单元格？`,
+        content: <Space direction="vertical">
+          <span>涉及 {new Set(edits.map(edit => edit.row)).size} 行。数量、重量及箱数按现有规则联动计算，填写的空格会清空文字或将数字设为 0。确认后仍需保存走货单。</span>
+          {result.dirtyMaterials.size > 0 && <Typography.Text type="warning">单位、尺寸、单个净重等属于物料资料；同物料所有行同步更新，保存时会写回货号库。Excel 导入资料仅更新本单。</Typography.Text>}
+        </Space>,
+        okText: '确认写入', cancelText: '取消',
+        afterClose: () => { sheetConfirmOpen.current = false },
+        onOk: () => {
+          if (sheetRevision.current.rawItems !== original.rawItems || sheetRevision.current.matMap !== original.matMap) {
+            message.warning('明细已变化，请重新选择粘贴位置'); return
+          }
+          setItems(result.items)
+          if (result.dirtyMaterials.size) {
+            setMatMap(result.materials)
+            setDirtyMatIds(current => new Set([...current, ...result.dirtyMaterials]))
+          }
+          setEditorDirty(true)
+          message.success(`已写入 ${edits.length} 个单元格，请核对后保存`)
+        },
+      })
+    } catch (error) { message.error((error as Error).message) }
   }
   // 送货重量按所选单位：KGM 显示净重 KG，TNE/TON 显示净重吨数。
   function kgForItem(it: ShipmentItem, m: any): number {
@@ -1206,7 +1304,7 @@ export default function ShipmentsPage() {
         >
           {showConsolidated ? <>
             <Typography.Paragraph type="secondary">
-              同柜相同物料已汇总，导出使用同一汇总规则。出库分配仍按原批次保存；供应商、价格、单据或装箱资料不同的明细保留分行。
+              同柜相同物料已汇总，箱号、采购单号或采购日期不同也会合并显示及导出。不同单价按各批金额合计，原始采购和出库分配仍按批次保存；供应商、币种、合同、发票或其他装箱资料不同的明细保留分行。
             </Typography.Paragraph>
             <Table
               rowKey={r => String(r._rowKey)}
@@ -1230,14 +1328,29 @@ export default function ShipmentsPage() {
                 { title: '毛重总重', width: 110, render: (_, r) => calc(r).grossTotal.toFixed(2) },
                 { title: '净重总重', width: 110, render: (_, r) => calc(r).netTotal.toFixed(2) },
                 { title: '箱数', width: 80, render: (_, _r, i) => consolidatedCartons[i]?.count || 0 },
-                { title: '采购单价', width: 110, render: (_, r) => num(r.price).toFixed(4) },
+                { title: '箱号（全部批次）', dataIndex: 'carton_no', width: 180 },
+                { title: '采购单价（加权）', width: 140, render: (_, r) => num(r.price).toFixed(4) },
                 { title: '采购金额', width: 110, render: (_, r) => calc(r).purchaseAmount.toFixed(2) },
                 { title: '采购单号', dataIndex: 'po_no', width: 160 },
+                { title: '采购日期（全部批次）', width: 180, render: (_, r) => [...new Set(r.sources.map(source => source.po_date).filter(Boolean))].join(' / ') },
                 { title: '供应商', dataIndex: 'supplier', width: 180 },
                 { title: '操作', width: 110, fixed: 'right', render: () => <Button size="small" onClick={() => setShowBatchDetails(true)}>编辑批次</Button> },
               ]}
             />
-          </> : <Table
+          </> : <ShipmentSheetTable<ShipmentItem>
+            fields={shipmentSheetFields}
+            onEdits={editSheetCells}
+            rowOrder={items.map(item => item._rowKey).join(',')}
+            valueAt={(row, field) => {
+              const item = items[row]
+              const material = matMap.get(item?.material_id!)
+              // Copy/fill the value displayed by the existing editor, including its defaults.
+              if (field === 'currency') return item?.currency || '¥'
+              if (field === 'material:unit_kg') return material?.unit_kg || 'KGM'
+              if (field === 'weighing_qty') return effectiveWeighingQty(item, material)
+              return field.startsWith('material:') ? material?.[field.slice(9)]
+                : item?.[field as keyof ShipmentItem] as string | number | undefined
+            }}
             rowKey={r => String(r._rowKey)}
             rowSelection={{ selectedRowKeys: cartonSelection.map(String), onChange: keys => setCartonSelection(keys.map(Number)), fixed: true }}
             size="small"
@@ -1247,13 +1360,13 @@ export default function ShipmentsPage() {
             columns={[
               { title: '序号', dataIndex: 'seq', width: 50, fixed: 'left', align: 'center' },
               {
-                title: '出库来源', dataIndex: 'outbound_id', width: 95, fixed: 'left',
-                render: (v) => v
+                title: '出库来源', dataIndex: 'outbound_id', width: 115,
+                render: (v, r) => v
                   ? <Tag bordered={false} color="blue">OUT-{v}</Tag>
-                  : <Tag bordered={false}>未关联</Tag>,
+                  : <Space direction="vertical" size={0}><Tag bordered={false}>未关联</Tag><Button type="link" size="small" onClick={() => openOutboundLink(r)}>关联出库</Button></Space>,
               },
               {
-                title: '图片', width: 56, fixed: 'left', align: 'center',
+                title: '图片', width: 56, align: 'center',
                 render: (_v, r) => {
                   const m = r.material_id != null ? matMap.get(r.material_id) : null
                   return m?.image
@@ -1261,7 +1374,7 @@ export default function ShipmentsPage() {
                     : <span style={{ color: '#bbb', fontSize: 12 }}>无</span>
                 },
               },
-              { title: '物料ID', width: 80, fixed: 'left', render: (_v, r, i) => r.material_snapshot ? <Tag title="Excel 导入资料只保存在本次走货单">{r.material_snapshot.id || '导入'}</Tag> : fillable(i, 'material_id', <InputNumber size="small" controls={false} value={r.material_id} onChange={(v) => { patchItem(i, 'material_id', v); loadMatsForItems([v as number]) }} style={{ width: '100%' }} />) },
+              { title: '物料ID', width: 80, render: (_v, r, i) => r.material_snapshot ? <Tag title="Excel 导入资料只保存在本次走货单">{r.material_snapshot.id || '导入'}</Tag> : r.material_id ? <Tag>{r.material_id}</Tag> : <Input.Search size="small" placeholder="物料ID" enterButton="选" onSearch={value => { const id = Number(value); if (Number.isInteger(id) && id > 0) { patchItem(i, 'material_id', id); loadMatsForItems([id]) } else message.warning('请输入有效物料 ID') }} /> },
               { title: '产品中文名称', width: 160, fixed: 'left', render: (_v, r) => matMap.get(r.material_id!)?.name_zh ?? '' },
               { title: '货号', width: 100, fixed: 'left', render: (_v, r) => matMap.get(r.material_id!)?.product_code ?? '' },
               { title: '中国HSCODE', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.hs_cn ?? '' },
@@ -1286,7 +1399,7 @@ export default function ShipmentsPage() {
               } },
               { title: '单位', width: 130, render: (_v, r, i) => fillableMaterial(i, 'unit_kg', <Select size="small" value={matMap.get(r.material_id!)?.unit_kg || 'KGM'} options={UNIT_LIST.map(u => ({ value: u, label: u }))} onChange={(v) => patchMatDim(r.material_id, 'unit_kg', v)} style={{ width: '100%' }} />) },
               { title: '送货重量', width: 120, render: (_v, r, i) => fillable(i, 'kg', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.kg} onChange={(v) => patchItem(i, 'kg', v ?? 0)} style={{ width: '100%' }} />) },
-              { title: '送货数量', width: 90, render: (_v, r, i) => fillable(i, 'qty', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.qty} onChange={(v) => patchQtyOrPack(i, 'qty', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '送货数量', width: 120, render: (_v, r, i) => fillable(i, 'qty', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.qty} onChange={(v) => patchQtyOrPack(i, 'qty', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '单位', width: 60, align: 'center', render: (_v, r) => r.purchase_unit || (isPaperRope(matMap.get(r.material_id!)?.name_zh) ? '米' : '个') },
               { title: '毛重总重', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.grossTotal ? c.grossTotal.toFixed(2) : '' } },
               { title: '净重总重', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.netTotal ? c.netTotal.toFixed(2) : '' } },
@@ -1302,7 +1415,7 @@ export default function ShipmentsPage() {
               { title: '供应商', width: 160, render: (_v, r, i) => fillable(i, 'supplier', <Input size="small" value={r.supplier} onChange={(e) => patchItem(i, 'supplier', e.target.value)} />) },
               { title: '采购单日期', width: 130, render: (_v, r, i) => fillable(i, 'po_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.po_date ? dayjs(r.po_date) : null} onChange={(v) => patchItem(i, 'po_date', v ? v.format('YYYY-MM-DD') : '')} />) },
               { title: '采购单号', width: 130, render: (_v, r, i) => fillable(i, 'po_no', <Input size="small" value={r.po_no} onChange={(e) => patchItem(i, 'po_no', e.target.value)} />) },
-              { title: '采购单价', width: 100, render: (_v, r, i) => fillable(i, 'price', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.price} onChange={(v) => patchItem(i, 'price', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '采购单价', width: 100, render: (_v, r, i) => fillable(i, 'price', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.price} title={shipmentUsesDeclarationPrice(r) ? '导入单价：按送货重量/申报数量计价' : `原采购单价：按送货数量（${r.purchase_unit || '个'}）计价；导出时换算申报单位单价`} onChange={(v) => patchItem(i, 'price', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '币种', width: 90, render: (_v, r, i) => fillable(i, 'currency', <Select size="small" value={r.currency || '¥'} options={CURR} onChange={(v) => patchItem(i, 'currency', v)} style={{ width: '100%' }} />) },
               { title: '采购金额', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.purchaseAmount ? c.purchaseAmount.toFixed(2) : '' } },
               { title: '报关出口公司', width: 240, render: (_v, r, i) => fillable(i, 'customs_company',
@@ -1393,6 +1506,41 @@ export default function ShipmentsPage() {
       </Modal>
 
       {/* 从出库拉物料 */}
+      <Modal open={linkRowKey != null} title="给当前明细关联出库（不新增行）" width="90vw"
+        onCancel={closeOutboundLink} onOk={confirmOutboundLink}
+        okText="确认物料并关联" cancelText="取消" okButtonProps={{ loading: linkBusy, disabled: !linkSelected || !linkConfirmed || linkBusy }} destroyOnClose>
+        {(() => {
+          const row = items.find(r => r._rowKey === linkRowKey)
+          const m = row ? matMap.get(row.material_id!) : undefined
+          const knownId = row?.material_snapshot?.id || (!row?.material_snapshot ? row?.material_id : undefined)
+          return <>
+            <Typography.Paragraph>当前明细：{m?.product_code || '未填货号'} / {m?.name_zh || '未填物料'} / {m?.spec || '无规格'}；送货数量：{row?.qty ?? 0} {row?.purchase_unit || (isPaperRope(m?.name_zh) ? '米' : '个')}</Typography.Paragraph>
+            <Typography.Paragraph type="secondary">请核对对应物料与出库批次；关联按物料 ID，下方名称、规格为采购快照，可能与当前物料库不同。保留本行数量、重量、箱号、箱数、卡板和尺寸；PO、供应商、报关公司及采购价格按出库来源带入。关联不会重复扣库存，点击走货单“保存”后生效。</Typography.Paragraph>
+            {row?.material_snapshot && <Typography.Paragraph type="warning">这是导入资料：请先确认下方所选物料与当前行一致。确认后绑定真实物料 ID，导入的装箱资料仍保留在本单，不写回物料库。</Typography.Paragraph>}
+            <Input.Search allowClear disabled={linkBusy} value={linkFilter} placeholder="搜索货号 / 名称 / 规格 / PO；可清空搜索查看候选" style={{ width: 480, maxWidth: '100%', marginBottom: 12 }} onChange={e => { setLinkFilter(e.target.value); setLinkSelected(null); setLinkConfirmed(false) }} />
+            <Table<OutByMat> size="small" loading={linkBusy} rowKey="outbound_id" scroll={{ x: 1250, y: 350 }} pagination={{ pageSize: 10 }}
+              locale={{ emptyText: '暂无符合条件的可分配出库。请核对搜索条件，或先在出库页面完成对应物料的出库。' }}
+              dataSource={linkRows.filter(r => (!knownId || knownId < 0 || r.material_id === knownId) &&
+                [r.code, r.name_zh, r.spec, r.po_no, String(r.outbound_id)].join(' ').toLowerCase().includes(linkFilter.trim().toLowerCase()))}
+              rowSelection={{ type: 'radio', selectedRowKeys: linkSelected ? [linkSelected] : [],
+                onChange: keys => { setLinkSelected(Number(keys[0]) || null); setLinkConfirmed(false) },
+                getCheckboxProps: r => ({ disabled: linkBusy || !r.material_id || remainingOutboundQuantity(items, linkRowKey!, r) < (row?.qty || 0) }) }}
+              columns={[
+                { title: '出库记录', dataIndex: 'outbound_id', render: v => `OUT-${v}` },
+                { title: '物料 ID', dataIndex: 'material_id' }, { title: '货号', dataIndex: 'code' },
+                { title: '采购物料名称', dataIndex: 'name_zh' }, { title: '采购规格', dataIndex: 'spec' },
+                { title: 'PO', dataIndex: 'po_no' }, { title: '供应商', dataIndex: 'supplier' },
+                { title: '出库日期', dataIndex: 'out_date', render: v => v?.slice(0, 10) },
+                { title: '本行可分配', render: (_, r) => remainingOutboundQuantity(items, linkRowKey!, r) },
+                { title: '数量单位', dataIndex: 'purchase_unit', render: (v, r) => v || (isPaperRope(r.name_zh) ? '米' : '个') },
+                { title: '采购单价', dataIndex: 'price' }, { title: '币种', dataIndex: 'currency' },
+              ]} />
+            <Typography.Paragraph type="secondary">本行可分配量已扣除其他柜及当前柜其他明细的占用；不足时请先调整或拆分本行数量，不会自动截减。</Typography.Paragraph>
+            <Checkbox checked={linkConfirmed} disabled={!linkSelected || linkBusy} onChange={e => setLinkConfirmed(e.target.checked)}>已核对物料、规格、数量单位及 PO，确认是本行对应的出库</Checkbox>
+          </>
+        })()}
+      </Modal>
+
       <Modal
         open={outOpen}
         title={`从出库精确分配到本柜（共 ${outRows.length} 笔 · 已选 ${outSel.length}）`}

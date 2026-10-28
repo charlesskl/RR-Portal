@@ -30,5 +30,5 @@ export default async function OrderDetailPage({ params }: { params: { id: string
     </div>;
   }
 
-  return <OrderDetailEditor order={dto} lines={lines.filter(line => line.isActive)} isAdmin={session.role === "admin" || session.role === "manager"} canAdjustDates={canEditPlanDates(session.role)} />;
+  return <OrderDetailEditor order={dto} lines={lines.filter(line => line.isActive)} isAdmin={session.role === "admin" || session.role === "manager"} canEdit={["admin", "manager", "clerk"].includes(session.role ?? "")} canAdjustDates={canEditPlanDates(session.role)} />;
 }

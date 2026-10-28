@@ -131,6 +131,48 @@
   background: #0958d9;
 }
 
+.shipment-sheet-toolbar {
+  padding: 10px 14px;
+  border-bottom: 1px solid #d9e2ec;
+  background: #f8fbff;
+  font-size: 12px;
+}
+
+.shipment-sheet-heading { position: relative; padding-right: 10px; }
+.shipment-sheet-resize {
+  position: absolute;
+  right: -8px;
+  top: -10px;
+  bottom: -10px;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.shipment-sheet-resize:hover { background: #1677ff44; }
+.shipment-sheet .ant-table-tbody > tr > td {
+  padding: 3px 6px !important;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+}
+.shipment-sheet .ant-table-body { scroll-padding-left: var(--sheet-fixed-width); scroll-padding-right: 60px; }
+.shipment-sheet .shipment-fillable-cell { padding-right: 8px; }
+.shipment-sheet .ant-input,
+.shipment-sheet .ant-input-number,
+.shipment-sheet .ant-picker,
+.shipment-sheet .ant-select-selector {
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.shipment-sheet td:focus-within { outline: 2px solid #1677ff; outline-offset: -2px; }
+.shipment-sheet .ant-table-tbody > tr > td.shipment-sheet-protected { background: #f0f3f7; }
+.shipment-sheet .ant-table-tbody > tr > td.shipment-sheet-selected { background: #e6f4ff !important; }
+.shipment-sheet .ant-table-tbody > tr > td.shipment-sheet-selected::after {
+  pointer-events: none;
+}
+.shipment-sheet .shipment-fill-handle { width: 8px; height: 8px; font-size: 0; border-radius: 0; right: -3px; bottom: 0; }
+
 @media (max-width: 1200px) {
   .shipment-editor .ant-drawer-header {
     align-items: flex-start;

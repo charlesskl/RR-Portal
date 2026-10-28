@@ -270,7 +270,7 @@ CREATE TABLE IF NOT EXISTS shipment_items (
     weighing_qty        DECIMAL(18,4) NULL,
     purchase_unit       VARCHAR(32)  NOT NULL DEFAULT '个',
     pallet              VARCHAR(64)  NULL,
-    price               DECIMAL(18,4) NULL,
+    price               DECIMAL(22,8) NULL,
     currency            VARCHAR(8)   NOT NULL DEFAULT '¥',
     po_no               VARCHAR(64)  NULL,
     po_date             DATE         NULL,

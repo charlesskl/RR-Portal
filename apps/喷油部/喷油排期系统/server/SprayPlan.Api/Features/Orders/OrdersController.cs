@@ -82,23 +82,12 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                 .GroupBy(q => q.PartName)
                 .Where(g => g.Sum(x => x.Qty) > 0)
                 .ToDictionary(g => g.Key, g => g.Sum(x => x.Qty));
-            var recorded = plans.GroupBy(p => p.PartName)
-                .ToDictionary(g => g.Key, g => g.Sum(p => p.GoodQty ?? 0));
             // 订单数量按部件级口径：同一订单各部件通常数量相同，不能再把所有部件相加。
             var demandQty = demand.Count == 0 ? 0 : demand.Values.Max();
 
-            // 一个部件完成全部工序才算成品；每个部件取各工序累计实绩的最小值，
-            // 整单成品数再取所有部件的最小值。
-            var finishedByPart = demand.Select(x =>
-            {
-                var stepTotals = plans
-                    .Where(p => p.PartName == x.Key)
-                    .GroupBy(p => p.StepNo)
-                    .Select(g => g.Sum(p => p.GoodQty ?? 0))
-                    .ToList();
-                return stepTotals.Count == 0 ? 0 : Math.Min(x.Value, stepTotals.Min());
-            }).ToList();
-            var recordedQty = finishedByPart.Count == 0 ? 0 : finishedByPart.Min();
+            // 不同部位可以有不同需求，不能再用最少实绩直接减最大需求。
+            var remainingQty = OrderCalc.RemainingQty(o);
+            var recordedQty = Math.Max(0, demandQty - remainingQty);
             var progressPct = demandQty > 0 ? Math.Min(100, (int)Math.Round(recordedQty * 100.0 / demandQty)) : 0;
 
             string? finishDate = null;
@@ -113,7 +102,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                     DateTime? stepFinish = null;
                     foreach (var plan in step.OrderBy(p => p.PlanDate))
                     {
-                        cumulative += plan.PlannedQty;
+                        cumulative += plan.GoodQty ?? plan.PlannedQty;
                         if (cumulative >= required) { stepFinish = plan.PlanDate; break; }
                     }
                     if (stepFinish is null) { covered = false; partFinish = null; break; }
@@ -130,7 +119,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                 plans.Count == 0 ? null : ScheduleCalc.Ymd(plans.Min(p => p.PlanDate)),
                 covered ? finishDate : null, covered,
                 plans.Sum(p => p.PlannedQty), recordedQty, demandQty, progressPct,
-                productionDays, recordedQty, Math.Max(0, demandQty - recordedQty), OrderCalc.RemainingQty(o));
+                productionDays, recordedQty, remainingQty, remainingQty);
         }).ToList();
         return Ok(result);
     }
@@ -146,8 +135,8 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                 o.Product == null ? null : new OrderProductDto(o.Product.Id, o.Product.ProductNo,
                     o.Product.Parts.OrderBy(p => p.PartOrder).Select(p => new OrderProductPartDto(p.Id, p.PartName, p.Craft, p.PartGroupId, p.UnitCost, p.LaborPrice, p.PaintCost, p.QuotedPrice, p.DailyCapacity)).ToList()),
                 o.PartQtys.OrderBy(q => q.PartOrder).Select(q => new OrderPartQtyDto(q.Id, q.PartName, q.SourcePartId, q.Qty, q.PartOrder)).ToList(),
-                // 数量可改 = 已接单 且 无未删排期计划（与 PATCH 校验同口径）
-                (o.Status == "draft" || o.Status == "received") && !o.Plans.Any(p => p.DeletedAt == null), null))
+                // 部位需求可独立更正；历史计划、实绩与库存保留。
+                o.Status != "archived" && !o.PendingProduct, null, null))
             .FirstOrDefaultAsync();
         if (order is null) return NotFound(new { error = "订单不存在" });
         var sourceIds = order.PartQtys.Where(part => part.SourcePartId.HasValue).Select(part => part.SourcePartId!.Value).ToList();
@@ -157,6 +146,13 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         order = order with { Products = secondaryProducts.Select(product => new OrderProductDto(product.Id, product.ProductNo,
             product.Parts.OrderBy(part => part.PartOrder).Select(part => new OrderProductPartDto(part.Id, part.PartName,
                 part.Craft, part.PartGroupId, part.UnitCost, part.LaborPrice, part.PaintCost, part.QuotedPrice, part.DailyCapacity)).ToList())).ToList() };
+        var plans = await db.ProductionPlans.AsNoTracking()
+            .Where(plan => plan.OrderId == id && plan.DeletedAt == null).ToListAsync();
+        var quantities = order.PartQtys.Select(part => new OrderPartQty { PartName = part.PartName, Qty = part.Qty });
+        var planIds = plans.Select(plan => plan.Id).ToList();
+        var inboundSources = (await db.InboundApplications.Where(app => planIds.Contains(app.SourcePlanId))
+            .Select(app => app.SourcePlanId).ToListAsync()).ToHashSet();
+        order = order with { ScheduleBalances = OrderCalc.ScheduleBalances(quantities, plans, inboundSources) };
         return Ok(order);
     }
 
@@ -316,11 +312,13 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         return StatusCode(201, new OrderCreated(order.Id, order.ExternalOrderNo, order.Status, order.IsMA, order.IsUrgent));
     }
 
-    // PATCH /api/orders/{id} — 改头部、整单数量或未排期的明细数量。
+    // PATCH /api/orders/{id} — 更正订单需求，可在同一事务中自动调整未报工计划。
     [HttpPatch("{id:int}")]
     [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateOrderRequest req)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var selectedParts = new HashSet<string>();
         // 状态校验在查订单前（对齐旧逻辑：非法状态立即 400，不依赖订单是否存在）
         if (req.Status is not null && !OrderStatuses.Contains(req.Status))
             return BadRequest(new { error = "状态无效" });
@@ -342,7 +340,9 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             if (parts.Count == 0)
                 return BadRequest(new { error = "订单没有部位数量，请先补全部位" });
             var previousQuantities = parts.Select(part => part.Qty).ToArray();
+            var previousById = parts.ToDictionary(part => part.Id, part => part.Qty);
             OrderCalc.ResizeDemand(parts, req.TotalQty.Value);
+            selectedParts.UnionWith(parts.Where(part => previousById[part.Id] != part.Qty).Select(part => part.PartName));
             if (!parts.Select(part => part.Qty).SequenceEqual(previousQuantities))
             {
                 var plans = await db.ProductionPlans.AsNoTracking()
@@ -351,25 +351,32 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             }
         }
 
-        // 明细数量编辑（修正导入识别错误用）：仅「已接单 received 且无排期计划」可改。
-        // 一旦进入排期/实绩，数量锁死，避免与已排产量/核价/实绩冲突。
-        if (req.PartQtys is not null && req.PartQtys.Count > 0)
+        // 先按明细主键独立更正需求；自动排期在末尾统一处理，实绩与库存不变。
+        if (req.PartQtys is { Count: > 0 })
         {
-            if (o.Status is not ("draft" or "received"))
-                return BadRequest(new { error = "订单已进入排期/生产，数量不可修改" });
-            bool hasPlan = await db.ProductionPlans.AnyAsync(p => p.OrderId == id && p.DeletedAt == null);
-            if (hasPlan)
-                return BadRequest(new { error = "订单已有排期计划，数量不可修改" });
-
-            // 按 partQty 主键 id 更新数量（只认属于本订单的明细，防越权改他单）
-            var qtyMap = req.PartQtys.ToDictionary(q => q.Id, q => q.Qty);
-            if (qtyMap.Count > 0)
+            if (o.Status == "archived" || o.PendingProduct)
+                return BadRequest(new { error = "请先恢复订单或补全产品后再修改部位数量" });
+            if (req.PartQtys.Any(q => q.Qty < 0) || req.PartQtys.Select(q => q.Id).Distinct().Count() != req.PartQtys.Count)
+                return BadRequest(new { error = "部位数量必须是非负整数，且部位不能重复提交" });
+            var parts = await db.OrderPartQtys.Where(q => q.OrderId == id).ToListAsync();
+            if (req.PartQtys.Any(q => parts.All(part => part.Id != q.Id)))
+                return BadRequest(new { error = "部位不属于该订单或已变化，请刷新页面后重试" });
+            var updates = req.PartQtys.ToDictionary(q => q.Id, q => q.Qty);
+            var proposed = parts.Select(part => new OrderPartQty {
+                Id = part.Id, PartName = part.PartName, Qty = updates.GetValueOrDefault(part.Id, part.Qty)
+            }).ToList();
+            if (!proposed.Any(part => part.Qty > 0))
+                return BadRequest(new { error = "订单至少需要一个数量大于 0 的部位" });
+            if (proposed.GroupBy(part => part.PartName).Any(group => group.Sum(part => (long)part.Qty) > int.MaxValue))
+                return BadRequest(new { error = "同名部位的合计数量不能超过 2,147,483,647" });
+            var changed = parts.Any(part => updates.TryGetValue(part.Id, out var qty) && qty != part.Qty);
+            if (changed)
             {
-                var partQtys = await db.OrderPartQtys
-                    .Where(q => q.OrderId == id && qtyMap.Keys.Contains(q.Id))
-                    .ToListAsync();
-                foreach (var pq in partQtys)
-                    if (qtyMap.TryGetValue(pq.Id, out var newQty)) pq.Qty = newQty;
+                foreach (var part in parts)
+                    if (updates.TryGetValue(part.Id, out var qty) && part.Qty != qty) { selectedParts.Add(part.PartName); part.Qty = qty; }
+                var plans = await db.ProductionPlans.AsNoTracking()
+                    .Where(plan => plan.OrderId == id && plan.DeletedAt == null).ToListAsync();
+                o.Status = OrderCalc.DemandStatus(o.Status, parts, plans);
             }
         }
 
@@ -387,10 +394,21 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             else
                 return BadRequest(new { error = "订单状态由系统自动流转，不可手动修改" });
         }
+        DemandScheduleResult? adjustment = null;
+        if (req.AutoAdjustSchedule)
+        {
+            if (o.Status == "archived" || o.PendingProduct)
+                return BadRequest(new { error = "请先恢复订单或补全产品后再自动调整排期" });
+            var parts = await db.OrderPartQtys.Where(part => part.OrderId == id).ToListAsync();
+            if (selectedParts.Count == 0) selectedParts.UnionWith(parts.Select(part => part.PartName));
+            try { adjustment = await DemandScheduleAdjustment.Apply(db, o, parts, selectedParts, CurrentUser()); }
+            catch (InvalidOperationException error) { return BadRequest(new { error = error.Message }); }
+        }
         o.LastUpdatedBy = CurrentUser();
         o.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
-        return Ok(new OrderHeadUpdated(o.Id, o.ExternalOrderNo, o.Status, o.IsMA, o.IsUrgent));
+        await transaction.CommitAsync();
+        return Ok(new OrderHeadUpdated(o.Id, o.ExternalOrderNo, o.Status, o.IsMA, o.IsUrgent, adjustment));
     }
 
     // DELETE /api/orders/{id} — 作废（status=archived 软删）

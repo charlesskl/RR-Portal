@@ -6,6 +6,7 @@ using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Validation;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using SprayPlan.Api.Data;
 using SprayPlan.Api.Entities;
 using SprayPlan.Api.Services;
@@ -101,7 +102,7 @@ public class DailyLineNotesTests : IAsyncLifetime
             });
             await db.SaveChangesAsync();
         });
-        (await Save("=注意调机\n下午来料后开工")).EnsureSuccessStatusCode();
+        (await Save("=注意调机<&>😀\n下午来料后开工")).EnsureSuccessStatusCode();
         (await Save("次日不得串入", date: "2026-10-29")).EnsureSuccessStatusCode();
         var response = await client.PostAsJsonAsync("/api/recording/export", new { date = Day, mode,
             lineNotes = new[] { new { lineId = 1, miscText = "杂工说明", miscCount = 3, headerText = "本拉说明" } } });
@@ -111,7 +112,7 @@ public class DailyLineNotesTests : IAsyncLifetime
         var ws = Assert.Single(doc.WorkbookPart!.WorksheetParts).Worksheet;
         var footer = ws.GetFirstChild<SheetData>()!.Elements<Row>().Last();
         var cell = footer.Elements<Cell>().Single(c => c.CellReference == $"C{footer.RowIndex}");
-        Assert.Equal("=注意调机\n下午来料后开工\n杂工说明", cell.InlineString!.InnerText);
+        Assert.Equal("=注意调机<&>😀\n下午来料后开工\n杂工说明", cell.InlineString!.InnerText);
         Assert.Null(cell.CellFormula);
         Assert.Contains(ws.Elements<MergeCells>().Single().Elements<MergeCell>(), m => m.Reference == $"C{footer.RowIndex}:L{footer.RowIndex}");
         Assert.Equal("3", footer.Elements<Cell>().Single(c => c.CellReference == $"B{footer.RowIndex}").CellValue!.Text);
@@ -135,4 +136,66 @@ public class DailyLineNotesTests : IAsyncLifetime
         Assert.Equal("原拉别", (await db.ProductionLines.SingleAsync()).Name);
         Assert.Equal("迁移后备注", (await db.DailyLineNotes.SingleAsync()).Text);
     }
+    sealed class NoteWriteBarrier : SaveChangesInterceptor
+    {
+        public bool Enabled;
+        int arrivals;
+        readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData data,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Enabled && data.Context!.ChangeTracker.Entries<DailyLineNote>()
+                .Any(e => e.State is EntityState.Added or EntityState.Modified))
+            {
+                if (Interlocked.Increment(ref arrivals) == 2) ready.TrySetResult();
+                await ready.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            }
+            return result;
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConcurrentFirstAndExistingWrites_KeepOneWinner(bool alreadyExists)
+    {
+        var barrier = new NoteWriteBarrier();
+        using var isolated = new ApiFactory(options => options.AddInterceptors(barrier));
+        using var concurrent = isolated.CreateClient();
+        await isolated.SeedAsync();
+        (await concurrent.PostAsJsonAsync("/api/auth/login", new { username = "clerk", password = "clerk123" })).EnsureSuccessStatusCode();
+        Task<HttpResponseMessage> Put(string text, int version) => concurrent.PutAsJsonAsync("/api/schedule/line-notes", new { date = Day, lineId = 1, text, version });
+        if (alreadyExists) (await Put("original", 0)).EnsureSuccessStatusCode();
+        barrier.Enabled = true;
+        var responses = await Task.WhenAll(Put("first", alreadyExists ? 1 : 0), Put("second", alreadyExists ? 1 : 0));
+        Assert.Single(responses.Where(response => response.StatusCode == HttpStatusCode.OK));
+        Assert.Single(responses.Where(response => response.StatusCode == HttpStatusCode.Conflict));
+        await isolated.WithDbAsync(async db => {
+            var note = await db.DailyLineNotes.SingleAsync();
+            Assert.Contains(note.Text, new[] { "first", "second" });
+            Assert.Equal(alreadyExists ? 2 : 1, note.Version);
+            Assert.Empty(await db.ProductionPlans.ToListAsync());
+            Assert.Empty(await db.InventoryMoves.ToListAsync());
+        });
+    }
+
+    [Theory]
+    [InlineData("\u0001")]
+    [InlineData("\u0000")]
+    public async Task XmlUnsafeNote_IsRejectedOrExportsValidWorkbook(string control)
+    {
+        var save = await Save("before" + control + "after");
+        if (save.StatusCode == HttpStatusCode.BadRequest)
+        {
+            await factory.WithDbAsync(async db => Assert.Empty(await db.DailyLineNotes.ToListAsync()));
+            return;
+        }
+        save.EnsureSuccessStatusCode();
+        var exported = await client.PostAsJsonAsync("/api/recording/export", new { date = Day });
+        exported.EnsureSuccessStatusCode();
+        using var stream = new MemoryStream(await exported.Content.ReadAsByteArrayAsync());
+        using var workbook = SpreadsheetDocument.Open(stream, false);
+        Assert.Empty(new OpenXmlValidator().Validate(workbook));
+    }
+
 }

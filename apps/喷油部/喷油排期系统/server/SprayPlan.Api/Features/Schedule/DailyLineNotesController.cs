@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Xml;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -24,6 +25,8 @@ public class DailyLineNotesController(AppDbContext db) : ControllerBase
             return BadRequest(new { error = "日期格式应为 YYYY-MM-DD" });
         if ((request.Text?.Length ?? 0) > 2000 || request.Version < 0)
             return BadRequest(new { error = "备注最多 2000 字，版本号不能为负数" });
+        try { XmlConvert.VerifyXmlChars(request.Text ?? ""); }
+        catch (XmlException) { return BadRequest(new { error = "备注包含无法写入 Excel 的控制字符，请删除后重试" }); }
         if (!await db.ProductionLines.AnyAsync(l => l.Id == request.LineId && l.IsActive))
             return NotFound(new { error = "拉别不存在或未启用" });
 

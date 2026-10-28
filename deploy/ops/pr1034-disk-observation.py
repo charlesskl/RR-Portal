@@ -1,6 +1,6 @@
 """Inert readonly exact space/Docker summary and fixed-task image reference scan."""
 import hashlib,json,os,pathlib,re,stat,subprocess,sys
-EXECUTE=True
+EXECUTE=False
 TARGET='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c'
 BRANCH='refs/heads/ops/pr-1034-20261028-indo-static'
 PREPARE=pathlib.Path('/opt/rr-portal/deploy/backups/pr1034-indo-static-20261028/prepare')

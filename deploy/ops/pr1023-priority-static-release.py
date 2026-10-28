@@ -9,7 +9,7 @@ import datetime, hashlib, io, json, os, pathlib, re, shutil, stat, subprocess, s
 ROOT = pathlib.Path('/opt/rr-portal')
 OUT = ROOT / 'deploy/backups/pr1023-priority-20261028'
 APP = 'apps/印尼小组/印尼走货明细'
-BASE = 'e63786d1157a29f0bbb7e8ca3e89e4c2c9163fe5'
+BASE = ''
 HOST_BASE = '4b3d8f3e319e41dcc8720d759e1af0726a2b2381'
 EXPECTED_BASE = 'e63786d1157a29f0bbb7e8ca3e89e4c2c9163fe5'
 EXPECTED_HEAD = 'f80e98a04525341645eea1c1007cc088d66c72be'
@@ -18,10 +18,10 @@ OLD = '4b3d8f3e319e41dcc8720d759e1af0726a2b2381'
 LIVE_IMAGE = 'sha256:ba2a99c9ff21311e22ede4f5ce46a49ffbcd298c77845681e3a9c881d6f157d2'
 STATIC_BASE_IMAGE = 'sha256:ba2a99c9ff21311e22ede4f5ce46a49ffbcd298c77845681e3a9c881d6f157d2'
 BRANCH = 'refs/heads/ops/pr-1023-20261028-static'
-HEAD = 'f80e98a04525341645eea1c1007cc088d66c72be'
-TARGET = '09b09cbf21b2dfb8518c58860fa33237d2123ed5'
-APP_TREE = '739379a23f7372485e5e1665f922ffe45d4baebf'
-TREE = '7fe125a9a0c74096b40b15a12a18b54258aa040c'
+HEAD = ''
+TARGET = ''
+APP_TREE = ''
+TREE = ''
 EXPECTED_APP_TREE = '739379a23f7372485e5e1665f922ffe45d4baebf'
 EXPECTED_WEB_TREE = '58bb3719b912ffd69b4c3c36b2c2e46856a7eb1d'
 OLD_APP_TREE = '8786d6f9143405a6fedca1a239529c01322dddc3'
@@ -30,9 +30,9 @@ TEMPLATES = ('template-customs.xlsx', 'template-customs-rri.xlsx', 'template-cus
 TEMPLATE_PROOFS = {'template-customs.xlsx': (144045, '24ea412592b3b656a872950c8a3985813fb3dd647c26df495bc882791e9bcaf6'),
                    'template-customs-rri.xlsx': (43375953, 'cb37324b0b4d659d55a8b2ddf012f0b6bbef8b1ee7f368448b3e0ad0fff23647'),
                    'template-customs-rrm.xlsx': (835559, '21fa65679165883c8ed9f100af96c581d79a35da9644464548c765e10f1d2984')}
-PHASE = 'deploy'
-EXECUTE = True
-PREPARED_SHA256 = '167adee1575612e2fa0c9d75d0a93ff94b699c87977a4d741067f3877f4b08bb'
+PHASE = ''
+EXECUTE = False
+PREPARED_SHA256 = ''
 PUBLIC = 'http://127.0.0.1/indo-shipping/'
 STAGE = 'entry'
 SERIAL = 0

@@ -8,6 +8,7 @@ type Props<T extends object> = TableProps<T> & {
   onEdits: (edits: SheetEdit[]) => void
   rowOrder: string
   valueAt: (row: number, field: string) => string | number | undefined
+  editableAt?: (row: number, field: string) => boolean
 }
 const point = (target: EventTarget | null): SheetPoint | null => {
   const cell = (target as HTMLElement)?.closest?.<HTMLElement>('td[data-sheet-col]')
@@ -23,7 +24,7 @@ function cellText(cell: HTMLElement | null): string {
 const quote = (value: string) => /[\t\n"]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value
 
 /** Spreadsheet interaction layer; the page retains ownership of data and saving. */
-export default function ShipmentSheetTable<T extends object>({ fields, onEdits, rowOrder, valueAt, columns = [], ...props }: Props<T>) {
+export default function ShipmentSheetTable<T extends object>({ fields, onEdits, rowOrder, valueAt, editableAt, columns = [], ...props }: Props<T>) {
   const { message } = App.useApp()
   const root = useRef<HTMLDivElement>(null)
   const [anchor, setAnchor] = useState<SheetPoint | null>(null)
@@ -69,7 +70,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       const original = column.onCell?.(record, row) || {}
       return { ...original, tabIndex: -1,
         'data-sheet-row': row, 'data-sheet-col': col,
-        className: [original.className, !fields[col] ? 'shipment-sheet-protected' : '', inSelection(row, col) ? 'shipment-sheet-selected' : ''].filter(Boolean).join(' '),
+        className: [original.className, !fields[col] || editableAt?.(row, fields[col]) === false ? 'shipment-sheet-protected' : '', inSelection(row, col) ? 'shipment-sheet-selected' : ''].filter(Boolean).join(' '),
       }
     },
   }))
@@ -129,7 +130,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       } else {
         for (let idx = p.row * fields.length + p.col + delta; idx >= 0 && idx < count * fields.length; idx += delta) {
           const candidate = { row: Math.floor(idx / fields.length), col: idx % fields.length }
-          if (fields[candidate.col] && cellAt(candidate)) { next = candidate; break }
+          if (fields[candidate.col] && editableAt?.(candidate.row, fields[candidate.col]) !== false && cellAt(candidate)) { next = candidate; break }
         }
       }
       if (next) { event.preventDefault(); event.stopPropagation(); focus(next) }

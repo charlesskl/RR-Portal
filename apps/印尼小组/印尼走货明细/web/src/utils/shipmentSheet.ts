@@ -1,6 +1,7 @@
 import { cartonGroupKey } from './shipmentOrder'
-import { formatShipmentPackingLines, shipmentCartonCount, shipmentKgWeight } from './shipmentWeight'
+import { formatShipmentPackingLines, shipmentCartonCount, shipmentKgWeight, shipmentWeightQuantity } from './shipmentWeight'
 import { isShipmentCountUnit, normalizeShipmentDeclarations, rebaseShipmentDeclaration } from './shipmentDeclaration'
+import { shipmentUsesDeclarationPrice } from './shipmentPurchase'
 
 // Same physical column order as the detail table; protected columns still occupy
 // a position during paste, so data can never slide into a neighbouring field.
@@ -120,7 +121,7 @@ export function parseShipmentSheetValue(field: string, raw: string): string | nu
 interface EditableShipment {
   material_id?: number; qty?: number; kg?: number; cartons?: number; qty_per_carton?: string
   carton_group?: string; supplier?: string; customs_company?: string
-  material_snapshot?: unknown
+  material_snapshot?: unknown; outbound_id?: number; price?: number
 }
 
 /** Validate first; operate on copies, recalculate once, never remap IDs/sources. */
@@ -134,9 +135,10 @@ export function applyShipmentSheetEdits<T extends EditableShipment>(items: T[], 
       if (edit.field.startsWith('material:') && !materials.has(items[edit.row].material_id!))
         throw new Error('请先选择物料，再填写单位或尺寸')
       return { ...edit, value: parseShipmentSheetValue(edit.field, edit.value) }
-    } catch (error) { throw new Error(`第 ${edit.row + 1} 行：${(error as Error).message}`) }
+    } catch (error) { throw new Error(`第 ${edit.row + 1} 行：${(error as Error).message}`, { cause: error }) }
   })
-  const next = normalizeShipmentDeclarations(items, materials).map(item => ({ ...item })); const nextMaterials = new Map(materials)
+  const original = normalizeShipmentDeclarations(items, materials)
+  const next = original.map(item => ({ ...item })); const nextMaterials = new Map(materials)
   const dirtyMaterials = new Set<number>(); const reweight = new Set<number>(); const repack = new Set<number>()
   const explicitKg = new Map<number, number>(); const explicitCartons = new Map<number, number>()
   const materialValues = new Map<string, string | number>()
@@ -170,11 +172,7 @@ export function applyShipmentSheetEdits<T extends EditableShipment>(items: T[], 
     next[i].cartons = shipmentCartonCount(next[i].qty, next[i].qty_per_carton)
   for (const i of reweight) {
     const m = nextMaterials.get(next[i].material_id!)
-    const kg = shipmentKgWeight(m?.unit_kg, next[i].qty, m?.net_per_pc, m?.name_zh)
-    const changedUnit = parsed.some(edit => edit.field === 'material:unit_kg'
-      && next[edit.row].material_id === next[i].material_id)
-    next[i] = changedUnit ? rebaseShipmentDeclaration(next[i], kg, !parsed.some(edit => edit.row === i && edit.field === 'price'))
-      : { ...next[i], kg }
+    next[i].kg = shipmentKgWeight(m?.unit_kg, next[i].qty, m?.net_per_pc, m?.name_zh)
   }
   // Explicit pasted weights win over derived weights within the same paste.
   explicitKg.forEach((value, i) => {
@@ -183,6 +181,46 @@ export function applyShipmentSheetEdits<T extends EditableShipment>(items: T[], 
       throw new Error(`第 ${i + 1} 行：${m.unit_kg} 申报数量自动取送货数量，请修改“送货数量”，不能填公斤重量`)
     next[i].kg = value
   })
+  // Rebase only after the entire paste has determined the final quantity and
+  // measured weight. Edited kg/qty values cannot replace the source price basis.
+  for (const i of reweight) {
+    const before = original[i], m = nextMaterials.get(next[i].material_id!)
+    const unit = (value: unknown) => String(value || 'KGM').trim().toUpperCase()
+    if (unit(materials.get(before.material_id!)?.unit_kg) === unit(m?.unit_kg)
+      || parsed.some(edit => edit.row === i && edit.field === 'price')
+      || !shipmentUsesDeclarationPrice(before)) continue
+    if (!(Number(before.qty) > 0) || !(Number(before.kg) > 0)) {
+      if (before.price == null || Number(before.price) === 0) continue
+      if (items[i].qty !== 0 || items[i].kg !== 0)
+        throw new Error(`第 ${i + 1} 行：原申报数量或送货数量缺少有效计价基准，请核对原数量或明确填写新单位采购单价`)
+      // An empty draft has no measured quantity to divide by. Infer only from
+      // known unit/technical factors, without rounding a reference weight to 4dp.
+      const factor = (material: any) => {
+        const code = unit(material?.unit_kg)
+        if (isShipmentCountUnit(code)) return 1
+        const net = Number(material?.net_per_pc)
+        if (!Number.isFinite(net) || net <= 0) return 0
+        const kg = net * shipmentWeightQuantity(material?.name_zh, 1)
+        return ['KGM', 'KG'].includes(code) ? kg : ['TNE', 'TON'].includes(code) ? kg / 1000 : 0
+      }
+      const oldFactor = factor(materials.get(before.material_id!)), newFactor = factor(m)
+      const price = Number(before.price) * oldFactor / newFactor
+      if (!(oldFactor > 0) || !(newFactor > 0) || !Number.isFinite(price))
+        throw new Error(`第 ${i + 1} 行：缺少可确定的单位换算基准，请补齐净重资料或明确填写新单位采购单价`)
+      next[i].price = price
+      continue
+    }
+    // Keep the per-purchase-quantity amount when quantity changes with the unit.
+    // For zero quantity, convert at the old quantity so restoring it later still
+    // uses the new unit's price rather than the former kg price.
+    const quantity = Number(next[i].qty) > 0 ? Number(next[i].qty) : Number(before.qty)
+    const scale = parsed.some(edit => edit.row === i && edit.field === 'qty') && Number(before.qty) > 0
+      ? quantity / Number(before.qty) : 1
+    const basis = { ...before, kg: Number(before.kg) * scale }
+    const denominator = Number(next[i].kg) > 0 ? Number(next[i].kg)
+      : shipmentKgWeight(m?.unit_kg, quantity, m?.net_per_pc, m?.name_zh)
+    next[i].price = rebaseShipmentDeclaration(basis, denominator).price
+  }
   const groupValues = new Map<string, number>()
   explicitCartons.forEach((value, i) => {
     const key = cartonGroupKey(next[i], nextMaterials)

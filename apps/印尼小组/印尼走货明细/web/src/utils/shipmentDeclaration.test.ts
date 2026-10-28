@@ -8,11 +8,13 @@ import { isShipmentCountUnit, normalizeShipmentDeclarations } from './shipmentDe
 import { shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
 import { withShipmentInvoicePrices } from './shipmentInvoice'
 import { shipmentPurchaseAmount } from './shipmentPurchase'
-import { applyShipmentSheetEdits } from './shipmentSheet'
+import { applyShipmentSheetEdits, parseSheetClipboard, sheetPasteEdits } from './shipmentSheet'
+import { applyMergedShipmentEdits } from './shipmentMergedEditor'
 import { consolidateShipmentItems } from './shipmentConsolidation'
 import { parseShipmentWorkbook } from './shipmentImport'
 import { buildCustomsWorkbook } from './customsExport'
 import { shipmentDateOnly, shipmentPurchaseDates } from './shipmentDates'
+import { shipmentDeclarationSaveError } from './shipmentDeclarationSaveValidation'
 
 const materials = new Map([[972, { id: 972, name_zh: '壶吸塑', unit_kg: 'PCE', net_per_pc: 51.23 / 5450 }],
   [973, { id: 973, name_zh: '杯吸塑', unit_kg: 'PCE', net_per_pc: 64.31 / 10900 }]])
@@ -77,6 +79,126 @@ it('切换申报单位保留导入采购金额；修改件数按每件价格正�
   expect(back.items[0]).toMatchObject({ qty: 100, kg: 20, price: 5 })
 })
 
+it('同次粘贴单位和件数与分次修改金额一致，并保留原始行及物料', () => {
+  const map = new Map([[-1, { unit_kg: 'KGM', net_per_pc: .2 }]])
+  const item = { _rowKey: 1, material_id: -1, material_snapshot: { unit_kg: 'KGM' }, qty: 100, kg: 20, price: 5 }
+  const before = structuredClone(item)
+  const unit = { row: 0, field: 'material:unit_kg', value: 'PCE' }
+  const qty = { row: 0, field: 'qty', value: '200' }
+  const first = applyShipmentSheetEdits([item], map, [unit])
+  const sequential = applyShipmentSheetEdits(first.items, first.materials, [qty])
+  const pasted = applyMergedShipmentEdits([item], map, consolidateShipmentItems([item], map),
+    sheetPasteEdits(parseSheetClipboard('PCE\t200\t200'), { row: 0, col: 12 }, 1))
+  for (const result of [applyShipmentSheetEdits([item], map, [unit, qty]), pasted]) {
+    expect(result.items[0]).toMatchObject({ qty: 200, kg: 200, price: 1 })
+    expect(shipmentPurchaseAmount(result.items[0])).toBe(shipmentPurchaseAmount(sequential.items[0]))
+    expect(shipmentPurchaseAmount(result.items[0])).toBe(200)
+  }
+  expect(item).toEqual(before)
+  expect(map.get(-1)).toEqual({ unit_kg: 'KGM', net_per_pc: .2 })
+})
+
+it('单位及实测申报量同贴只按最终量换价，显式新价格及同单位价格优先', () => {
+  const map = new Map([[-1, { unit_kg: 'PCE', net_per_pc: .2 }]])
+  const item = { material_id: -1, material_snapshot: { unit_kg: 'PCE' }, qty: 100, kg: 100, price: 1 }
+  const edits = [{ row: 0, field: 'material:unit_kg', value: 'KGM' }, { row: 0, field: 'kg', value: '25' }]
+  const result = applyShipmentSheetEdits([item], map, edits)
+  expect(result.items[0]).toMatchObject({ qty: 100, kg: 25, price: 4 })
+  expect(shipmentPurchaseAmount(result.items[0])).toBe(100)
+  const doubled = applyShipmentSheetEdits([item], map, [...edits, { row: 0, field: 'qty', value: '200' }])
+  expect(doubled.items[0]).toMatchObject({ qty: 200, kg: 25, price: 8 })
+  expect(shipmentPurchaseAmount(doubled.items[0])).toBe(200)
+  const repriced = applyShipmentSheetEdits([item], map, [...edits, { row: 0, field: 'price', value: '3' }])
+  expect(repriced.items[0].price).toBe(3)
+  expect(shipmentPurchaseAmount(repriced.items[0])).toBe(75)
+  const sameUnit = applyShipmentSheetEdits(result.items, result.materials, edits)
+  expect(sameUnit.items[0].price).toBe(4)
+  expect(item).toMatchObject({ qty: 100, kg: 100, price: 1 })
+})
+
+it('件数清零时仍换算每件单价，恢复数量不会沿用公斤单价', () => {
+  const map = new Map([[-1, { unit_kg: 'KGM', net_per_pc: .2 }]])
+  const item = { material_id: -1, material_snapshot: { unit_kg: 'KGM' }, qty: 100, kg: 20, price: 5 }
+  const empty = applyShipmentSheetEdits([item], map, [
+    { row: 0, field: 'material:unit_kg', value: 'PCE' }, { row: 0, field: 'qty', value: '0' },
+  ])
+  expect(empty.items[0]).toMatchObject({ qty: 0, kg: 0, price: 1 })
+  const restored = applyShipmentSheetEdits(empty.items, empty.materials, [{ row: 0, field: 'qty', value: '100' }])
+  expect(shipmentPurchaseAmount(restored.items[0])).toBe(100)
+})
+
+it('初始零数量导入草稿按技术基准换价，单位与数量的先后次序不改变金额', () => {
+  const map = new Map([[-1, { unit_kg: 'KGM', net_per_pc: .2 }]])
+  const item = { material_id: -1, material_snapshot: { unit_kg: 'KGM' }, qty: 0, kg: 0, price: 5 }
+  const unit = { row: 0, field: 'material:unit_kg', value: 'PCE' }
+  const qty = { row: 0, field: 'qty', value: '100' }
+  const firstUnit = applyShipmentSheetEdits([item], map, [unit])
+  const firstQty = applyShipmentSheetEdits([item], map, [qty])
+  const results = [
+    applyShipmentSheetEdits(firstUnit.items, firstUnit.materials, [qty]),
+    applyShipmentSheetEdits(firstQty.items, firstQty.materials, [unit]),
+    applyShipmentSheetEdits([item], map, [unit, qty]),
+  ]
+  for (const result of results) {
+    expect(result.items[0]).toMatchObject({ qty: 100, kg: 100, price: 1 })
+    expect(shipmentPurchaseAmount(result.items[0])).toBe(100)
+  }
+  const tiny = applyShipmentSheetEdits([item], new Map([[-1, { unit_kg: 'KGM', net_per_pc: .000001 }]]), [unit])
+  expect(tiny.items[0].price).toBeCloseTo(.000005, 12)
+  expect(item).toMatchObject({ qty: 0, kg: 0, price: 5, material_snapshot: { unit_kg: 'KGM' } })
+})
+
+it('空草稿缺技术换算依据时整批拒绝，但明确新单价、零价和关联采购价无需猜测', () => {
+  const map = new Map([[-1, { unit_kg: 'KGM' }]])
+  const item = { material_id: -1, material_snapshot: { unit_kg: 'KGM' }, qty: 0, kg: 0, price: 5 }
+  const unit = { row: 0, field: 'material:unit_kg', value: 'PCE' }
+  const qty = { row: 0, field: 'qty', value: '100' }
+  expect(() => applyShipmentSheetEdits([item], map, [unit, qty])).toThrow('缺少可确定的单位换算基准')
+  expect(item).toMatchObject({ qty: 0, kg: 0, price: 5 })
+  expect(map.get(-1)?.unit_kg).toBe('KGM')
+  const repriced = applyShipmentSheetEdits([item], map, [unit, qty, { row: 0, field: 'price', value: '2' }])
+  expect(shipmentPurchaseAmount(repriced.items[0])).toBe(200)
+  expect(applyShipmentSheetEdits([{ ...item, price: 0 }], map, [unit]).items[0].price).toBe(0)
+  const linked = applyShipmentSheetEdits([{ ...item, outbound_id: 1, purchase_charge_ratio: .9 }], map, [unit, qty])
+  expect(linked.items[0].price).toBe(5)
+  expect(shipmentPurchaseAmount(linked.items[0])).toBe(450)
+})
+
+it.each([
+  { qty: 100, kg: 0 }, { qty: 100, kg: undefined }, { qty: 100, kg: null },
+  { qty: 0, kg: undefined }, { qty: undefined, kg: 0 }, { qty: -1, kg: 0 }, { qty: 0, kg: -1 },
+])('非明确空草稿的无效计价基准不按技术净重猜金额：%j', quantities => {
+  const map = new Map([[-1, { unit_kg: 'KGM', net_per_pc: .2 }]])
+  const item = { material_id: -1, material_snapshot: { unit_kg: 'KGM' }, price: 5, ...quantities } as any
+  const before = structuredClone(item)
+  const unit = { row: 0, field: 'material:unit_kg', value: 'PCE' }
+  expect(() => applyShipmentSheetEdits([item], map, [unit])).toThrow('缺少有效计价基准')
+  expect(item).toEqual(before)
+  expect(map.get(-1)?.unit_kg).toBe('KGM')
+  expect(applyShipmentSheetEdits([item], map, [unit, { row: 0, field: 'price', value: '2' }]).items[0].price).toBe(2)
+  expect(applyShipmentSheetEdits([{ ...item, price: 0 }], map, [unit]).items[0].price).toBe(0)
+  expect(applyShipmentSheetEdits([{ ...item, outbound_id: 1 }], map, [unit]).items[0].price).toBe(5)
+})
+
+it('合并采购批次切换单位保留各来源价格和备品计费比例，失败不部分写入', () => {
+  const map = new Map([[1, { id: 1, unit_kg: 'KGM', net_per_pc: .2 }]])
+  const items = [
+    { _rowKey: 1, material_id: 1, outbound_id: 10, qty: 100, kg: 20, price: 5, purchase_charge_ratio: .9 },
+    { _rowKey: 2, material_id: 1, outbound_id: 11, qty: 50, kg: 10, price: 7, purchase_charge_ratio: .8 },
+  ]
+  const before = structuredClone(items)
+  const result = applyMergedShipmentEdits(items, map, consolidateShipmentItems(items, map), [
+    { row: 0, field: 'material:unit_kg', value: 'PCE' },
+  ])
+  expect(result.items.map(row => [row.kg, row.price, row.purchase_charge_ratio])).toEqual([[100, 5, .9], [50, 7, .8]])
+  expect(result.items.map(shipmentPurchaseAmount)).toEqual([450, 280])
+  expect(() => applyShipmentSheetEdits(items, map, [
+    { row: 0, field: 'material:unit_kg', value: 'PCE' }, { row: 1, field: 'kg', value: '10' },
+  ])).toThrow('自动取送货数量')
+  expect(items).toEqual(before)
+  expect(map.get(1)?.unit_kg).toBe('KGM')
+})
+
 it('件数单位禁止把公斤值粘贴到申报数量，整次拒绝且不写入源行', () => {
   expect(() => applyShipmentSheetEdits(rows, materials, [{ row: 0, field: 'kg', value: '51.23' }])).toThrow('自动取送货数量')
   expect(rows[0].kg).toBe(51.23)
@@ -84,6 +206,48 @@ it('件数单位禁止把公斤值粘贴到申报数量，整次拒绝且不写�
     { row: 0, field: 'kg', value: '6000' }, { row: 0, field: 'qty', value: '6000' },
   ])
   expect(result.items[0]).toMatchObject({ qty: 6000, kg: 6000 })
+})
+
+it('真实单位下拉接入同一粘贴业务链，空草稿选单位后填量保持正确金额', async () => {
+  const source = readFileSync(new URL('../pages/ShipmentsPage.tsx', import.meta.url), 'utf8')
+  const tree = ts.createSourceFile('page.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const functions: string[] = []
+  function collect(node: ts.Node) {
+    if (ts.isFunctionDeclaration(node) && ['patchMatDim', 'writeMergedCells'].includes(node.name?.text || '')) functions.push(node.getText(tree))
+    ts.forEachChild(node, collect)
+  }
+  collect(tree)
+  const original = { _rowKey: 1, material_id: -1, material_snapshot: { unit_kg: 'KGM', net_per_pc: .2 }, qty: 0, kg: 0, price: 5 }
+  const items = [structuredClone(original)]
+  const map = new Map([[-1, { ...original.material_snapshot }]])
+  const state = {
+    items, matMap: map, consolidatedItems: consolidateShipmentItems(items, map),
+    applyMergedShipmentEdits, outRows: [], editing: { id: 9 }, customsOptions: [],
+    sheetRevision: { current: { rawItems: items, matMap: map, session: 1 } }, sheetConfirmOpen: { current: false },
+    dirtyMatIds: new Set<number>(), setItems: vi.fn(), setMatMap: vi.fn(), setDirtyMatIds: vi.fn(),
+    setEditorDirty: vi.fn(), setSheetEditing: vi.fn(), setOutRows: vi.fn(),
+    api: { get: vi.fn(async () => ({ data: [] })), put: vi.fn(), post: vi.fn() },
+    message: { error: vi.fn(), success: vi.fn() },
+  }
+  const refresh = () => {
+    state.consolidatedItems = consolidateShipmentItems(state.items, state.matMap)
+    state.sheetRevision.current = { rawItems: state.items, matMap: state.matMap, session: 1 }
+  }
+  state.setItems.mockImplementation(next => { state.items = next; refresh() })
+  state.setMatMap.mockImplementation(next => { state.matMap = next; refresh() })
+  state.setDirtyMatIds.mockImplementation(update => { state.dirtyMatIds = update(state.dirtyMatIds) })
+  const context = createContext(state)
+  runInContext(ts.transpileModule(functions.join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText, context)
+  expect(await runInContext("patchMatDim(-1, 'unit_kg', 'PCE')", context)).toBe(true)
+  expect(state.items[0]).toMatchObject({ qty: 0, kg: 0, price: 1 })
+  expect(await runInContext("writeMergedCells([{row:0,field:'qty',value:'100'}], false)", context)).toBe(true)
+  expect(state.items[0]).toMatchObject({ qty: 100, kg: 100, price: 1 })
+  expect(shipmentPurchaseAmount(state.items[0])).toBe(100)
+  expect(state.matMap.get(-1)?.unit_kg).toBe('PCE')
+  expect(state.message.error).not.toHaveBeenCalled()
+  expect(state.api.put).not.toHaveBeenCalled()
+  expect(state.api.post).not.toHaveBeenCalled()
+  expect(original).toMatchObject({ qty: 0, kg: 0, price: 5, material_snapshot: { unit_kg: 'KGM' } })
 })
 
 it('旧Excel中PCE搭配公斤值时修正申报量，保留原表证据和采购金额', () => {
@@ -123,12 +287,12 @@ it('实际页面保存使用按单位校正的申报量，采购日期展示去�
     { ...rows[0], _rowKey: 2, outbound_id: 98, po_date: '2026-10-06T00:00:00' },
   ]
   const items = withShipmentInvoicePrices(raw, materials)
-  const api = { put: vi.fn(async (..._args: any[]) => ({})) }
+  const api = { put: vi.fn(async (..._args: any[]) => { void _args; return {} }) }
   const context = createContext({
     items, consolidatedItems: consolidateShipmentItems(items, materials), matMap: materials, api, creating: false, editing: { id: 9001 },
     sheetEditing: false, dirtyMatIds: new Set(), form: { validateFields: async () => ({ customer: 'RRI' }) },
     setSaving: vi.fn(), setEditing: vi.fn(), setEditorDirty: vi.fn(), closeEditor: vi.fn(), load: vi.fn(),
-    shipmentPurchaseDates, shipmentPackingAverageQty, shipmentWeightQuantity, message: { success: vi.fn() },
+    shipmentPurchaseDates, shipmentPackingAverageQty, shipmentWeightQuantity, shipmentDeclarationSaveError, message: { success: vi.fn() },
   })
   runInContext(ts.transpileModule(handlers.join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context)
   expect(runInContext("mergedCellValue(0, 'po_date')", context)).toBe('2026-09-28 / 2026-10-06')
@@ -139,6 +303,50 @@ it('实际页面保存使用按单位校正的申报量，采购日期展示去�
   expect(saved.map((row: any) => row.po_date)).toEqual(raw.map(row => row.po_date))
   expect(raw.map(row => row.kg)).toEqual([51.23, 51.23])
 })
+
+it('整行粘贴换单位和数量后，实际保存、真实模板导出及重新导入保留金额', async () => {
+  const material = { name_zh: '合成测试件', unit_kg: 'KGM', net_per_pc: .2 }
+  const raw = { _rowKey: 1, material_id: -1, material_snapshot: material, qty: 100, kg: 20, price: 5 }
+  const map = new Map([[-1, material]])
+  const edited = applyMergedShipmentEdits([raw], map, consolidateShipmentItems([raw], map),
+    sheetPasteEdits(parseSheetClipboard('PCE\t200\t200'), { row: 0, col: 12 }, 1))
+  const items = withShipmentInvoicePrices(edited.items, edited.materials)
+  const source = readFileSync(new URL('../pages/ShipmentsPage.tsx', import.meta.url), 'utf8')
+  const tree = ts.createSourceFile('ShipmentsPage.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const handlers: string[] = []
+  function walk(node: ts.Node) {
+    if (ts.isFunctionDeclaration(node) && ['save', 'effectiveWeighingQty'].includes(node.name?.text || '')) handlers.push(node.getText(tree))
+    ts.forEachChild(node, walk)
+  }
+  walk(tree)
+  const api = { put: vi.fn(async (..._args: any[]) => { void _args; return {} }) }
+  const context = createContext({
+    items, matMap: edited.materials, api, creating: false, editing: { id: 9001 },
+    sheetEditing: false, dirtyMatIds: edited.dirtyMaterials,
+    form: { validateFields: async () => ({ customer: 'RRM', container_no: 'PASTE-TEST' }) },
+    setSaving: vi.fn(), setEditing: vi.fn(), setEditorDirty: vi.fn(), setDirtyMatIds: vi.fn(), closeEditor: vi.fn(), load: vi.fn(),
+    shipmentPackingAverageQty, shipmentWeightQuantity, shipmentDeclarationSaveError, message: { success: vi.fn() },
+  })
+  runInContext(ts.transpileModule(handlers.join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context)
+  expect(await runInContext('save()', context)).toBe(true)
+  expect(api.put).toHaveBeenCalledTimes(1)
+  const saved = JSON.parse(JSON.stringify(api.put.mock.calls[0][1].items[0]))
+  expect(saved).toMatchObject({ qty: 200, kg: 200, price: 1, material_id: null, material_snapshot: { unit_kg: 'PCE' } })
+  expect(shipmentPurchaseAmount(saved)).toBe(200)
+  vi.stubGlobal('DOMParser', DOMParser)
+  try {
+    const templateBuffer = Uint8Array.from(readFileSync(new URL('../../public/template-customs-rrm.xlsx', import.meta.url))).buffer
+    const output = await buildCustomsWorkbook({ templateBuffer, items: [{ ...saved, material_id: -1 }], materials: edited.materials,
+      productHs: new Map(), images: new Map(), form: { customer: 'RRM', containerNo: 'PASTE-TEST', rate: .93 }, mainOnly: true })
+    const workbook = XLSX.read(await output.arrayBuffer(), { type: 'array' })
+    expect(workbook.Sheets['PASTE-TEST'].Q4.v).toBe(40)
+    expect(workbook.Sheets['PASTE-TEST'].AP4.v).toBe(200)
+    const imported = parseShipmentWorkbook(workbook).rows[0].item
+    expect(imported).toMatchObject({ qty: 200, kg: 200, price: 1 })
+    expect(shipmentPurchaseAmount(imported)).toBe(200)
+    expect(raw).toMatchObject({ qty: 100, kg: 20, price: 5, material_snapshot: { unit_kg: 'KGM' } })
+  } finally { vi.unstubAllGlobals() }
+}, 60000)
 
 it.each(['rri', 'rrm'])('真实模板导出件数申报量、公斤净重、金额及简化日期，并能重新导入（%s）', async customer => {
   vi.stubGlobal('DOMParser', DOMParser)

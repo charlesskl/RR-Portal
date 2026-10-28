@@ -15,7 +15,8 @@ import ShipmentImport from '../components/ShipmentImport'
 import ShipmentImportSource from '../components/ShipmentImportSource'
 import ShipmentSheetTable from '../components/ShipmentSheetTable'
 import ShipmentNumberCell from '../components/ShipmentNumberCell'
-import { isShipmentCountUnit, rebaseShipmentDeclaration } from '../utils/shipmentDeclaration'
+import { isShipmentCountUnit } from '../utils/shipmentDeclaration'
+import { shipmentDeclarationSaveError } from '../utils/shipmentDeclarationSaveValidation'
 import { shipmentPurchaseDates } from '../utils/shipmentDates'
 import { applyMergedShipmentEdits, mergedReadOnlyFields, type MergedEditorRow } from '../utils/shipmentMergedEditor'
 import { shipmentSheetFields, type SheetEdit } from '../utils/shipmentSheet'
@@ -693,6 +694,8 @@ export default function ShipmentsPage() {
     if (sheetEditing) { message.info('数量正在校验，请完成后再保存'); return false }
     try {
       const v = await form.validateFields()
+      const priceError = shipmentDeclarationSaveError(items)
+      if (priceError) { message.error(priceError); return false }
       setSaving(true)
       // 空字符串日期 → null，否则后端 DateTime? 绑定失败 400
       const dOrNull = (x: any) => (x ? x : null)
@@ -989,7 +992,7 @@ export default function ShipmentsPage() {
   }
   function mergedCellValue(row: number, field: string): string | number | undefined {
     const item = consolidatedItems[row]
-    const material = matMap.get(item?.material_id!)
+    const material = item?.material_id != null ? matMap.get(item.material_id) : undefined
     if (field === 'currency') return item?.currency || '¥'
     if (field === 'material:unit_kg') return material?.unit_kg || 'KGM'
     if (field === 'weighing_qty') return effectiveWeighingQty(item, material)
@@ -1070,13 +1073,18 @@ export default function ShipmentsPage() {
   // 改物料主数据（单位/尺寸/毛净重）→ 更新 matMap、标脏、并按单位重算相关行的送货KG重量
   function patchMatDim(materialId: number | undefined, field: string, value: any) {
     if (materialId == null) return
+    if (field === 'unit_kg') {
+      const row = consolidatedItems.findIndex(item => item.material_id === materialId)
+      if (row >= 0) return writeMergedCells([{ row, field: 'material:unit_kg', value: String(value || 'KGM') }], false)
+      return
+    }
     setEditorDirty(true)
     const newM = { ...(matMap.get(materialId) || {}), [field]: value }
     setMatMap(prev => new Map(prev).set(materialId, newM))
     setDirtyMatIds(prev => new Set(prev).add(materialId))
-    if (field === 'unit_kg' || field === 'net_per_pc')
+    if (field === 'net_per_pc')
       setItems(its => its.map(it => it.material_id === materialId
-        ? field === 'unit_kg' ? rebaseShipmentDeclaration(it, kgForItem(it, newM)) : { ...it, kg: kgForItem(it, newM) }
+        ? { ...it, kg: kgForItem(it, newM) }
         : it))
   }
   function addItem() {
@@ -1380,9 +1388,13 @@ export default function ShipmentsPage() {
           </Typography.Paragraph>
           <ShipmentSheetTable<MergedEditorRow<ShipmentItem>>
             fields={shipmentSheetFields}
-            editableAt={(row, field) => !(consolidatedItems[row]?.sources.length > 1 && mergedReadOnlyFields.has(field))
-              && (field !== 'kg' || !isShipmentCountUnit(matMap.get(consolidatedItems[row]?.material_id!)?.unit_kg))
-              && (!field.startsWith('snapshot:') || (!!consolidatedItems[row]?.material_snapshot && consolidatedItems[row]?.material_id! < 0))}
+            editableAt={(row, field) => {
+              const item = consolidatedItems[row]
+              const material = item?.material_id != null ? matMap.get(item.material_id) : undefined
+              return !(item?.sources.length > 1 && mergedReadOnlyFields.has(field))
+                && (field !== 'kg' || !isShipmentCountUnit(material?.unit_kg))
+                && (!field.startsWith('snapshot:') || (!!item?.material_snapshot && item.material_id != null && item.material_id < 0))
+            }}
             onEdits={editSheetCells}
             rowOrder={consolidatedItems.map(item => item.sources.map(source => source._rowKey).join('-')).join(',')}
             valueAt={mergedCellValue}

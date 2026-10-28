@@ -39,12 +39,13 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     && row >= Math.min(anchor.row, end.row) && row <= Math.max(anchor.row, end.row)
     && col >= Math.min(anchor.col, end.col) && col <= Math.max(anchor.col, end.col)
   const cellAt = (p: SheetPoint) => root.current?.querySelector<HTMLElement>(`td[data-sheet-row="${p.row}"][data-sheet-col="${p.col}"]`) || null
+  const editorAt = (p: SheetPoint) => cellAt(p)?.querySelector<HTMLElement>('input:not([readonly]):not([disabled]),textarea:not([readonly]):not([disabled]),input[role="combobox"]:not([disabled])') || null
   const focus = (p: SheetPoint, edit = true) => {
     const cell = cellAt(p)
     if (!cell) return
     setAnchor(p); setEnd(p)
     cell.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    const input = edit ? cell.querySelector<HTMLElement>('input:not([readonly]):not([disabled]),textarea:not([readonly]):not([disabled]),input[role="combobox"]:not([disabled])') : null
+    const input = edit ? editorAt(p) : null
     ;(input || cell).focus({ preventScroll: true })
   }
   const fillDown = () => {
@@ -129,7 +130,9 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       if (event.key === 'Escape') { setAnchor(null); setEnd(null); return }
       if (target.getAttribute('aria-expanded') === 'true' || target.closest('[aria-expanded="true"]')
         || cellAt(p)?.querySelector('[aria-expanded="true"]')) return
-      if (event.key === 'F2' && fields[p.col] && editableAt?.(p.row, fields[p.col]) !== false) {
+      // Batch-protected columns can still contain their own material/category
+      // picker. F2 may focus that enabled control without opening batch edits.
+      if (event.key === 'F2' && (!fields[p.col] || editableAt?.(p.row, fields[p.col]) !== false) && editorAt(p)) {
         event.preventDefault(); event.stopPropagation(); focus(p); return
       }
       if (sheetArrowKeys.has(event.key)) {

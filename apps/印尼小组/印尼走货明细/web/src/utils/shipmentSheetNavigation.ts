@@ -19,6 +19,9 @@ export function sheetArrowPoint(start: SheetPoint, key: string, rows: number, co
 
 /** Text editing wins until a horizontal caret reaches its edge. */
 export function sheetArrowUsesEditor(target: HTMLElement, key: string): boolean {
+  // F2 focuses these composite editors. Their closed inputs still need arrows
+  // to open/select options or move within a date; grid navigation owns the td.
+  if (target.closest('.ant-select,.ant-picker')) return true
   if (target.closest('button,a,select,[contenteditable="true"]')) return true
   const editor = target.closest<HTMLInputElement | HTMLTextAreaElement>('input,textarea')
   if (!editor || editor.readOnly || editor.disabled) return false

@@ -44,6 +44,15 @@ it('多行文字、按钮和原生选择保留自身键盘行为，只读格仍�
   expect(sheetArrowUsesEditor(target(), 'ArrowRight')).toBe(false)
 })
 
+it.each(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'])('Select 和日期编辑器保留自身%s，闭合或只读搜索框也不被网格抢占', key => {
+  for (const readOnly of [false, true]) {
+    const editor = target({ tagName: 'INPUT', readOnly, value: '', selectionStart: 0, selectionEnd: 0 })
+    const closest = editor.closest.bind(editor)
+    editor.closest = ((selector: string) => selector === '.ant-select,.ant-picker' ? {} : closest(selector)) as any
+    expect(sheetArrowUsesEditor(editor, key)).toBe(true)
+  }
+})
+
 // Execute the actual React keyboard handler. Never invoke a business API.
 const text = readFileSync(new URL('../components/ShipmentSheetTable.tsx', import.meta.url), 'utf8')
 const tree = ts.createSourceFile('table.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -60,7 +69,7 @@ function setup(key: string, at = { row: 1, col: 1 }) {
   const state = {
     sheetArrowKeys, sheetArrowPoint, sheetArrowUsesEditor, point: () => at,
     count: 3, fields: ['', 'name', 'qty'], editableAt: () => true,
-    cellAt: () => ({ querySelector: () => null }), focus: vi.fn(),
+    cellAt: () => ({ querySelector: () => null }), editorAt: vi.fn(() => ({} as HTMLElement | null)), focus: vi.fn(),
     setAnchor: vi.fn(), setEnd: vi.fn(), fillDown: vi.fn(),
     event: { key, target: input, nativeEvent: { isComposing: false },
       ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false,
@@ -111,6 +120,19 @@ it('输入法、系统修饰键和打开的下拉选择不被方向导航抢占'
     expect(state.event.preventDefault).not.toHaveBeenCalled()
   }
 })
+it.each(['.ant-select', '.ant-picker'])('F2 后处于可编辑列的闭合%s 内，方向键交给控件而非跳到下一行', control => {
+  const { state, run } = setup('ArrowDown')
+  const input = { tagName: 'INPUT', readOnly: control === '.ant-select', value: '', selectionStart: 0, selectionEnd: 0 }
+  state.event.target.closest = ((selector: string) => {
+    if (selector === '.ant-select,.ant-picker') return {}
+    if (selector === 'input,textarea' || selector === 'input,textarea,button,[role="combobox"]') return input
+    return null
+  }) as any
+  run()
+  expect(state.focus).not.toHaveBeenCalled()
+  expect(state.event.preventDefault).not.toHaveBeenCalled()
+  expect(state.event.stopPropagation).not.toHaveBeenCalled()
+})
 it('F2可进入编辑，Tab/Enter/向下填充继续使用原有逻辑', () => {
   const edit = setup('F2'); edit.run()
   expect(edit.state.focus).toHaveBeenCalledWith({ row: 1, col: 1 })
@@ -120,4 +142,13 @@ it('F2可进入编辑，Tab/Enter/向下填充继续使用原有逻辑', () => {
   expect(enter.state.focus).toHaveBeenCalledWith({ row: 2, col: 1 })
   const fill = setup('d'); fill.state.event.metaKey = true; fill.run()
   expect(fill.state.fillDown).toHaveBeenCalledOnce()
+})
+
+it('F2可进入批量保护列中的已有选择器，禁止进入合并只读格及无编辑器的显示格', () => {
+  const picker = setup('F2', { row: 1, col: 0 }); picker.run()
+  expect(picker.state.focus).toHaveBeenCalledWith({ row: 1, col: 0 })
+  const merged = setup('F2'); merged.state.editableAt = () => false; merged.run()
+  expect(merged.state.focus).not.toHaveBeenCalled()
+  const display = setup('F2', { row: 1, col: 0 }); display.state.editorAt.mockReturnValue(null); display.run()
+  expect(display.state.focus).not.toHaveBeenCalled()
 })

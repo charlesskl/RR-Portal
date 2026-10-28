@@ -30,9 +30,9 @@ TEMPLATES = ('template-customs.xlsx', 'template-customs-rri.xlsx', 'template-cus
 TEMPLATE_PROOFS = {'template-customs.xlsx': (144045, '24ea412592b3b656a872950c8a3985813fb3dd647c26df495bc882791e9bcaf6'),
                    'template-customs-rri.xlsx': (43375953, 'cb37324b0b4d659d55a8b2ddf012f0b6bbef8b1ee7f368448b3e0ad0fff23647'),
                    'template-customs-rrm.xlsx': (835559, '21fa65679165883c8ed9f100af96c581d79a35da9644464548c765e10f1d2984')}
-PHASE = 'prepare'
+PHASE = 'deploy'
 EXECUTE = True
-PREPARED_SHA256 = ''
+PREPARED_SHA256 = '167adee1575612e2fa0c9d75d0a93ff94b699c87977a4d741067f3877f4b08bb'
 PUBLIC = 'http://127.0.0.1/indo-shipping/'
 STAGE = 'entry'
 SERIAL = 0

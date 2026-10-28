@@ -4,7 +4,7 @@ All final application pins remain blank until source review finishes.
 """
 import contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,shutil,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error,urllib.parse
 ROOT=pathlib.Path('/opt/rr-portal')
-ARCHIVE_ROOT=ROOT/'deploy/backups/pr1034-indo-static-20261028-r2'
+ARCHIVE_ROOT=ROOT/'deploy/backups/pr1034-indo-static-20261028-r3'
 OUT=None
 PREPARE_OUT=ARCHIVE_ROOT/'prepare'
 BASE='70590f6d0dc1c691cfcc7c6b85c67e4a3574e571'
@@ -19,10 +19,10 @@ EXPECTED_TARGET='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c'
 EXPECTED_TREE='97f1a01c37dc8c1219b1af0b56cc1c8e2854d1eb'
 REVIEWED_PATHS=('web/src/components/ShipmentImport.tsx', 'web/src/components/ShipmentSheetTable.tsx', 'web/src/pages/ShipmentsPage.tsx', 'web/src/utils/customsExport.ts', 'web/src/utils/shipmentConsolidationSave.test.ts', 'web/src/utils/shipmentDates.ts', 'web/src/utils/shipmentDeclaration.test.ts', 'web/src/utils/shipmentDeclaration.ts', 'web/src/utils/shipmentDeclarationSaveValidation.test.ts', 'web/src/utils/shipmentDeclarationSaveValidation.ts', 'web/src/utils/shipmentFreezePanes.test.ts', 'web/src/utils/shipmentImport.ts', 'web/src/utils/shipmentImportedHs.test.ts', 'web/src/utils/shipmentInvoice.ts', 'web/src/utils/shipmentSheet.test.ts', 'web/src/utils/shipmentSheet.ts', 'web/src/utils/shipmentSheetNavigation.test.ts', 'web/src/utils/shipmentSheetNavigation.ts', 'web/src/utils/supplierDocuments.test.ts')
 REVIEWED_PATH_COUNT=19
-TARGET=''
-TREE=''
-PHASE=''
-EXECUTE=False
+TARGET='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c'
+TREE='97f1a01c37dc8c1219b1af0b56cc1c8e2854d1eb'
+PHASE='prepare'
+EXECUTE=True
 PREPARED_SHA256=''
 DEPLOY_SHA256=''
 BRANCH='refs/heads/ops/pr-1034-20261028-indo-static'
@@ -400,8 +400,9 @@ def inventory():
  service(rows,'db');return r,rows,rows
 
 def backend_proof(identity,candidate=False):
+ if not REUSE_INDEX:initialize_r2_reuse(r2_seal_check())
  value=Q.service_source_proof(SERVICE,{'id':identity},revision=BACKEND_REVISION,candidate=candidate)
- need(value['reviewedSourceMatch']is True,'actual-six-dll-pdb-and-db-seed-source-match-705');return value
+ need(value['reviewedSourceMatch']is True,'actual-six-dll-pdb-and-db-seed-source-match-705');reuse_completed_proofs();private(OUT/('proof-reuse-after-command-%06d.private.json'%SERIAL),REUSE_AUDIT);return value
 
 def same_backend(left,right):
  ignored={'compiledArtifactInventory','compiledArtifactInventorySHA256'}
@@ -431,62 +432,150 @@ def derivative_contract(base_image,derivative):
  before,after=dict(base_image['Config']),dict(derivative['Config']);left=before.pop('Labels',None)or{};right=after.pop('Labels',None)or{};before.pop('Image',None);after.pop('Image',None)
  need(before==after and right==dict(left,**{'org.opencontainers.image.revision':TARGET,'io.rr-portal.backend-image':LIVE_IMAGE,'io.rr-portal.frontend-app-tree':APP_TREE}),'full-config-including-exact-user-and-only-explicit-static-labels')
 
+# Paste before prepare() in the reviewed13fc helper. No import-time operations.
+R2_ROOT=ROOT/'deploy/backups/pr1034-indo-static-20261028-r2/prepare'
+R2_SOURCE_SHA256='13fc4cfeac59a8672ee3f3b2309d35987b92c822eaf9af68d4ee58f39b905859'
+R2_OPS_COMMIT='d4f255b6464ab81f0dd76412de47d5814685307b'
+R2_RUN_ID=40703736639
+R2_MANIFEST_SHA256='2e29909df4802c055e151c1bebacf2b91b44a08111ef670010fa50e1bf2efaf5'
+R2_FAILED_RESULT_SHA256='ef0978f322e5d3d9ede5bd1d06cf26bdd644b7233a85d9f23b842026d79b258f'
+ADOPT_FRONTEND='sha256:685449bc64537388bec8a5b17574c81c828b36ee75e6176cfca8b8709726b25a'
+ADOPT_DURABLE='sha256:f09427d7b4ac75245a4bf823b964e04b8c524edf98eb9287d2ad57f2a76f4bd1'
+REUSE_INDEX={}
+REUSE_AUDIT=[]
+
+def reuse_metadata(path):
+    st=path.lstat()
+    need(stat.S_ISREG(st.st_mode) and not path.is_symlink(),'regular-owned-reuse-file')
+    try: attrs=tuple((n,os.getxattr(path,n,follow_symlinks=False)) for n in sorted(os.listxattr(path,follow_symlinks=False)))
+    except OSError: return None
+    return (st.st_uid,st.st_gid,stat.S_IMODE(st.st_mode),attrs)
+
+def reuse_completed_proofs():
+    # Called only after a complete fresh backend_proof, whose subprocess streams
+    # and L.private_write outputs are closed/fsynced. Both logical files remain.
+    paths=sorted({*OUT.glob('*.stdout.private'),*OUT.glob('runtime-source-*.private.tar')})
+    for path in paths:
+        meta=reuse_metadata(path)
+        if meta is None: continue
+        st=path.stat();digest=sha(path.read_bytes());key=(st.st_size,digest,meta)
+        source=REUSE_INDEX.get(key)
+        if source is None:
+            REUSE_INDEX[key]=path
+            continue
+        source_st=source.stat()
+        if (st.st_dev,st.st_ino)==(source_st.st_dev,source_st.st_ino): continue
+        need(st.st_dev==source_st.st_dev and reuse_metadata(source)==meta and sha(source.read_bytes())==digest,'same-device-sealed-or-fresh-proof-reuse-source')
+        before=(st.st_dev,st.st_ino,st.st_size,st.st_mtime_ns,st.st_ctime_ns)
+        now=path.stat();need(before==(now.st_dev,now.st_ino,now.st_size,now.st_mtime_ns,now.st_ctime_ns),'completed-proof-still-stable-before-link')
+        temp=path.with_name(path.name+'.r3-link')
+        need(not temp.exists() and not temp.is_symlink(),'fresh-own-completed-proof-link')
+        try:
+            os.link(source,temp,follow_symlinks=False)
+            need(reuse_metadata(temp)==meta and sha(temp.read_bytes())==digest,'new-proof-link-byte-owner-mode-xattr-exact')
+            current=path.stat();need(before==(current.st_dev,current.st_ino,current.st_size,current.st_mtime_ns,current.st_ctime_ns),'completed-proof-cas-immediately-before-replace')
+            os.replace(temp,path);directory=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
+            try:os.fsync(directory)
+            finally:os.close(directory)
+            need(path.stat().st_size==st.st_size and reuse_metadata(path)==meta and sha(path.read_bytes())==digest,'logical-fresh-proof-retained-exact-after-link')
+        finally:
+            if temp.exists():
+                need((temp.stat().st_dev,temp.stat().st_ino)==(source.stat().st_dev,source.stat().st_ino),'cleanup-only-own-proof-link')
+                temp.unlink()
+        REUSE_AUDIT.append({'path':str(path.relative_to(OUT)),'source':str(source),'sha256':digest,'bytes':st.st_size,'originalFreshMtimeNS':st.st_mtime_ns,'linkedMtimeNS':path.stat().st_mtime_ns})
+
+def r2_seal_check():
+    need(R2_ROOT.is_dir() and not R2_ROOT.is_symlink(),'fixed-existing-r2-failed-archive')
+    manifest_path=R2_ROOT/'manifest.json';result_path=R2_ROOT/'result.private.json'
+    need(manifest_path.is_file() and not manifest_path.is_symlink() and sha(manifest_path.read_bytes())==R2_MANIFEST_SHA256,'fixed-failed-r2-manifest-bytes')
+    need(result_path.is_file() and not result_path.is_symlink() and sha(result_path.read_bytes())==R2_FAILED_RESULT_SHA256,'fixed-failed-r2-private-result-bytes')
+    expected=read(manifest_path);actual=manifest(R2_ROOT);actual.pop('manifest.json',None);actual.pop('result.private.json',None)
+    need(actual==expected,'every-original-failed-r2-logical-path-and-body-exact')
+    result=read(result_path)
+    need(result['success'] is False and result['phase']=='prepare' and result['stage']=='frontend-three-gib-user-and-ten-gib-physical-free' and result['base']==BASE and result['head']==HEAD and result['target']==TARGET and result['tree']==TREE and result['appTree']==APP_TREE and result['hostBase']==HOST_BASE and result['manifestSHA256']==R2_MANIFEST_SHA256,'only-known-after-budget-failed-r2-source-bound-result')
+    need(not (R2_ROOT/'prepared.private.json').exists(),'do-not-pretend-failed-r2-was-successful-prepare')
+    before=read(R2_ROOT/'docker-space-before.private.json');after=read(R2_ROOT/'docker-space-after.private.json')
+    need(before['available']>=3*1024**3 and before['free']>=10*1024**3 and (after['available']<3*1024**3 or after['free']<10*1024**3),'r2-failed-only-post-complete-build-budget')
+    return expected
+
+def r2_source_check():
+    # Read the exact immutable published helper; no checkout or branch mutation.
+    import ast
+    git('fetch','--no-write-fetch-head','origin',R2_OPS_COMMIT)
+    raw=git('show',R2_OPS_COMMIT+':deploy/ops/pr1034-static-release.py')
+    for key,active,canonical in [('TARGET',TARGET,''),('TREE',TREE,''),('PHASE','prepare',''),('EXECUTE',True,False)]:
+        parsed=ast.parse(raw);found=[n.value for n in parsed.body if isinstance(n,ast.Assign) and len(n.targets)==1 and isinstance(n.targets[0],ast.Name) and n.targets[0].id==key]
+        need(len(found)==1 and ast.literal_eval(found[0])==active,'exact-published-r2-activation-'+key)
+        n=found[0];lines=raw.splitlines(keepends=True);begin=sum(map(len,lines[:n.lineno-1]))+n.col_offset;end=sum(map(len,lines[:n.end_lineno-1]))+n.end_col_offset
+        raw=raw[:begin]+repr(canonical).encode()+raw[end:]
+    need(sha(raw)==R2_SOURCE_SHA256,'published-r2-helper-inverse-exact13fc')
+
+def initialize_r2_reuse(expected):
+    for relative,digest in expected.items():
+        need(safe_relative(relative),'safe-sealed-r2-reuse-path');path=R2_ROOT/relative
+        meta=reuse_metadata(path)
+        if meta is not None:
+            need(sha(path.read_bytes())==digest,'sealed-r2-index-body-still-exact')
+            REUSE_INDEX.setdefault((path.stat().st_size,digest,meta),path)
+
+def link_public_tree(source,name):
+    expected=files(source);dest=OUT/name;dest.mkdir(mode=0o700)
+    for relative,digest in expected.items():
+        src=source/relative;target=dest/relative;target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+        need(src.is_file() and not src.is_symlink(),'only-regular-r2-public-file-links')
+        os.link(src,target,follow_symlinks=False)
+        need(sha(target.read_bytes())==digest and reuse_metadata(target)==reuse_metadata(src),'linked-public-body-owner-mode-xattr-exact')
+    need(files(dest)==expected,'whole-public-tree-linked-without-body-copy')
+    return dest
+
+def adopted_image_inspect(iid,expected_manifest):
+    found=[]
+    for relative in expected_manifest:
+        if not relative.endswith('.stdout.private'): continue
+        p=R2_ROOT/relative
+        if p.stat().st_size>2*1024**2: continue
+        try: value=json.loads(p.read_bytes())
+        except (ValueError,UnicodeError): continue
+        if type(value) is list and len(value)==1 and type(value[0]) is dict and value[0].get('Id')==iid and all(k in value[0] for k in ('Config','RootFS','Architecture','Os')):
+            found.append({k:value[0][k] for k in ('Id','Config','RootFS','Architecture','Os')})
+    need(found and all(v==found[0] for v in found),'exact-r2-sealed-image-inspect-evidence')
+    rows=json.loads(run(['docker','image','inspect',iid]));need(len(rows)==1 and {k:rows[0][k] for k in found[0]}==found[0],'fresh-immutable-image-id-platform-config-rootfs-exact')
+    return rows[0]
+
 def prepare():
-    need(git('symbolic-ref', '--short', 'HEAD').decode().strip() == 'main' and git('rev-parse', 'HEAD').decode().strip() == HOST_BASE, 'unchanged-canonical-priority-host-base')
-    r, rows, records = inventory(); preserved = host_files(); protection=protected_inventory(rows); ensure_build_space()
-    prior_alias=image_id(COMPOSE_TAG); need(prior_alias==STATIC_BASE_IMAGE,'fresh-original-durable-canonical-alias'); original_proof=backend_proof(r['Id']); accepted_proof=backend_proof(STATIC_BASE_IMAGE,True); need(original_proof==accepted_proof,'whole-live-backend-and-static-graph-equal-known79c')
-    private(OUT / 'runtime.private.json', enc(records)); private(OUT / 'environment.private', (ROOT / '.env.cloud.production').read_bytes())
-    old = copy_web(r['Id'], 'old-wwwroot'); old_manifest = files(old); old_meta = index_metadata(r['Id'])
-    status, headers, body = http()
-    need(status == 200 and sha(body) == old_manifest['index.html'], 'live-old-index-matches-backup')
-    src = OUT / 'source'
-    extract_source(src)
-    build_tag = 'rrportal-indo-pr1034-frontend:' + TARGET
-    run(['docker', 'build', '--target', 'frontend', '--build-arg', 'VITE_BASE_PATH=/indo-shipping/', '-t', build_tag, str(src / APP)], timeout=1500)
-    frontend_image = image_id(build_tag); scratch = scratch_create(frontend_image)
-    try:
-        prepared = OUT / 'prepared-wwwroot'; prepared.mkdir(mode=0o700)
-        run(['docker', 'cp', scratch + ':/src/web/dist/.', str(prepared)])
-    finally: scratch_remove(scratch, frontend_image)
-    template_proofs = preserve_templates(old, prepared, old_manifest)
-    new_manifest = files(prepared)
-    additions = static_plan(old_manifest, new_manifest)
-    # Equal length avoids the narrow sendfile window using the previous index's length.
-    need((prepared / 'index.html').stat().st_size == (old / 'index.html').stat().st_size, 'equal-index-byte-length')
-    # Isolate the daemon context: no runtime/env/dump/log/backup can enter it.
-    image_context = OUT / 'image-context'; image_context.mkdir(mode=0o700)
-    merged = image_context / 'wwwroot'; shutil.copytree(old, merged); shutil.copytree(prepared, merged, dirs_exist_ok=True)
-    base_alias = 'rrportal-indo-pr1034-backend:' + STATIC_BASE_IMAGE.split(':')[1]
-    previous_alias = image_id(base_alias, optional=True); need(previous_alias in (None, STATIC_BASE_IMAGE), 'own-base-alias-not-reassigned')
-    run(['docker', 'tag', STATIC_BASE_IMAGE, base_alias]); need(image_id(base_alias) == STATIC_BASE_IMAGE, 'frozen-local-build-base')
-    base_image = json.loads(run(['docker', 'image', 'inspect', STATIC_BASE_IMAGE]))[0]
-    base_scratch = scratch_create(STATIC_BASE_IMAGE)
-    try: base_web = copy_web(base_scratch, 'base-image-wwwroot')
-    finally: scratch_remove(base_scratch, STATIC_BASE_IMAGE)
-    need(files(base_web) == old_manifest, 'live-original-static-files-match-pinned-immutable-image')
-    dockerfile = ('FROM ' + base_alias + '\nCOPY --chown=app:app wwwroot/ /app/wwwroot/\nLABEL org.opencontainers.image.revision="' + TARGET + '" io.rr-portal.backend-image="' + LIVE_IMAGE + '" io.rr-portal.frontend-app-tree="' + APP_TREE + '"\n').encode()
-    private(image_context / 'Dockerfile', dockerfile)
-    need(all(p == image_context / 'Dockerfile' or p == merged or merged in p.parents for p in image_context.rglob('*')), 'public-only-derivative-build-context')
-    durable_tag = 'rrportal-indo-pr1034:' + TARGET
-    run(['docker', 'build', '--pull=false', '-t', durable_tag, str(image_context)], timeout=300)
-    derivative = json.loads(run(['docker', 'image', 'inspect', durable_tag]))[0]; image = derivative['Id']
-    need(image_id(base_alias)==STATIC_BASE_IMAGE,'frozen-local-base-alias-still-exact'); derivative_contract(base_image,derivative)
-    # Read back the durable image to prove it contains the whole old+new dependency graph.
-    scratch = scratch_create(image)
-    try: image_web = copy_web(scratch, 'image-verified-wwwroot')
-    finally: scratch_remove(scratch, image)
-    need(files(image_web) == files(merged), 'durable-image-static-files-exact')
-    _, after, _ = inventory(); target_unchanged(rows, after, r['Id']); need(host_files() == preserved and protected_inventory(after)==protection, 'prepare-host-env-bind-auth-maintenance-preserved')
-    service = json.loads(run(['docker', 'compose', '-p', 'rr-portal', '-f', str(ROOT / 'docker-compose.cloud.yml'), '--env-file', str(ROOT / '.env.cloud.production'), 'config', '--format', 'json']))['services']['indo-shipping']
-    need(type(service.get('build')) is dict and service['build'].get('dockerfile', 'Dockerfile') == 'Dockerfile' and service.get('image') in (None, 'rr-portal-indo-shipping', COMPOSE_TAG), 'known-compose-build-service-and-default-image-tag')
-    old_headers = {k.lower(): v for k, v in headers.items() if k.lower() in ('etag', 'last-modified')}; need(set(old_headers) == {'etag', 'last-modified'}, 'both-old-index-cache-validators-recorded')
-    derived_proof=backend_proof(image,True); same_backend(original_proof,derived_proof); need({n.removeprefix('wwwroot/'):v['sha256']for n,v in derived_proof['compiledArtifactInventory'].items()}==files(merged),'durable-full-proof-static-union-exact')
-    need(image_id(COMPOSE_TAG)==prior_alias,'original-canonical-alias-unchanged-through-prepare')
-    data = {'base': BASE, 'hostBase': HOST_BASE, 'sourceCheckoutDeferredToReviewedHostBaseline': True, 'target': TARGET, 'tree': TREE, 'head': HEAD, 'appTree': APP_TREE, 'container': r['Id'], 'runtime': rows, 'hostFiles': preserved, 'oldManifest': old_manifest, 'newManifest': new_manifest, 'templateProofs': template_proofs, 'newAssets': additions, 'oldHeaders': old_headers, 'oldIndexMetadata': old_meta, 'composeTag': COMPOSE_TAG, 'composeTagBefore': prior_alias, 'originalContainerImageName': r['Config']['Image'], 'durableTag': durable_tag, 'durableImage': image, 'imageContextManifest': files(merged), 'oldProof': original_proof, 'protected': protection, 'compiledBackendRevision': BACKEND_REVISION}
-    ensure_build_space('after')
-    private(OUT / 'prepared.private.json', enc(data))
-    return {'durableImage': image, 'newFileCount': len(new_manifest), 'databaseReadOrWritten': False, 'runtimeNotRestarted': True, 'liveRuntimeUnchanged': True,
-            'hostSourceHead': HOST_BASE, 'logicalPrBase': BASE, 'sourceCheckoutDeferredToReviewedHostBaseline': True}
+    # Deliberately no docker build/tag/create/copy_web, Git archive, extraction or
+    # failed-phase replay. New evidence records a fresh adoption, not R2 success.
+    expected=r2_seal_check();r2_source_check();initialize_r2_reuse(expected)
+    r,rows,records=inventory();preserved=host_files();protection=protected_inventory(rows);ensure_build_space()
+    need(rows==read(R2_ROOT/'runtime.private.json'),'all-runtime-fields-exact-to-r2-before-build')
+    need((ROOT/'.env.cloud.production').read_bytes()==(R2_ROOT/'environment.private').read_bytes(),'original-r2-production-env-bytes-unchanged')
+    prior_alias=image_id(COMPOSE_TAG);need(prior_alias==STATIC_BASE_IMAGE,'fresh-original-durable-canonical-alias')
+    frontend=adopted_image_inspect(ADOPT_FRONTEND,expected);derivative=adopted_image_inspect(ADOPT_DURABLE,expected)
+    need(not frontend['Config'].get('Volumes') and not derivative['Config'].get('Volumes'),'both-adopted-images-stateless')
+    need(image_id('rrportal-indo-pr1034-frontend:'+TARGET)==ADOPT_FRONTEND and image_id('rrportal-indo-pr1034:'+TARGET)==ADOPT_DURABLE,'exact-existing-frontend-and-durable-tags-no-retag')
+    base_image=json.loads(run(['docker','image','inspect',STATIC_BASE_IMAGE]))[0];need(base_image['Id']==STATIC_BASE_IMAGE,'same-accepted-staticbase-image');derivative_contract(base_image,derivative)
+    private(OUT/'runtime.private.json',records);private(OUT/'environment.private',(ROOT/'.env.cloud.production').read_bytes())
+    old=link_public_tree(R2_ROOT/'old-wwwroot','old-wwwroot');prepared=link_public_tree(R2_ROOT/'prepared-wwwroot','prepared-wwwroot')
+    old_manifest=files(old);new_manifest=files(prepared);additions=static_plan(old_manifest,new_manifest);union=dict(old_manifest,**new_manifest)
+    need(files(R2_ROOT/'image-verified-wwwroot')==union and files(R2_ROOT/'image-context/wwwroot')==union,'sealed-r2-durable-full-static-union')
+    original_proof=backend_proof(r['Id']);accepted_proof=backend_proof(STATIC_BASE_IMAGE,True)
+    need(original_proof==accepted_proof and {n.removeprefix('wwwroot/'):v['sha256']for n,v in original_proof['compiledArtifactInventory'].items()}==old_manifest,'fresh-full-live-backend-and-static-equal-accepted79c')
+    old_meta=index_metadata(r['Id']);status,headers,body=http();need(status==200 and sha(body)==old_manifest['index.html'],'fresh-live-old-index-exact')
+    template_proofs=preserve_templates(old,prepared,old_manifest);reuse_completed_proofs()
+    need(files(prepared)==new_manifest and (prepared/'index.html').stat().st_size==(old/'index.html').stat().st_size==old_meta['size'],'adopted-static-and-equal-index-length-exact')
+    derived_proof=backend_proof(ADOPT_DURABLE,True);same_backend(original_proof,derived_proof)
+    need({n.removeprefix('wwwroot/'):v['sha256']for n,v in derived_proof['compiledArtifactInventory'].items()}==union,'fresh-adopted-durable-whole-static-union')
+    _,after,_=inventory();target_unchanged(rows,after,r['Id']);need(host_files()==preserved and protected_inventory(after)==protection,'adoption-host-env-bind-auth-maintenance-preserved')
+    service_config=json.loads(run(['docker','compose','-p','rr-portal','-f',str(ROOT/'docker-compose.cloud.yml'),'--env-file',str(ROOT/'.env.cloud.production'),'config','--format','json']))['services']['indo-shipping']
+    need(type(service_config.get('build')) is dict and service_config['build'].get('dockerfile','Dockerfile')=='Dockerfile' and service_config.get('image') in(None,'rr-portal-indo-shipping',COMPOSE_TAG),'known-compose-build-service-and-default-image-tag')
+    old_headers={k.lower():v for k,v in headers.items()if k.lower() in('etag','last-modified')};need(set(old_headers)=={'etag','last-modified'},'both-current-old-cache-validators')
+    need(image_id(COMPOSE_TAG)==prior_alias and image_id('rrportal-indo-pr1034:'+TARGET)==ADOPT_DURABLE,'all-original-aliases-unchanged-during-readonly-adoption')
+    need(r2_seal_check()==expected,'all-r2-failure-evidence-retained-after-link-adoption')
+    private(OUT/'proof-reuse.private.json',REUSE_AUDIT)
+    data={'base':BASE,'hostBase':HOST_BASE,'sourceCheckoutDeferredToReviewedHostBaseline':True,'target':TARGET,'tree':TREE,'head':HEAD,'appTree':APP_TREE,'container':r['Id'],'runtime':rows,'hostFiles':preserved,'oldManifest':old_manifest,'newManifest':new_manifest,'templateProofs':template_proofs,'newAssets':additions,'oldHeaders':old_headers,'oldIndexMetadata':old_meta,'composeTag':COMPOSE_TAG,'composeTagBefore':prior_alias,'originalContainerImageName':r['Config']['Image'],'durableTag':'rrportal-indo-pr1034:'+TARGET,'durableImage':ADOPT_DURABLE,'imageContextManifest':union,'oldProof':original_proof,'protected':protection,'compiledBackendRevision':BACKEND_REVISION,'adoptedFailedR2':{'success':False,'runId':R2_RUN_ID,'opsCommit':R2_OPS_COMMIT,'sourceSHA256':R2_SOURCE_SHA256,'manifestSHA256':R2_MANIFEST_SHA256,'failedResultSHA256':R2_FAILED_RESULT_SHA256}}
+    ensure_build_space('after');private(OUT/'prepared.private.json',data)
+    return {'durableImage':ADOPT_DURABLE,'frontendImage':ADOPT_FRONTEND,'newFileCount':len(new_manifest),'databaseReadOrWritten':False,'runtimeNotRestarted':True,'liveRuntimeUnchanged':True,'hostSourceHead':HOST_BASE,'logicalPrBase':BASE,'sourceCheckoutDeferredToReviewedHostBaseline':True,'newBuildOrSourceExtractionPerformed':False,'adoptedR2RunId':R2_RUN_ID,'r2FailureRetained':True}
+
 
 def manifest(directory):
  values=sorted(directory.rglob('*'));need(len(values)<=100000 and all(not p.is_symlink()and(p.is_file()or p.is_dir())for p in values),'regular-bounded-private-evidence');return {str(p.relative_to(directory)):sha(p.read_bytes())for p in values if p.is_file()}

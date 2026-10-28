@@ -375,10 +375,15 @@ export function extractInvoices(sheetRowsMap) {
 }
 
 /** 按发票号主干分组（X, X-2, X-3 …），用于多段发票的累计合计 */
+export function invoicePart(name) {
+  const match = String(name).match(/^(.*)-(\d+)$/);
+  return match ? { base: match[1], part: Number(match[2]) } : { base: String(name), part: 1 };
+}
+
 export function groupParts(invoices) {
   const groups = new Map();
   for (const inv of invoices) {
-    const base = inv.outSheetName.replace(/-\d+$/, '');
+    const base = invoicePart(inv.outSheetName).base;
     if (!groups.has(base)) groups.set(base, []);
     groups.get(base).push(inv);
   }
@@ -403,8 +408,9 @@ export function invoiceTotal(inv) {
  */
 export function buildJobs(invoices) {
   const groups = groupParts(invoices);
+  for (const parts of groups.values()) parts.sort((a, b) => invoicePart(a.outSheetName).part - invoicePart(b.outSheetName).part);
   return invoices.map((inv) => {
-    const parts = groups.get(inv.outSheetName.replace(/-\d+$/, ''));
+    const parts = groups.get(invoicePart(inv.outSheetName).base);
     const partIndex = parts.indexOf(inv);
     const isLast = partIndex === parts.length - 1;
     const linesTotal = isLast ? parts.reduce((s, p) => s + invoiceTotal(p), 0) : null;

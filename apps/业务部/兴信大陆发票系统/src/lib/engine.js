@@ -3,7 +3,7 @@
  * 浏览器专用（fetch 内置母版），生成逻辑与 Node 测试共用同一套 lib。
  */
 import * as XLSX from 'xlsx';
-import { parseWorkbook, extractInvoices, buildJobs, invoiceTotal, fmtDate } from './invoice.js';
+import { parseWorkbook, extractInvoices, buildJobs, invoiceTotal, fmtDate, invoicePart } from './invoice.js';
 import { SheetBuilder } from './sheetBuilder.js';
 import { ZuruSheetBuilder } from './zuruSheetBuilder.js';
 import { XlsxPackage } from './xlsxPackage.js';
@@ -13,10 +13,21 @@ function baseSheetTotal(baseWb, name) {
   const ws = baseWb && baseWb.Sheets[name];
   if (!ws) return null;
   let t = 0, found = false;
-  for (let r = 24; r <= 47; r++) {
-    const c = ws[`C${r}`], d = ws[`D${r}`], k = ws[`K${r}`];
-    if (c && d && k && typeof d.v === 'number' && typeof k.v === 'number') {
-      t += k.v * 0.967 * d.v;
+  const modern = ws.H9?.v != null && ws.H10?.v == null;
+  const first = modern ? 19 : 24, firstTotal = modern ? 44 : 48;
+  const end = XLSX.utils.decode_range(ws['!ref'] || 'A1').e.r + 1;
+  const numeric = (value) => typeof value === 'number' && Number.isFinite(value);
+  for (let r = first; r <= end; r++) {
+    const c = ws[`C${r}`]?.v, d = ws[`D${r}`]?.v, k = ws[`K${r}`]?.v;
+    // Stop at this sheet's total, which can be cumulative across prior parts.
+    // Extended data rows and direct-amount fees must be counted only once.
+    if (r >= firstTotal && (ws[`A${r}`]?.v === 'TOTAL'
+      || (ws[`H${r}`]?.v === 'USD' && !numeric(d) && !numeric(k)))) break;
+    if (numeric(d) && numeric(k)) {
+      t += k * 0.967 * d;
+      found = true;
+    } else if (numeric(k) && (d == null || d === '') && c != null && String(c).trim() !== '') {
+      t += k * 0.967;
       found = true;
     }
   }
@@ -38,40 +49,49 @@ export async function generate({ baseBuffer, baseName, invoices, selected, onPro
     builder = new SheetBuilder(await pkg.getTemplateParts('98631'));
     if (slimOutput || baseIsTemplate) await pkg.stripAllSheets();   // 仅导出新增发票（不带母版旧票，也不带模版参考）
   }
-  // 母版值（SheetJS，只读前 60 行），用于已存在检测 & 前段合计
-  const baseWb = XLSX.read(baseBuffer, { type: 'array', cellDates: true, sheetRows: 60 });
+  // 历史票可能已扩行；读取完整数据区，避免续票累计漏掉第 60 行后的明细。
+  const baseWb = XLSX.read(baseBuffer, { type: 'array', cellDates: true });
   const baseNames = new Set(baseIsTemplate ? [] : (zuruMode || slimOutput ? baseWb.SheetNames : pkg.getSheetNames()));
 
   // 按发票号排序生成：基号与各段（-1/-2）及 REV 续票相邻，sheet 目录更整齐
   const invKey = (name) => {
     const m = String(name).match(/\d+/);
-    return { n: m ? parseInt(m[0], 10) : Number.MAX_SAFE_INTEGER, s: String(name) };
+    return { n: m ? parseInt(m[0], 10) : Number.MAX_SAFE_INTEGER, s: String(name), ...invoicePart(name) };
   };
   const todo = invoices.filter((v) => selected.has(v.outSheetName)).sort((a, b) => {
     const ka = invKey(a.outSheetName), kb = invKey(b.outSheetName);
     if (ka.n !== kb.n) return ka.n - kb.n;
+    if (ka.base === kb.base && ka.part !== kb.part) return ka.part - kb.part;
     return ka.s < kb.s ? -1 : ka.s > kb.s ? 1 : 0;
   });
+  const uniqueNames = new Set();
+  for (const inv of todo) {
+    if (uniqueNames.has(inv.outSheetName)) throw new Error(`发票工作表名称冲突：${inv.outSheetName}，请检查源表或按客户分开生成`);
+    uniqueNames.add(inv.outSheetName);
+  }
   const skipped = [];
   const jobs = buildJobs(todo);
 
   // 补算：-2/-3 段的前段若已在母版里，累计合计要包含前段
   const groups = new Map();
   for (const j of jobs) {
-    const base = j.inv.outSheetName.replace(/-\d+$/, '');
+    const base = invoicePart(j.inv.outSheetName).base;
     if (!groups.has(base)) groups.set(base, []);
     groups.get(base).push(j);
   }
   const warnings = [];
   for (const [base, parts] of groups) {
-    if (parts[0].inv.outSheetName === base) continue;   // 第一段已选中，累计完整
-    // 第一段不在本次选择里：尝试从母版读前段合计（适用于只选了 -2/-3 段的情况）
+    // 只补本次末段之前、未选中的历史段；首段选中也可能仍缺中间段。
     const last = parts[parts.length - 1];
+    const lastPart = invoicePart(last.inv.outSheetName).part;
     let fromBase = 0;
     let prefixTotal = 0;
     const selectedNames = new Set(parts.map((p) => p.inv.outSheetName));
     // 前段可能有多段（X, X-2 …），把母版里存在的、且不在选择中的前段都算上
-    const allPartNames = [...baseNames].filter((n) => n === base || n.match(new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-\\d+$`)));
+    const allPartNames = [...baseNames].filter((name) => {
+      const part = invoicePart(name);
+      return part.base === base && part.part < lastPart;
+    });
     for (const n of allPartNames) {
       if (selectedNames.has(n)) continue;
       const t = baseSheetTotal(baseWb, n);

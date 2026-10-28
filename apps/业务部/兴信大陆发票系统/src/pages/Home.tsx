@@ -84,6 +84,7 @@ function StepBadge({ n }) {
 }
 
 const cardCls = 'rounded-xl border-neutral-200/90 shadow-[0_1px_2px_rgba(0,0,0,0.04)]'
+const invoiceKey = (invoice) => JSON.stringify([invoice.customer || 'ZURU', invoice.outSheetName])
 
 export default function Home() {
   const [mode, setMode] = useState('zuru')
@@ -168,10 +169,10 @@ export default function Home() {
         try {
           const buffer = await file.arrayBuffer()
           const invs = await parseZuruSource(buffer)
-          setInvoices((prev) => [...prev.filter((x) => !invs.some((v) => v.srcSheetName === x.srcSheetName)), ...invs])
+          setInvoices((prev) => [...prev.filter((x) => !invs.some((v) => v.srcSheetName === x.srcSheetName && v.customer === x.customer)), ...invs])
           setSelected((sel) => {
             const next = new Set(sel)
-            for (const v of invs) if (!baseNames.has(v.outSheetName)) next.add(v.outSheetName)
+            for (const v of invs) if (!baseNames.has(v.outSheetName)) next.add(invoiceKey(v))
             return next
           })
           setSources((s) => s.map((x) => x.name === file.name ? { ...x, count: invs.length, status: 'done', unrec: invs.unrecognized || [] } : x))
@@ -215,14 +216,14 @@ export default function Home() {
   // 启用日期范围后，范围外发票自动取消勾选（不可再选）
   useEffect(() => {
     if (!range.active) return
-    const ymdByName = new Map(invoices.map((v) => [v.outSheetName, fmtDate(v.date)]))
+    const ymdByName = new Map(invoices.map((v) => [invoiceKey(v), fmtDate(v.date)]))
     setSelected((sel) => {
       const next = new Set([...sel].filter((n) => inRangeYmd(ymdByName.get(n) || '', range)))
       return next.size === sel.size ? sel : next
     })
   }, [range.active, range.lo, range.hi, invoices])
 
-  const selectedList = useMemo(() => invoices.filter((v) => selected.has(v.outSheetName)), [invoices, selected])
+  const selectedList = useMemo(() => invoices.filter((v) => selected.has(invoiceKey(v))), [invoices, selected])
   const selectedCount = selectedList.length
   const selectedAmount = useMemo(() => selectedList.reduce((s, v) => s + invoiceTotal(v), 0), [selectedList])
 
@@ -239,7 +240,7 @@ export default function Home() {
       const next = new Set(sel)
       for (const v of filtered) {
         if (check && !inRangeOf(v)) continue
-        check ? next.add(v.outSheetName) : next.delete(v.outSheetName)
+        check ? next.add(invoiceKey(v)) : next.delete(invoiceKey(v))
       }
       return next
     })
@@ -251,7 +252,7 @@ export default function Home() {
     const hit = filtered.filter((v) => tokens.some((t) => matchToken(v.outSheetName, t.trim())))
     setSelected((sel) => {
       const next = new Set(sel)
-      for (const v of hit) if (!baseNames.has(v.outSheetName) && inRangeOf(v)) next.add(v.outSheetName)
+      for (const v of hit) if (!baseNames.has(v.outSheetName) && inRangeOf(v)) next.add(invoiceKey(v))
       return next
     })
   }
@@ -263,7 +264,7 @@ export default function Home() {
       // 按客人分组：每个客人单独生成一个输出工作簿，绝不混在一个文件里
       const groups = new Map()
       for (const v of invoices) {
-        if (!selected.has(v.outSheetName)) continue
+        if (!selected.has(invoiceKey(v))) continue
         if (!inRangeOf(v)) continue
         const c = v.customer || 'ZURU'
         if (!groups.has(c)) groups.set(c, new Set())
@@ -277,7 +278,7 @@ export default function Home() {
           baseBuffer: base.buffer,
           baseName: base.name,
           baseIsTemplate: base.isDefault,
-          invoices,
+          invoices: invoices.filter((v) => (v.customer || 'ZURU') === customer),
           selected: names,
           slimOutput,
           zuruTplBuffer: customer === 'ZURU' ? zuruTpl.buffer : undefined,
@@ -508,20 +509,21 @@ export default function Home() {
                 </thead>
                 <tbody>
                   {visibleList.slice(0, 300).map((v) => {
+                    const rowKey = JSON.stringify([v.customer || 'ZURU', v.srcSheetName])
                     const exists = baseNames.has(v.outSheetName)
-                    const checked = selected.has(v.outSheetName)
-                    const open = expanded.has(v.outSheetName)
+                    const checked = selected.has(invoiceKey(v))
+                    const open = expanded.has(rowKey)
                     const bad = !v.date || !v.po
                     const inR = inRangeOf(v)
                     return [
-                      <tr key={v.srcSheetName}
+                      <tr key={rowKey}
                         className={`border-t border-neutral-100 transition-colors cursor-pointer ${exists || !inR ? 'opacity-45' : ''} ${checked ? 'bg-teal-50/50' : 'hover:bg-neutral-50'}`}
-                        onClick={() => setExpanded((ex) => { const n = new Set(ex); open ? n.delete(v.outSheetName) : n.add(v.outSheetName); return n })}>
+                        onClick={() => setExpanded((ex) => { const n = new Set(ex); open ? n.delete(rowKey) : n.add(rowKey); return n })}>
                         <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
                           <input type="checkbox" className="accent-teal-700" checked={checked} disabled={exists || !inR}
                             onChange={(e) => setSelected((sel) => {
                               const next = new Set(sel)
-                              e.target.checked ? next.add(v.outSheetName) : next.delete(v.outSheetName)
+                              e.target.checked ? next.add(invoiceKey(v)) : next.delete(invoiceKey(v))
                               return next
                             })} />
                         </td>
@@ -540,7 +542,7 @@ export default function Home() {
                         </td>
                       </tr>,
                       open && (
-                        <tr key={v.srcSheetName + '-detail'} className="bg-neutral-50/70">
+                        <tr key={rowKey + '-detail'} className="bg-neutral-50/70">
                           <td colSpan={9} className="px-6 py-3">
                             <table className="w-full text-xs">
                               <thead>

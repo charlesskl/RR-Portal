@@ -58,8 +58,17 @@ function indexHeader(row) {
     else if (cols.note == null && /(备注|備註|REMARK)/.test(s)) cols.note = index;
     else if (cols.delivery == null && /(交期|LEADTIME|DELIVERY)/.test(s)) cols.delivery = index;
   });
+  // Prefer per-product usage over a supplier's order/batch quantity column.
+  const usageColumn = (row || []).findIndex(value => /^(单个产品用量|單個產品用量|产品用量|產品用量|单件用量|單件用量)$/.test(norm(value)));
+  if (usageColumn >= 0) cols.qty = usageColumn;
   cols.supplierTemplate = cols.moq != null
     && (cols.unitPriceUntaxed != null || cols.unitPriceTaxed != null || cols.unitPriceUsd != null);
+  if (cols.supplierTemplate) {
+    // A supplier's QTY/order quantity is a batch size, not per-product usage.
+    // Keep the former default of one when no usage column is provided.
+    const genericUsageColumn = (row || []).findIndex(value => /^用量$/.test(norm(value)));
+    cols.qty = usageColumn >= 0 ? usageColumn : genericUsageColumn >= 0 ? genericUsageColumn : null;
+  }
   return cols;
 }
 
@@ -170,6 +179,8 @@ async function parseSheets(sheets, options = {}) {
       const rawSpec = cols.spec == null ? '' : toStr(row[cols.spec]);
       const rawMaterial = cols.material == null ? '' : toStr(row[cols.material]);
       const rawUnit = cols.unit == null ? '' : toStr(row[cols.unit]);
+      const usageText = cols.qty == null ? '' : toStr(row[cols.qty]);
+      const usage = usageText === '' ? null : toNum(row[cols.qty]);
       const moqText = toStr(row[cols.moq]);
       const untaxed = cols.unitPriceUntaxed == null ? null : toNum(row[cols.unitPriceUntaxed]);
       const taxed = cols.unitPriceTaxed == null ? null : toNum(row[cols.unitPriceTaxed]);
@@ -177,6 +188,9 @@ async function parseSheets(sheets, options = {}) {
       const hasContent = rawSerial || rawName || rawSpec || rawMaterial || rawUnit || moqText
         || untaxed != null || taxed != null || usd != null;
       if (!hasContent) continue;
+      if (usageText && (usage == null || usage < 0)) {
+        return { error: `${picked.name} 第 ${index + 1} 行用量无效，请填写大于或等于 0 的数值` };
+      }
 
       const tierEntry = untaxed != null || taxed != null || usd != null ? {
         moq: moqText,
@@ -201,9 +215,10 @@ async function parseSheets(sheets, options = {}) {
       const repeatsCurrentProduct = !!(current
         && (!rawProductCode || identityNorm(rawProductCode) === identityNorm(current.product_code))
         && (!rawName || identityNorm(rawName) === identityNorm(current.name))
-        && (!rawSpec || !current.spec || identityNorm(rawSpec) === identityNorm(current.spec)));
+        && (!rawSpec || !current.spec || identityNorm(rawSpec) === identityNorm(current.spec))
+        && (usage == null || current.qty == null || usage === current.qty));
       const startsProduct = !repeatsCurrentProduct
-        && !!(rawSerial || rawProductCode || (rawName && identityNorm(rawName) !== identityNorm(carried.name)));
+        && !!(rawSerial || rawProductCode || usage != null || (rawName && identityNorm(rawName) !== identityNorm(carried.name)));
       if (startsProduct) {
         carried = {
           serial: rawSerial || carried.serial,
@@ -215,6 +230,7 @@ async function parseSheets(sheets, options = {}) {
         };
         current = {
           ...carried,
+          qty: usage,
           note: cols.note == null ? '' : toStr(row[cols.note]),
           delivery_days: cols.delivery == null ? '' : toStr(row[cols.delivery]),
           tiers: [],
@@ -235,6 +251,7 @@ async function parseSheets(sheets, options = {}) {
         }
       }
       if (!current) continue;
+      if (current.qty == null && usage != null) current.qty = usage;
       if (!current.spec && carried.spec) current.spec = carried.spec;
       if (!current.material && carried.material) current.material = carried.material;
       if (!current.unit && carried.unit) current.unit = carried.unit;
@@ -254,7 +271,7 @@ async function parseSheets(sheets, options = {}) {
         name: group.name,
         product_code: group.product_code,
         spec,
-        qty: 1,
+        qty: group.qty ?? 1,
         unit_price_rmb: tier.unit_price_rmb,
         unit_price_usd: tier.unit_price_usd,
         source_currency: tier.source_currency,

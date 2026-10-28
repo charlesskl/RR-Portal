@@ -1,101 +1,70 @@
-name: Service Logs
-
-# 通用服务日志诊断（手动触发）：查看任意 compose 服务的容器状态、健康检查结果与日志。
-# 背景：2026-09-15 voyageplex 上线时 api 容器 unhealthy，仓库里没有一个能看任意服务日志的
-# 入口，只能靠猜。此 workflow 填补该空缺。
-#   service —— compose 服务名（如 voyageplex-api）；容器名按 rr-portal-<service>-1 推导
-#   tail    —— 日志行数，默认 100
-
+name: Indo outbound picker frontend release
 on:
   workflow_dispatch:
     inputs:
-      service:
-        description: "compose 服务名（如 voyageplex-api）"
-        type: string
+      mode:
+        type: choice
         required: true
-      tail:
-        description: "日志行数"
+        options: [prepare, deploy]
+      prepared_sha256:
         type: string
         required: false
-        default: "100"
-      tomy_smoke:
-        description: "仅 TOMY：使用合成文件验证上传核对及 ZIP 下载"
-        type: boolean
-        required: false
-        default: false
-
+        default: ''
 permissions:
   contents: read
-
 concurrency:
   group: deploy-cloud
   queue: max
   cancel-in-progress: false
-
+env:
+  SCOPED_RELEASE_HELPER_SHA256: '44de8d98b2c5f0f29d07d045e05cb338f9a4fe212489568dd7c3c897f9aa7d0a'
 jobs:
-  logs:
+  indo-picker-only:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 40
     steps:
-      - name: Validate SSH host fingerprint
+      - name: Validate pinned release scope
         shell: bash
         env:
+          RELEASE_BRANCH: ${{ github.ref }}
+          RELEASE_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          PREPARED_SHA256: ${{ inputs.prepared_sha256 }}
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
-            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
-            exit 1
-          fi
-
-      - name: Fetch service logs via SSH
-        env:
-          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          OPS_SERVICE: ${{ inputs.service }}
-          OPS_TAIL: ${{ inputs.tail }}
-          TOMY_SMOKE: ${{ inputs.tomy_smoke }}
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/indo-picker-web-20261028 && "$RELEASE_ATTEMPT" = 1 ]] || exit 1
+          [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+          if [[ "$RELEASE_MODE" = prepare ]]; then
+            [[ -z "$PREPARED_SHA256" ]] || exit 1
+          elif [[ "$RELEASE_MODE" = deploy ]]; then
+            [[ "$PREPARED_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          else exit 1; fi
+      - name: Prepare or publish only the reviewed picker static files
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        env:
+          RELEASE_BRANCH: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          PREPARED_SHA256: ${{ inputs.prepared_sha256 }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 5m
-          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE
+          command_timeout: 35m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,PREPARED_SHA256,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            # 服务名只允许字母数字和连字符，防止注入
-            if [[ ! "$OPS_SERVICE" =~ ^[a-z0-9-]+$ ]]; then
-              echo "非法服务名: $OPS_SERVICE" >&2
-              exit 1
-            fi
-            [[ "$OPS_TAIL" =~ ^[0-9]+$ ]] || OPS_TAIL=100
-            CTR="rr-portal-${OPS_SERVICE}-1"
-
-            echo "=== 容器状态 ==="
-            docker ps -a --filter "name=^${CTR}$" --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
-
-            echo ""
-            echo "=== 健康检查最近结果 ==="
-            docker inspect --format '{{json .State.Health}}' "$CTR" 2>/dev/null | head -c 3000 || echo "(无健康检查信息)"
-
-            echo ""
-            echo "=== 最近 ${OPS_TAIL} 行日志 ==="
-            docker logs --timestamps --tail "$OPS_TAIL" "$CTR" 2>&1 || true
-
-            echo ""
-            echo "=== 重启次数 ==="
-            docker inspect --format 'RestartCount={{.RestartCount}} StartedAt={{.State.StartedAt}}' "$CTR" 2>/dev/null || true
-
-            if [ "$OPS_SERVICE" = "tomy-paiqi" ]; then
-              echo "=== TOMY 实际内存配置（只读） ==="
-              docker inspect --format 'Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}} OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}}' "$CTR" || true
-              docker exec "$CTR" node -e 'console.log(JSON.stringify({nodeOptions:process.env.NODE_OPTIONS,heapLimit:require("v8").getHeapStatistics().heap_size_limit}))' || true
-              echo "=== 最近内存终止记录（只读） ==="
-              journalctl -k --since '2 hours ago' --no-pager 2>/dev/null | grep -Ei 'oom-kill|killed process|memory cgroup out of memory' | tail -20 || true
-              if [ "${TOMY_SMOKE:-false}" = "true" ]; then
-                echo "=== TOMY 合成上传与下载验证 ==="
-                docker exec "$CTR" node server/upload-smoke.mjs
-                docker inspect --format 'RestartCountAfterSmoke={{.RestartCount}} Health={{.State.Health.Status}}' "$CTR"
-              fi
-            fi
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/indo-picker-web-20261028 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            cd /opt/rr-portal
+            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/indo-picker-web-20261028:refs/remotes/origin/ops/indo-picker-web-20261028 >/dev/null 2>&1
+            [[ "$(git rev-parse refs/remotes/origin/ops/indo-picker-web-20261028)" = "$RELEASE_SHA" ]] || exit 1
+            umask 077
+            release_picker_tmp=$(mktemp -d /tmp/indo-picker-release.XXXXXX)
+            trap 'rm -rf "$release_picker_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/indo-picker-static-release.py" > "$release_picker_tmp/run.py"
+            [[ "$(sha256sum "$release_picker_tmp/run.py" | cut -d ' ' -f1)" = "$SCOPED_RELEASE_HELPER_SHA256" ]] || exit 1
+            timeout --signal=TERM --kill-after=20s 32m python3 -B "$release_picker_tmp/run.py" "$RELEASE_MODE"

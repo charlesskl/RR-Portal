@@ -3,7 +3,7 @@ namespace SprayPlan.Api.Features.Plans;
 // ===== 入参 =====
 public record CreatePlanRow(string? PlanDate, string? PlanType, int? LineId, int? OrderId, string? ItemName, string? PartName, int? SourcePartId, List<string>? MachineNos, double? PlannedQty, int? WorkerCount, int? StepNo, string? Craft);
 public record CreatePlansRequest(List<CreatePlanRow>? Plans);
-public record CreatePlansResult(int Count);
+public record CreatePlansResult(int Count, global::SprayPlan.Api.Services.MaterialReflowResult? MaterialReflow = null);
 public record BatchUnscheduleRequest(List<int>? PlanIds, string? Reason);
 public record BatchUnscheduleResult(int DeletedPlans, int AffectedOrders, List<int> PlanIds);
 

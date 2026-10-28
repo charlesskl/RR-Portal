@@ -113,8 +113,9 @@ export default function OrderDetailEditor({ order: initialOrder, lines, isAdmin,
       const adjustmentText = adjustment && Number.isFinite(adjustment.addedQty) && Number.isFinite(adjustment.reducedQty)
         ? `已自动补排 ${adjustment.addedQty.toLocaleString("zh-CN")} 件、减排 ${adjustment.reducedQty.toLocaleString("zh-CN")} 件（按工序合计）。`
         : "";
+      const materialText = adjustment?.materialReflow ? "已按登记的来料情况重排，未到料数量保持待料。" : "";
       const warnings = Array.isArray(adjustment?.warnings) ? adjustment.warnings.filter((item: unknown) => typeof item === "string").join("；") : "";
-      setSuccess(`已保存，订单统计和状态已更新。${adjustmentText}历史实绩和库存已保留。${warnings ? `未自动处理：${warnings}` : ""}`);
+      setSuccess(`已保存，订单统计和状态已更新。${adjustmentText}${materialText}历史实绩和库存已保留。${warnings ? `未自动处理：${warnings}` : ""}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "请检查网络后重试";
       setError(committed ? `订单已保存，但页面更新失败，请刷新页面查看（${message}）` : message);

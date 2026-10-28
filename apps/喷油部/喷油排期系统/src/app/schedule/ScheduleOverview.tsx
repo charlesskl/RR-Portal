@@ -9,6 +9,7 @@ import { buildOverviewGrid, cellKey, dateRange, type CellItem, type OverviewLine
 import { cachedJson } from "@/lib/clientCache";
 import { apiFetch } from "@/lib/apiFetch";
 import Link from "next/link";
+import MaterialReadinessDialog from "./MaterialReadinessDialog";
 import ExportDialog from "../recording/ExportDialog";
 import { isPlanDate } from "@/lib/planDateAdjustment";
 
@@ -50,6 +51,7 @@ export default function ScheduleOverview({ orderFilter, canAdjustDates = false, 
   const [detailRemark, setDetailRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [materialSelection, setMaterialSelection] = useState<{ orderId: number; partName?: string } | null | undefined>(undefined);
   const [newPlanDate, setNewPlanDate] = useState("");
   const [dateReason, setDateReason] = useState("");
 
@@ -152,7 +154,7 @@ export default function ScheduleOverview({ orderFilter, canAdjustDates = false, 
 
   return (
     <div className="sc">
-      <style>{CSS}</style>
+      <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
       {(pendingOrderCount > 0 || pendingUrgentCount > 0) && (
         <div className="sc-alerts">
@@ -188,6 +190,7 @@ export default function ScheduleOverview({ orderFilter, canAdjustDates = false, 
           <span>～</span>
           <input type="date" value={to} onChange={(e) => { setView("custom"); setTo(e.target.value); }} aria-label="结束日期" />
         </div>
+        <button type="button" className="bg-mint-50 text-mint-700 border border-mint-400 px-3 py-2 rounded-btn" onClick={() => setMaterialSelection(orderFilter ? { orderId: orderFilter.orderId } : null)}>来料管理</button>
         <div className="sc-export">
           <ExportDialog date={from === to ? from : ymd(new Date())} lines={lines.map((l) => ({ id: l.lineId, label: l.name }))} />
         </div>
@@ -264,6 +267,8 @@ export default function ScheduleOverview({ orderFilter, canAdjustDates = false, 
         {lines.length === 0 && !loading && <p className="sc-empty">没有启用的拉别，请先到基础数据库维护拉别。</p>}
       </div>
 
+      {materialSelection !== undefined && <MaterialReadinessDialog selection={materialSelection ?? undefined} canEdit={canAdjustDates}
+        onClose={() => setMaterialSelection(undefined)} onChanged={() => { load(); }} />}
       {detail && (
         <div className="sc-modal" onClick={() => setDetail(null)}>
           <div className="sc-dialog" role="dialog" aria-modal="true" aria-labelledby="sc-detail-title" onClick={(e) => e.stopPropagation()}>
@@ -288,6 +293,9 @@ export default function ScheduleOverview({ orderFilter, canAdjustDates = false, 
               <div><dt>人数</dt><dd>{detail.item.workerCount || "-"}</dd></div>
               <div><dt>拉别产能上限</dt><dd>{detail.line.dailyLimit > 0 ? `${(detail.line.dailyLimit / 10000)}万` : "不卡"}</dd></div>
             </dl>
+            <button type="button" disabled={saving} className="text-mint-700 border border-mint-400 rounded-btn px-3 py-2 mt-3" onClick={() => {
+              setMaterialSelection({ orderId: detail.item.orderId, partName: detail.item.partName }); setDetail(null);
+            }}>登记来料 / 自动重排</button>
             {canAdjustDates && <div className="sc-entry-grid">
               {!detail.item.canReschedule ? <p>该计划已录实绩或订单已完工、作废，不能调整日期。</p> : <>
                 <label>调整计划日期<input disabled={saving} type="date" value={newPlanDate} onChange={e => setNewPlanDate(e.target.value)} /></label>

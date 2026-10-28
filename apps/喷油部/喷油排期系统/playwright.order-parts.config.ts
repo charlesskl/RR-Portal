@@ -3,7 +3,7 @@ import { defineConfig } from "@playwright/test";
 // 独立模拟 API + 本地 Next 页面；不读取或修改真实订单数据库。
 export default defineConfig({
   testDir: "./tests/browser",
-  testMatch: "order-part-quantity.spec.ts",
+  testMatch: ["order-part-quantity.spec.ts", "material-readiness.spec.ts"],
   workers: 1,
   timeout: 30_000,
   use: { baseURL: "http://127.0.0.1:18401", headless: true, viewport: { width: 1440, height: 1000 } },

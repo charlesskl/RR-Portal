@@ -148,3 +148,37 @@ it('统一更换共箱范围后仍拒绝相互冲突的箱数且不污染输入'
   expect(rows).toEqual(before)
   expect(mats).toEqual(beforeMaterials)
 })
+
+it.each([
+  { changeCartons: false, target: 'C2', moveBoth: false },
+  { changeCartons: true, target: 'C2', moveBoth: false },
+  { changeCartons: true, target: 'C3', moveBoth: true },
+])('不能因修改范围而合并两个使用同名标识的独立物理共箱组 %j', ({ changeCartons, target, moveBoth }) => {
+  const rows = [974, 975, 976, 977].map((material_id, index) => ({
+    ...batches[0], _rowKey: index + 1, outbound_id: 74 + index, material_id,
+    carton_group: 'G', cartons: index < 2 ? 6 : 9, supplier: 'S', customs_company: index < 2 ? 'C1' : 'C2',
+  }))
+  const mats = new Map(rows.map(row => [row.material_id, { ...materials.get(974)!, id: row.material_id }]))
+  const display = consolidateShipmentItems(rows, mats)
+  const edits = (moveBoth ? [974, 975, 976, 977] : [974, 975])
+    .map(id => edit('customs_company', target, display.findIndex(row => row.material_id === id)))
+  if (changeCartons) edits.push(edit('cartons', '7', display.findIndex(row => row.material_id === 974)))
+  const before = structuredClone(rows)
+  expect(() => applyMergedShipmentEdits(rows, mats, display, edits)).toThrow('共箱范围')
+  expect(rows).toEqual(before)
+})
+
+it('两组同名共箱同时交换范围仍保持独立物理箱数，修改只传播到原组', () => {
+  const rows = [974, 975, 976, 977].map((material_id, index) => ({
+    ...batches[0], _rowKey: index + 1, outbound_id: 74 + index, material_id,
+    carton_group: 'G', cartons: index < 2 ? 6 : 9, supplier: 'S', customs_company: index < 2 ? 'C1' : 'C2',
+  }))
+  const mats = new Map(rows.map(row => [row.material_id, { ...materials.get(974)!, id: row.material_id }]))
+  const display = consolidateShipmentItems(rows, mats)
+  const edits = rows.map(row => edit('customs_company', row.customs_company === 'C1' ? 'C2' : 'C1',
+    display.findIndex(item => item.material_id === row.material_id)))
+  edits.push(edit('cartons', '5', display.findIndex(row => row.material_id === 974)))
+  const result = applyMergedShipmentEdits(rows, mats, display, edits)
+  expect(result.items.map(row => row.cartons)).toEqual([5, 5, 9, 9])
+  expect(cartonLayout(result.items, mats).reduce((sum, row) => sum + row.count, 0)).toBe(14)
+})

@@ -103,6 +103,16 @@ export function applyMergedShipmentEdits<T extends EditorItem>(
     restoredCartonGroup = true
   }
   if (restoredCartonGroup) {
+    // The same legacy group label can identify separate physical groups in
+    // different scopes. Moving a whole group must not merge those identities.
+    const finalOwners = new Map<string, string>()
+    for (const [originalKey, indices] of cartonGroups) for (const index of indices) {
+      const finalKey = cartonGroupKey(result.items[index], result.materials)
+      if (!finalKey) continue
+      if (finalOwners.has(finalKey) && finalOwners.get(finalKey) !== originalKey)
+        throw new Error('修改后的共箱范围与另一个独立箱数组合冲突，请先取消箱数组合并核对实际箱数')
+      finalOwners.set(finalKey, originalKey)
+    }
     // Apply explicit carton edits again with the retained group identity so the
     // shared propagation and conflicting-total checks cover all its materials.
     result.items = applyShipmentSheetEdits(result.items, result.materials,

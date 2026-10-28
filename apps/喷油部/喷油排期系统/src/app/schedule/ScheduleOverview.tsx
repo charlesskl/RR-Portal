@@ -3,10 +3,9 @@
 // 日期竖排、拉别横排；每格顶部小计（件数·产能占用%·红黄绿），下面铺「部位+数量+第几道」，按工序上色。
 // 数据来自 GET /api/schedule/overview；网格聚合/占用/配色由 @/lib/scheduleOverview 纯函数算。
 // 每天每拉备注独立保存；计划详情支持实绩录入和日期调整。
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invalidateClientCache } from "@/lib/clientCache";
 import { buildOverviewGrid, cellKey, dateRange, type CellItem, type OverviewLine, type OverviewPlan } from "@/lib/scheduleOverview";
-import { cachedJson } from "@/lib/clientCache";
 import { apiFetch } from "@/lib/apiFetch";
 import Link from "next/link";
 import MaterialReadinessDialog from "./MaterialReadinessDialog";
@@ -56,16 +55,34 @@ export default function ScheduleOverview({ orderFilter, canAdjustDates = false, 
   const [newPlanDate, setNewPlanDate] = useState("");
   const [dateReason, setDateReason] = useState("");
 
+  const selectionKey = `${from}|${to}|${orderFilter?.orderId ?? ""}`;
+  const activeSelection = useRef(selectionKey);
+  activeSelection.current = selectionKey;
+  const loadVersion = useRef(0);
   const load = useCallback(async () => {
-    if (!from || !to) { setErr("请选择起止日期"); setData(null); return; }
-    if (parseYmd(to) < parseYmd(from)) { setErr("结束日期不能早于起始日期"); setData(null); return; }
+    const request = ++loadVersion.current;
+    const current = () => request === loadVersion.current && activeSelection.current === selectionKey;
+    if (!from || !to) { setErr("请选择起止日期"); setData(null); setLoading(false); return; }
+    if (parseYmd(to) < parseYmd(from)) { setErr("结束日期不能早于起始日期"); setData(null); setLoading(false); return; }
     setLoading(true); setErr("");
     try {
       const filter = orderFilter ? `&orderId=${orderFilter.orderId}` : "";
-      setData(await cachedJson<Resp>(`/api/schedule/overview?from=${from}&to=${to}${filter}`, 5_000));
-    } catch { setErr("加载失败"); setData(null); }
-    finally { setLoading(false); }
-  }, [from, to, orderFilter]);
+      // Notes are editable: a cached overview must not replay an older version.
+      const response = await apiFetch(`/api/schedule/overview?from=${from}&to=${to}${filter}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("加载失败");
+      const incoming = await response.json() as Resp;
+      if (current()) setData(previous => {
+        const notes = new Map((incoming.lineNotes ?? []).map(note => [cellKey(note.date, note.lineId), note]));
+        for (const note of previous?.lineNotes ?? []) {
+          const key = cellKey(note.date, note.lineId);
+          if (note.date >= from && note.date <= to && incoming.lines.some(line => line.lineId === note.lineId)
+            && note.version > (notes.get(key)?.version ?? 0)) notes.set(key, note);
+        }
+        return { ...incoming, lineNotes: Array.from(notes.values()) };
+      });
+    } catch { if (current()) { setErr("加载失败"); setData(null); } }
+    finally { if (current()) setLoading(false); }
+  }, [from, to, orderFilter, selectionKey]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     if (!detail) return;
@@ -83,9 +100,12 @@ export default function ScheduleOverview({ orderFilter, canAdjustDates = false, 
   const grid = useMemo(() => (data ? buildOverviewGrid(data.plans, data.lines) : {}), [data]);
   const lines = data?.lines ?? [];
   const notes = useMemo(() => Object.fromEntries((data?.lineNotes ?? []).map(n => [cellKey(n.date, n.lineId), n])), [data]);
-  const saveNote = (note: DailyLineNote) => setData(current => current ? {
-    ...current, lineNotes: [...(current.lineNotes ?? []).filter(n => n.date !== note.date || n.lineId !== note.lineId), note],
-  } : current);
+  const saveNote = (note: DailyLineNote) => setData(current => {
+    if (!current) return current;
+    const existing = current.lineNotes?.find(n => n.date === note.date && n.lineId === note.lineId);
+    if (existing && existing.version > note.version) return current;
+    return { ...current, lineNotes: [...(current.lineNotes ?? []).filter(n => n.date !== note.date || n.lineId !== note.lineId), note] };
+  });
 
   const applyPreset = (v: Exclude<View, "custom">) => {
     setView(v);

@@ -1,4 +1,4 @@
-name: PR 1025 SprayPlan Build Diagnostic
+name: PR 1025 SprayPlan Build Diagnostic 2
 on:
   workflow_dispatch:
     inputs:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '475b0f17f4d58d04d8821d42c1cddf5a006287ec095fb40716199ce84c413074'
+  SCOPED_RELEASE_HELPER_SHA256: 'd6562e120389819f38c784929ce6230c7c522478e3284a2e26d976733f909fb7'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -53,8 +53,8 @@ jobs:
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1025-20261028-sprayplan:refs/remotes/origin/ops/pr-1025-20261028-sprayplan >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1025-20261028-sprayplan)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            scoped_release_tmp=$(mktemp -d /tmp/pr1025-build-diagnostic.XXXXXX)
+            scoped_release_tmp=$(mktemp -d /tmp/pr1025-build-diagnostic-v2.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1025-build-diagnostic.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 475b0f17f4d58d04d8821d42c1cddf5a006287ec095fb40716199ce84c413074 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1025-build-diagnostic-v2.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = d6562e120389819f38c784929ce6230c7c522478e3284a2e26d976733f909fb7 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

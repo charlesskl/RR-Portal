@@ -3,7 +3,7 @@ Only ps/inspect and fixed anonymous health GETs; raw logs remain private.
 No SQL, exec, lifecycle, dispatch or original evidence modification.
 """
 import hashlib,json,os,pathlib,re,stat,subprocess,sys,urllib.error,urllib.request
-EXECUTE=True
+EXECUTE=False
 ROOT=pathlib.Path('/opt/rr-portal')
 PREPARE=ROOT/'deploy/backups/pr1025-sprayplan-20261028/prepare'
 OUT=ROOT/'deploy/backups/pr1025-sprayplan-20261028-build-diagnostic-1'

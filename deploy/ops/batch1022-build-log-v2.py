@@ -4,7 +4,7 @@ import datetime, hashlib, json, os, pathlib, re, subprocess, sys
 ROOT = pathlib.Path('/opt/rr-portal')
 BASE = '4b3d8f3e319e41dcc8720d759e1af0726a2b2381'
 BRANCH = 'refs/heads/ops/batch-1015-1019-1022-20261028'
-EXECUTE = True
+EXECUTE = False
 PHASE = 'diagnose-build-log-v2'
 FAILED = ROOT / 'deploy/backups/batch-1015-1019-1022-20261028-existing/prepare'
 OUT = ROOT / 'deploy/backups/batch-1015-1019-1022-20261028-build-log-v2'

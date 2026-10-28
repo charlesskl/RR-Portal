@@ -2,7 +2,7 @@ name: PR 1026 SprayPlan Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [deploy]}
+      mode: {type: choice, required: true, options: [verify]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'b9582dd2c1ebafa0a04131bd6cc07d82a070fd2c1672f0cfd8406603f7f3778e'
+  SCOPED_RELEASE_HELPER_SHA256: '5452332bf61b6acd5279a133b98b927c3bc286418bcb9529da55d02529fe4bd0'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1026-20261028-sprayplan && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1026-20261028-sprayplan && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed sprayplan deploy
+      - name: Run only reviewed sprayplan verify
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,7 +48,7 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1026-20261028-sprayplan && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1026-20261028-sprayplan && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1026-20261028-sprayplan:refs/remotes/origin/ops/pr-1026-20261028-sprayplan >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1026-20261028-sprayplan)" = "$RELEASE_SHA" ]] || exit 1
@@ -56,7 +56,7 @@ jobs:
             scoped_release_tmp=$(mktemp -d /tmp/pr1026-sprayplan.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1026-sprayplan-release-v2.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = b9582dd2c1ebafa0a04131bd6cc07d82a070fd2c1672f0cfd8406603f7f3778e ]] || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 5452332bf61b6acd5279a133b98b927c3bc286418bcb9529da55d02529fe4bd0 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1012-compose-library-v2.py" > "$scoped_release_tmp/pr1012-compose-library-v2.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$scoped_release_tmp/pr1012-compose-library-v2.py" | cut -d ' ' -f1)" = bbf49ca20451f5c503bc807f71590dca8f20061590d0e78300551f302c386027 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1012-data-library.py" > "$scoped_release_tmp/pr1012-data-library.py" 2>/dev/null || exit 1

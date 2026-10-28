@@ -1,4 +1,4 @@
-name: PR 1034 Readonly Runtime Preflight
+name: PR 1034 Readonly Post1037 Runtime Preflight
 on:
   workflow_dispatch:
     inputs:
@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
-  SCOPED_RELEASE_HELPER_SHA256: '179072beb14329896e6a4320bc989bdf10368a8bbbb23e369a9365595ccf974d'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
+  SCOPED_RELEASE_HELPER_SHA256: '0753bef9bfb0bc261987959cbdecbf36aa38326bfeaa50ef7ab295d0558cb25d'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -55,6 +55,6 @@ jobs:
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/pr1034-runtime-preflight.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1034-runtime-preflight.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 179072beb14329896e6a4320bc989bdf10368a8bbbb23e369a9365595ccf974d ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1034-runtime-post1037-preflight.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 0753bef9bfb0bc261987959cbdecbf36aa38326bfeaa50ef7ab295d0558cb25d ]] || exit 1
             timeout --signal=TERM --kill-after=20s 3m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

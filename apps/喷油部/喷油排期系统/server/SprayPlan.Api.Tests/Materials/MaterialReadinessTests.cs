@@ -233,6 +233,69 @@ public class MaterialReadinessTests : IAsyncLifetime
         await Login("viewer", "viewer123"); Assert.Equal(HttpStatusCode.Forbidden, (await Save(orderA, 100)).StatusCode);
     }
 
+    private async Task<HttpResponseMessage> CreateFirstMaterialSchedule(string route)
+    {
+        var partId = 0;
+        await factory.WithDbAsync(async db => partId = await db.ProductParts.Where(part => part.PartName == "B").Select(part => part.Id).SingleAsync());
+        var date = Ymd(Work(today));
+        if (route == "monthly")
+            return await client.PostAsJsonAsync("/api/schedule/auto/commit", new { month = date[..7], mode = "incremental", draft = new[] { new {
+                orderId = orderB, externalOrderNo = "MATERIAL-B", productNo = "MATERIAL", sourcePartId = partId,
+                itemName = "", partName = "B", planDate = date, plannedQty = 80, lineId, lineName = "Fixture", stepNo = 1, craft = "移印",
+            } } });
+        if (route == "urgent")
+            return await client.PostAsJsonAsync("/api/schedule/urgent/commit", new { urgentOrderId = orderB, pausedOrderIds = Array.Empty<int>(), rows = new[] { new {
+                planDate = date, lineId, partName = "B", sourcePartId = partId, plannedQty = 80, workerCount = 1, machineNos = "[]",
+            } } });
+        return await client.PostAsJsonAsync("/api/plans", new { plans = new[] { new {
+            planDate = date, lineId, orderId = orderB, partName = "B", plannedQty = 80,
+        } } });
+    }
+
+    [Theory]
+    [InlineData("manual", 0)]
+    [InlineData("monthly", 0)]
+    [InlineData("urgent", 0)]
+    [InlineData("manual", 30)]
+    [InlineData("monthly", 30)]
+    [InlineData("urgent", 30)]
+    public async Task FirstScheduleAfterMaterialRegistration_StillHonorsMissingMaterial(string route, int arrived)
+    {
+        await factory.WithDbAsync(async db => {
+            db.ProductionPlans.RemoveRange(await db.ProductionPlans.Where(plan => plan.OrderId == orderB).ToListAsync());
+            await db.SaveChangesAsync();
+        });
+        (await Save(orderB, arrived)).EnsureSuccessStatusCode();
+        (await CreateFirstMaterialSchedule(route)).EnsureSuccessStatusCode();
+        await factory.WithDbAsync(async db => {
+            Assert.Equal(arrived, await db.ProductionPlans.Where(plan => plan.OrderId == orderB && plan.DeletedAt == null).SumAsync(plan => plan.PlannedQty));
+            var record = await db.OrderMaterials.SingleAsync(material => material.OrderId == orderB);
+            Assert.NotEqual("[]", record.Configuration);
+        });
+        Assert.Equal(80 - arrived, (await Row(orderB)).GetProperty("waitingQty").GetInt32());
+        await AssertActuals();
+    }
+
+    [Theory]
+    [InlineData("manual")]
+    [InlineData("monthly")]
+    [InlineData("urgent")]
+    public async Task FirstScheduleMaterialFailure_RollsBackWholeCreation(string route)
+    {
+        await factory.WithDbAsync(async db => {
+            db.ProductionPlans.RemoveRange(await db.ProductionPlans.Where(plan => plan.OrderId == orderB).ToListAsync());
+            await db.SaveChangesAsync();
+        });
+        (await Save(orderB, 30)).EnsureSuccessStatusCode();
+        await factory.WithDbAsync(async db => {
+            (await db.ProductionLines.SingleAsync(line => line.Id == lineId)).IsActive = false;
+            await db.SaveChangesAsync();
+        });
+        var before = await Snapshot();
+        Assert.Equal(HttpStatusCode.BadRequest, (await CreateFirstMaterialSchedule(route)).StatusCode);
+        Assert.Equal(before, await Snapshot());
+    }
+
     [Fact]
     public async Task OtherFactoryOrder_IsNotVisibleOrEditable()
     {

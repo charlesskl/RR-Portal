@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -19,7 +20,7 @@ public record UrgentPreviewResult(int Need, bool CanDirect, List<OverloadDay> Ov
 
 public record UrgentCommitRequest(int UrgentOrderId, List<UrgentRow> Rows, List<int> PausedOrderIds);
 public record PostponedOrder(int OrderId, string ExternalOrderNo, int Days, string NewFinish);
-public record UrgentCommitResult(int CreatedRows, List<PostponedOrder> Postponed);
+public record UrgentCommitResult(int CreatedRows, List<PostponedOrder> Postponed, MaterialReflowResult? MaterialReflow = null);
 
 // 急单：preview（只算不落库：产能检测+暂停候选）/ commit（落库：写急单计划行+被停单整单顺延）。
 // 顺延用「日期往后挪 X 个可排日（跳节假日/周末）」，不依赖未完成的月排引擎。
@@ -272,8 +273,15 @@ public class UrgentController(AppDbContext db) : ControllerBase
         }
 
         await db.SaveChangesAsync();
+        MaterialReflowResult? materialReflow;
+        try {
+            materialReflow = await MaterialReflow.ApplyCreatedParts(db, parsedRows.Select(row => (req.UrgentOrderId, row.r.PartName ?? "")), user);
+            if (materialReflow is not null) await db.SaveChangesAsync();
+        } catch (InvalidOperationException error) { return BadRequest(new { error = error.Message }); }
+        catch (JsonException) { return BadRequest(new { error = "来料配置或历史记录格式异常，本次排期未保存" }); }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { error = "来料或排期已变化，请重新加载后再保存" }); }
         await tx.CommitAsync();
-        return Ok(new UrgentCommitResult(parsedRows.Count, postponed));
+        return Ok(new UrgentCommitResult(parsedRows.Count, postponed, materialReflow));
     }
 
     // 构造 [minDate, maxDate + days + 60] 范围内的不可排日集合：周末 ∪ 节假日休 − 调休补班

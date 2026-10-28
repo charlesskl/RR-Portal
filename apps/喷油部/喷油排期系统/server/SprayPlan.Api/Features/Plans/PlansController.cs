@@ -163,8 +163,15 @@ public class PlansController(AppDbContext db) : ControllerBase
         foreach (var o in toUpdate) { o.Status = "scheduled"; o.LastUpdatedBy = by; }
 
         await db.SaveChangesAsync();
+        MaterialReflowResult? materialReflow;
+        try {
+            materialReflow = await MaterialReflow.ApplyCreatedParts(db, rows.Select(plan => (plan.OrderId, plan.PartName)), by);
+            if (materialReflow is not null) await db.SaveChangesAsync();
+        } catch (InvalidOperationException error) { return BadRequest(new { error = error.Message }); }
+        catch (JsonException) { return BadRequest(new { error = "来料配置或历史记录格式异常，本次排期未保存" }); }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { error = "来料或排期已变化，请重新加载后再保存" }); }
         await transaction.CommitAsync();
-        return StatusCode(201, new CreatePlansResult(plans.Count));
+        return StatusCode(201, new CreatePlansResult(plans.Count, materialReflow));
     }
 
     // 日期调整采用整批校验后保存，避免部分移动；原日期用于防止覆盖他人修改。

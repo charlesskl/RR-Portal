@@ -12,6 +12,28 @@ public record MaterialReflowResult(int RemovedPlans, int CreatedPlans, List<stri
 public static class MaterialReflow
 {
     public static DateTime Today => DateTime.SpecifyKind(DateTime.UtcNow.AddHours(8).Date, DateTimeKind.Utc);
+
+    // 首次生成也必须遵守已登记的来料。调用方先在同一事务保存本次计划，
+    // 使 Apply 能读取工序配置；失败时计划、订单状态和来料快照一起回滚。
+    public static async Task<MaterialReflowResult?> ApplyCreatedParts(AppDbContext db,
+        IEnumerable<(int OrderId, string PartName)> createdParts, string by)
+    {
+        if (db.Database.CurrentTransaction is null) throw new InvalidOperationException("来料重排必须在事务中执行");
+        var keys = createdParts.ToHashSet();
+        if (keys.Count == 0) return null;
+        var orderIds = keys.Select(key => key.OrderId).ToList();
+        var records = (await db.OrderMaterials.Where(material => material.AutoScheduleEnabled && orderIds.Contains(material.OrderId)).ToListAsync())
+            .Where(material => keys.Contains((material.OrderId, material.PartName))).ToList();
+        if (records.Count == 0) return null;
+        var removed = 0; var created = 0; var warnings = new List<string>();
+        foreach (var factory in records.GroupBy(material => material.FactoryId))
+        {
+            var result = await Apply(db, factory.Key, factory.Select(material => material.Id).ToHashSet(), by);
+            removed += result.RemovedPlans; created += result.CreatedPlans; warnings.AddRange(result.Warnings);
+        }
+        return new(removed, created, warnings);
+    }
+
     public static List<MaterialTemplate> Templates(OrderMaterial material) => JsonSerializer.Deserialize<List<MaterialTemplate>>(material.Configuration) ?? new();
     public static long Consumed(IEnumerable<ProductionPlan> source, int orderId, string partName)
     {

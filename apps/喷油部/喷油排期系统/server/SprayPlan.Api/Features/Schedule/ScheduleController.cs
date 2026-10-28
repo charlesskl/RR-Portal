@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using SprayPlan.Api.Data;
 using SprayPlan.Api.Entities;
 using SprayPlan.Api.Services;
@@ -390,8 +391,15 @@ public class ScheduleController(AppDbContext db) : ControllerBase
         foreach (var o in toUp) { o.Status = "scheduled"; o.LastUpdatedBy = by; }
 
         await db.SaveChangesAsync();
+        MaterialReflowResult? materialReflow;
+        try {
+            materialReflow = await MaterialReflow.ApplyCreatedParts(db, draftRows.Select(row => (row.Row.OrderId, row.Row.PartName)), by);
+            if (materialReflow is not null) await db.SaveChangesAsync();
+        } catch (InvalidOperationException error) { return BadRequest(new { error = error.Message }); }
+        catch (JsonException) { return BadRequest(new { error = "来料配置或历史记录格式异常，本次排期未保存" }); }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { error = "来料或排期已变化，请重新加载后再保存" }); }
         await transaction.CommitAsync();
-        return Ok(new CommitAutoResult(req.Draft.Count, cleared));
+        return Ok(new CommitAutoResult(req.Draft.Count, cleared, materialReflow));
     }
 
     // POST /api/schedule/orders/{orderId}/unschedule —— 按订单整体撤销排期。

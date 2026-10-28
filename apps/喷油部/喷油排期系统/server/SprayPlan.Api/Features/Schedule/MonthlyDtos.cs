@@ -25,4 +25,4 @@ public record AutoScheduleResult(
 
 // 保存请求：草稿含真实拉别（由算法分配），落库按行写 LineId。
 public record CommitAutoRequest(string? Month, string? Mode, List<DraftRow>? Draft);
-public record CommitAutoResult(int Created, int Cleared);
+public record CommitAutoResult(int Created, int Cleared, MaterialReflowResult? MaterialReflow = null);

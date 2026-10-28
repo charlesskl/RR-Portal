@@ -3490,7 +3490,12 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
         seen.add(identity);
         const matches = positions.get(identity) || [];
         if (!matches.length) { addedRows.push({ ...row }); added++; continue; }
-        replacements.set(matches[0], { ...existing[matches[0]], ...row });
+        const replacement = { ...existing[matches[0]], ...row };
+        // Replaced numbers must not keep an older editable/exported formula.
+        for (const field of ['qty', 'unit_price_rmb', 'unit_price_usd', 'unit_price']) {
+          if (Object.hasOwn(row, field) && !Object.hasOwn(row, field + '_raw')) delete replacement[field + '_raw'];
+        }
+        replacements.set(matches[0], replacement);
         matches.slice(1).forEach(index => removed.add(index));
         updated++;
         duplicates += matches.length - 1;

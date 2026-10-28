@@ -191,3 +191,32 @@ test('更新模式继续阻止未知货号、只读页面和切换报价对象�
     assert.equal(s.root.mixed_products.a.packaging_materials[0].name, '独立材料');
   }
 });
+
+
+test('更新匹配数值时清除旧算式，保留未更新材料及本地分类图片', async () => {
+  for (const scope of ['single', 'shared', 'product']) {
+    const untouched = {product_code:'A',name:'收缩膜',qty:6,qty_raw:'2*3',unit_price_rmb:0.5,unit_price_rmb_raw:'1/2'};
+    const matched = {product_code:'A',name:'纸袋',spec:'小',qty:6,qty_raw:'2*3',unit_price_rmb:0.5,unit_price_rmb_raw:'1/2',unit_price_usd:2.5,unit_price_usd_raw:'5/2',category:'其他外购',images:['kept.png']};
+    const rows = [untouched, matched];
+    const s = await setup(scope === 'shared' ? '__shared__' : '__overall__', true, null, [], {
+      single:scope === 'single', payload:{packaging_materials:rows},
+      root:{mixed_shared:{packaging_materials:rows},mixed_products:{a:{packaging_materials:rows}}},
+      items:[{product_code:'A',name:'纸袋',spec:'小',qty:2,unit_price_rmb:0.2,unit_price_usd:null,source_currency:'RMB'}],
+    });
+    s.host.querySelector('[data-action="update"]').onclick();
+    const next = scope === 'single' ? s.payload.packaging_materials : scope === 'shared' ? s.root.mixed_shared.packaging_materials : s.root.mixed_products.a.packaging_materials;
+    assert.equal(next[1].qty,2);assert.equal(next[1].unit_price_rmb,0.2);
+    if (scope === 'single') {
+      const {buildWorkbook} = require('../backend/services/exportInternal');
+      const wb = await buildWorkbook({quote:{quote_no:'IMPORT-UPDATE',qty:1},sections:[{dept:'engineering',payload_json:JSON.stringify({packaging_materials:next})}]});
+      let exported;
+      wb.worksheets[0].eachRow(row => { if (row.getCell(3).value === '纸袋') exported = row; });
+      assert.ok(exported,'导出包含本次更新的纸袋');
+      assert.equal(exported.getCell(8).formula,undefined);assert.equal(exported.getCell(8).value,2);
+      assert.equal(exported.getCell(9).formula,undefined);assert.equal(exported.getCell(9).value,0.2);
+    }
+    assert.equal(next[1].qty_raw,undefined);assert.equal(next[1].unit_price_rmb_raw,undefined);assert.equal(next[1].unit_price_usd_raw,undefined);
+    assert.equal(next[1].category,'其他外购');assert.equal(next[1].images[0],'kept.png');
+    assert.equal(next[0],untouched);assert.equal(next[0].qty_raw,'2*3');
+  }
+});

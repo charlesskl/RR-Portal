@@ -1,6 +1,6 @@
 """Inert sealed public-label/index-mtime observation; no Docker/SQL/log/data access."""
 import os,json,pathlib,re,stat,sys,hashlib,io,tarfile
-EXECUTE=True
+EXECUTE=False
 BRANCH='refs/heads/ops/pr-1027-clone-diagnostic-20261028'
 ROOT=pathlib.Path('/opt/rr-portal')
 PREPARE=ROOT/'deploy/backups/pr1027-1029-indo-20261028-r3/prepare'

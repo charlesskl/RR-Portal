@@ -13,15 +13,13 @@ const renames = [
 
 async function main() {
   for (const r of renames) {
-    const line = await prisma.productionLine.findFirst({ where: {
-      factoryId: "XINGXIN", craftType: r.craftType, name: { in: r.names },
-    } });
-    if (!line) { console.warn(`⚠️ 未找到拉别 ${r.name}，跳过`); continue; }
-    await prisma.productionLine.update({
-      where: { id: line.id },
+    // 新旧标准名称可能并存；一次更新全部匹配项，避免先命中已改名记录。
+    const result = await prisma.productionLine.updateMany({
+      where: { factoryId: "XINGXIN", craftType: r.craftType, name: { in: r.names } },
       data: { name: r.name, workshop: "兴信A" },
     });
-    console.log(`✓ id=${line.id} → ${r.name}（车间 兴信A）`);
+    if (!result.count) { console.warn(`⚠️ 未找到拉别 ${r.name}，跳过`); continue; }
+    console.log(`✓ ${result.count} 条 → ${r.name}（车间 兴信A）`);
   }
   console.log("—— 结果 ——");
   for (const l of await prisma.productionLine.findMany({ orderBy: { id: "asc" } }))

@@ -17,6 +17,84 @@ namespace IndoShipping.Api.Tests;
 public class ShipmentOutboundLinkTests
 {
     [Fact]
+    public async Task Existing_shipments_derive_free_spare_basis_on_reload_without_rewriting_stock_or_prices()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        await f.Db.ExecuteAsync("""
+            INSERT INTO purchase_orders(id,po_no) VALUES (1,'IRRIHS0403');
+            INSERT INTO po_items(id,po_id,material_id,purchase_unit) VALUES (1,1,66,'个');
+            UPDATE outbound SET po_item_id=1,qty=3667 WHERE id=1;
+            UPDATE po_receipts SET po_item_id=1,qty=3630,spare_qty=37 WHERE id=1;
+            """);
+        var body = Body(3667); body.items![0].price = .227m; body.items[0].kg = 502.379m;
+        var id = Id(await f.Controller.Create(body));
+        var before = await f.Snapshot();
+        var row = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(id)).Value)
+            .GetProperty("items")[0];
+        Assert.Equal(3630m / 3667m, row.GetProperty("purchase_charge_ratio").GetDecimal(), 20);
+        Assert.Equal(.227m, row.GetProperty("price").GetDecimal());
+        Assert.Equal(3667m, row.GetProperty("qty").GetDecimal());
+        Assert.Equal(502.379m, row.GetProperty("kg").GetDecimal());
+        Assert.Equal(before, await f.Snapshot());
+        // An old row with an exact, unique PO/material reference can also recover
+        // the basis. An ambiguous manual reference must never guess a PO line.
+        await f.Db.ExecuteAsync("UPDATE shipment_items SET outbound_id=NULL,po_no='IRRIHS0403' WHERE shipment_id=@id", new { id });
+        row = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(id)).Value).GetProperty("items")[0];
+        Assert.Equal(3630m / 3667m, row.GetProperty("purchase_charge_ratio").GetDecimal(), 20);
+        await f.Db.ExecuteAsync("INSERT INTO po_items(id,po_id,material_id) VALUES (2,1,66)");
+        row = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(id)).Value).GetProperty("items")[0];
+        Assert.Equal(1m, row.GetProperty("purchase_charge_ratio").GetDecimal());
+    }
+
+    [Theory]
+    [InlineData(100, 0, 1)]
+    [InlineData(0, 10, 0)]
+    [InlineData(0, 0, 1)]
+    [InlineData(80, 20, .8)]
+    public async Task Receipt_basis_handles_no_spares_free_only_and_receipt_corrections(decimal paid, decimal spare, decimal expected)
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        await f.Db.ExecuteAsync("INSERT INTO po_items(id,purchase_unit) VALUES (1,'个'); UPDATE outbound SET po_item_id=1; UPDATE po_receipts SET po_item_id=1,qty=@paid,spare_qty=@spare", new { paid, spare });
+        var id = Id(await f.Controller.Create(Body(10)));
+        var row = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(id)).Value).GetProperty("items")[0];
+        Assert.Equal(expected, row.GetProperty("purchase_charge_ratio").GetDecimal());
+        // Fresh read reflects a corrected receipt, not any stale client metadata.
+        await f.Db.ExecuteAsync("UPDATE po_receipts SET spare_qty=0,qty=100");
+        row = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(id)).Value).GetProperty("items")[0];
+        Assert.Equal(1m, row.GetProperty("purchase_charge_ratio").GetDecimal());
+    }
+
+    [Fact]
+    public async Task New_outbound_picker_returns_the_same_paid_basis_as_existing_shipment_reads()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        await f.Db.ExecuteAsync("""
+            ALTER TABLE materials ADD product_code text, ADD customs_company text;
+            ALTER TABLE outbound ADD po_no text, ADD out_date date, ADD notes text;
+            ALTER TABLE po_items ADD material_name text, ADD spec text, ADD price numeric, ADD currency text;
+            ALTER TABLE purchase_orders ADD supplier text, ADD order_date date;
+            CREATE TABLE tool_materials(material_id int,related_product_code text);
+            INSERT INTO purchase_orders(id,po_no) VALUES (1,'IRRIHS0451');
+            INSERT INTO po_items(id,po_id,material_id,purchase_unit,price) VALUES (1,1,66,'个',.3032);
+            UPDATE outbound SET po_item_id=1,qty=15251 WHERE id=1;
+            UPDATE po_receipts SET po_item_id=1,qty=15100,spare_qty=151 WHERE id=1;
+            """);
+        var result = Assert.IsType<OkObjectResult>(await new OutboundController(new SqlConnectionFactory(f.Connection)).Allocatable(null));
+        var source = JsonSerializer.SerializeToElement(result.Value)[0];
+        Assert.Equal(15100m / 15251m, source.GetProperty("purchase_charge_ratio").GetDecimal(), 20);
+        Assert.Equal(.3032m, source.GetProperty("price").GetDecimal());
+        Assert.Equal(15251m, source.GetProperty("allocatable_qty").GetDecimal());
+        // Other-container allocations reduce physical capacity, not the fee ratio.
+        var id = Id(await f.Controller.Create(Body(9000)));
+        result = Assert.IsType<OkObjectResult>(await new OutboundController(new SqlConnectionFactory(f.Connection)).Allocatable(null));
+        var remaining = JsonSerializer.SerializeToElement(result.Value)[0];
+        Assert.Equal(6251m, remaining.GetProperty("allocatable_qty").GetDecimal());
+        Assert.Equal(source.GetProperty("purchase_charge_ratio").GetDecimal(), remaining.GetProperty("purchase_charge_ratio").GetDecimal());
+        var row = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(id)).Value).GetProperty("items")[0];
+        Assert.Equal(source.GetProperty("purchase_charge_ratio").GetDecimal(), row.GetProperty("purchase_charge_ratio").GetDecimal());
+    }
+
+    [Fact]
     public async Task Purchase_unit_price_survives_create_update_and_reload_at_eight_decimals()
     {
         await using var f = await Fixture.Create(); if (f is null) return;
@@ -295,10 +373,10 @@ public class ShipmentOutboundLinkTests
                     (1,'no-access','synthetic','none','000000000','000000000',true,now()),
                     (2,'readonly','synthetic','readonly','000000001','000000000',true,now()),
                     (3,'editor','synthetic','editor','000000001','000000001',true,now());
-                CREATE TABLE po_receipts(id int PRIMARY KEY,qty numeric,notes text);
-                INSERT INTO po_receipts VALUES (1,100,'preserve inbound stock');
+                CREATE TABLE po_receipts(id int PRIMARY KEY,qty numeric,notes text,po_item_id int,spare_qty numeric DEFAULT 0);
+                INSERT INTO po_receipts(id,qty,notes) VALUES (1,100,'preserve inbound stock');
                 CREATE TABLE purchase_orders(id serial PRIMARY KEY,po_no text,merged_into_id int);
-                CREATE TABLE po_items(id serial PRIMARY KEY,purchase_unit text);
+                CREATE TABLE po_items(id serial PRIMARY KEY,purchase_unit text,po_id int,material_id int);
                 CREATE TABLE outbound(id int PRIMARY KEY,qty numeric,material_id int,po_item_id int);
                 INSERT INTO outbound VALUES (1,100,66,NULL);
                 CREATE TABLE shipments(id serial PRIMARY KEY,customer text,container_no text,container_count int,

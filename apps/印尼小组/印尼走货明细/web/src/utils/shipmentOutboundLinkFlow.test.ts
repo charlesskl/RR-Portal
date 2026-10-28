@@ -35,6 +35,12 @@ it('refreshes balance and binds the existing row in editor only, without API wri
   expect(state.setEditorDirty).toHaveBeenCalledWith(true)
   expect(state.closeOutboundLink).toHaveBeenCalledOnce()
 })
+it('关联后使用出库收费比例，但不减少原有走货数量和重量', async () => {
+  const { state, source, run } = setup()
+  Object.assign(source, { purchase_charge_ratio: .9, price: 2 })
+  await run()
+  expect(state.setItems.mock.calls[0][0][0]).toMatchObject({ qty: 2, kg: .2, price: 2, purchase_charge_ratio: .9 })
+})
 it('requires explicit material confirmation before any request', async () => {
   const { state, run } = setup(); state.linkConfirmed = false; await run()
   expect(state.api.get).not.toHaveBeenCalled()

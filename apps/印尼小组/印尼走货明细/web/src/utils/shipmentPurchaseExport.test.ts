@@ -7,6 +7,42 @@ import { shipmentPurchaseAmount } from './shipmentPurchase'
 import { withShipmentInvoicePrices } from './shipmentInvoice'
 import { consolidateShipmentItems } from './shipmentConsolidation'
 
+it.each(['RRI', 'RRM'])('免费备品：真实模板数量重量不减、采购/发票金额及再导入金额不含备品（%s）', async customer => {
+  const materials = new Map([
+    [979, { id: 979, name_zh: '阿奇密封盒', product_code: '97282/1099235/6077462', unit_kg: 'KGM' }],
+    [983, { id: 983, name_zh: '阿奇CDU', product_code: '94704/1101147/6079033', unit_kg: 'KGM' }],
+  ])
+  const common = { currency: 'US$', supplier: '测试供应商', customs_company: '测试报关公司', purchase_unit: '个' }
+  const rows = [
+    { ...common, material_id: 979, outbound_id: 99, qty: 3667, kg: 502.379, price: .227, purchase_charge_ratio: 3630 / 3667, po_no: 'IRRIHS0403' },
+    { ...common, material_id: 983, outbound_id: 100, qty: 9000, kg: 738, price: .3032, purchase_charge_ratio: 15100 / 15251, po_no: 'IRRIHS0451' },
+    { ...common, material_id: 983, outbound_id: 101, qty: 6251, kg: 512.582, price: .3032, purchase_charge_ratio: 15100 / 15251, po_no: 'IRRIHS0451' },
+  ]
+  const before = structuredClone(rows)
+  const templateBuffer = Uint8Array.from(readFileSync(new URL('../../public/template-customs-' + customer.toLowerCase() + '.xlsx', import.meta.url))).buffer
+  const blob = await buildCustomsWorkbook({ templateBuffer, items: rows, materials, productHs: new Map(), images: new Map(),
+    form: { containerNo: 'FREE-SPARES', customer, rate: 1 } })
+  const workbook = XLSX.read(await blob.arrayBuffer(), { type: 'array', cellNF: true })
+  const sheet = workbook.Sheets['FREE-SPARES']
+  const expected = [824.01, 4578.32]
+  expected.forEach((amount, i) => {
+    const r = i + 4
+    expect(sheet['AP' + r].v).toBeCloseTo(amount, 9)
+    expect(sheet['AP' + r].f).toBe('AO' + r + '*K' + r)
+    expect(sheet['AA' + r].v).toBeCloseTo(amount, 9)
+    expect(sheet['O' + r].v).toBeCloseTo(amount, 9)
+    expect(sheet['AO' + r].v * sheet['K' + r].v).toBeCloseTo(amount, 9)
+  })
+  expect(sheet.L4.v).toBe(3667)
+  expect(sheet.K4.v).toBeCloseTo(502.379, 9)
+  expect(sheet.L5.v).toBe(15251)
+  expect(sheet.K5.v).toBeCloseTo(1250.582, 9)
+  const imported = parseShipmentWorkbook(workbook).rows.filter(row => row.sheet === 'FREE-SPARES')
+  expect(imported).toHaveLength(2)
+  imported.forEach((row, i) => expect(shipmentPurchaseAmount(row.item)).toBeCloseTo(expected[i], 9))
+  expect(rows).toEqual(before)
+}, 60000)
+
 it.each(['RRI', 'RRM'])('真实模板按采购数量计价，千克单价换算及再导入金额不变（%s）', async customer => {
   const materials = new Map([
     [1, { id: 1, name_zh: 'PB螺丝2.6*6', product_code: '46720J', unit_kg: 'KGM', net_per_pc: .00029 }],

@@ -1,4 +1,4 @@
-name: PR 1027 Sealed Layer Rejection Diagnostic
+name: PR 1027 Sealed Layer Technical Root Diagnostic
 on:
   workflow_dispatch:
     inputs:
@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
-  SCOPED_RELEASE_HELPER_SHA256: '68d37b4a009cbb3c215208cf320d886d911da7340596095f7f64f7815197d61b'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
+  SCOPED_RELEASE_HELPER_SHA256: 'd1c2bed864e6b46947ef2f34d5fe54f8b63d7e92d3029c7625ca787c31883a61'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -55,6 +55,6 @@ jobs:
             umask 077
             scoped_release_tmp=$(mktemp -d /tmp/pr1027-runtime-diagnostic.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1027-layer-rejection-diagnostic.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 68d37b4a009cbb3c215208cf320d886d911da7340596095f7f64f7815197d61b ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1027-layer-rejection-diagnostic-v2.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = d1c2bed864e6b46947ef2f34d5fe54f8b63d7e92d3029c7625ca787c31883a61 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 3m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

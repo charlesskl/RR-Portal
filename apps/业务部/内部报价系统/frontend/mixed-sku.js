@@ -141,11 +141,17 @@
     for(const item of items){
       const code=normalize(item.product_code);
       if(total && code===total){sharedItems.push({...item});continue;}
-      // Supplier BeautyMini codes use the SKU list serial, including exclusive SKUs.
-      // Prefer an exact official code; only this known alias may fall back to serial.
+      // Beauty Mini is the supplier's spelling of the official BEAUTYM SKU family.
+      // The numeric suffix is a SKU number, never the reordered spreadsheet NO.
       const exact=code?config.products.filter(p=>normalize(p.code)===code):[];
       const sourceNumber=/^BEAUTYMINI[_-]S3-(\d+)$/.exec(code)?.[1];
-      const matches=exact.length?exact:(sourceNumber?config.products.filter(p=>productSerial(p)===serial(sourceNumber)):[]);
+      const officialCode=sourceNumber?`BEAUTYM-S3-${String(Number(sourceNumber)).padStart(3,'0')}`:'';
+      const official=officialCode?config.products.filter(p=>normalize(p.code)===officialCode):[];
+      const qualified=sourceNumber?config.products.filter(p=>{
+        const number=/^BEAUTYM-S3-(\d+)(?:-EXCL)?$/.exec(normalize(p.code))?.[1];
+        return number!=null && Number(number)===Number(sourceNumber);
+      }):[];
+      const matches=exact.length?exact:official.length?official:qualified;
       if(matches.length!==1){unmatched.add(code?(code+(matches.length?'（匹配多款）':'（未找到）')):'缺少货号');continue;}
       const product=matches[0];
       if(!groups.has(product.id))groups.set(product.id,{product,items:[]});

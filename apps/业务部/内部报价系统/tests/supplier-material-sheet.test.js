@@ -189,6 +189,68 @@ test('legacy hardware quotation header remains supported', async () => {
   });
 });
 
+test('supplier usage is read per material, preserved through MOQ tiers and mixed product allocation', async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('系统格式');
+  sheet.getRow(13).values = ['序号', '产品编号', '物料名称', '规格描述', '单位', 'MOQ',
+    '单价(元)含税（RMB)', '订单数量', '单个产品用量', '备注'];
+  sheet.addRow([1, 'BEAUTYM-S3-011', '纸袋', '80开口*100MM', '个', '100K', 0.059, 100000, 1]);
+  sheet.addRow([2, 'BEAUTYM-S3-011', '铝箔袋', '35.5开口*31.5MM', '个', '20K', 0.125, 20000,
+    { formula: '1+1', result: 2 }, '用量：2个']);
+  sheet.addRow([null, null, null, null, null, '100K', 0.1]);
+  sheet.addRow([3, 'BEAUTYM-S3-012', '铝箔袋', '35.5开口*31.5MM', '个', '20K', 0.125, 20000, 0.5]);
+  sheet.addRow([4, 'BEAUTYM-S3-013', '铝箔袋', '35.5开口*31.5MM', '个', '20K', 0.125, 20000, 0]);
+  sheet.addRow([5, 'BEAUTYM-S3-014', '纸袋', '80开口*100MM', '个', '100K', 0.059]);
+  const buffer = await workbook.xlsx.writeBuffer();
+  for (const targetQty of [20000, 100000]) {
+    const result = await parseWorkbook(buffer, { targetQty });
+    assert.equal(result.error, undefined);
+    assert.deepEqual(result.items.map(item => item.qty), [1, 2, 0.5, 0, 1]);
+    assert.equal(result.items[1].price_tiers.length, 2);
+    assert.equal(result.items[1].unit_price_rmb, targetQty === 20000 ? 0.125 : 0.1);
+    const { planSupplier } = require('../frontend/mixed-sku');
+    const config = { products: [11, 12, 13, 14].map(n => ({ id: String(n), code: `BEAUTYM-S3-0${n}` })) };
+    const plan = planSupplier(config, result.items);
+    assert.deepEqual(plan.unmatched, []);
+    assert.equal(plan.groups[0].items[1].qty, 2);
+  }
+});
+
+test('different explicit usages are not merged into one material and invalid usage is reported', async () => {
+  const workbook = new ExcelJS.Workbook(), sheet = workbook.addWorksheet('报价');
+  sheet.addRow(['序号', '产品编号', '物料名称', 'MOQ', '单价(元)不含税', '用量']);
+  sheet.addRow([1, 'A', '纸袋', '20K', 0.1, 1]);
+  sheet.addRow([2, 'A', '纸袋', '20K', 0.1, 2]);
+  const result = await parseWorkbook(await workbook.xlsx.writeBuffer());
+  assert.deepEqual(result.items.map(item => item.qty), [1, 2]);
+  sheet.addRow([3, 'B', '纸袋', '20K', 0.1, '待确认']);
+  assert.match((await parseWorkbook(await workbook.xlsx.writeBuffer())).error, /第 4 行用量无效/);
+});
+
+test('supplier order quantities never become per-product usages or split MOQ tiers', async () => {
+  for (const quantityHeader of ['订单数量', '訂單數量', '数量', 'QTY']) {
+    const workbook = new ExcelJS.Workbook(), sheet = workbook.addWorksheet('报价');
+    sheet.addRow(['序号', '产品编号', '物料名称', 'MOQ', '单价(元)不含税', quantityHeader]);
+    sheet.addRow([1, 'A', '纸袋', '20K', 0.1, 20000]);
+    sheet.addRow([2, 'A', '纸袋', '100K', 0.08, 100000]);
+    const result = await parseWorkbook(await workbook.xlsx.writeBuffer(), { targetQty: 100000 });
+    assert.equal(result.error, undefined);
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].qty, 1);
+    assert.equal(result.items[0].price_tiers.length, 2);
+    assert.equal(result.items[0].unit_price_rmb, 0.08);
+  }
+});
+
+test('supplier generic usage takes priority over an earlier order quantity', async () => {
+  const workbook = new ExcelJS.Workbook(), sheet = workbook.addWorksheet('报价');
+  sheet.addRow(['序号', '产品编号', '物料名称', 'MOQ', '单价(元)不含税', '订单数量', '用量']);
+  sheet.addRow([1, 'A', '纸袋', '20K', 0.1, 20000, 0.5]);
+  const result = await parseWorkbook(await workbook.xlsx.writeBuffer());
+  assert.equal(result.error, undefined);
+  assert.equal(result.items[0].qty, 0.5);
+});
+
  test('mixed supplier import separates identical material names by product code and blocks unknown codes', async () => {
   const wb=new ExcelJS.Workbook(),ws=wb.addWorksheet('报价');
   ws.addRow(['序号','货号','产品名称','规格','MOQ','单价(元)不含税']);
@@ -208,20 +270,42 @@ test('legacy hardware quotation header remains supported', async () => {
   assert.equal(planSupplier({products:[...config.products,{id:'c',code:'BEAUTYM-S3-002'}]},result.items).unmatched.length,1);
 });
 
- test('supplier BeautyMini aliases match SKU serials, preserve exact priority and reject ambiguity', () => {
+ test('supplier BeautyMini aliases match official SKU suffixes, preserve exact priority and reject ambiguity', () => {
   const {planSupplier}=require('../frontend/mixed-sku');
   const numbers=[3,4,10,32,33,34,56];
-  const products=numbers.map(n=>({id:'p'+n,code:'BEAUTYM-S3-'+String(n).padStart(3,'0'),source_number:String(n)}));
+  const products=numbers.map((n,i)=>({id:'p'+n,code:'BEAUTYM-S3-'+String(n).padStart(3,'0'),source_number:String(i+1)}));
   products.push({id:'exclusive',code:'BEAUTYM-S3-048-excl',source_number:'60'});
   const items=numbers.map(n=>({product_code:'BEAUTYMINI_S3-'+String(n).padStart(2,'0'),name:'物料',unit_price_rmb:2}));
-  items.push({product_code:'Beauty Mini_S3-060',name:'独家款物料'});
+  items.push({product_code:'Beauty Mini_S3-048',name:'独家款物料'});
   const plan=planSupplier({products},items);
   assert.deepEqual(plan.unmatched,[]);assert.equal(plan.groups.length,8);
   assert.equal(plan.groups[7].product.id,'exclusive');
   assert.equal(plan.groups[0].items[0].name,'物料');
   assert.equal(plan.groups[0].items[0].product_code,'BEAUTYMINI_S3-03');
-  const conflicting=[...products,{id:'other',code:'OTHER-003',source_number:'03'}];
+  const conflicting=[...products,{id:'other',code:'BEAUTYM-S3-003',source_number:'99'}];
   assert.equal(planSupplier({products:conflicting},[items[0]]).unmatched.length,1);
-  assert.equal(planSupplier({products:conflicting},[{product_code:'BEAUTYM-S3-003'}]).groups[0].product.id,'p3');
+  assert.equal(planSupplier({products},[{product_code:'BEAUTYM-S3-003'}]).groups[0].product.id,'p3');
   assert.equal(planSupplier({products},[{product_code:'UNRELATED-03'}]).unmatched.length,1);
+  assert.equal(planSupplier({products},[{product_code:'Beauty Mini_S3-060'}]).unmatched.length,1);
+});
+
+test('supplier 59 maps to official 059 even when NO.59 is an exclusive SKU or has been removed', () => {
+  const { planSupplier } = require('../frontend/mixed-sku');
+  const products = [
+    {id:'cake', code:'BEAUTYM-S3-059', source_number:'56'},
+    {id:'toner', code:'BEAUTYM-S3-040-excl', source_number:'59'},
+    {id:'mask', code:'BEAUTYM-S3-026', source_number:'25'},
+    {id:'device', code:'BEAUTYM-S3-027', source_number:'26'},
+  ];
+  const items = [{product_code:'Beauty Mini_S3-59', name:'彩盒', qty:2},
+    {product_code:'Beauty Mini_S3-26', name:'面膜彩盒2', qty:1}];
+  for (const config of [{products}, {products:products.filter(p=>p.id!=='toner')}]) {
+    const plan = planSupplier(config, items);
+    assert.deepEqual(plan.unmatched, []);
+    assert.deepEqual(plan.groups.map(g=>g.product.id), ['cake','mask']);
+    assert.equal(plan.groups[0].items[0].qty, 2);
+  }
+  const missing = planSupplier({products:products.filter(p=>p.id!=='cake')}, [items[0]]);
+  assert.equal(missing.groups.length, 0);
+  assert.match(missing.unmatched[0], /未找到/);
 });

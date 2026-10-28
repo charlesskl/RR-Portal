@@ -9,8 +9,8 @@ import shutil, sqlite3, stat, subprocess, sys, tarfile, time, urllib.error, urll
 EXECUTE = True
 TARGET = 'cd0118ff0ed5f2eeed8bec039e346ae7e0466df7'
 TREE = 'af334ea27a30dfaa2640019a8c17ed57f58640be'
-PHASE = 'prepare'
-PREPARED_SHA256 = ''
+PHASE = 'deploy'
+PREPARED_SHA256 = 'd244e0dbe727fafa3eb91d85cb9983f5efe4691e71e397a84e47b3660108b225'
 DEPLOY_SHA256 = ''
 BASE = '09b09cbf21b2dfb8518c58860fa33237d2123ed5'
 HEAD = '0f14aaf6bce77b7c144ff2dd4587d57f55fedca8'

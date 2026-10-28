@@ -97,3 +97,20 @@ test("只读账号可以查看来料但不能保存", async ({ page, context }) 
   const dialog = page.getByRole("dialog", { name: "来料管理" }); await dialog.getByRole("button", { name: "查看", exact: true }).click();
   await expect(dialog.getByLabel("累计到料数量")).toBeDisabled(); await expect(dialog.getByRole("button", { name: "保存来料并自动重排" })).toBeDisabled();
 });
+
+
+test("保存已提交但来料回读失败时，仍刷新排期中已移除的计划", async ({ page }) => {
+  await page.goto("/schedule");
+  await expect(page.getByRole("button", { name: "查看 2#番茄片 计划详情" })).toBeVisible();
+  await page.getByRole("button", { name: "来料管理", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "来料管理" });
+  await dialog.getByRole("button", { name: "登记", exact: true }).click();
+  failRead = true;
+  await dialog.getByLabel("累计到料数量").fill("0");
+  await dialog.getByRole("button", { name: "保存来料并自动重排" }).click();
+  await expect(dialog.getByRole("alert", { name: "来料错误" })).toContainText("登记已保存");
+  expect(writes).toBe(1);
+  expect(activePlan).toBe(false);
+  await dialog.getByRole("button", { name: "关闭来料管理" }).click();
+  await expect(page.getByRole("button", { name: "查看 2#番茄片 计划详情" })).toHaveCount(0);
+});

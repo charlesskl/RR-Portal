@@ -63,11 +63,12 @@ export default function MaterialReadinessDialog({ selection, canEdit, onClose, o
       if (!response.ok) throw new Error(body.error || "保存失败");
       committed = true;
       for (const prefix of ["/api/orders", "/api/schedule", "/api/materials", "/api/recording", "/api/dashboard"]) invalidateClientCache(prefix);
+      // 重排已提交，即使来料列表回读失败，排期视图也必须刷新。
+      onChanged();
       const fresh = await load();
       const row = fresh.find(row => row.orderId === selected.orderId && row.partName === selected.partName);
       if (row) choose(row);
       setSuccess(`${body.message || "已保存并重排"}${body.reflow?.warnings?.length ? `；${body.reflow.warnings.join("；")}` : ""}`);
-      onChanged();
     } catch (error) {
       setError(`${committed ? "登记已保存，但页面更新失败，请重新打开来料管理查看。" : ""}${error instanceof Error ? error.message : "请检查网络后重试"}`);
     } finally { setSaving(false); }

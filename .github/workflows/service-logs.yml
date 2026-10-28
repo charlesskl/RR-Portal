@@ -1,8 +1,8 @@
-name: PR 1025 SprayPlan Scoped Release
+name: PR 1025 SprayPlan Build Diagnostic
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [prepare]}
+      mode: {type: choice, required: true, options: [build-diagnostic]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'fe8fd3a580217eefcddf5f5be8b22a1be5eec261758a776c246d544e028e8cd3'
+  SCOPED_RELEASE_HELPER_SHA256: '475b0f17f4d58d04d8821d42c1cddf5a006287ec095fb40716199ce84c413074'
 jobs:
   fixed-scoped-release:
     runs-on: ubuntu-latest
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1025-20261028-sprayplan && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1025-20261028-sprayplan && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = build-diagnostic ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run only reviewed sprayplan prepare
+      - name: Run only reviewed sprayplan build-diagnostic
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -48,19 +48,13 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1025-20261028-sprayplan && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1025-20261028-sprayplan && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = build-diagnostic && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1025-20261028-sprayplan:refs/remotes/origin/ops/pr-1025-20261028-sprayplan >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1025-20261028-sprayplan)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            scoped_release_tmp=$(mktemp -d /tmp/pr1025-sprayplan.XXXXXX)
+            scoped_release_tmp=$(mktemp -d /tmp/pr1025-build-diagnostic.XXXXXX)
             trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1025-sprayplan-release.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = fe8fd3a580217eefcddf5f5be8b22a1be5eec261758a776c246d544e028e8cd3 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1012-compose-library-v2.py" > "$scoped_release_tmp/pr1012-compose-library-v2.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1012-compose-library-v2.py" | cut -d ' ' -f1)" = bbf49ca20451f5c503bc807f71590dca8f20061590d0e78300551f302c386027 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1012-data-library.py" > "$scoped_release_tmp/pr1012-data-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1012-data-library.py" | cut -d ' ' -f1)" = b937a93ac5d08ba93bb684270e3d05d13d58dc6ecf90af5e1306aec30cec0eb3 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1025-build-diagnostic.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 475b0f17f4d58d04d8821d42c1cddf5a006287ec095fb40716199ce84c413074 ]] || exit 1
             timeout --signal=TERM --kill-after=20s 68m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"

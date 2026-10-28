@@ -554,11 +554,12 @@ function lineToCells(ln, r, kindEff, st, ctx) {
     return cells;
   }
   if (kindEff === 'fee50') {
-    // Tigerhead 模费50%：B=描述, D=数量, E=PCS, H=USD, I==K, J=1, K=全价（合计区再×50%）
+    // Tigerhead 模费50%：货物按数量×单价，费用按直接金额（合计区再×50%）。
     set(2, cStr('B', r, st[2], ln.desc));
     if (ln.kind !== 'fee') { set(4, cNum('D', r, st[4], ln.qty)); set(5, cStr('E', r, st[5], 'PCS')); }
     set(8, cStr('H', r, st[8], 'USD'));
-    set(9, cFormula('I', r, st[9], `K${r}`, ln.kind === 'fee' ? ln.amount : ln.unit));
+    set(9, cFormula('I', r, st[9], ln.kind === 'fee' ? `K${r}` : `K${r}*D${r}`,
+      ln.kind === 'fee' ? ln.amount : ln.unit * ln.qty));
     set(10, cNum('J', r, st[10], 1));
     set(11, cNum('K', r, st[11], ln.kind === 'fee' ? ln.amount : ln.unit));
     return cells;

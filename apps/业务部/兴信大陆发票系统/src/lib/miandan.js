@@ -86,6 +86,32 @@ function parseSharedStrings(xml) {
 /** 列字母 → 列号 */
 const colNum = (s) => { let n = 0; for (const ch of s) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };
 
+// Excel may store identical labels as shared strings, direct strings, or inline
+// rich text. Normalize the latter two while reading each selected sheet, keeping
+// the existing bounded XML scan and avoiding a full-workbook SheetJS parse.
+const decodeText = (text) => text
+  .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+  .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+  .replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+
+function normalizeSourceStrings(xml, strings, indices) {
+  return xml.replace(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g, (cell, attrs, body) => {
+    const type = (attrs.match(/\bt="([^"]*)"/) || [])[1];
+    if (type !== 'inlineStr' && type !== 'str') return cell;
+    const inner = body || '';
+    const text = type === 'inlineStr'
+      ? [...inner.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((m) => decodeText(m[1])).join('')
+      : decodeText((inner.match(/<v>([\s\S]*?)<\/v>/) || [,''])[1]);
+    let index = indices.get(text);
+    if (index === undefined) {
+      index = strings.length; strings.push(text); indices.set(text, index);
+    }
+    const rest = attrs.replace(/\s+t="[^"]*"/, '');
+    return `<c${rest} t="s"><v>${index}</v></c>`;
+  });
+}
+
 /** 打开 zip,列出 sheet(名→部件路径)与 sharedStrings */
 async function openBook(arrayBuffer) {
   const zip = await JSZip.loadAsync(arrayBuffer);
@@ -104,12 +130,14 @@ async function openBook(arrayBuffer) {
   let strings = [];
   const ssFile = zip.file('xl/sharedStrings.xml');
   if (ssFile) strings = parseSharedStrings(await ssFile.async('string'));
-  return { zip, sheets, strings };
+  const indices = new Map(strings.map((text, index) => [text, index]));
+  const readSheet = async (path) => normalizeSourceStrings(await zip.file(path).async('string'), strings, indices);
+  return { zip, sheets, strings, readSheet };
 }
 
 /* ---------------- 美国簿解析 ---------------- */
 
-async function parseUsBook({ zip, sheets, strings }, fileName) {
+async function parseUsBook({ sheets, strings, readSheet }, fileName) {
   const totalIdx = new Set(), dateIdx = new Set();
   strings.forEach((t, i) => {
     const ts = t.trim();
@@ -140,7 +168,13 @@ async function parseUsBook({ zip, sheets, strings }, fileName) {
   for (const [base, versions] of groups) {
     versions.sort((a, b) => a.n - b.n);
     const last = versions[versions.length - 1];
-    const xml = await zip.file(last.path).async('string');
+    const firstNewString = strings.length;
+    const xml = await readSheet(last.path);
+    for (let i = firstNewString; i < strings.length; i++) {
+      const t = strings[i];
+      if (/^Total (Net )?Amount$/.test(t.trim())) totalIdx.add(i);
+      if (/^Date[:：]/.test(t.trim())) dateIdx.add(i);
+    }
     const { total, date } = extractTotalAndDate(xml, totalIdx, dateIdx, strings);
     if (total === null || !date) {
       skipped.push({ sheet: last.name, reason: total === null ? '缺 Total 行' : '缺 Date' });
@@ -231,7 +265,7 @@ function parseDateString(s) {
 
 /* ---------------- 国际簿解析 ---------------- */
 
-async function parseIntlBook({ zip, sheets, strings }, fileName) {
+async function parseIntlBook({ sheets, strings, readSheet }, fileName) {
   const usdIdx = new Set(), revIdx = new Map();
   strings.forEach((t, i) => {
     const ts = t.trim();
@@ -262,7 +296,14 @@ async function parseIntlBook({ zip, sheets, strings }, fileName) {
   for (const [base, versions] of groups) {
     versions.sort((a, b) => a.n - b.n);
     const last = versions[versions.length - 1];
-    const xml = await zip.file(last.path).async('string');
+    const firstNewString = strings.length;
+    const xml = await readSheet(last.path);
+    for (let i = firstNewString; i < strings.length; i++) {
+      const t = strings[i];
+      if (t.trim() === 'USD$' || t.trim() === 'USD') usdIdx.add(i);
+      const m = t.trim().match(/[（(]\s*REV\s*(\d)\s*[）)]/i);
+      if (m && /\d{4}/.test(t)) revIdx.set(i, parseInt(m[1], 10));
+    }
     const info = extractIntlInfo(xml, usdIdx, revIdx, strings);
     if (info.total === null || !info.date) {
       skipped.push({ sheet: last.name, reason: !info.date ? '缺 G3 日期' : '缺 USD 总额行' });

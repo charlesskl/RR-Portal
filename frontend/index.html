@@ -215,6 +215,12 @@
           <div class="plugin-list" id="zurumaPluginList">
             <div class="plugin-item">
               <div class="plugin-info">
+                <div class="plugin-dot gray" id="xingxinInvoiceDot"></div>
+                <span class="plugin-name">兴信大陆发票系统</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
                 <div class="plugin-dot green"></div>
                 <span class="plugin-name">Zuru MA 包装差价系统</span>
                 <span class="plugin-tag">差价</span>
@@ -343,6 +349,26 @@
       业务部
     </div>
     <div class="page-subtitle">Zuru MA 包装物料差价计算与发票生成 · 排期录入管理 · 河源排期入单</div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#0f766e,#14b8a6);">&#128196;</div>
+        <div>
+          <div class="detail-plugin-name">兴信大陆发票系统</div>
+          <div class="detail-plugin-desc">兴信厂区独立工作台，支持 ZURU 发票、其他客发票、面单及金额核对，文件在当前浏览器处理</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#127981; 兴信厂区</div>
+            <div class="feature-tag">&#128196; Excel 导入</div>
+            <div class="feature-tag">&#128203; 多客人模板</div>
+            <div class="feature-tag">&#128230; 批量导出</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="xingxinInvoiceDetailDot"></div> 检查中...</div>
+        <a href="/xingxin-invoice/" target="_blank" rel="noopener" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -609,6 +635,7 @@ async function checkHealth() {
       { name: 'jiangping', url: '/jiangping/health' },
       { name: 'paiji', url: '/paiji/health' },
       { name: 'hySchedule', url: '/hy-schedule/health' },
+      { name: 'xingxinInvoice', url: '/xingxin-invoice/health' },
     ];
     let healthy = 1;
     let total = 1 + checks.length;
@@ -632,6 +659,8 @@ async function checkHealth() {
     updateDot('dotZouhuoDetail', '/zouhuo/health');
     updateDot('dotJiangping', '/jiangping/health');
     updateDot('dotJiangpingDetail', '/jiangping/health');
+    updateDot('xingxinInvoiceDot', '/xingxin-invoice/health');
+    updateDot('xingxinInvoiceDetailDot', '/xingxin-invoice/health');
   } catch(e) {
     statusEl.textContent = '连接失败';
   }

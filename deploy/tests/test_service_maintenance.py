@@ -196,6 +196,18 @@ ensure_service_base_images() { :; }
         self.assertTrue(all('--no-deps' in a and '--no-build' in a for a in updates))
         self.assertEqual(list(self.flags.iterdir()), [])
 
+    @unittest.skipUnless(BASH_MAJOR >= 4, 'full server script requires Bash 4+; covered on Linux CI')
+    def test_xingxin_source_change_deploys_only_xingxin(self):
+        services = {svc: {} for svc in ['db', 'paiji', 'xingxin-invoice', 'nginx']}
+        result, calls = self.run_update_script(
+            changed_files='apps/业务部/兴信大陆发票系统/src/pages/Home.tsx',
+            services_config=services,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([a[-1] for a in calls if 'build' in a], ['xingxin-invoice'])
+        self.assertEqual([a[-1] for a in calls if 'up' in a], ['xingxin-invoice'])
+        self.assertEqual(list(self.flags.iterdir()), [])
+
     def mailbox_compose_fixture(self):
         before = b'services:\n  voyageplex-api:\n    environment:\n      ASPNETCORE_ENVIRONMENT: Production\n'
         after = before + b'      VOYAGEPLEX_HUADENG_MAILBOXES_JSON: ${VOYAGEPLEX_HUADENG_MAILBOXES_JSON:-}\n'
@@ -317,6 +329,7 @@ ensure_service_base_images() { :; }
 class Backend(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
+        self.send_header('X-Fixture-Path', self.path)
         self.end_headers()
         self.wfile.write(b'other system available')
 
@@ -419,6 +432,22 @@ class NginxTests(unittest.TestCase):
         (self.flags / 'paiji').unlink()
         self.assertEqual(self.fetch('/paiji/')[0], 200)
 
+    def test_xingxin_health_is_public_but_pages_and_templates_require_auth(self):
+        status, _, headers = self.fetch('/xingxin-invoice/health', auth=False)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers['X-Fixture-Path'], '/health')
+        for path in ['/xingxin-invoice/', '/xingxin-invoice/assets/app.js',
+                     '/xingxin-invoice/other-tpl/template.xlsx']:
+            with self.subTest(path=path):
+                self.assertEqual(self.fetch(path, auth=False)[0], 401)
+                status, _, headers = self.fetch(path)
+                self.assertEqual(status, 200)
+                self.assertEqual(headers['X-Fixture-Path'], path.removeprefix('/xingxin-invoice'))
+        # urllib follows the bare-path redirect; the upstream must receive root.
+        status, _, headers = self.fetch('/xingxin-invoice')
+        self.assertEqual(status, 200)
+        self.assertEqual(headers['X-Fixture-Path'], '/')
+
     def test_legacy_global_flag_is_ignored(self):
         (self.path / 'maintenance/ON').touch()
         for path in ['/', '/nginx-health', '/paiji/', '/peise/health']:
@@ -438,6 +467,7 @@ class NginxTests(unittest.TestCase):
             'quality-portal': ['/portal', '/portal/'],
             'factory-review-test': ['/factory-review-test/health'],
             'sprayplan-test': ['/sprayplan-test/api/health'],
+            'xingxin-invoice': ['/xingxin-invoice', '/xingxin-invoice/health', '/xingxin-invoice/assets/app.js'],
         }
         for key, paths in cases.items():
             with self.subTest(key=key):
@@ -465,6 +495,7 @@ class NginxTests(unittest.TestCase):
             'qa-weekly-report': '/qa-weekly-report/', 'production-plan': '/production-plan/',
             'zuru-order-system': '/zuru-order-system/', 'baojia': '/baojia/',
             'internal-quote': '/internal-quote/', 'tomy-paiqi': '/tomy-paiqi/',
+            'xingxin-invoice': '/xingxin-invoice/',
             'liwenjuan': '/liwenjuan/', 'zuru-master-schedule': '/zuru-master/',
             'hy-schedule-system': '/hy-schedule/', 'huadeng': '/huadeng/',
             'huadeng-maorong': '/huadeng-maorong/', 'indo-shipping': '/indo-shipping/',

@@ -447,6 +447,12 @@
           <div class="plugin-list">
             <div class="plugin-item">
               <div class="plugin-info">
+                <div class="plugin-dot gray" id="xingxinInvoiceDot"></div>
+                <span class="plugin-name">兴信大陆发票系统</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
                 <div class="plugin-dot gray" id="zuruOrderDot"></div>
                 <span class="plugin-name">ZURU接单表入单系统</span>
               </div>
@@ -878,7 +884,27 @@
       <div class="dept-icon business" style="width:40px;height:40px;font-size:18px;">&#128176;</div>
       业务部
     </div>
-    <div class="page-subtitle">ZURU接单表入单 · ZURU总排期入单 · 河源排期入单 · 报价管理 · TOMY排期核对</div>
+    <div class="page-subtitle">ZURU接单表入单 · ZURU总排期入单 · 河源排期入单 · 报价管理 · TOMY排期核对 · 兴信大陆发票</div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#0f766e,#14b8a6);">&#128196;</div>
+        <div>
+          <div class="detail-plugin-name">兴信大陆发票系统</div>
+          <div class="detail-plugin-desc">兴信厂区独立工作台，支持 ZURU 发票、其他客发票、面单及金额核对，文件在当前浏览器处理</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#127981; 兴信厂区</div>
+            <div class="feature-tag">&#128196; Excel 导入</div>
+            <div class="feature-tag">&#128203; 多客人模板</div>
+            <div class="feature-tag">&#128230; 批量导出</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="xingxinInvoiceDetailDot"></div> 检查中...</div>
+        <a href="/xingxin-invoice/" target="_blank" rel="noopener" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -1474,6 +1500,7 @@ async function checkHealth() {
       { name: 'baojia', url: '/baojia/health', dot: 'baojiaDot', detailDot: 'baojiaDetailDot' },
       { name: 'internalQuote', url: '/internal-quote/health', dot: 'internalQuoteDot', detailDot: 'internalQuoteDetailDot' },
       { name: 'tomy', url: '/tomy-paiqi/health', dot: 'tomyDot', detailDot: 'tomyDetailDot' },
+      { name: 'xingxinInvoice', url: '/xingxin-invoice/health', dot: 'xingxinInvoiceDot', detailDot: 'xingxinInvoiceDetailDot' },
       { name: 'zuruMaster', url: '/zuru-master/health', dot: 'zuruMasterDot', detailDot: 'zuruMasterDetailDot' },
       { name: 'hySchedule', url: '/hy-schedule/health', dot: 'hyScheduleDot', detailDot: 'hyScheduleDetailDot' },
       { name: 'peise', url: '/peise/health', dot: 'peiseDot', detailDot: 'peiseDetailDot' },

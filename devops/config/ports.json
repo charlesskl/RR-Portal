@@ -8,5 +8,6 @@
   "new-product-schedule": { "port": 3000 },
   "figure-mold-cost-system": { "port": 3001 },
   "baojia": { "port": 3007 },
-  "liwenjuan": { "port": 5004 }
+  "liwenjuan": { "port": 5004 },
+  "xingxin-invoice": { "port": 3480, "containerPort": 80 }
 }

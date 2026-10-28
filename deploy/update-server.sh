@@ -125,6 +125,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/PMC跟仓管/加工厂月度评审管理制度/"]="factory-review factory-review-test"
   ["apps/业务部/报价系统/"]="baojia"
   ["apps/业务部/TOMY排期核对系统/"]="tomy-paiqi"
+  ["apps/业务部/兴信大陆发票系统/"]="xingxin-invoice"
   ["apps/业务部/ZURU接单表入单系统/"]="zuru-order-system"
   ["apps/业务部/ZURU总排期入单/"]="zuru-master-schedule"
   ["apps/业务部/ZURU河源排期入单/"]="hy-schedule-system"

@@ -171,10 +171,10 @@ export default function ExplorerView({ path, onNavigate, onOpenDialog, onOpenEdi
       }}
     >
       {/* 面包屑 + 工具栏 */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-white px-4 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-[#111c30] px-4 py-2.5">
         <nav className="flex min-w-0 items-center gap-0.5 text-sm">
           <button
-            className="shrink-0 rounded px-1.5 py-0.5 font-medium text-slate-600 hover:bg-slate-100"
+            className="shrink-0 rounded px-1.5 py-0.5 font-medium text-slate-300 hover:bg-[#0b1220]"
             onClick={() => onNavigate({ type: "clients" })}
           >
             客户首页
@@ -187,8 +187,8 @@ export default function ExplorerView({ path, onNavigate, onOpenDialog, onOpenEdi
                 <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
                 <button
                   className={cn(
-                    "truncate rounded px-1.5 py-0.5 hover:bg-slate-100",
-                    last ? "font-semibold text-slate-900" : "text-slate-600",
+                    "truncate rounded px-1.5 py-0.5 hover:bg-[#0b1220]",
+                    last ? "font-semibold text-slate-100" : "text-slate-300",
                   )}
                   onClick={() => {
                     if (last) return;
@@ -237,7 +237,7 @@ export default function ExplorerView({ path, onNavigate, onOpenDialog, onOpenEdi
 
       {/* 上传进度 */}
       {uploads.length > 0 && (
-        <div className="space-y-1.5 border-b bg-blue-50/60 px-4 py-2">
+        <div className="space-y-1.5 border-b bg-cyan-950/60 px-4 py-2">
           {uploads.map((t) => (
             <div key={t.id} className="flex items-center gap-3 text-xs">
               <span className="w-56 truncate font-medium">{t.name}</span>
@@ -255,7 +255,7 @@ export default function ExplorerView({ path, onNavigate, onOpenDialog, onOpenEdi
       )}
 
       {/* 文件列表 */}
-      <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-[#111c30]">
         {error ? (
           <div className="p-8 text-center text-sm text-red-600">{error}</div>
         ) : entries === null ? (
@@ -293,7 +293,7 @@ export default function ExplorerView({ path, onNavigate, onOpenDialog, onOpenEdi
                 return (
                   <TableRow
                     key={e.name}
-                    className={cn("cursor-pointer", checked && "bg-blue-50/60")}
+                    className={cn("cursor-pointer", checked && "bg-cyan-950/60")}
                     onDoubleClick={() => openEntry(e)}
                     onClick={() => (e.kind === "dir" ? openEntry(e) : toggle(e.name, !checked))}
                   >
@@ -430,10 +430,10 @@ export default function ExplorerView({ path, onNavigate, onOpenDialog, onOpenEdi
 
       {/* 拖拽提示遮罩 */}
       {dragOver && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-4 border-dashed border-blue-400 bg-blue-50/80">
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-4 border-dashed border-blue-400 bg-cyan-950/80">
           <div className="text-center">
             <UploadCloud className="mx-auto mb-2 h-12 w-12 text-blue-500" />
-            <p className="font-medium text-blue-700">松开鼠标，上传到当前目录</p>
+            <p className="font-medium text-cyan-300">松开鼠标，上传到当前目录</p>
           </div>
         </div>
       )}

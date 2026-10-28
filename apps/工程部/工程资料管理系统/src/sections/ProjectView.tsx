@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   BadgeCheck,
   CircleDashed,
+  ClipboardList,
   Download,
   ExternalLink,
   FilePlus2,
@@ -117,7 +118,7 @@ export default function ProjectView({
   return (
     <div className="flex h-full flex-col">
       {/* 头部 */}
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-white px-4 py-2.5">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-[#111c30] px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <Button
             variant="ghost"
@@ -130,7 +131,7 @@ export default function ProjectView({
           </Button>
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs text-slate-400">
-              <button className="hover:text-blue-600" onClick={() => onNavigate({ type: "client", client })}>
+              <button className="hover:text-cyan-400" onClick={() => onNavigate({ type: "client", client })}>
                 {client}
               </button>
               <span>/</span>
@@ -144,12 +145,12 @@ export default function ProjectView({
             onClick={() => setTab("docs")}
             className={cn(
               "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm",
-              tab === "docs" ? "bg-blue-600 font-medium text-white" : "text-slate-600 hover:bg-slate-200/70",
+              tab === "docs" ? "bg-cyan-600 font-medium text-white" : "text-slate-300 hover:bg-[#16233d]",
             )}
           >
             <BadgeCheck className="h-4 w-4" /> 做资料
             {items && (
-              <span className={cn("text-xs", tab === "docs" ? "text-blue-100" : "text-slate-400")}>
+              <span className={cn("text-xs", tab === "docs" ? "text-cyan-200" : "text-slate-400")}>
                 {doneCount}/{items.length}
               </span>
             )}
@@ -158,10 +159,17 @@ export default function ProjectView({
             onClick={() => setTab("files")}
             className={cn(
               "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm",
-              tab === "files" ? "bg-blue-600 font-medium text-white" : "text-slate-600 hover:bg-slate-200/70",
+              tab === "files" ? "bg-cyan-600 font-medium text-white" : "text-slate-300 hover:bg-[#16233d]",
             )}
           >
             <Files className="h-4 w-4" /> 全部文件
+          </button>
+          <button
+            onClick={() => onNavigate({ type: "workbench", client, year, project })}
+            className="flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-cyan-300 hover:bg-slate-800"
+            title="按 EPMS 制单台流程做资料（草稿/审核/归档/防串单锁）"
+          >
+            <ClipboardList className="h-4 w-4" /> 制单台
           </button>
           <Button size="sm" variant="ghost" onClick={load} title="重新扫描">
             <RefreshCw className="h-4 w-4" />
@@ -283,11 +291,11 @@ export default function ProjectView({
                 </Card>
 
                 {/* 模板库提示 */}
-                <div className="flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/60 px-4 py-3 text-xs text-blue-800">
+                <div className="flex items-start gap-2 rounded-lg border border-blue-100 bg-cyan-950/60 px-4 py-3 text-xs text-blue-800">
                   <Info className="mt-0.5 h-4 w-4 shrink-0" />
                   <div>
                     <p className="font-medium">模板库使用方法</p>
-                    <p className="mt-1 leading-relaxed text-blue-700/90">
+                    <p className="mt-1 leading-relaxed text-cyan-300/90">
                       把空白模板文件放到资料库根目录的
                       <button
                         className="mx-1 font-medium underline underline-offset-2"

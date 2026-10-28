@@ -45,9 +45,6 @@ export default function DocEditor({
       try {
         let p = path;
         if (!/\.xlsx$/i.test(p)) {
-          if (!/\.xls$/i.test(p)) {
-            throw new Error("此文件格式暂不支持网页编辑，请下载后用对应软件打开");
-          }
           // 旧版 .xls：若旁边已有转换好的 .xlsx（批量转换产生），直接改开它
           const alt = p.replace(/\.xls$/i, ".xlsx");
           try {
@@ -197,7 +194,7 @@ export default function DocEditor({
   return (
     <div className="flex h-full flex-col">
       {/* 工具条 */}
-      <div className="flex shrink-0 items-center gap-2 border-b bg-white px-3 py-2">
+      <div className="flex shrink-0 items-center gap-2 border-b bg-[#111c30] px-3 py-2">
         <Button variant="ghost" size="sm" onClick={handleBack}>
           <ArrowLeft className="mr-1 h-4 w-4" /> 返回
         </Button>
@@ -218,15 +215,15 @@ export default function DocEditor({
       </div>
 
       {/* 编辑区 */}
-      <div className="relative min-h-0 flex-1 bg-white">
+      <div className="relative min-h-0 flex-1 bg-[#111c30]">
         {phase === "loading" && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-[#111c30]">
             <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
             <p className="text-sm text-slate-500">正在加载编辑器…</p>
           </div>
         )}
         {phase === "error" && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-white p-6">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#111c30] p-6">
             <p className="text-sm text-red-600">{error}</p>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={handleBack}>

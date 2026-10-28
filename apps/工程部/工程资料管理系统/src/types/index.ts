@@ -41,11 +41,13 @@ export interface AppConfig {
 }
 
 export type View =
+  | { type: "dashboard" }
   | { type: "clients" }
   | { type: "client"; client: string }
   | { type: "project"; client: string; year: string; project: string }
   | { type: "explorer"; path: string }
   | { type: "editor"; path: string; name: string }
+  | { type: "workbench"; client: string; year: string; project: string }
   | { type: "search" }
   | { type: "recent" }
   | { type: "trash" };
@@ -63,4 +65,31 @@ export interface ProjectInfo {
   subdirs: string[];
   fileCount: number;
   mtime: number;
+}
+
+export interface DashboardProject {
+  client: string;
+  year: string;
+  project: string;
+  path: string;
+  done: number;
+  total: number;
+  docs: Record<string, boolean>;
+  mtime: number;
+}
+
+export interface Dashboard {
+  projects: DashboardProject[];
+  stats: { projects: number; readiness: number; incomplete: number; complete: number };
+}
+
+export interface EpmsRecordPublic {
+  status: "none" | "draft" | "pending" | "approved";
+  data?: unknown;
+  by?: string;
+  updatedAt?: number;
+  docNo?: string;
+  lock?: { by: string; at: number } | null;
+  lockTtl?: number;
+  history?: { at: number; by: string; action: string }[];
 }

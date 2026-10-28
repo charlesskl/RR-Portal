@@ -173,8 +173,8 @@ export default function ClientView({ client, onNavigate, onOpenDialog, refreshKe
                   className={cn(
                     "border-b-2 px-4 py-2 text-sm font-medium transition-colors",
                     y === year
-                      ? "border-blue-600 text-blue-700"
-                      : "border-transparent text-slate-500 hover:text-slate-800",
+                      ? "border-cyan-500 text-cyan-300"
+                      : "border-transparent text-slate-500 hover:text-slate-200",
                   )}
                 >
                   {y}
@@ -210,7 +210,7 @@ export default function ClientView({ client, onNavigate, onOpenDialog, refreshKe
                     {manageMode && (
                       <span
                         className={cn(
-                          "absolute -left-2 -top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 bg-white text-xs font-bold",
+                          "absolute -left-2 -top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 bg-[#111c30] text-xs font-bold",
                           checked ? "border-red-500 bg-red-500 text-white" : "border-slate-300 text-transparent",
                         )}
                       >
@@ -221,7 +221,7 @@ export default function ClientView({ client, onNavigate, onOpenDialog, refreshKe
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex min-w-0 items-center gap-2">
                           <FolderOpen className="h-5 w-5 shrink-0 text-amber-500" />
-                          <span className="truncate font-semibold group-hover:text-blue-700">{p.name}</span>
+                          <span className="truncate font-semibold group-hover:text-cyan-300">{p.name}</span>
                         </div>
                         <Badge variant="secondary" className="shrink-0">
                           {p.fileCount} 个文件
@@ -251,7 +251,7 @@ export default function ClientView({ client, onNavigate, onOpenDialog, refreshKe
               })}
             </div>
           ) : year ? (
-            <div className="rounded-lg border border-dashed bg-white p-12 text-center">
+            <div className="rounded-lg border border-dashed bg-[#111c30] p-12 text-center">
               <p className="text-sm text-slate-500">{year} 年还没有项目</p>
               <Button className="mt-3" onClick={() => onOpenDialog({ type: "newProject", client })}>
                 <FolderPlus className="mr-1.5 h-4 w-4" /> 新建第一个项目
@@ -267,7 +267,7 @@ export default function ClientView({ client, onNavigate, onOpenDialog, refreshKe
                 {otherDirs.map((d) => (
                   <button
                     key={d.name}
-                    className="flex items-center gap-2 rounded-lg border bg-white px-3 py-2.5 text-left text-sm transition-colors hover:border-blue-300 hover:text-blue-700"
+                    className="flex items-center gap-2 rounded-lg border bg-[#111c30] px-3 py-2.5 text-left text-sm transition-colors hover:border-cyan-500 hover:text-cyan-300"
                     onClick={() => onNavigate({ type: "explorer", path: `${client}/${d.name}` })}
                   >
                     <FolderOpen className="h-4 w-4 shrink-0 text-amber-500" />
@@ -282,8 +282,8 @@ export default function ClientView({ client, onNavigate, onOpenDialog, refreshKe
 
       {/* 批量管理底部操作栏 */}
       {manageMode && (
-        <div className="fixed bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-full border bg-white px-5 py-2.5 shadow-lg">
-          <span className="text-sm text-slate-600">已选 {selected.size} 个项目</span>
+        <div className="fixed bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-full border bg-[#111c30] px-5 py-2.5 shadow-lg">
+          <span className="text-sm text-slate-300">已选 {selected.size} 个项目</span>
           <Button
             size="sm"
             variant="ghost"

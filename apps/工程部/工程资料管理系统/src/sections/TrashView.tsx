@@ -69,13 +69,13 @@ export default function TrashView({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b bg-white px-4 py-2.5">
+      <div className="flex items-center justify-between border-b bg-[#111c30] px-4 py-2.5">
         <h2 className="text-sm font-semibold">回收站（删除的内容会先移到这里，可还原）</h2>
         <Button size="sm" variant="ghost" onClick={load}>
           <RefreshCw className="h-4 w-4" />
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-[#111c30]">
         {items === null ? (
           <div className="flex items-center justify-center gap-2 p-16 text-slate-400">
             <Loader2 className="h-5 w-5 animate-spin" /> 加载中…

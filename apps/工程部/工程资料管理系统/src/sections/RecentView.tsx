@@ -30,7 +30,7 @@ export default function RecentView({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b bg-white px-4 py-2.5">
+      <div className="flex items-center justify-between border-b bg-[#111c30] px-4 py-2.5">
         <h2 className="text-sm font-semibold">最近更新的 100 个文件</h2>
         <Button size="sm" variant="ghost" onClick={load}>
           <RefreshCw className="h-4 w-4" />

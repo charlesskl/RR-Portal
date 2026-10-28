@@ -92,7 +92,7 @@ export default function ClientsView({ onNavigate, refreshKey }: Props) {
             {others.map((c) => (
               <button
                 key={c.name}
-                className="rounded-full border bg-white px-4 py-1.5 text-sm text-slate-600 transition-colors hover:border-blue-300 hover:text-blue-700"
+                className="rounded-full border bg-[#111c30] px-4 py-1.5 text-sm text-slate-300 transition-colors hover:border-cyan-500 hover:text-cyan-300"
                 onClick={() => onNavigate({ type: "explorer", path: c.name })}
               >
                 {c.name}

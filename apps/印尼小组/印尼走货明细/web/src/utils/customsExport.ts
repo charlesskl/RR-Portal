@@ -9,7 +9,7 @@ import { DOMParser, XMLSerializer } from '@xmldom/xmldom'
 import type { Material, SupplierDict } from '../api/client'
 import { documentSellerForLine, supplierForLine } from './supplierProfiles'
 import { deliveryDeadline, syncedShipmentDeadline } from './shipmentDeadline'
-import { isPaperRope, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
+import { isPaperRope, shipmentCbmPerCarton, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
 import { bindInvoiceLookupSerial, documentRow, rebindDocumentFormula, type DocumentTableLayout } from './documentTemplateFormula'
 import auxiliaryDocumentLayout from './auxiliaryDocumentLayout.json'
 import { AUXILIARY_TABLES, auxiliaryDetailFormulas } from './auxiliaryDocumentFormula'
@@ -1233,8 +1233,10 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     }
     const phs = m?.product_code && !m.tool_kind ? productHs.get(m.product_code) : undefined
     setCell(ws, ri, 0, i + 1, 'n')
-    setCell(ws, ri, 1, m?.hs_cn || phs?.hsCN || '', 's')
-    setCell(ws, ri, 2, m?.hs_id || phs?.hsID || '', 's')
+    // Imported snapshots are this shipment's explicit declaration data. Clearing
+    // a code must not silently restore a different code from the product master.
+    setCell(ws, ri, 1, it.material_snapshot ? m?.hs_cn ?? '' : m?.hs_cn || phs?.hsCN || '', 's')
+    setCell(ws, ri, 2, it.material_snapshot ? m?.hs_id ?? '' : m?.hs_id || phs?.hsID || '', 's')
     setCell(ws, ri, 3, m?.product_code || '', 's')
     setCell(ws, ri, 4, customsFormulaName(it, m, effCustoms(it)), 's')
     setCell(ws, ri, 5, m?.name_zh || '', 's')
@@ -1305,10 +1307,19 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 50, qpc, (typeof qpc === 'string' && /[^\d.]/.test(qpc)) ? 's' : 'n')
     setCell(ws, ri, 51, m?.weight_per_carton || 0, 'n')
     const weighingQty = it.weighing_qty ?? shipmentWeightQuantity(m?.name_zh, shipmentPackingAverageQty(qpc))
-    setCell(ws, ri, 52, shipmentGrossPerPc(m?.weight_per_carton, weighingQty), 'n')
+    const grossPerPc = shipmentGrossPerPc(m?.weight_per_carton, weighingQty)
+    setCell(ws, ri, 52, grossPerPc, 'n')
     ws[XLSX.utils.encode_cell({ r: ri, c: 52 })].f = `IFERROR(IF(AZ${ri + 1}>0,AZ${ri + 1}/${Number(weighingQty) || 0},0),0)`
     setCell(ws, ri, 53, m?.net_per_pc || 0, 'n')
     setCell(ws, ri, 54, it.pallet || '', 's')
+    // File readers and import previews use cached values before Excel/WPS
+    // recalculates. Keep the actual weights alongside their live formulas.
+    const weightQty = shipmentWeightQuantity(m?.name_zh, it.qty)
+    ws[XLSX.utils.encode_cell({ r: ri, c: 15 })].v = Number((grossPerPc * weightQty).toFixed(2))
+    ws[XLSX.utils.encode_cell({ r: ri, c: 16 })].v = Number(((Number(m?.net_per_pc) || 0) * weightQty).toFixed(2))
+    const cbmEach = shipmentCbmPerCarton(m?.length, m?.width, m?.height)
+    ws[XLSX.utils.encode_cell({ r: ri, c: 17 })].v = cbmEach
+    ws[XLSX.utils.encode_cell({ r: ri, c: 18 })].v = cbmEach * (Number(it.cartons) || 0)
   })
 
   // 合计不再跨行合并：合并单元格会吞掉明细行之间的横向边框。

@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx'
 import JSZip from 'jszip'
-import type { Material } from '../api/client'
+import type { Material, ShipmentSourceCell } from '../api/client'
 import { extractSheetImages } from './engineeringImport'
 import { readToolPrice } from './toolPrice'
 import { shipmentKgWeight, shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
@@ -54,6 +54,25 @@ export function parseShipmentWorkbook(wb: XLSX.WorkBook): ShipmentImportResult {
       }
     }
     if (hi < 0) continue // Contracts, invoices and summary sheets are not source detail.
+    const headers = names.map((_, c) => text(ws[XLSX.utils.encode_cell({ r: hi, c })]?.v))
+    const sourceCell = (r: number, c: number, label: string): ShipmentSourceCell => {
+      const merge = ws['!merges']?.find(m => m.s.c === c && m.e.c === c && m.s.r <= r && m.e.r >= r)
+      const address = XLSX.utils.encode_cell(merge?.s || { r, c })
+      const cell = ws[address]
+      const error = cell?.t === 'e' || !!(cell?.f && cell.v == null)
+      const raw = cell?.v
+      return { address, label, value: error ? null : typeof raw === 'string' || typeof raw === 'boolean'
+        || typeof raw === 'number' && Number.isFinite(raw) ? raw : null,
+        display: cell?.w ?? (raw == null ? '' : String(raw)),
+        ...(cell?.f ? { formula: cell.f } : {}), ...(error ? { error: true } : {}) }
+    }
+    // Keep header-level notes/rate as evidence, not as commands to overwrite a
+    // container the user is already editing. Never execute imported formulas.
+    const context: ShipmentSourceCell[] = []
+    for (let r = 0; r < hi; r++) for (let c = 0; c <= range.e.c; c++) {
+      const source = sourceCell(r, c, XLSX.utils.encode_cell({ r, c }))
+      if (source.display || source.formula) context.push(source)
+    }
     const col = (...labels: string[]) => {
       const candidates = labels.map(norm)
       const exact = names.findIndex(n => candidates.includes(n))
@@ -118,22 +137,36 @@ export function parseShipmentWorkbook(wb: XLSX.WorkBook): ShipmentImportResult {
         length: number(['箱长', '长'], true), width: number(['箱宽', '宽'], true), height: number(['箱高', '高'], true),
         net_per_pc: number(['单个净重', '单件净重']), gross_per_pc: number(['单个毛重', '单件毛重']),
         weight_per_carton: number(['每箱重量', '每箱毛重']),
+        department: str('使用部门', '部门'),
+        import_source: { sheet, row: r + 1,
+          cells: headers.flatMap((label, c) => {
+            const source = sourceCell(r, c, label || `未命名列 ${XLSX.utils.encode_col(c)}`)
+            return label || source.value != null || source.formula ? [source] : []
+          }), context },
       }
       const use = str('产品用途')
-      if (['工具', '模具', '耗材'].includes(use)) material.tool_kind = '工具'
-      else if (['机器设备', '设备', '机器'].includes(use)) material.tool_kind = '机器设备'
+      if ([material.category, use].some(v => ['工具', '模具', '耗材'].includes(v || ''))) material.tool_kind = '工具'
+      else if ([material.category, use].some(v => ['机器设备', '设备', '机器'].includes(v || ''))) material.tool_kind = '机器设备'
       const qpc = str('每箱数量')
       const weightQty = shipmentWeightQuantity(name, qty)
-      const grossTotal = number(['毛重总重'], false, false), netTotal = number(['净重总重'], false, false)
-      if (material.net_per_pc == null && netTotal != null && weightQty > 0) material.net_per_pc = netTotal / weightQty
-      if (material.gross_per_pc == null && grossTotal != null && weightQty > 0) material.gross_per_pc = grossTotal / weightQty
+      const grossTotal = number(['毛重总重'], false, false) ?? number(['总毛重'], false, false) ?? number(['毛重'], false, false)
+      const netTotal = number(['净重总重'], false, false) ?? number(['总净重'], false, false) ?? number(['净重'], false, false)
+      // Actual shipment totals take precedence over stale single-piece defaults
+      // (including zero) in the workbook. Derive per-piece inputs so subsequent
+      // quantity changes still use the normal editor/export calculation.
+      if (weightQty > 0) {
+        if (netTotal != null) material.net_per_pc = netTotal / weightQty
+        if (grossTotal != null) material.gross_per_pc = grossTotal / weightQty
+      } else if (grossTotal != null || netTotal != null) notices.push('有毛净重合计但没有有效件数；源值已保留，请补充件数后核对重量')
       const weighing = number(['称重数量']) ?? shipmentWeightQuantity(name, shipmentPackingAverageQty(qpc))
       // Preserve a supplied per-piece gross weight without treating total weight as per-carton weight.
       const effectiveWeighing = weighing > 0 ? weighing : material.gross_per_pc != null ? 1 : undefined
-      if (material.weight_per_carton == null && material.gross_per_pc != null && effectiveWeighing) material.weight_per_carton = material.gross_per_pc * effectiveWeighing
+      if ((material.weight_per_carton == null || grossTotal != null && weightQty > 0) && material.gross_per_pc != null && effectiveWeighing)
+        material.weight_per_carton = material.gross_per_pc * effectiveWeighing
       // RRM has an earlier converted-currency purchase-price column (N).
       // Prefer the original purchase price (AO), including its bilingual header.
-      const price = readToolPrice(cell(col('采购单价', '采购单价Purchase price')), str('币种', 'Currency'))
+      const priceCol = col('采购单价', '采购单价Purchase price')
+      const price = readToolPrice(value(priceCol) == null ? undefined : cell(priceCol), str('币种', 'Currency'))
       if (price.price != null && !price.currency) notices.push('采购币种未明确，请选择后导入')
       if (price.conflict) notices.push('采购单价格式与币种冲突，请核对')
       let po = str('采购单号')
@@ -166,6 +199,7 @@ export async function importShipmentFile(file: File) {
   if (file.size > 20 * 1024 * 1024) throw new Error('文件不能超过 20MB')
   const buffer = await file.arrayBuffer()
   const parsed = parseShipmentWorkbook(XLSX.read(buffer, { type: 'array', cellNF: true }))
+  parsed.rows.forEach(row => { if (row.item.material_snapshot.import_source) row.item.material_snapshot.import_source.file = file.name })
   if (parsed.rows.length > 500) throw new Error('一次最多导入 500 行，请分批导入')
   const zip = await JSZip.loadAsync(buffer)
   for (const sheet of new Set(parsed.rows.map(row => row.sheet))) {
@@ -177,6 +211,23 @@ export async function importShipmentFile(file: File) {
     }
   }
   return parsed
+}
+
+/** Updating a shipment must not replace its HS with defaults for blank source cells. */
+export function mergeShipmentImportMaterial(current: Material | undefined, imported: Material): Material {
+  const provided = Object.fromEntries(Object.entries(imported).filter(([, value]) => value != null && value !== ''))
+  if (imported.import_source) {
+    const hsLabels = { hs_cn: ['中国HSCODE'], hs_id: ['印尼HSCODE', '印尼编码'] }
+    for (const [field, labels] of Object.entries(hsLabels)) {
+      const candidates = labels.map(norm)
+      const cells = imported.import_source.cells
+      // Use the same exact-first, first-column rule as the workbook parser.
+      const source = cells.find(cell => candidates.includes(norm(cell.label)))
+        ?? cells.find(cell => candidates.some(label => norm(cell.label).startsWith(label)))
+      if (!source || source.error || text(source.value) === '') delete provided[field]
+    }
+  }
+  return { ...current, ...provided }
 }
 
 export function matchShipmentMaterial(source: Material, candidates: Material[]) {

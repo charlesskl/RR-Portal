@@ -1,8 +1,8 @@
 "use client";
-// 排期总览看板（拉别 × 日期·只读）—— 照 mockup supervisor-grid-v4.html / spec 2026-06-24 §6。
+// 排期总览看板（拉别 × 日期）—— 照 mockup supervisor-grid-v4.html / spec 2026-06-24 §6。
 // 日期竖排、拉别横排；每格顶部小计（件数·产能占用%·红黄绿），下面铺「部位+数量+第几道」，按工序上色。
 // 数据来自 GET /api/schedule/overview；网格聚合/占用/配色由 @/lib/scheduleOverview 纯函数算。
-// 第一期只读；「点格子跳周排」联动留下一步。
+// 每天每拉备注独立保存；计划详情支持实绩录入和日期调整。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invalidateClientCache } from "@/lib/clientCache";
 import { buildOverviewGrid, cellKey, dateRange, type CellItem, type OverviewLine, type OverviewPlan } from "@/lib/scheduleOverview";
@@ -12,8 +12,9 @@ import Link from "next/link";
 import MaterialReadinessDialog from "./MaterialReadinessDialog";
 import ExportDialog from "../recording/ExportDialog";
 import { isPlanDate } from "@/lib/planDateAdjustment";
+import DailyLineNoteEditor, { type DailyLineNote } from "./DailyLineNoteEditor";
 
-type Resp = { lines: OverviewLine[]; plans: OverviewPlan[] };
+type Resp = { lines: OverviewLine[]; plans: OverviewPlan[]; lineNotes?: DailyLineNote[] };
 type View = "today" | "month" | "lastMonth" | "custom";
 type DetailState = { date: string; line: OverviewLine; item: CellItem };
 type AdjustTarget = { planId: number; date: string; lineId: number };
@@ -81,6 +82,10 @@ export default function ScheduleOverview({ orderFilter, canAdjustDates = false, 
   }, [from, to]);
   const grid = useMemo(() => (data ? buildOverviewGrid(data.plans, data.lines) : {}), [data]);
   const lines = data?.lines ?? [];
+  const notes = useMemo(() => Object.fromEntries((data?.lineNotes ?? []).map(n => [cellKey(n.date, n.lineId), n])), [data]);
+  const saveNote = (note: DailyLineNote) => setData(current => current ? {
+    ...current, lineNotes: [...(current.lineNotes ?? []).filter(n => n.date !== note.date || n.lineId !== note.lineId), note],
+  } : current);
 
   const applyPreset = (v: Exclude<View, "custom">) => {
     setView(v);
@@ -231,18 +236,20 @@ export default function ScheduleOverview({ orderFilter, canAdjustDates = false, 
                   <td className={`sc-daycol${we ? " we" : ""}`}>周{WEEKNAME[d.getDay()]}<small>{d.getMonth() + 1}-{pad2(d.getDate())}</small></td>
                   {lines.map((l) => {
                     const cell = grid[cellKey(date, l.lineId)];
-                    if (!cell) return <td key={l.lineId} className="sc-cell"><div className="sc-blank">空</div></td>;
-                    const lvl = cell.level;
+                    const lvl = cell?.level;
                     return (
                       <td key={l.lineId} className="sc-cell">
                         <div className={`sc-mini${lvl ? " " + MINI_BG[lvl] : ""}`}>
-                          <span>{cell.count}款</span>
+                          <span>{cell?.count ?? 0}款</span>
                           <span className={lvl ? MINI_TX[lvl] : ""}>
-                            {cell.total.toLocaleString()}{cell.occupancyPct != null ? ` · ${cell.occupancyPct}%` : ""}{lvl === "over" ? " ⚠" : ""}
+                            {(cell?.total ?? 0).toLocaleString()}{cell?.occupancyPct != null ? ` · ${cell.occupancyPct}%` : ""}{lvl === "over" ? " ⚠" : ""}
                           </span>
                         </div>
+                        <DailyLineNoteEditor key={cellKey(date, l.lineId)} date={date} lineId={l.lineId} name={l.name}
+                          note={notes[cellKey(date, l.lineId)]} canEdit={canAdjustDates} onSaved={saveNote} />
+                        {!cell && <div className="sc-blank">空</div>}
                         <ul className="sc-items">
-                          {cell.items.map((it, i) => (
+                          {cell?.items.map((it, i) => (
                             <li key={i}>
                               <button
                                 type="button"
@@ -373,6 +380,13 @@ const CSS = `
   td.sc-daycol small { display:block; color:#9ca3af; font-weight:400; font-size:11px; margin-top:3px; }
 
   .sc-cell { padding:0; }
+  .sc-line-note { padding:4px 6px; border-bottom:1px solid #eef0f2; font-size:12px; }
+  .sc-line-note textarea { display:block; width:100%; min-height:28px; resize:vertical; padding:4px 6px; border:1px solid #dbe4df; border-radius:5px; font:inherit; background:#fff; color:#374151; }
+  .sc-line-note textarea:focus { outline:2px solid #6ee7b7; }
+  .sc-line-note button { margin-top:4px; border:0; border-radius:4px; background:#047857; color:#fff; padding:3px 8px; cursor:pointer; }
+  .sc-line-note [role=status] { color:#047857; }
+  .sc-line-note [role=alert] { display:block; color:#c91d32; }
+  .sc-line-note-text { white-space:pre-wrap; overflow-wrap:anywhere; color:#64748b; }
   .sc-mini { padding:6px 9px; font-size:11px; font-weight:700; border-bottom:1px solid #eef0f2; display:flex; justify-content:space-between; gap:6px; color:#64748b; }
   .sc-mini.sc-bg-ok { background:#f0fdf4; } .sc-mini.sc-bg-busy { background:#fffbeb; } .sc-mini.sc-bg-over { background:#fef2f2; }
   .sc-ut-ok { color:#047857; } .sc-ut-busy { color:#b45309; } .sc-ut-over { color:#b91c1c; }

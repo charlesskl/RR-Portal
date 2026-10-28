@@ -22,4 +22,4 @@ public record OverviewLine(int LineId, string Name, string CraftType, int DailyL
 public record OverviewPlan(int Id, int LineId, string Date, int OrderId, string ProductNo,
     string ItemName, string PartName, int StepNo, string Craft, int PlannedQty,
     List<string> MachineNos, int WorkerCount, int? GoodQty, int? InboundQty, string? Remark, string ExternalOrderNo, bool CanReschedule);
-public record OverviewResult(List<OverviewLine> Lines, List<OverviewPlan> Plans);
+public record OverviewResult(List<OverviewLine> Lines, List<OverviewPlan> Plans, List<DailyLineNoteDto> LineNotes);

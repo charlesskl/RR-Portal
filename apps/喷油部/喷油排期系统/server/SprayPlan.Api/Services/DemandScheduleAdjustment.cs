@@ -5,7 +5,7 @@ using SprayPlan.Api.Entities;
 
 namespace SprayPlan.Api.Services;
 
-public record DemandScheduleResult(long AddedQty, long ReducedQty, int CreatedPlans, List<string> Warnings);
+public record DemandScheduleResult(long AddedQty, long ReducedQty, int CreatedPlans, List<string> Warnings, MaterialReflowResult? MaterialReflow = null);
 
 // 仅调整所选部位的未报工计划。调用方负责事务，失败时数量与计划一起回滚。
 public static class DemandScheduleAdjustment
@@ -13,6 +13,8 @@ public static class DemandScheduleAdjustment
     public static async Task<DemandScheduleResult> Apply(AppDbContext db, Order order, List<OrderPartQty> parts,
         HashSet<string> selectedParts, string by)
     {
+        var materials = await db.OrderMaterials.Where(material => material.OrderId == order.Id && selectedParts.Contains(material.PartName)).ToListAsync();
+        selectedParts = selectedParts.Except(materials.Select(material => material.PartName)).ToHashSet();
         var plans = await db.ProductionPlans.Where(plan => plan.OrderId == order.Id && plan.DeletedAt == null).ToListAsync();
         // 配置快照不参与减排修改。整道工序曾因需求归零而自动减排时，允许沿用其配置，
         // 但不恢复已删除的原记录，也不采用人工撤销或已有实绩/入库关联的历史计划。
@@ -145,7 +147,14 @@ public static class DemandScheduleAdjustment
         }
         if (added > 0 || reduced > 0)
             order.Status = OrderCalc.DemandStatus(order.Status, parts, plans);
-        return new(added, reduced, created, warnings);
+        MaterialReflowResult? materialReflow = null;
+        if (materials.Count > 0) {
+            await db.SaveChangesAsync();
+            materialReflow = await global::SprayPlan.Api.Services.MaterialReflow.Apply(db, order.FactoryId, materials.Select(material => material.Id).ToHashSet(), by);
+            warnings.AddRange(materialReflow.Warnings);
+            warnings.AddRange(materials.Where(material => !material.AutoScheduleEnabled).Select(material => $"{material.PartName}：已手工撤销排期，自动重排暂停；请在来料管理保存来料后重新启用"));
+        }
+        return new(added, reduced, created, warnings, materialReflow);
     }
 
     private static bool IsAutomaticReductionTemplate(ProductionPlan plan, ISet<int> inboundSources)

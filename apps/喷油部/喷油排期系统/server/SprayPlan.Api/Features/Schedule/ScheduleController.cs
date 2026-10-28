@@ -415,6 +415,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
         var by = CurrentUser();
         var now = DateTime.UtcNow;
         foreach (var p in plans) { p.DeletedAt = now; p.DeletedBy = by; }
+        await MaterialReflow.Pause(db, plans, by);
 
         // 订单退回已接单（仅当当前是已排期/在产；完工/作废不动）
         if (order.Status is "scheduled" or "in_production")

@@ -435,6 +435,7 @@ public class PlansController(AppDbContext db) : ControllerBase
             order.UpdatedAt = now;
         }
 
+        await MaterialReflow.Pause(db, plans, by);
         await db.SaveChangesAsync();
         return Ok(new BatchUnscheduleResult(plans.Count, orderIds.Count, ids));
     }
@@ -447,6 +448,7 @@ public class PlansController(AppDbContext db) : ControllerBase
         if (p is null) return NotFound(new { error = "计划不存在" });
         p.DeletedAt = DateTime.UtcNow;
         p.DeletedBy = CurrentUser();
+        await MaterialReflow.Pause(db, new[] { p }, CurrentUser());
         await db.SaveChangesAsync();
         return Ok(new PlanDeleted(p.Id, p.DeletedAt));
     }

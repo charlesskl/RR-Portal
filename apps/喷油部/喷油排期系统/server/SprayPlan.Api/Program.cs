@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // --- 服务注册 ---
 builder.Services.AddControllers();
+builder.Services.AddHostedService<MaterialReflowWorker>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<SprayPlan.Api.Features.Inventory.InventoryService>();
@@ -71,6 +72,8 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins("http://localhost:8400").AllowCredentials().AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
+using (var scope = app.Services.CreateScope())
+    await MaterialSchema.Ensure(scope.ServiceProvider.GetRequiredService<AppDbContext>());
 
 // --- 中间件管道 ---
 if (app.Environment.IsDevelopment())

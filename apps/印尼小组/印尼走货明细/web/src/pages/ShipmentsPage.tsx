@@ -12,6 +12,7 @@ import { consolidateShipmentItems } from '../utils/shipmentConsolidation'
 import { createCartonGroupId } from '../utils/cartonGroupId'
 import { receiptChargeRatio, shipmentChargeQuantity, shipmentPurchaseAmount, shipmentUsesDeclarationPrice } from '../utils/shipmentPurchase'
 import ShipmentImport from '../components/ShipmentImport'
+import ShipmentImportSource from '../components/ShipmentImportSource'
 import ShipmentSheetTable from '../components/ShipmentSheetTable'
 import ShipmentNumberCell from '../components/ShipmentNumberCell'
 import { applyMergedShipmentEdits, mergedReadOnlyFields, type MergedEditorRow } from '../utils/shipmentMergedEditor'
@@ -991,7 +992,7 @@ export default function ShipmentsPage() {
     if (field === 'weighing_qty') return effectiveWeighingQty(item, material)
     if (item?.sources.length > 1 && field === 'po_date')
       return [...new Set(item.sources.map(source => source.po_date).filter(Boolean))].join(' / ')
-    return field.startsWith('material:') ? material?.[field.slice(9)]
+    return field.startsWith('material:') || field.startsWith('snapshot:') ? material?.[field.slice(9)]
       : item?.[field as keyof ShipmentItem] as string | number | undefined
   }
   async function writeMergedCells(edits: SheetEdit[], confirm: boolean) {
@@ -1019,8 +1020,10 @@ export default function ShipmentsPage() {
       }
       const apply = (result: ReturnType<typeof applyMergedShipmentEdits<ShipmentItem>>) => {
         setItems(result.items)
-        if (result.dirtyMaterials.size) {
+        if (result.dirtyMaterials.size || edits.some(edit => edit.field.startsWith('snapshot:'))) {
           setMatMap(result.materials)
+        }
+        if (result.dirtyMaterials.size) {
           setDirtyMatIds(current => new Set([...current, ...result.dirtyMaterials]))
         }
         setEditorDirty(true)
@@ -1032,6 +1035,7 @@ export default function ShipmentsPage() {
         content: <Space direction="vertical">
           <span>涉及 {new Set(edits.map(edit => edit.row)).size} 行。合并行的数量、重量及采购来源保持不变，普通资料同步修改；独立箱数按各批原箱数分配。确认后仍需保存走货单。</span>
           {result.dirtyMaterials.size > 0 && <Typography.Text type="warning">单位、尺寸、单个净重等属于物料资料；同物料所有行同步更新，保存时会写回货号库。Excel 导入资料仅更新本单。</Typography.Text>}
+          {edits.some(edit => edit.field.startsWith('snapshot:')) && <Typography.Text type="secondary">导入行的海关编码仅更新本票走货，保存及导出使用新编码，不写回货号库。</Typography.Text>}
         </Space>,
         okText: '确认写入', cancelText: '取消',
         afterClose: () => { sheetConfirmOpen.current = false },
@@ -1125,6 +1129,19 @@ export default function ShipmentsPage() {
         {control}
       </FillableShipmentCell>
     )
+  }
+
+  function importedHsCell(row: ShipmentItem, index: number, field: 'hs_cn' | 'hs_id') {
+    const code = matMap.get(row.material_id!)?.[field] ?? ''
+    if (!row.material_snapshot || !(row.material_id! < 0)) return code
+    const sheetField = `snapshot:${field}`
+    return <FillableShipmentCell rowIndex={index} field={sheetField} onFill={fillMaterialDown}
+      onFillToEnd={(sourceIndex, sourceField) => fillMaterialDown(sourceIndex, consolidatedItems.length - 1, sourceField)}>
+      <Input size="small" value={code} inputMode="numeric" maxLength={field === 'hs_cn' ? 10 : 8}
+        aria-label={`第 ${index + 1} 行${field === 'hs_cn' ? '中国' : '印尼'}海关编码`}
+        title="仅修改本票走货的导入资料，不写回货号库；支持粘贴和向下填充"
+        onChange={event => { void writeMergedCells([{ row: index, field: sheetField, value: event.target.value }], false) }} />
+    </FillableShipmentCell>
   }
 
   const filtered = useMemo(() => rows.filter(r => {
@@ -1350,9 +1367,13 @@ export default function ShipmentsPage() {
           {items.some(item => !shipmentUsesDeclarationPrice(item) && (item.purchase_charge_ratio ?? 1) < 1) && <Typography.Paragraph type="secondary">
             备品不收费：数量和重量保留实际走货（含备品），采购金额按对应采购明细的正常入库／总入库比例折算；分批及合并走货不重复计费。
           </Typography.Paragraph>}
+          {items.some(item => item.material_snapshot) && <Typography.Paragraph type="secondary">
+            Excel 导入行的中国／印尼海关编码可直接编辑、粘贴或向下填充；保存后仅影响本票走货及导出，不写回货号库。
+          </Typography.Paragraph>}
           <ShipmentSheetTable<MergedEditorRow<ShipmentItem>>
             fields={shipmentSheetFields}
-            editableAt={(row, field) => !(consolidatedItems[row]?.sources.length > 1 && mergedReadOnlyFields.has(field))}
+            editableAt={(row, field) => !(consolidatedItems[row]?.sources.length > 1 && mergedReadOnlyFields.has(field))
+              && (!field.startsWith('snapshot:') || (!!consolidatedItems[row]?.material_snapshot && consolidatedItems[row]?.material_id! < 0))}
             onEdits={editSheetCells}
             rowOrder={consolidatedItems.map(item => item.sources.map(source => source._rowKey).join('-')).join(',')}
             valueAt={mergedCellValue}
@@ -1379,11 +1400,11 @@ export default function ShipmentsPage() {
                     : <span style={{ color: '#bbb', fontSize: 12 }}>无</span>
                 },
               },
-              { title: '物料ID', width: 80, render: (_v, r, i) => r.material_snapshot ? <Tag title="Excel 导入资料只保存在本次走货单">{r.material_snapshot.id || '导入'}</Tag> : r.material_id ? <Tag>{r.material_id}</Tag> : <Input.Search size="small" placeholder="物料ID" enterButton="选" onSearch={value => { const id = Number(value); if (Number.isInteger(id) && id > 0) { patchItem(i, 'material_id', id); loadMatsForItems([id]) } else message.warning('请输入有效物料 ID') }} /> },
+              { title: '物料ID', width: 100, render: (_v, r, i) => r.material_snapshot ? <><Tag title="Excel 导入资料只保存在本次走货单">{r.material_snapshot.id || '导入'}</Tag><ShipmentImportSource source={matMap.get(r.material_id!)?.import_source} /></> : r.material_id ? <Tag>{r.material_id}</Tag> : <Input.Search size="small" placeholder="物料ID" enterButton="选" onSearch={value => { const id = Number(value); if (Number.isInteger(id) && id > 0) { patchItem(i, 'material_id', id); loadMatsForItems([id]) } else message.warning('请输入有效物料 ID') }} /> },
               { title: '产品中文名称', width: 160, fixed: 'left', render: (_v, r) => matMap.get(r.material_id!)?.name_zh ?? '' },
               { title: '货号', width: 100, fixed: 'left', render: (_v, r) => matMap.get(r.material_id!)?.product_code ?? '' },
-              { title: '中国HSCODE', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.hs_cn ?? '' },
-              { title: '印尼HSCODE', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.hs_id ?? '' },
+              { title: '中国HSCODE', width: 150, render: (_v, r, i) => importedHsCell(r, i, 'hs_cn') },
+              { title: '印尼HSCODE', width: 140, render: (_v, r, i) => importedHsCell(r, i, 'hs_id') },
               { title: '套公式名称栏', width: 150, render: (_v, r, i) => fillable(i, 'formula_name', <Input size="small" value={r.formula_name} onChange={(e) => patchItem(i, 'formula_name', e.target.value)} />) },
               { title: '产品英文名称', width: 160, render: (_v, r) => matMap.get(r.material_id!)?.name_en ?? '' },
               { title: '规格', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.spec ?? '' },

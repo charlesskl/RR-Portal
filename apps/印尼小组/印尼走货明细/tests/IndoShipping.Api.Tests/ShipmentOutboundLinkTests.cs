@@ -17,6 +17,60 @@ namespace IndoShipping.Api.Tests;
 public class ShipmentOutboundLinkTests
 {
     [Fact]
+    public async Task Imported_source_columns_and_formula_cache_survive_save_reload_only_in_shipment()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        var body = Body(3, imported: true);
+        body.items![0].outbound_id = null;
+        body.items[0].material_snapshot = JsonSerializer.SerializeToElement(new {
+            id = 66, name_zh = "条码扫描仪", hs_cn = "8471605000", hs_id = "84716090", department = "仓库",
+            import_source = new { file = "新版清溪.xlsx", sheet = "WHSU2342610", row = 5,
+                cells = new object[] {
+                    new { address = "AP5", label = "采购金额", value = 363.63m, display = "US$363.63", formula = "AO5*K5" },
+                    new { address = "AI5", label = "中国运费", value = 0m, display = "0" },
+                    new { address = "BD5", label = "卡板", value = "雅洛轩", display = "雅洛轩" } },
+                context = new[] { new { address = "N1", label = "N1", value = .93m, display = "0.9300" } } } });
+        var id = Id(await f.Controller.Create(body));
+        body.items[0].pallet = "新卡板";
+        Assert.IsType<OkObjectResult>(await f.Controller.Update(id, body));
+        var row = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(id)).Value).GetProperty("items")[0];
+        var snapshot = row.GetProperty("material_snapshot");
+        if (snapshot.ValueKind == JsonValueKind.String) snapshot = JsonDocument.Parse(snapshot.GetString()!).RootElement;
+        var original = snapshot.GetProperty("import_source");
+        Assert.Equal("仓库", snapshot.GetProperty("department").GetString());
+        Assert.Equal(363.63m, original.GetProperty("cells")[0].GetProperty("value").GetDecimal());
+        Assert.Equal("AO5*K5", original.GetProperty("cells")[0].GetProperty("formula").GetString());
+        Assert.Equal(0m, original.GetProperty("cells")[1].GetProperty("value").GetDecimal());
+        Assert.Equal("雅洛轩", original.GetProperty("cells")[2].GetProperty("value").GetString());
+        Assert.Equal("新卡板", row.GetProperty("pallet").GetString());
+        Assert.Equal("中边模", await f.Db.ExecuteScalarAsync<string>("SELECT name_zh FROM materials WHERE id=66"));
+        Assert.Equal(100m, await f.Db.ExecuteScalarAsync<decimal>("SELECT qty FROM outbound WHERE id=1"));
+    }
+
+    [Fact]
+    public async Task Imported_HS_snapshot_edits_roundtrip_without_changing_master_or_outbound()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        var body = Body(2, imported: true);
+        body.items![0].material_snapshot = JsonSerializer.SerializeToElement(new {
+            id = 66, name_zh = "条码扫描仪", hs_cn = "8471605000", hs_id = "84716050", length = 23 });
+        var id = Id(await f.Controller.Create(body));
+        body.items[0].material_snapshot = JsonSerializer.SerializeToElement(new {
+            id = 66, name_zh = "条码扫描仪", hs_cn = "0012345678", hs_id = "00123456", length = 23 });
+        Assert.IsType<OkObjectResult>(await f.Controller.Update(id, body));
+        var row = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(id)).Value).GetProperty("items")[0];
+        var snapshot = row.GetProperty("material_snapshot");
+        if (snapshot.ValueKind == JsonValueKind.String) snapshot = JsonDocument.Parse(snapshot.GetString()!).RootElement;
+        Assert.Equal("0012345678", snapshot.GetProperty("hs_cn").GetString());
+        Assert.Equal("00123456", snapshot.GetProperty("hs_id").GetString());
+        Assert.Equal(23, snapshot.GetProperty("length").GetInt32());
+        Assert.Equal(2m, row.GetProperty("qty").GetDecimal());
+        Assert.Equal(4m, row.GetProperty("kg").GetDecimal());
+        Assert.Equal("中边模", await f.Db.ExecuteScalarAsync<string>("SELECT name_zh FROM materials WHERE id=66"));
+        Assert.Equal(100m, await f.Db.ExecuteScalarAsync<decimal>("SELECT qty FROM outbound WHERE id=1"));
+    }
+
+    [Fact]
     public async Task Existing_shipments_derive_free_spare_basis_on_reload_without_rewriting_stock_or_prices()
     {
         await using var f = await Fixture.Create(); if (f is null) return;

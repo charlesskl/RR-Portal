@@ -57,6 +57,8 @@ export function customsFormulaName(item: CustomsItem, material?: Material, custo
 
 import { customsInvoicePrice, customsInvoiceFormula, invoiceCustomsCompany } from './shipmentInvoice'
 import { shipmentDeclarationPrice, shipmentPurchaseAmount } from './shipmentPurchase'
+import { normalizeShipmentDeclarations } from './shipmentDeclaration'
+import { shipmentPurchaseDates } from './shipmentDates'
 export { customsInvoicePrice } from './shipmentInvoice'
 
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
@@ -1098,6 +1100,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
 
   // RRI/RRM 模板此区域的列序不同；导出统一采用走货明细抬头与数据列序。
   const packingHeaders: Record<string, string> = {
+    J: '申报单位\nDeclaration unit', K: '申报数量\nDeclaration quantity', M: '数量单位\nQuantity unit',
     AU: '长\nLength', AV: '宽\nWidth', AW: '高\nHeight',
     AX: '物料编码', AY: '每箱数量', AZ: '每箱重量',
     BA: '单个毛重', BB: '单个净重', BC: '卡板', BD: '',
@@ -1150,7 +1153,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     // 仅用于展示及分组；发票计算另取明确的报关公司，不使用默认值。
     return effectiveCustomsCompany(it, m, tf.exportCompany)
   }
-  const sorted = sortShipmentItems(consolidateShipmentItems(items, materials, tf.exportCompany), materials, tf.exportCompany)
+  const sorted = sortShipmentItems(consolidateShipmentItems(normalizeShipmentDeclarations(items, materials), materials, tf.exportCompany), materials, tf.exportCompany)
   sorted.forEach((item, index) => {
     if (shipmentPurchaseAmount(item) !== 0 && !(Number(item.kg) > 0))
       throw new Error(`第 ${index + 1} 行（${matOf(item)?.name_zh || '未命名物料'}）有采购金额但送货重量/申报数量为零，请补齐后导出`)
@@ -1282,9 +1285,9 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 34, tf.freightCN, 'n')
     setCell(ws, ri, 35, tf.freightID, 'n')
     setCell(ws, ri, 37, it.supplier || m?.supplier || '', 's')
-    const purchaseDates = [...new Set(it.sources.map(source => source.po_date?.trim()).filter(Boolean))]
+    const purchaseDates = shipmentPurchaseDates(it.sources)
     if (purchaseDates.length > 1) setCell(ws, ri, 38, purchaseDates.join(' / '), 's')
-    else if (it.po_date) setCell(ws, ri, 38, excelDate(it.po_date), 'n')
+    else if (purchaseDates.length) setCell(ws, ri, 38, excelDate(purchaseDates[0]), 'n')
     else if (it.contract_date) setCell(ws, ri, 38, excelDate(it.contract_date), 'n')
     setCell(ws, ri, 39, it.po_no || '', 's')
     setCell(ws, ri, 40, declarationPrice, 'n')

@@ -1,5 +1,6 @@
 import { cartonGroupKey } from './shipmentOrder'
 import { formatShipmentPackingLines, shipmentCartonCount, shipmentKgWeight } from './shipmentWeight'
+import { isShipmentCountUnit, normalizeShipmentDeclarations, rebaseShipmentDeclaration } from './shipmentDeclaration'
 
 // Same physical column order as the detail table; protected columns still occupy
 // a position during paste, so data can never slide into a neighbouring field.
@@ -135,7 +136,7 @@ export function applyShipmentSheetEdits<T extends EditableShipment>(items: T[], 
       return { ...edit, value: parseShipmentSheetValue(edit.field, edit.value) }
     } catch (error) { throw new Error(`第 ${edit.row + 1} 行：${(error as Error).message}`) }
   })
-  const next = items.map(item => ({ ...item })); const nextMaterials = new Map(materials)
+  const next = normalizeShipmentDeclarations(items, materials).map(item => ({ ...item })); const nextMaterials = new Map(materials)
   const dirtyMaterials = new Set<number>(); const reweight = new Set<number>(); const repack = new Set<number>()
   const explicitKg = new Map<number, number>(); const explicitCartons = new Map<number, number>()
   const materialValues = new Map<string, string | number>()
@@ -169,10 +170,19 @@ export function applyShipmentSheetEdits<T extends EditableShipment>(items: T[], 
     next[i].cartons = shipmentCartonCount(next[i].qty, next[i].qty_per_carton)
   for (const i of reweight) {
     const m = nextMaterials.get(next[i].material_id!)
-    next[i].kg = shipmentKgWeight(m?.unit_kg, next[i].qty, m?.net_per_pc, m?.name_zh)
+    const kg = shipmentKgWeight(m?.unit_kg, next[i].qty, m?.net_per_pc, m?.name_zh)
+    const changedUnit = parsed.some(edit => edit.field === 'material:unit_kg'
+      && next[edit.row].material_id === next[i].material_id)
+    next[i] = changedUnit ? rebaseShipmentDeclaration(next[i], kg, !parsed.some(edit => edit.row === i && edit.field === 'price'))
+      : { ...next[i], kg }
   }
   // Explicit pasted weights win over derived weights within the same paste.
-  explicitKg.forEach((value, i) => { next[i].kg = value })
+  explicitKg.forEach((value, i) => {
+    const m = nextMaterials.get(next[i].material_id!)
+    if (isShipmentCountUnit(m?.unit_kg) && value !== Number(next[i].qty || 0))
+      throw new Error(`第 ${i + 1} 行：${m.unit_kg} 申报数量自动取送货数量，请修改“送货数量”，不能填公斤重量`)
+    next[i].kg = value
+  })
   const groupValues = new Map<string, number>()
   explicitCartons.forEach((value, i) => {
     const key = cartonGroupKey(next[i], nextMaterials)

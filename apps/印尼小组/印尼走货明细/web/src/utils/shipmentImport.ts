@@ -4,6 +4,7 @@ import type { Material, ShipmentSourceCell } from '../api/client'
 import { extractSheetImages } from './engineeringImport'
 import { readToolPrice } from './toolPrice'
 import { shipmentKgWeight, shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
+import { normalizeShipmentDeclaration } from './shipmentDeclaration'
 
 export interface ShipmentImportItem {
   material_snapshot: Material
@@ -79,6 +80,8 @@ export function parseShipmentWorkbook(wb: XLSX.WorkBook): ShipmentImportResult {
       return exact >= 0 ? exact : names.findIndex(n => candidates.some(label => n.startsWith(label)))
     }
     const unitCols = names.map((n, i) => n.startsWith('单位') ? i : -1).filter(i => i >= 0)
+    const declarationUnitCol = col('申报单位') >= 0 ? col('申报单位') : unitCols[0] ?? -1
+    const purchaseUnitCol = col('数量单位', '采购单位') >= 0 ? col('数量单位', '采购单位') : unitCols.find(c => c !== declarationUnitCol) ?? -1
     const cartonCol = col('箱数'), imageCol = col('图片')
     for (let r = hi + 1; r <= range.e.r; r++) {
       const notices: string[] = []
@@ -123,7 +126,7 @@ export function parseShipmentWorkbook(wb: XLSX.WorkBook): ShipmentImportResult {
       }
       const name = text(value(col('产品中文名称'), false))
       if (!name || /^(合计|总计|总合计|产品中文名称|total)/i.test(name)) continue
-      const unitText = text(value(unitCols[0] ?? -1)).toLowerCase()
+      const unitText = text(value(declarationUnitCol)).toLowerCase()
       const unit = units[unitText] || unitText.toUpperCase()
       const qtyExplicit = number(['送货数量', '产品数量'])
       const demand = number(['需求数量'])
@@ -174,11 +177,11 @@ export function parseShipmentWorkbook(wb: XLSX.WorkBook): ShipmentImportResult {
       if (poCell && typeof poCell.v === 'number' && XLSX.SSF.is_date(poCell.z || '')) { po = ''; notices.push('采购单号为日期格式，未当作订单号导入') }
       const cartonMerge = ws['!merges']?.find(m => m.s.c === cartonCol && m.e.c === cartonCol && m.e.r > m.s.r && m.s.r <= r && m.e.r >= r)
       const item: ShipmentImportItem = {
-        material_snapshot: material, qty, kg: number(['送货KG重量', '送货重量']) ?? (['KGM', 'TNE'].includes(unit) ? demand : undefined) ??
+        material_snapshot: material, qty, kg: number(['申报数量', '送货KG重量', '送货重量']) ?? (['KGM', 'TNE'].includes(unit) ? demand : undefined) ??
           (qty != null ? shipmentKgWeight(unit, qty, material.net_per_pc, name) : undefined),
         cartons: number(['箱数']), carton_group: cartonMerge ? `source:${sheet}:${cartonMerge.s.r}` : undefined,
         carton_no: str('箱号'), pallet: str('卡板', '卡板号'), qty_per_carton: qpc, weighing_qty: effectiveWeighing,
-        purchase_unit: text(value(unitCols[1] ?? -1)) || unitText || undefined,
+        purchase_unit: text(value(purchaseUnitCol)) || unitText || undefined,
         price: price.price, currency: price.currency ? currencies[price.currency] : undefined,
         supplier: material.supplier, customs_company: material.customs_company,
         po_no: po, po_date: date('采购单日期'), contract_no: str('合同号码', '合同编号'),
@@ -188,7 +191,9 @@ export function parseShipmentWorkbook(wb: XLSX.WorkBook): ShipmentImportResult {
       if (item.cartons != null && !Number.isInteger(item.cartons)) { notices.push('箱数不是整数，未带入'); item.cartons = undefined }
       if (material.net_per_pc != null && material.gross_per_pc != null && material.net_per_pc > material.gross_per_pc)
         notices.push('单件净重大于毛重，已保留源值，请核对')
-      rows.push({ key: `${sheet}:${r + 1}`, sheet, row: r + 1, imageCol, selected: true, warnings: notices, item })
+      const normalized = normalizeShipmentDeclaration(item, material)
+      if (normalized.kg !== item.kg && item.kg != null) notices.push(`${unit} 申报数量已按送货数量对应，原表值保存在“原表资料”；采购金额保持不变`)
+      rows.push({ key: `${sheet}:${r + 1}`, sheet, row: r + 1, imageCol, selected: true, warnings: notices, item: normalized })
     }
   }
   if (!rows.length) warnings.push('未识别到含货号、产品中文名称的主明细表')

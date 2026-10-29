@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, type EditorLease } from "@/lib/api";
+import { CoreAccountControl, EpmsAccountProvider } from "@/components/EpmsAccount";
+import { useEpmsAccess } from "@/lib/epms-access";
 import type { AppConfig, View } from "@/types";
 import ClientsView from "@/sections/ClientsView";
 import ClientView from "@/sections/ClientView";
@@ -24,14 +26,17 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Clock3, FolderPlus, HardDriveDownload, LayoutGrid, Search, Trash2 } from "lucide-react";
 
-export default function App() {
+function LegacyEngineeringApp() {
+  const { session, revision } = useEpmsAccess();
+  const [editorLease, setEditorLease] = useState<EditorLease | null>(null);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [configError, setConfigError] = useState("");
   const [view, setView] = useState<View>({ type: "clients" });
   const [dialog, setDialog] = useState<DialogState>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshCount, setRefreshCount] = useState(0);
+  const refreshKey = refreshCount + revision;
 
-  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+  const refresh = useCallback(() => setRefreshCount((k) => k + 1), []);
 
   useEffect(() => {
     api
@@ -40,13 +45,14 @@ export default function App() {
       .catch((e) => setConfigError(e.message));
   }, []);
 
-  const navigate = useCallback((v: View) => setView(v), []);
-  const goPath = useCallback((path: string) => setView({ type: "explorer", path }), []);
+  const navigate = useCallback((v: View) => { setEditorLease(null); setView(v); }, []);
+  const goPath = useCallback((path: string) => { setEditorLease(null); setView({ type: "explorer", path }); }, []);
 
   // 进入编辑器前的视图，用于「返回」
   const editorBackRef = useRef<View>({ type: "clients" });
   const openEditor = useCallback(
-    (path: string, name: string) => {
+    (path: string, name: string, lease?: EditorLease) => {
+      setEditorLease(lease || null);
       setView((cur) => {
         if (cur.type !== "editor") editorBackRef.current = cur;
         return { type: "editor", path, name };
@@ -88,7 +94,7 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-100 text-slate-900">
       {/* 顶部导航栏 */}
-      <header className="flex shrink-0 items-center gap-3 border-b bg-white px-4 py-2.5">
+      {view.type !== "workbench" && view.type !== "editor" && <header className="flex shrink-0 flex-wrap items-center gap-3 border-b bg-white px-4 py-2.5">
         <div className="flex items-baseline gap-2">
           <h1 className="text-base font-bold tracking-tight">工程资料管理系统</h1>
           <span className="hidden max-w-72 truncate text-xs text-slate-400 lg:inline" title={config?.root}>
@@ -109,12 +115,13 @@ export default function App() {
             navigate({ type: "trash" }),
           )}
         </nav>
-        <div className="ml-auto">
-          <Button size="sm" onClick={() => setDialog({ type: "newProject" })}>
+        <div className="ml-auto flex items-center gap-3">
+          <CoreAccountControl />
+          <Button disabled={!session?.canEdit} size="sm" onClick={() => setDialog({ type: "newProject" })}>
             <FolderPlus className="mr-1.5 h-4 w-4" /> 新建项目
           </Button>
         </div>
-      </header>
+      </header>}
 
       {!config?.mounted && config && (
         <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
@@ -126,6 +133,8 @@ export default function App() {
         {view.type === "workbench" ? (
           <div className="h-full overflow-y-auto">
             <WorkbenchView
+              key={view.client + "/" + view.year + "/" + view.project}
+              initialLease={editorLease}
               client={view.client}
               year={view.year}
               project={view.project}
@@ -135,6 +144,7 @@ export default function App() {
           </div>
         ) : view.type === "editor" ? (
           <DocEditor
+            lease={editorLease}
             path={view.path}
             name={view.name}
             onClose={() => setView(editorBackRef.current)}
@@ -234,4 +244,8 @@ export default function App() {
       <Toaster richColors position="top-center" />
     </div>
   );
+}
+
+export default function App() {
+  return <EpmsAccountProvider><LegacyEngineeringApp /></EpmsAccountProvider>;
 }

@@ -11,6 +11,9 @@ import path from "node:path";
 import { preserveImagesOnOverwrite } from "./vite-plugin-xlsx-images";
 import type { Plugin, Connect } from "vite";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { EpmsStore, EpmsError, canonicalDocumentPath, type VerifiedEpmsActor, type EpmsSnapshotCapture } from "./epms-store";
+import { createCoreEpmsAuth, type CoreEpmsAuth } from "./epms-auth";
+import { moveToTrashSafe, restoreTrashSafe, purgeTrashSafe, listTrashSafe, verifyTrashForMove, trashRestoreTarget, verifyTrashForPurge, validateTrashName } from "./docs-trash";
 
 const TRASH_DIRNAME = ".回收站";
 const TEMPLATE_DIRS = ["工程放产资料", "模具图/2D排位图", "模具图/3D模具图", "包装印刷最终文件"];
@@ -39,7 +42,9 @@ function fail(res: ServerResponse, status: number, message: string) {
   json(res, status, { error: message });
 }
 
+const legacyBodyCache = new WeakMap<IncomingMessage, string>();
 async function readBody(req: IncomingMessage): Promise<string> {
+  if (legacyBodyCache.has(req)) return legacyBodyCache.get(req)!;
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     req.on("data", (c) => chunks.push(c));
@@ -141,23 +146,7 @@ async function walk(root: string, opts: { maxDepth: number; maxVisit: number }):
 
 /** 把 root 内的某个路径移入回收站并记录 manifest，返回回收站条目名 */
 async function moveToTrash(root: string, rel: string): Promise<string> {
-  const abs = resolveSafe(root, rel);
-  if (!abs || abs === root || !fs.existsSync(abs)) throw new Error(`路径不存在: ${rel}`);
-  const trashAbs = path.join(root, TRASH_DIRNAME);
-  await fsp.mkdir(trashAbs, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const trashName = `${stamp}__${path.basename(abs)}`;
-  await fsp.rename(abs, path.join(trashAbs, trashName));
-  const manifestPath = path.join(trashAbs, "manifest.json");
-  let manifest: { trashName: string; originalPath: string; deletedAt: number }[] = [];
-  try {
-    manifest = JSON.parse(await fsp.readFile(manifestPath, "utf-8"));
-  } catch {
-    /* fresh */
-  }
-  manifest.push({ trashName, originalPath: rel, deletedAt: Date.now() });
-  await fsp.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-  return trashName;
+  return moveToTrashSafe(root, rel);
 }
 
 type Handler = (ctx: {
@@ -380,9 +369,11 @@ const routes: Record<string, { method: string; handler: Handler }> = {
       }
       const items = docTypes.map((dt) => {
         // 同名资料同时存在 .xls 与 .xlsx 时优先 .xlsx（可在网页编辑器打开）
+        const names = dt.name === "外购件清单" ? ["外购件清单", "外购清单"] : [dt.name];
+        const matches = (file: WalkItem) => names.some((name) => file.name.includes(name));
         const hit =
-          projectFiles.find((f) => f.name.includes(dt.name) && f.name.endsWith(".xlsx")) ??
-          projectFiles.find((f) => f.name.includes(dt.name));
+          projectFiles.find((file) => matches(file) && file.ext === ".xlsx") ??
+          projectFiles.find(matches);
         return {
           name: dt.name,
           dir: dt.dir,
@@ -480,97 +471,6 @@ const routes: Record<string, { method: string; handler: Handler }> = {
     },
   },
 
-  /* ---------- EPMS 制单台：表单草稿 + 防串单编辑锁 + 审核归档 ---------- */
-
-  "/api/epms": {
-    method: "GET",
-    handler: async ({ res, url, root }) => {
-      const rec = await epmsRead(root, url.searchParams.get("path") || "", url.searchParams.get("doc") || "");
-      if (!rec) return json(res, 200, { status: "none" });
-      json(res, 200, epmsPublic(rec));
-    },
-  },
-
-  "/api/epms/save": {
-    method: "POST",
-    handler: async ({ req, res, root }) => {
-      const body = JSON.parse(await readBody(req));
-      const { path: proj, doc, data, by } = body;
-      if (!by) return fail(res, 400, "缺少填报人");
-      const old = await epmsRead(root, String(proj), String(doc));
-      const lockedBy = epmsLockedBy(old, String(by));
-      if (lockedBy) return fail(res, 409, `单据正被 ${lockedBy} 编辑锁定`);
-      const rec: EpmsRecord = {
-        status: old?.status === "approved" ? "approved" : "draft",
-        data: data ?? old?.data ?? null,
-        by: String(by),
-        updatedAt: Date.now(),
-        docNo: old?.docNo || epmsDocNo(),
-        // 自己持有的锁保存后续期，避免保存瞬间被他人抢锁
-        lock: old?.lock?.by === String(by) ? { by: String(by), at: Date.now() } : null,
-        history: [...(old?.history || []), { at: Date.now(), by: String(by), action: "保存草稿" }].slice(-50),
-      };
-      await epmsWrite(root, String(proj), String(doc), rec);
-      json(res, 200, epmsPublic(rec));
-    },
-  },
-
-  "/api/epms/lock": {
-    method: "POST",
-    handler: async ({ req, res, root }) => {
-      const body = JSON.parse(await readBody(req));
-      const { path: proj, doc, by } = body;
-      if (!by) return fail(res, 400, "缺少操作人");
-      const old = await epmsRead(root, String(proj), String(doc));
-      const lockedBy = epmsLockedBy(old, String(by));
-      if (lockedBy) {
-        return json(res, 409, { error: `单据正被 ${lockedBy} 编辑锁定`, lockBy: lockedBy, lockAt: old!.lock!.at });
-      }
-      const rec: EpmsRecord = old || { status: "draft", data: null, by: String(by), updatedAt: Date.now(), docNo: epmsDocNo() };
-      rec.lock = { by: String(by), at: Date.now() };
-      await epmsWrite(root, String(proj), String(doc), rec);
-      json(res, 200, epmsPublic(rec));
-    },
-  },
-
-  "/api/epms/unlock": {
-    method: "POST",
-    handler: async ({ req, res, root }) => {
-      const body = JSON.parse(await readBody(req));
-      const { path: proj, doc, by } = body;
-      const old = await epmsRead(root, String(proj), String(doc));
-      if (old && old.lock && old.lock.by === String(by)) {
-        old.lock = null;
-        await epmsWrite(root, String(proj), String(doc), old);
-      }
-      json(res, 200, { ok: true });
-    },
-  },
-
-  "/api/epms/status": {
-    method: "POST",
-    handler: async ({ req, res, root }) => {
-      const body = JSON.parse(await readBody(req));
-      const { path: proj, doc, by, action } = body;
-      if (!by) return fail(res, 400, "缺少操作人");
-      const rec = await epmsRead(root, String(proj), String(doc));
-      if (!rec) return fail(res, 404, "单据不存在");
-      const lockedBy = epmsLockedBy(rec, String(by));
-      if (lockedBy) return fail(res, 409, `单据正被 ${lockedBy} 编辑锁定`);
-      const label: Record<string, string> = { submit: "提交工程师审核", approve: "审核通过并归档", return: "审核驳回" };
-      if (action === "submit") rec.status = "pending";
-      else if (action === "approve") rec.status = "approved";
-      else if (action === "return") rec.status = "draft";
-      else return fail(res, 400, "非法操作");
-      rec.by = String(by);
-      rec.updatedAt = Date.now();
-      rec.lock = null;
-      rec.history = [...(rec.history || []), { at: Date.now(), by: String(by), action: label[action] }].slice(-50);
-      await epmsWrite(root, String(proj), String(doc), rec);
-      json(res, 200, epmsPublic(rec));
-    },
-  },
-
   "/api/upload": {
     method: "POST",
     handler: async ({ req, res, url, root }) => {
@@ -643,96 +543,28 @@ const routes: Record<string, { method: string; handler: Handler }> = {
     method: "DELETE",
     handler: async ({ res, url, root }) => {
       const rel = url.searchParams.get("path") || "";
-      try {
-        const trashName = await moveToTrash(root, rel);
-        json(res, 200, { ok: true, trashName });
-      } catch (e) {
-        fail(res, 404, (e as Error).message);
-      }
+      const trashName = await moveToTrash(root, rel);
+      json(res, 200, { ok: true, trashName });
     },
   },
 
   "/api/trash": {
     method: "GET",
-    handler: async ({ res, root }) => {
-      const trashAbs = path.join(root, TRASH_DIRNAME);
-      if (!fs.existsSync(trashAbs)) return json(res, 200, { items: [] });
-      let manifest: { trashName: string; originalPath: string; deletedAt: number }[] = [];
-      try {
-        manifest = JSON.parse(await fsp.readFile(path.join(trashAbs, "manifest.json"), "utf-8"));
-      } catch {
-        /* ignore */
-      }
-      const entries = await fsp.readdir(trashAbs, { withFileTypes: true });
-      const items = await Promise.all(
-        entries
-          .filter((e) => e.name !== "manifest.json" && !e.name.startsWith(".") || e.name.includes("__"))
-          .map(async (e) => {
-            const st = await fsp.stat(path.join(trashAbs, e.name));
-            const meta = manifest.find((m) => m.trashName === e.name);
-            return {
-              trashName: e.name,
-              name: e.name.split("__").slice(1).join("__") || e.name,
-              kind: e.isDirectory() ? ("dir" as const) : ("file" as const),
-              size: e.isDirectory() ? 0 : st.size,
-              originalPath: meta?.originalPath ?? "",
-              deletedAt: meta?.deletedAt ?? st.mtimeMs,
-            };
-          }),
-      );
-      items.sort((a, b) => b.deletedAt - a.deletedAt);
-      json(res, 200, { items });
-    },
+    handler: async ({ res, root }) => { json(res, 200, { items: await listTrashSafe(root) }); },
   },
 
   "/api/restore": {
     method: "POST",
     handler: async ({ req, res, root }) => {
       const body = JSON.parse(await readBody(req));
-      const trashName = path.basename(String(body.trashName || ""));
-      const trashAbs = path.join(root, TRASH_DIRNAME);
-      const src = path.join(trashAbs, trashName);
-      if (!fs.existsSync(src)) return fail(res, 404, "回收站中不存在该项");
-      const manifestPath = path.join(trashAbs, "manifest.json");
-      let manifest: { trashName: string; originalPath: string; deletedAt: number }[] = [];
-      try {
-        manifest = JSON.parse(await fsp.readFile(manifestPath, "utf-8"));
-      } catch {
-        /* ignore */
-      }
-      const meta = manifest.find((m) => m.trashName === trashName);
-      const originalName = trashName.split("__").slice(1).join("__") || trashName;
-      const destRel = meta?.originalPath || originalName;
-      const destAbs = resolveSafe(root, destRel);
-      if (!destAbs) return fail(res, 400, "原路径非法");
-      await fsp.mkdir(path.dirname(destAbs), { recursive: true });
-      const finalDest = await uniquePath(destAbs);
-      await fsp.rename(src, finalDest);
-      manifest = manifest.filter((m) => m.trashName !== trashName);
-      await fsp.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-      json(res, 200, { ok: true, restoredTo: path.relative(root, finalDest) });
+      json(res, 200, { ok: true, restoredTo: await restoreTrashSafe(root, body.trashName) });
     },
   },
 
   "/api/purge": {
     method: "POST",
     handler: async ({ req, res, root }) => {
-      const body = JSON.parse(await readBody(req));
-      const trashName = path.basename(String(body.trashName || ""));
-      const target = path.join(root, TRASH_DIRNAME, trashName);
-      if (!fs.existsSync(target)) return fail(res, 404, "不存在");
-      await fsp.rm(target, { recursive: true, force: true });
-      const manifestPath = path.join(root, TRASH_DIRNAME, "manifest.json");
-      try {
-        const manifest = JSON.parse(await fsp.readFile(manifestPath, "utf-8"));
-        await fsp.writeFile(
-          manifestPath,
-          JSON.stringify(manifest.filter((m: { trashName: string }) => m.trashName !== trashName), null, 2),
-        );
-      } catch {
-        /* ignore */
-      }
-      json(res, 200, { ok: true });
+      const body = JSON.parse(await readBody(req)); await purgeTrashSafe(root, body.trashName); json(res, 200, { ok: true });
     },
   },
 
@@ -760,86 +592,116 @@ const routes: Record<string, { method: string; handler: Handler }> = {
 
 /* ---------- 插件入口 ---------- */
 
-/* ---------- EPMS 制单台辅助 ---------- */
-
-interface EpmsRecord {
-  status: "draft" | "pending" | "approved";
-  data: unknown;
-  by: string;
-  updatedAt: number;
-  docNo: string;
-  lock?: { by: string; at: number } | null;
-  history?: { at: number; by: string; action: string }[];
+export interface DocsApiOptions {
+  // Server-owned callback only. Never resolve identity from body.by or unsigned client role headers.
+  authenticateEpms?: (req: IncomingMessage) => Promise<VerifiedEpmsActor | null>;
+  captureEpmsSnapshot?: EpmsSnapshotCapture;
+  coreAuth?: CoreEpmsAuth;
 }
-
-const EPMS_LOCK_TTL = 15 * 60 * 1000; // 编辑锁 15 分钟无操作自动释放
-
-function epmsDocNo(): string {
-  const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  return `DOC-${ymd}-${String(Math.floor(Math.random() * 10000)).padStart(4, "0")}`;
+async function epmsJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = []; let bytes = 0;
+  for await (const chunk of req) { const b = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk); bytes += b.length; if (bytes > 512 * 1024) throw new EpmsError(413, "制单内容过大"); chunks.push(b); }
+  try { const body: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8")); if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("shape"); return body as Record<string, unknown>; }
+  catch { throw new EpmsError(400, "请求内容格式错误"); }
 }
-
-function epmsFile(root: string, project: string, doc: string): string | null {
-  if (!/^[\w一-龥-]+$/.test(doc)) return null;
-  return resolveSafe(root, path.join(project, ".epms", `${doc}.json`));
-}
-
-async function epmsRead(root: string, project: string, doc: string): Promise<EpmsRecord | null> {
-  const abs = epmsFile(root, project, doc);
-  if (!abs || !fs.existsSync(abs)) return null;
-  try {
-    return JSON.parse(await fsp.readFile(abs, "utf8")) as EpmsRecord;
-  } catch {
-    return null;
+async function epmsDispatch(req: IncomingMessage, res: ServerResponse, url: URL, store: EpmsStore, options: DocsApiOptions): Promise<void> {
+  res.setHeader("Cache-Control", "no-store");
+  if (url.pathname === "/api/epms/login" || url.pathname === "/api/epms/logout") {
+    if (req.method !== "POST") throw new EpmsError(405, "方法不允许");
+    if (!options.coreAuth) throw new EpmsError(503, "账号验证服务尚未配置");
+    return json(res, 200, url.pathname.endsWith("/login") ? await options.coreAuth.login(req, res, await epmsJsonBody(req)) : await options.coreAuth.logout(req, res));
   }
+  if (!options.authenticateEpms) throw new EpmsError(503, "工程制单台受信任账号验证尚未配置");
+  const actor = await options.authenticateEpms(req); await store.session(actor);
+  if (url.pathname === "/api/epms/session" && req.method === "GET") return json(res, 200, await store.session(actor));
+  if (url.pathname === "/api/epms" && req.method === "GET") return json(res, 200, await store.get(url.searchParams.get("path"), url.searchParams.get("doc"), actor));
+  if (!["/api/epms/lock", "/api/epms/unlock", "/api/epms/save", "/api/epms/status"].includes(url.pathname)) throw new EpmsError(404, "接口不存在");
+  if (req.method !== "POST") throw new EpmsError(405, "方法不允许");
+  const b = await epmsJsonBody(req);
+  const record = url.pathname === "/api/epms/lock" ? await store.lock(b.path, b.doc, actor, b.lockToken)
+    : url.pathname === "/api/epms/unlock" ? await store.unlock(b.path, b.doc, actor, b.lockToken)
+    : url.pathname === "/api/epms/save" ? await store.save(b.path, b.doc, actor, b.data, b.version, b.lockToken)
+    : await store.status(b.path, b.doc, actor, b.action, b.version, b.lockToken);
+  json(res, 200, record);
 }
-
-async function epmsWrite(root: string, project: string, doc: string, rec: EpmsRecord): Promise<void> {
-  const abs = epmsFile(root, project, doc);
-  if (!abs) throw new Error("非法单据类型");
-  await fsp.mkdir(path.dirname(abs), { recursive: true });
-  await fsp.writeFile(abs, JSON.stringify(rec, null, 2), "utf8");
+function rejectInternalPaths(value: unknown): void {
+  if (typeof value === "string" && value.split(/[\\/]/).some(p => p.toLowerCase() === ".epms" || p.toLowerCase().startsWith(".epms-"))) throw new EpmsError(403, "制单状态目录不允许通过文件接口访问");
+  if (Array.isArray(value)) for (const x of value) rejectInternalPaths(x);
+  else if (value && typeof value === "object") for (const x of Object.values(value)) rejectInternalPaths(x);
 }
-
-/** 若单据被他人锁定且未过期，返回锁定人；否则返回 null */
-function epmsLockedBy(rec: EpmsRecord | null, by: string): string | null {
-  if (!rec?.lock) return null;
-  if (rec.lock.by === by) return null;
-  if (Date.now() - rec.lock.at > EPMS_LOCK_TTL) return null;
-  return rec.lock.by;
+async function legacyDocumentPath(root: string, value: string): Promise<string> {
+  const relative = await canonicalDocumentPath(root, value);
+  if (relative.split(path.sep)[0] === TRASH_DIRNAME) throw new EpmsError(403, "回收站资料请使用专用查看、恢复或清理操作");
+  return relative;
 }
+async function legacyMutation(req: IncomingMessage, url: URL, root: string, epms: EpmsStore, options: DocsApiOptions, perform: () => Promise<void>): Promise<void> {
+  for (const [name, value] of url.searchParams) {
+    rejectInternalPaths(value);
+    if (name === "path" || name === "project") await legacyDocumentPath(root, value);
+  }
+  if (url.pathname === "/api/projects") {
+    const client = url.searchParams.get("client") || "", year = url.searchParams.get("year") || "";
+    await legacyDocumentPath(root, year ? client + "/" + year : client);
+  }
+  const jsonRoutes = ["/api/copy", "/api/mkdir", "/api/project", "/api/rename", "/api/restore", "/api/purge", "/api/batch-delete"];
+  const isWrite = url.pathname === "/api/upload" || url.pathname === "/api/item" || jsonRoutes.includes(url.pathname);
+  if (!isWrite) return perform();
+  const actor = await epms.session(options.authenticateEpms ? await options.authenticateEpms(req) : null);
+  if (!actor.canEdit) throw new EpmsError(403, "没有工程资料新建或编辑权限");
+  let b: Record<string, unknown> = {};
+  if (jsonRoutes.includes(url.pathname)) {
+    b = await epmsJsonBody(req); rejectInternalPaths(b);
+    for (const key of ["src", "destDir", "path", "newName", "client", "year", "name"]) {
+      if (b[key] !== undefined && typeof b[key] !== "string") throw new EpmsError(400, "资料路径字段必须是文本");
+    }
+    if (b.paths !== undefined && (!Array.isArray(b.paths) || !b.paths.every(value => typeof value === "string"))) throw new EpmsError(400, "批量资料路径必须是文本列表");
+    for (const key of ["src", "destDir", "path"]) if (typeof b[key] === "string") await legacyDocumentPath(root, b[key] as string);
+    legacyBodyCache.set(req, JSON.stringify(b));
+  }
+  let targets: string[] | (() => Promise<string[]>) = [];
+  if (url.pathname === "/api/upload") targets = [path.join(url.searchParams.get("path") || "", path.basename(decodeURIComponent(url.searchParams.get("name") || "未命名文件")))];
+  else if (url.pathname === "/api/item") targets = async () => { await verifyTrashForMove(root); return [url.searchParams.get("path") || ""]; };
+  else if (url.pathname === "/api/copy") { const ext = path.extname(String(b.src || "")); const name = path.basename(String(b.newName || "")); targets = [path.join(String(b.destDir || ""), name.endsWith(ext) ? name : name + ext)]; }
+  else if (url.pathname === "/api/rename") targets = [String(b.path || ""), path.join(path.dirname(String(b.path || "")), String(b.newName || ""))];
+  else if (url.pathname === "/api/batch-delete") targets = async () => { await verifyTrashForMove(root); return Array.isArray(b.paths) ? b.paths.map(String) : []; };
+  else if (url.pathname === "/api/project") targets = [[b.client, b.year, b.name].map(x => String(x || "")).join("/")];
+  else if (url.pathname === "/api/mkdir") targets = [String(b.path || "")];
+  else if (url.pathname === "/api/restore") targets = async () => [await trashRestoreTarget(root, b.trashName)];
+  else targets = async () => { await verifyTrashForPurge(root, b.trashName); return [TRASH_DIRNAME + "/" + validateTrashName(b.trashName)]; };
 
-function epmsPublic(rec: EpmsRecord) {
-  return {
-    status: rec.status,
-    data: rec.data,
-    by: rec.by,
-    updatedAt: rec.updatedAt,
-    docNo: rec.docNo,
-    lock: rec.lock && Date.now() - rec.lock.at <= EPMS_LOCK_TTL ? rec.lock : null,
-    lockTtl: EPMS_LOCK_TTL,
-    history: rec.history || [],
+  const token = req.headers["x-epms-lock-token"];
+  const checkedTargets = async () => {
+    const selected = typeof targets === "function" ? await targets() : targets;
+    if (url.pathname === "/api/copy") await legacyDocumentPath(root, String(b.src || ""));
+    if (url.pathname !== "/api/purge") for (const target of selected) await legacyDocumentPath(root, target);
+    return selected;
   };
+  return epms.withFileMutation(checkedTargets, () => Promise.resolve(actor), token, perform);
 }
-
-export function docsApi(): Plugin {
+export function docsApi(input: DocsApiOptions = {}): Plugin {
+  const coreAuth = input.coreAuth ?? createCoreEpmsAuth();
+  const options: DocsApiOptions = { ...input, coreAuth, authenticateEpms: input.authenticateEpms ?? (req => coreAuth.authenticate(req)) };
   let root = "";
   let projectRoot = "";
+  let epms: EpmsStore;
   const middleware = (req: Connect.IncomingMessage, res: ServerResponse, next: () => void) => {
     const url = new URL(req.url || "/", "http://localhost");
+    if (url.pathname === "/api/epms" || url.pathname.startsWith("/api/epms/")) {
+      epmsDispatch(req, res, url, epms, options).catch(e => fail(res, e instanceof EpmsError ? e.status : 500, e instanceof EpmsError ? e.message : "服务器内部错误，原资料已保留"));
+      return;
+    }
     const route = routes[url.pathname];
     if (!route) return next();
     if (req.method !== route.method) return fail(res, 405, "方法不允许");
-    route
-      .handler({ req, res, url, root, projectRoot })
-      .catch((e) => fail(res, 500, (e as Error).message || "服务器内部错误"));
+    legacyMutation(req, url, root, epms, options, () => route.handler({ req, res, url, root, projectRoot }))
+      .catch((e) => fail(res, e instanceof EpmsError ? e.status : 500, e instanceof EpmsError ? e.message : "服务器内部错误，原资料已保留"));
   };
   return {
     name: "docs-api",
     configResolved(config) {
       projectRoot = config.root;
       root = loadRoot(config.root);
+      epms = new EpmsStore(root, options.captureEpmsSnapshot);
     },
     // 开发模式（npm run dev）
     configureServer(server) {

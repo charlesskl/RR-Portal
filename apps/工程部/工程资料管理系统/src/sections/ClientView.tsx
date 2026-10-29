@@ -1,3 +1,4 @@
+import { useEpmsAccess } from "@/lib/epms-access";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -40,6 +41,7 @@ const STANDARD_DIRS = ["工程放产资料", "模具图", "包装印刷最终文
 
 /** 客户工作区：年份 → 项目 → 点进项目做资料 */
 export default function ClientView({ client, onNavigate, onOpenDialog, refreshKey }: Props) {
+  const canEdit = Boolean(useEpmsAccess().session?.canEdit);
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
   const [error, setError] = useState("");
   const [year, setYear] = useState<string>("");
@@ -147,11 +149,11 @@ export default function ClientView({ client, onNavigate, onOpenDialog, refreshKe
         </div>
         <div className="flex items-center gap-2">
           {projects && projects.length > 0 && (
-            <Button variant={manageMode ? "secondary" : "outline"} onClick={() => (manageMode ? exitManage() : setManageMode(true))}>
+            <Button disabled={!canEdit} variant={manageMode ? "secondary" : "outline"} onClick={() => (manageMode ? exitManage() : setManageMode(true))}>
               <ListChecks className="mr-1.5 h-4 w-4" /> {manageMode ? "退出管理" : "批量管理"}
             </Button>
           )}
-          <Button onClick={() => onOpenDialog({ type: "newProject", client })}>
+          <Button disabled={!canEdit} onClick={() => onOpenDialog({ type: "newProject", client })}>
             <FolderPlus className="mr-1.5 h-4 w-4" /> 新建项目
           </Button>
         </div>
@@ -253,7 +255,7 @@ export default function ClientView({ client, onNavigate, onOpenDialog, refreshKe
           ) : year ? (
             <div className="rounded-lg border border-dashed bg-white p-12 text-center">
               <p className="text-sm text-slate-500">{year} 年还没有项目</p>
-              <Button className="mt-3" onClick={() => onOpenDialog({ type: "newProject", client })}>
+              <Button disabled={!canEdit} className="mt-3" onClick={() => onOpenDialog({ type: "newProject", client })}>
                 <FolderPlus className="mr-1.5 h-4 w-4" /> 新建第一个项目
               </Button>
             </div>
@@ -297,7 +299,7 @@ export default function ClientView({ client, onNavigate, onOpenDialog, refreshKe
           >
             {selected.size === (projects?.length ?? 0) ? "取消全选" : "全选"}
           </Button>
-          <Button size="sm" variant="destructive" disabled={selected.size === 0} onClick={() => setConfirmBatch(true)}>
+          <Button size="sm" variant="destructive" disabled={!canEdit || (selected.size === 0)} onClick={() => setConfirmBatch(true)}>
             <Trash2 className="mr-1.5 h-4 w-4" /> 移入回收站
           </Button>
           <Button size="sm" variant="outline" onClick={exitManage}>
@@ -317,7 +319,7 @@ export default function ClientView({ client, onNavigate, onOpenDialog, refreshKe
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={doBatchDelete} disabled={batchBusy} className="bg-red-600 hover:bg-red-700">
+            <AlertDialogAction onClick={doBatchDelete} disabled={!canEdit || (batchBusy)} className="bg-red-600 hover:bg-red-700">
               {batchBusy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />} 移入回收站
             </AlertDialogAction>
           </AlertDialogFooter>

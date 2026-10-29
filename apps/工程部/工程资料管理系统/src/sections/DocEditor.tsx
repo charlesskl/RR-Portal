@@ -6,7 +6,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ensureLuckysheet } from "@/lib/luckysheet-loader";
 import { luckyToXlsx } from "@/lib/lucky-to-xlsx";
-import { api } from "@/lib/api";
+import { api, type EditorLease } from "@/lib/api";
+import { useEpmsAccess } from "@/lib/epms-access";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Download, Loader2, Save } from "lucide-react";
 
@@ -17,12 +18,27 @@ export default function DocEditor({
   name,
   onClose,
   onSaved,
+  lease,
 }: {
   path: string;
   name: string;
   onClose: () => void;
   onSaved: () => void;
+  lease?: EditorLease | null;
 }) {
+  const { session } = useEpmsAccess();
+  const [leaseValid, setLeaseValid] = useState(Boolean(lease?.token && !lease.readOnly));
+  const writable = Boolean(session?.canEdit && (!lease || (!lease.readOnly && leaseValid)));
+  useEffect(() => {
+    if (!lease?.token || !(session?.canEdit || session?.canReview)) { setLeaseValid(false); return; }
+    let alive = true;
+    const renew = () => api.epmsLock(lease.projectPath, lease.doc, lease.token).then(() => {
+      if (alive) setLeaseValid(true);
+    }).catch(() => { if (alive) { setLeaseValid(false); toast.error("编辑锁已失效，保存已停用；可先下载当前内容"); } });
+    void renew();
+    const timer = setInterval(() => { void renew(); }, 60000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [lease, session?.canEdit, session?.canReview]);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -40,6 +56,7 @@ export default function DocEditor({
   }, []);
 
   useEffect(() => {
+    destroyedRef.current = false;
     let cancelled = false;
     (async () => {
       try {
@@ -84,13 +101,13 @@ export default function DocEditor({
               data: exportJson.sheets,
               title: fileName,
               lang: "zh",
-              allowEdit: true,
-              showtoolbar: true,
+              allowEdit: writable,
+              showtoolbar: writable,
               showinfobar: false,
               showsheetbar: true,
               showstatisticBar: true,
               allowCopy: true,
-              enableAddRow: true,
+              enableAddRow: writable,
               enableAddBackTop: true,
             });
             setPhase("ready");
@@ -122,7 +139,7 @@ export default function DocEditor({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path]);
+  }, [path, session?.id]);
 
   // 关闭页面前提示未保存
   useEffect(() => {
@@ -137,13 +154,13 @@ export default function DocEditor({
   }, []);
 
   const doSave = useCallback(async () => {
-    if (saving || phase !== "ready") return;
+    if (saving || phase !== "ready" || !writable) return;
     setSaving(true);
     try {
       const sheets = window.luckysheet.getAllSheets();
       const blob = await luckyToXlsx(sheets, fileName);
       const file = new File([blob], fileName, { type: blob.type });
-      await api.upload(dir, file, undefined, { overwrite: true, baseMtime });
+      await api.upload(dir, file, undefined, { overwrite: true, baseMtime, lockToken: lease?.token || undefined });
       dirtyRef.current = false;
       setDirty(false);
       const st = await api.stat(resolvedPath).catch(() => null);
@@ -160,7 +177,7 @@ export default function DocEditor({
     } finally {
       setSaving(false);
     }
-  }, [saving, phase, dir, fileName, baseMtime, resolvedPath, onSaved]);
+  }, [saving, phase, dir, fileName, baseMtime, resolvedPath, onSaved, writable, lease]);
 
   // Ctrl+S 保存
   useEffect(() => {
@@ -211,7 +228,7 @@ export default function DocEditor({
         <Button variant="outline" size="sm" onClick={doDownload} disabled={phase !== "ready"}>
           <Download className="mr-1 h-4 w-4" /> 下载
         </Button>
-        <Button size="sm" onClick={doSave} disabled={saving || phase !== "ready"}>
+        <Button size="sm" onClick={doSave} disabled={saving || phase !== "ready" || !writable}>
           {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
           保存 (Ctrl+S)
         </Button>

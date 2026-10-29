@@ -1,3 +1,4 @@
+import { useEpmsAccess } from "@/lib/epms-access";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -46,6 +47,7 @@ export default function ProjectView({
   refreshKey,
   onChanged,
 }: Props) {
+  const canEdit = Boolean(useEpmsAccess().session?.canEdit);
   const projPath = `${client}/${year}/${project}`;
   const [tab, setTab] = useState<"docs" | "files">("docs");
   const [items, setItems] = useState<DocTypeItem[] | null>(null);
@@ -268,7 +270,7 @@ export default function ProjectView({
                                 <Button
                                   size="sm"
                                   onClick={() => createFromTemplate(dt)}
-                                  disabled={!dt.template || busyRow === dt.name}
+                                  disabled={!canEdit || (!dt.template || busyRow === dt.name)}
                                   title={dt.template ? `以「${dt.template}」为模板新建` : `模板库中还没有「${dt.name}」模板`}
                                 >
                                   <FilePlus2 className="mr-1 h-3.5 w-3.5" /> 从模板新建
@@ -277,7 +279,7 @@ export default function ProjectView({
                                   size="sm"
                                   variant="outline"
                                   onClick={() => pickUpload(dt)}
-                                  disabled={busyRow === dt.name}
+                                  disabled={!canEdit || (busyRow === dt.name)}
                                 >
                                   <UploadCloud className="mr-1 h-3.5 w-3.5" /> 上传
                                 </Button>

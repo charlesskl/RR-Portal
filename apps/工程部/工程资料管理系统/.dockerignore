@@ -4,3 +4,5 @@ logs
 *.log
 .git
 .DS_Store
+资料库存储
+.env*

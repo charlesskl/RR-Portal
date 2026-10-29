@@ -1,3 +1,4 @@
+import { useEpmsAccess } from "@/lib/epms-access";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
@@ -58,6 +59,7 @@ interface Props {
 }
 
 export default function ExplorerView({ path, onNavigate, onOpenDialog, onOpenEditor, refreshKey, onChanged }: Props) {
+  const canEdit = Boolean(useEpmsAccess().session?.canEdit);
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
   const [error, setError] = useState("");
   const [uploads, setUploads] = useState<UploadTask[]>([]);
@@ -205,14 +207,14 @@ export default function ExplorerView({ path, onNavigate, onOpenDialog, onOpenEdi
 
         <div className="flex items-center gap-2">
           {selected.size > 0 && (
-            <Button size="sm" variant="destructive" onClick={() => setConfirmBatch(true)}>
+            <Button disabled={!canEdit} size="sm" variant="destructive" onClick={() => setConfirmBatch(true)}>
               <Trash2 className="mr-1.5 h-4 w-4" /> 移入回收站 ({selected.size})
             </Button>
           )}
-          <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>
+          <Button disabled={!canEdit} size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>
             <UploadCloud className="mr-1.5 h-4 w-4" /> 上传文件
           </Button>
-          <Button
+          <Button disabled={!canEdit}
             size="sm"
             variant="outline"
             onClick={() => onOpenDialog({ type: "newFolder", parentPath: path })}
@@ -272,7 +274,7 @@ export default function ExplorerView({ path, onNavigate, onOpenDialog, onOpenEdi
             <TableHeader>
               <TableRow>
                 <TableHead className="w-10">
-                  <Checkbox
+                  <Checkbox disabled={!canEdit}
                     checked={entries.length > 0 && selected.size === entries.length}
                     onCheckedChange={(v) => toggleAll(!!v)}
                     aria-label="全选"
@@ -298,7 +300,7 @@ export default function ExplorerView({ path, onNavigate, onOpenDialog, onOpenEdi
                     onClick={() => (e.kind === "dir" ? openEntry(e) : toggle(e.name, !checked))}
                   >
                     <TableCell onClick={(ev) => ev.stopPropagation()}>
-                      <Checkbox
+                      <Checkbox disabled={!canEdit}
                         checked={checked}
                         onCheckedChange={(v) => toggle(e.name, !!v)}
                         aria-label={`选择 ${e.name}`}
@@ -386,13 +388,13 @@ export default function ExplorerView({ path, onNavigate, onOpenDialog, onOpenEdi
                               <Download className="mr-2 h-4 w-4" /> 下载
                             </DropdownMenuItem>
                           )}
-                          <DropdownMenuItem
+                          <DropdownMenuItem disabled={!canEdit}
                             onClick={() => onOpenDialog({ type: "rename", path: full, name: e.name })}
                           >
                             <FilePenLine className="mr-2 h-4 w-4" /> 重命名
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem
+                          <DropdownMenuItem disabled={!canEdit}
                             className="text-red-600 focus:text-red-600"
                             onClick={() => onOpenDialog({ type: "confirmDelete", path: full, name: e.name })}
                           >
@@ -421,7 +423,7 @@ export default function ExplorerView({ path, onNavigate, onOpenDialog, onOpenEdi
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={doBatchDelete} disabled={batchBusy} className="bg-red-600 hover:bg-red-700">
+            <AlertDialogAction onClick={doBatchDelete} disabled={!canEdit || (batchBusy)} className="bg-red-600 hover:bg-red-700">
               {batchBusy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />} 移入回收站
             </AlertDialogAction>
           </AlertDialogFooter>

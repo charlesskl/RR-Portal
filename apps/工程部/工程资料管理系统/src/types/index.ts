@@ -46,6 +46,7 @@ export type View =
   | { type: "project"; client: string; year: string; project: string }
   | { type: "explorer"; path: string }
   | { type: "editor"; path: string; name: string }
+  | { type: "workbench"; client: string; year: string; project: string }
   | { type: "search" }
   | { type: "recent" }
   | { type: "trash" };

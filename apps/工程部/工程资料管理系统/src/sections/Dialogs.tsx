@@ -1,3 +1,4 @@
+import { useEpmsAccess } from "@/lib/epms-access";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -48,6 +49,7 @@ export function NewProjectDialog({
   onClose: () => void;
   onCreated: (path: string) => void;
 }) {
+  const canEdit = Boolean(useEpmsAccess().session?.canEdit);
   const [clients, setClients] = useState<string[]>([]);
   const [client, setClient] = useState("");
   const [newClient, setNewClient] = useState("");
@@ -151,7 +153,7 @@ export function NewProjectDialog({
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button onClick={submit} disabled={busy}>
+          <Button onClick={submit} disabled={!canEdit || (busy)}>
             {busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />} 创建项目
           </Button>
         </DialogFooter>
@@ -171,6 +173,7 @@ export function NewFolderDialog({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const canEdit = Boolean(useEpmsAccess().session?.canEdit);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -210,7 +213,7 @@ export function NewFolderDialog({
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button onClick={submit} disabled={busy || !name.trim()}>
+          <Button onClick={submit} disabled={!canEdit || (busy || !name.trim())}>
             {busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />} 创建
           </Button>
         </DialogFooter>
@@ -230,6 +233,7 @@ export function RenameDialog({
   onClose: () => void;
   onRenamed: () => void;
 }) {
+  const canEdit = Boolean(useEpmsAccess().session?.canEdit);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -266,7 +270,7 @@ export function RenameDialog({
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button onClick={submit} disabled={busy || !name.trim()}>
+          <Button onClick={submit} disabled={!canEdit || (busy || !name.trim())}>
             {busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />} 保存
           </Button>
         </DialogFooter>
@@ -286,6 +290,7 @@ export function ConfirmDeleteDialog({
   onClose: () => void;
   onDeleted: () => void;
 }) {
+  const canEdit = Boolean(useEpmsAccess().session?.canEdit);
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
@@ -312,7 +317,7 @@ export function ConfirmDeleteDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction onClick={submit} disabled={busy} className="bg-red-600 hover:bg-red-700">
+          <AlertDialogAction onClick={submit} disabled={!canEdit || (busy)} className="bg-red-600 hover:bg-red-700">
             {busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />} 移入回收站
           </AlertDialogAction>
         </AlertDialogFooter>

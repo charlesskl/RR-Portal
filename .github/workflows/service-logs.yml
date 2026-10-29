@@ -2,7 +2,7 @@ name: PR 1039 Scoped ZURU Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [deploy]}
+      mode: {type: choice, required: true, options: [verify]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '7601d03e67c6c1dec3a685dad4356b97a2cbfd92ee4e2cbaf3b33551b41a180c'
+  SCOPED_RELEASE_HELPER_SHA256: 'd4d43871331b72bf35f67e063a8e5e1cd560cad1f7237aedbfb5b50150807540'
 jobs:
   fixed-zuru-phase:
     runs-on: ubuntu-latest
@@ -27,10 +27,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 7601d03e67c6c1dec3a685dad4356b97a2cbfd92ee4e2cbaf3b33551b41a180c ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1039-20261029-zuru && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = d4d43871331b72bf35f67e063a8e5e1cd560cad1f7237aedbfb5b50150807540 ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1039-20261029-zuru && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run exact ZURU deploy helper
+      - name: Run exact ZURU verify helper
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -47,8 +47,8 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 7601d03e67c6c1dec3a685dad4356b97a2cbfd92ee4e2cbaf3b33551b41a180c ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1039-20261029-zuru && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = d4d43871331b72bf35f67e063a8e5e1cd560cad1f7237aedbfb5b50150807540 ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1039-20261029-zuru && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1039-20261029-zuru:refs/remotes/origin/ops/pr-1039-20261029-zuru >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1039-20261029-zuru)" = "$RELEASE_SHA" ]] || exit 1
@@ -56,7 +56,7 @@ jobs:
             zuru_tmp=$(mktemp -d /tmp/pr1039-zuru.XXXXXX)
             trap 'rm -rf "$zuru_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1039-zuru-release.py" > "$zuru_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$zuru_tmp/run.py" | cut -d ' ' -f1)" = 7601d03e67c6c1dec3a685dad4356b97a2cbfd92ee4e2cbaf3b33551b41a180c ]] || exit 1
+            [[ "$(sha256sum "$zuru_tmp/run.py" | cut -d ' ' -f1)" = d4d43871331b72bf35f67e063a8e5e1cd560cad1f7237aedbfb5b50150807540 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1039-zuru-switch.py" > "$zuru_tmp/pr1039-zuru-switch.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$zuru_tmp/pr1039-zuru-switch.py" | cut -d ' ' -f1)" = dd2b2697694b07ee93d54e09da8effcb2577f0786847ce0dc35a339cdeeedc31 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1039-zuru-map.py" > "$zuru_tmp/pr1039-zuru-map.py" 2>/dev/null || exit 1
@@ -69,4 +69,4 @@ jobs:
             [[ "$(sha256sum "$zuru_tmp/pr1030-engineering-preflight.py" | cut -d ' ' -f1)" = 3d06b2aef715f75740826ff75f91c1cb78e0927e030717795ef2733f0595a4d0 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/batch1003-image-library.py" > "$zuru_tmp/batch1003-image-library.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$zuru_tmp/batch1003-image-library.py" | cut -d ' ' -f1)" = 94d9dc30f1e21ee1346f89ac231bbc28ebc21d210d08298f54c56cc0103fab02 ]] || exit 1
-            timeout --signal=TERM --kill-after=30s 22m python3 -B "$zuru_tmp/run.py" deploy
+            timeout --signal=TERM --kill-after=30s 22m python3 -B "$zuru_tmp/run.py" verify

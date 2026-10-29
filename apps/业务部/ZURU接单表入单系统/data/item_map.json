@@ -1151,7 +1151,7 @@
   },
   "157145": {
     "cn_name": "牙齿怪兽",
-    "workshop": "兴信A",
+    "workshop": "A-华嘉",
     "schedule_name": "牙齿怪兽"
   },
   "157128": {
@@ -2476,7 +2476,7 @@
   },
   "15752": {
     "cn_name": "牙齿怪兽",
-    "workshop": "A-华嘉",
+    "workshop": "兴信A",
     "schedule_name": "牙齿怪兽"
   },
   "157144": {
@@ -2658,5 +2658,30 @@
     "cn_name": "15774混装",
     "workshop": "B-华嘉",
     "schedule_name": "牙齿怪兽"
+  },
+  "71184": {
+    "cn_name": "客版眼镜蛇",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MEC494": {
+    "cn_name": "157131+157130+157128",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MSLD227": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MSLD192": {
+    "cn_name": "77772",
+    "workshop": "兴信B",
+    "schedule_name": "迷你唱片球"
+  },
+  "77965": {
+    "cn_name": "3PK双色龙",
+    "workshop": "华登",
+    "schedule_name": "双色龙"
   }
 }

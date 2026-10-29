@@ -220,3 +220,40 @@ test('SPIN截图四行：名称为裁床、车缝、手工而工艺留空时也�
  near(result.sewing_taxable.sewing_cloth,16.1172);
  near(result.components.sewing_cloth,27.1114-16.1172*.115);
 });
+
+
+test('SPIN旧版逐项核价继续应用客户工费规则，汇总Excel与普通客户分离', async()=>{
+ const sewing={sewing_groups:[{items:[{fabric:'布料',usage:1,mat_price:10},{fabric:'工费',craft:'手工',usage:1,mat_price:10}]}],
+  legacy_items:[{include_in_summary:true,cost_category:'sewing_cloth',formula_kind:'quantity_x_unit',formula_quantity:1,formula_unit_hkd:20}]};
+ const p=payload(sewing);
+ p.sales.legacy_import={formula_mode:'itemized_v1',formula_offsets:{},formula_markup_x:1};
+ for(const customer of ['SPIN','TOMY']){
+  const r=buildQuoteSummary({...quote,customer},sections(p)),eligible=customer==='SPIN'?10:20;
+  near(r.components_before_tax.sewing_cloth,20);
+  near(r.sewing_taxable.sewing_cloth,eligible);
+  near(r.components.sewing_cloth,20-eligible*.115);
+  near(r.summary_values.cloth_13_cost,eligible);
+  const wb=buildSummaryWorkbook([r]),saved=new(require('exceljs').Workbook)();
+  await saved.xlsx.load(await wb.xlsx.writeBuffer());
+  const ws=saved.getWorksheet('各客报价汇总'),keys=[...BASE_SUMMARY_COLUMNS,...SUMMARY_COLUMNS];
+  const cell=key=>ws.getCell(5,keys.findIndex(c=>c[0]===key)+1);
+  near(cell('cloth_13_cost').result,eligible);
+  near(cell('sewing_cloth_after_tax').result,20-eligible*.115);
+  assert.match(cell('cloth_13_cost').formula,customer==='SPIN'?/\*0\.5$/:/\*1$/);
+ }
+});
+
+test('SPIN材料名称中的工艺词不误当工费，显式工艺与明确加工费仍优先',()=>{
+ for(const fabric of ['车缝线','绣花线','手工布料','車縫線','繡花線','embroidery thread']){
+  const sewing={sewing_groups:[{items:[{fabric,usage:1,mat_price:10},{fabric:'手工工费',usage:1,mat_price:10}]}]};
+  const r=buildQuoteSummary({...quote,customer:'SPIN'},sections(payload(sewing)));
+  near(r.components_before_tax.sewing_cloth,20);
+  near(r.sewing_taxable.sewing_cloth,10);
+  near(r.components.sewing_cloth,18.85);
+  assert.equal(Tax.craftFor({fabric}),'');
+  assert.equal(Tax.craftFor({fabric,craft:'电绣'}),'电绣');
+  assert.equal(Tax.craftFor({fabric,craft:'绣花'}),'电绣');
+ }
+ for(const [craft,expected] of [['車縫','车缝'],['裁床加工','裁床'],['手工制作','手工']])assert.equal(Tax.craftFor({fabric:'布料',craft}),expected);
+ for(const fabric of ['脸部绣花','车缝加工费','裁床人工','布料手工加工费'])assert.notEqual(Tax.craftFor({fabric}),'');
+});

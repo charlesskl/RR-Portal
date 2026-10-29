@@ -7,8 +7,17 @@
     return /^(SPIN|SPINMASTER|SPINMASTER-毛绒\(印尼\))$/.test(String(customer || '').normalize('NFKC').replace(/\s+/g, '').toUpperCase());
   }
   function craftFor(row = {}) {
-    const explicit = String(row.craft || '').trim();
+    const explicit = String(row.craft || '').trim().normalize('NFKC');
     if (['电绣', '裁床', '车缝', '手工'].includes(explicit)) return explicit;
+    if (/电绣|電繡|绣花|繡花|embroider/i.test(explicit)) return '电绣';
+    if (/裁床/.test(explicit)) return '裁床';
+    if (/车缝|車縫/.test(explicit)) return '车缝';
+    if (/手工/.test(explicit)) return '手工';
+    // A material name can contain a process word without being a process fee.
+    // An explicit craft selection above still takes priority over its name.
+    const material = [row.fabric, row.material, row.name].filter(Boolean).join(' ').normalize('NFKC');
+    if (/车缝线|車縫線|绣花线|繡花線|电绣线|電繡線|布料|面料|embroidery\s+thread/i.test(material)
+      && !/人工|工费|加工费|费用/.test(material)) return '';
     const text = [row.craft, row.fabric, row.material, row.name, row.part].filter(Boolean).join(' ').normalize('NFKC');
     if (/电绣|電繡|绣花|繡花|embroider/i.test(text)) return '电绣';
     if (/裁床/.test(text)) return '裁床';
@@ -24,7 +33,7 @@
     return fallback;
   }
   function hasSetting(payload = {}, customer) {
-    return (isSpin(customer) && (payload.sewing_groups || []).some(group => number(group.labor_amount) || (group.items || []).some(craftFor))) || [payload, ...(payload.sewing_groups || [])].some(value =>
+    return (isSpin(customer) && (payload.sewing_groups || []).some(group => number(group.labor_amount) || (group.items || []).some(item => craftFor(item) || /人工/.test(String(item.fabric || item.part || item.name || ''))))) || [payload, ...(payload.sewing_groups || [])].some(value =>
       Boolean(value.tax_label || value.price_type) || (value.tax_pct != null && value.tax_pct !== ''));
   }
   function fractions(payload = {}, customer) {

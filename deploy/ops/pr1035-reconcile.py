@@ -1,6 +1,6 @@
 """INERT finalize only: no stop/start/copy/build replay, original failure remains sealed."""
 import calendar,datetime,email.utils,hashlib,importlib.util,io,json,os,pathlib,re,sys,tarfile,time
-EXECUTE=True
+EXECUTE=False
 BRANCH='refs/heads/ops/pr-1035-20261029-quote'
 SOURCE_SHA='2ea1fa14e1a415dd9205761754616e6a2bf1496f46e5159d01059edd902a23c1'
 PREPARED='fcf4485a301fbc244dbe8b717c56e2af00fd0002f634a62565fc120a9f648d9f'

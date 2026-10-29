@@ -1,8 +1,8 @@
-name: PR 1035 Scoped Quote Release
+name: PR 1030 1033 Scoped Engineering Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [reconcile]}
+      mode: {type: choice, required: true, options: [diagnose]}
 permissions:
   contents: read
 concurrency:
@@ -10,12 +10,12 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
-  SCOPED_RELEASE_HELPER_SHA256: '75b2e71565be4c92f413d1123d46cf615ad4d075d84068493750677600c6353f'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
+  SCOPED_RELEASE_HELPER_SHA256: '2efcaef768359711c1f721ee6ffe2f59232e1f5dfea73321f3159e56d31955be'
 jobs:
-  fixed-scoped-release:
+  readonly-preflight:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - name: Validate exact phase, branch and first attempt
         shell: bash
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1035-20261029-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = reconcile ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1030-1033-20261029-engineering && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run reviewed one-service quote phase reconcile
+      - name: Read only engineering runtime and core reachability
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -43,26 +43,20 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 24m
+          command_timeout: 14m
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1035-20261029-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = reconcile && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 2efcaef768359711c1f721ee6ffe2f59232e1f5dfea73321f3159e56d31955be ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1030-1033-20261029-engineering && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
-            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1035-20261029-quote:refs/remotes/origin/ops/pr-1035-20261029-quote >/dev/null 2>&1 || exit 1
-            [[ "$(git rev-parse refs/remotes/origin/ops/pr-1035-20261029-quote)" = "$RELEASE_SHA" ]] || exit 1
+            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1030-1033-20261029-engineering:refs/remotes/origin/ops/pr-1030-1033-20261029-engineering >/dev/null 2>&1 || exit 1
+            [[ "$(git rev-parse refs/remotes/origin/ops/pr-1030-1033-20261029-engineering)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
-            scoped_release_tmp=$(mktemp -d /tmp/pr1035-quote-release.XXXXXX)
-            trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1035-reconcile.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 75b2e71565be4c92f413d1123d46cf615ad4d075d84068493750677600c6353f ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1035-quote-preflight.py" > "$scoped_release_tmp/pr1035-quote-preflight.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1035-quote-preflight.py" | cut -d ' ' -f1)" = 2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1035-quote-release.py" > "$scoped_release_tmp/pr1035-original-release.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1035-original-release.py" | cut -d ' ' -f1)" = 2ea1fa14e1a415dd9205761754616e6a2bf1496f46e5159d01059edd902a23c1 ]] || exit 1
-            timeout --signal=TERM --kill-after=30s 22m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"
+            engineering_tmp=$(mktemp -d /tmp/pr1030-engineering-preflight.XXXXXX)
+            trap 'rm -rf "$engineering_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/pr1030-engineering-preflight.py" > "$engineering_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$engineering_tmp/run.py" | cut -d ' ' -f1)" = 2efcaef768359711c1f721ee6ffe2f59232e1f5dfea73321f3159e56d31955be ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1035-quote-preflight.py" > "$engineering_tmp/pr1035-quote-preflight.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$engineering_tmp/pr1035-quote-preflight.py" | cut -d ' ' -f1)" = 2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5 ]] || exit 1
+            timeout --signal=TERM --kill-after=10s 12m python3 -B "$engineering_tmp/run.py" diagnose

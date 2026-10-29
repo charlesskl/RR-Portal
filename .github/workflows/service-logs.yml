@@ -10,8 +10,8 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'd4d43871331b72bf35f67e063a8e5e1cd560cad1f7237aedbfb5b50150807540'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
+  SCOPED_RELEASE_HELPER_SHA256: '81aa801b4776c459efa4bbf98d9c7969c9dde92b6eccdfd894776a8a104ebece'
 jobs:
   fixed-zuru-phase:
     runs-on: ubuntu-latest
@@ -27,7 +27,7 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = d4d43871331b72bf35f67e063a8e5e1cd560cad1f7237aedbfb5b50150807540 ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 81aa801b4776c459efa4bbf98d9c7969c9dde92b6eccdfd894776a8a104ebece ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1039-20261029-zuru && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Run exact ZURU verify helper
@@ -47,7 +47,7 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = d4d43871331b72bf35f67e063a8e5e1cd560cad1f7237aedbfb5b50150807540 ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 81aa801b4776c459efa4bbf98d9c7969c9dde92b6eccdfd894776a8a104ebece ]] || exit 1
             [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1039-20261029-zuru && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1039-20261029-zuru:refs/remotes/origin/ops/pr-1039-20261029-zuru >/dev/null 2>&1 || exit 1
@@ -56,7 +56,7 @@ jobs:
             zuru_tmp=$(mktemp -d /tmp/pr1039-zuru.XXXXXX)
             trap 'rm -rf "$zuru_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1039-zuru-release.py" > "$zuru_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$zuru_tmp/run.py" | cut -d ' ' -f1)" = d4d43871331b72bf35f67e063a8e5e1cd560cad1f7237aedbfb5b50150807540 ]] || exit 1
+            [[ "$(sha256sum "$zuru_tmp/run.py" | cut -d ' ' -f1)" = 81aa801b4776c459efa4bbf98d9c7969c9dde92b6eccdfd894776a8a104ebece ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1039-zuru-switch.py" > "$zuru_tmp/pr1039-zuru-switch.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$zuru_tmp/pr1039-zuru-switch.py" | cut -d ' ' -f1)" = dd2b2697694b07ee93d54e09da8effcb2577f0786847ce0dc35a339cdeeedc31 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1039-zuru-map.py" > "$zuru_tmp/pr1039-zuru-map.py" 2>/dev/null || exit 1

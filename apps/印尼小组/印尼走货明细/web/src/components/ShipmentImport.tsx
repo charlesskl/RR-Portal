@@ -4,6 +4,9 @@ import { api, type Dictionaries, type Material } from '../api/client'
 import { importShipmentFile, matchShipmentMaterial, planShipmentImport, type ExistingShipmentImportRow, type ShipmentImportItem, type ShipmentImportRow } from '../utils/shipmentImport'
 import { toolImportDefaults } from '../utils/toolImportDefaults'
 import { createCartonGroupId } from '../utils/cartonGroupId'
+import ShipmentImportSource from './ShipmentImportSource'
+import { shipmentGrossPerPc, shipmentWeightQuantity } from '../utils/shipmentWeight'
+import { isShipmentCountUnit } from '../utils/shipmentDeclaration'
 
 const currencies = ['¥', 'US$', 'HK$', 'IDR'].map(value => ({ value, label: value }))
 export default function ShipmentImport({ existing, onImport }: { existing: ExistingShipmentImportRow[]; onImport: (rows: ShipmentImportItem[], targets: number[]) => void }) {
@@ -12,7 +15,12 @@ export default function ShipmentImport({ existing, onImport }: { existing: Exist
   const [rows, setRows] = useState<ShipmentImportRow[] | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [fileName, setFileName] = useState('')
-  const change = (key: string, fields: Partial<ShipmentImportItem>) => setRows(current => current!.map(r => r.key === key ? { ...r, item: { ...r.item, ...fields } } : r))
+  const change = (key: string, fields: Partial<ShipmentImportItem>) => setRows(current => current!.map(r => {
+    if (r.key !== key) return r
+    const item = { ...r.item, ...fields }
+    if ('qty' in fields && isShipmentCountUnit(item.material_snapshot.unit_kg)) item.kg = fields.qty
+    return { ...r, item }
+  }))
   async function read(file: File) {
     setBusy(true)
     try {
@@ -70,7 +78,7 @@ export default function ShipmentImport({ existing, onImport }: { existing: Exist
     </Upload>
     <Modal title={`导入走货资料 — ${fileName}`} open={rows !== null} width="95vw" onCancel={() => setRows(null)}
       onOk={confirm} okText="确认导入（相同更新，新增追加）" okButtonProps={{ disabled: !(rows || []).some(r => r.selected) }}>
-      <Alert type="info" showIcon message="按货号、中文名、规格、供应商匹配当前走货明细；有采购单号、报关公司时一并核对。唯一匹配则更新文件中有值的字段，空白保留原值；没有匹配才追加。重复匹配或已关联出库的行需人工核对。不改资料库及整柜信息，发票价格按导出规则重算。" />
+      <Alert type="info" showIcon message="支持新版清溪表：按列名识别，不依赖固定位置。主明细所有字段及公式缓存值保存在“原表资料”，合同、发票、汇总等配套表不重复导成物料。按货号、中文名、规格、供应商匹配当前明细；唯一匹配更新有值字段，空白保留原值，无匹配则追加。重复匹配及已关联出库的行需核对。不改资料库或整柜设置，发票价格按系统规则重算。" />
       {warnings.length > 0 && <Alert type="warning" message={warnings.join('；')} />}
       <Space style={{ margin: '12px 0' }} wrap>
         <span>识别 {(rows || []).length} 行，已选 {(rows || []).filter(r => r.selected).length} 行</span>
@@ -90,6 +98,12 @@ export default function ShipmentImport({ existing, onImport }: { existing: Exist
           { key: 'qpc', label: '每箱数量', children: r.item.qty_per_carton || '—' },
           { key: 'box', label: '箱号 / 卡板', children: `${r.item.carton_no || '—'} / ${r.item.pallet || '—'}` },
           { key: 'dim', label: '长 / 宽 / 高 cm', children: [r.item.material_snapshot.length, r.item.material_snapshot.width, r.item.material_snapshot.height].map(v => v ?? '—').join(' / ') },
+          { key: 'weights', label: '毛重 / 净重 kg', children: [
+            shipmentGrossPerPc(r.item.material_snapshot.weight_per_carton, r.item.weighing_qty) * shipmentWeightQuantity(r.item.material_snapshot.name_zh, r.item.qty),
+            Number(r.item.material_snapshot.net_per_pc || 0) * shipmentWeightQuantity(r.item.material_snapshot.name_zh, r.item.qty),
+          ].map(v => v.toFixed(2)).join(' / ') },
+          { key: 'department', label: '使用部门', children: r.item.material_snapshot.department || '—' },
+          { key: 'source', label: '完整源字段', children: <ShipmentImportSource source={r.item.material_snapshot.import_source} /> },
           { key: 'date', label: '采购日期', children: r.item.po_date || '—' },
           { key: 'contract', label: '合同 / 日期', children: `${r.item.contract_no || '—'} / ${r.item.contract_date || '—'}` },
           { key: 'invoice', label: '发票 / 日期', children: `${r.item.invoice_no || '—'} / ${r.item.invoice_date || '—'}` },
@@ -107,7 +121,7 @@ export default function ShipmentImport({ existing, onImport }: { existing: Exist
           { title: '货号 / 物料', width: 230, render: (_, r) => <>{r.item.material_snapshot.product_code}<br />{r.item.material_snapshot.name_zh}</> },
           { title: '供应商 / 报关公司', width: 220, render: (_, r) => <>{r.item.supplier}<br />{r.item.customs_company || '未填'}</> },
           { title: '送货数量', width: 110, render: (_, r) => <InputNumber min={0} value={r.item.qty} onChange={v => change(r.key, { qty: v ?? undefined })} style={{ width: '100%' }} /> },
-          { title: '申报量 / 单位', width: 130, render: (_, r) => <><InputNumber min={0} value={r.item.kg} onChange={v => change(r.key, { kg: v ?? undefined })} style={{ width: '100%' }} />{r.item.material_snapshot.unit_kg}</> },
+          { title: '申报数量 / 单位', width: 130, render: (_, r) => <><InputNumber min={0} readOnly={isShipmentCountUnit(r.item.material_snapshot.unit_kg)} value={r.item.kg} onChange={v => change(r.key, { kg: v ?? undefined })} style={{ width: '100%' }} />{r.item.material_snapshot.unit_kg}</> },
           { title: '箱数', width: 90, render: (_, r) => <>{r.item.cartons ?? '—'}{r.item.carton_group ? '（共箱）' : ''}</> },
           { title: '采购单价 / 币种', width: 140, render: (_, r) => <>{r.item.price ?? '—'}<Select style={{ width: '100%' }} value={r.item.currency} options={currencies} onChange={currency => change(r.key, { currency })} /></> },
           { title: '采购单号', width: 150, render: (_, r) => r.item.po_no || '—' },

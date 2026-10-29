@@ -39,6 +39,7 @@ public class AppDbContext : DbContext
     public DbSet<EquipmentKind> EquipmentKinds => Set<EquipmentKind>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderPartQty> OrderPartQtys => Set<OrderPartQty>();
+    public DbSet<DailyLineNote> DailyLineNotes => Set<DailyLineNote>();
     public DbSet<OrderMaterial> OrderMaterials => Set<OrderMaterial>();
     public DbSet<ProductionPlan> ProductionPlans => Set<ProductionPlan>();
     public DbSet<Holiday> Holidays => Set<Holiday>();
@@ -267,6 +268,19 @@ public class AppDbContext : DbContext
         material.Property(x => x.Configuration).HasColumnName("configuration");
         material.Property(x => x.History).HasColumnName("history");
 
+        var note = b.Entity<DailyLineNote>();
+        note.ToTable("daily_line_notes");
+        note.HasIndex(x => new { x.FactoryId, x.LineId, x.NoteDate }).IsUnique();
+        note.HasOne(x => x.Line).WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Restrict);
+        note.Property(x => x.FactoryId).HasColumnName("factoryId");
+        note.Property(x => x.LineId).HasColumnName("lineId");
+        note.Property(x => x.NoteDate).HasColumnName("noteDate").HasConversion(MsConverter);
+        note.Property(x => x.Text).HasColumnName("text");
+        note.Property(x => x.Version).HasColumnName("version").IsConcurrencyToken();
+        note.Property(x => x.UpdatedBy).HasColumnName("updatedBy");
+        note.Property(x => x.UpdatedAt).HasColumnName("updatedAt").HasConversion(MsConverter);
+        note.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
+
         // 厂区数据隔离统一放在数据库查询层，避免任何接口漏写 Where 条件。
         // 管理员的用户管理始终显示全部账号，不受当前业务厂区选择影响。
         u.HasQueryFilter(x => CanSeeAllFactories || IsAdmin || x.FactoryId == CurrentFactoryId);
@@ -305,6 +319,7 @@ public class AppDbContext : DbContext
                 InventoryMove x => x.FactoryId,
                 InboundApplication x => x.FactoryId,
                 OrderMaterial x => x.FactoryId,
+                DailyLineNote x => x.FactoryId,
                 _ => null,
             };
             if (factory is null) continue;
@@ -347,6 +362,7 @@ public class AppDbContext : DbContext
             case InventoryMove x: x.FactoryId = factoryId; break;
             case InboundApplication x: x.FactoryId = factoryId; break;
             case OrderMaterial x: x.FactoryId = factoryId; break;
+            case DailyLineNote x: x.FactoryId = factoryId; break;
         }
     }
 

@@ -117,7 +117,7 @@ it('spreadsheet fields stay aligned with actual page columns, including protecte
   walk(tree)
   expect(titles).toHaveLength(shipmentSheetFields.length)
   expect(titles.filter((_, i) => shipmentSheetFields[i])).toEqual([
-    '套公式名称栏', '单位', '送货重量', '送货数量', '产品用途', '合同号码', '合同日期', '发票号', '发票日期',
+    '中国HSCODE', '印尼HSCODE', '套公式名称栏', '申报单位', '申报数量', '送货数量', '产品用途', '合同号码', '合同日期', '发票号', '发票日期',
     '供应商', '采购单日期', '采购单号', '采购单价', '币种', '报关出口公司', '提单抬头', '箱数', '每箱数量', '卡板', '箱号',
     '长', '宽', '高', '每箱重量', '称重数量', '单个净重',
   ])

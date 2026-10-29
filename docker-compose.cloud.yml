@@ -343,6 +343,7 @@ services:
       - PORT=3000
       - DATA_PATH=/app/data
       # 阿里云百炼 (Bailian/Qwen-VL) —— 图片订单识别用
+      - ERP_RECEIPT_RETURN_TOKEN=${PAIJI_ERP_RECEIPT_RETURN_TOKEN:-}
       - BAILIAN_API_KEY=${PAIJI_BAILIAN_API_KEY:-}
       - BAILIAN_BASE_URL=${PAIJI_BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       - BAILIAN_VISION_MODEL=${PAIJI_BAILIAN_VISION_MODEL:-qwen-vl-max}

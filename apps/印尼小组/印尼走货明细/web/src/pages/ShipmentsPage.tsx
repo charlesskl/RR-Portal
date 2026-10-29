@@ -12,13 +12,17 @@ import { consolidateShipmentItems } from '../utils/shipmentConsolidation'
 import { createCartonGroupId } from '../utils/cartonGroupId'
 import { receiptChargeRatio, shipmentChargeQuantity, shipmentPurchaseAmount, shipmentUsesDeclarationPrice } from '../utils/shipmentPurchase'
 import ShipmentImport from '../components/ShipmentImport'
+import ShipmentImportSource from '../components/ShipmentImportSource'
 import ShipmentSheetTable from '../components/ShipmentSheetTable'
 import ShipmentNumberCell from '../components/ShipmentNumberCell'
+import { isShipmentCountUnit } from '../utils/shipmentDeclaration'
+import { shipmentDeclarationSaveError } from '../utils/shipmentDeclarationSaveValidation'
+import { shipmentPurchaseDates } from '../utils/shipmentDates'
 import { applyMergedShipmentEdits, mergedReadOnlyFields, type MergedEditorRow } from '../utils/shipmentMergedEditor'
 import { shipmentSheetFields, type SheetEdit } from '../utils/shipmentSheet'
 import { linkShipmentOutbound, remainingOutboundQuantity } from '../utils/shipmentOutboundLink'
 import { outboundCandidates, planOutboundPull } from '../utils/shipmentOutboundRemaining'
-import type { ShipmentImportItem } from '../utils/shipmentImport'
+import { mergeShipmentImportMaterial, type ShipmentImportItem } from '../utils/shipmentImport'
 import { MATERIAL_CATEGORIES } from '../utils/engineeringImport'
 import { HUASHENGYI_FULL_NAME } from '../utils/supplierProfiles'
 import { publicAsset } from '../deployment'
@@ -690,6 +694,8 @@ export default function ShipmentsPage() {
     if (sheetEditing) { message.info('数量正在校验，请完成后再保存'); return false }
     try {
       const v = await form.validateFields()
+      const priceError = shipmentDeclarationSaveError(items)
+      if (priceError) { message.error(priceError); return false }
       setSaving(true)
       // 空字符串日期 → null，否则后端 DateTime? 绑定失败 400
       const dOrNull = (x: any) => (x ? x : null)
@@ -854,7 +860,7 @@ export default function ShipmentsPage() {
     items.forEach((it, i) => {
       const tag = `行${i + 1}（物料#${it.material_id ?? '-'} ${it.formula_name ?? ''}）：`
       if (!it.outbound_id) warn.push(tag + '未关联具体出库记录，不参与出库余额校验')
-      if (!(Number(it.kg) > 0)) hard.push(tag + '送货 KG 必须 > 0')
+      if (!(Number(it.kg) > 0)) hard.push(tag + '申报数量必须 > 0（按申报单位）')
       if (!(Number(it.qty) > 0)) hard.push(tag + '送货数量必须 > 0')
       if (!(Number(it.cartons) > 0)) hard.push(tag + '箱数必须 > 0')
       const packing = parseShipmentPacking(it.qty_per_carton)
@@ -862,7 +868,7 @@ export default function ShipmentsPage() {
       if (packing.mode === 'ranges' && Number(it.qty) > 0 && Math.abs(packing.totalQty - Number(it.qty)) > 0.0001)
         warn.push(tag + `每箱数量分段合计 ${packing.totalQty} 与送货数量 ${it.qty} 不一致`)
       if (!(Number(it.price) > 0)) hard.push(tag + '采购单价必须 > 0')
-      if (decimals(it.kg) > 4) hard.push(tag + '送货 KG 小数超过 4 位')
+      if (decimals(it.kg) > 4) hard.push(tag + '申报数量小数超过 4 位')
       // Per-piece purchase prices may need more than four decimal places.
       // Display precision must not reject or round the source PO price.
       if (it.pallet && !/^\d+-\d+\/.+/.test(it.pallet) && !/^\d+-\d+$/.test(it.pallet))
@@ -912,6 +918,7 @@ export default function ShipmentsPage() {
       const materials = new Map<number, any>()
       const { data: usedMaterials } = await api.get<any[]>('/materials/by-ids', { params: { ids: [...new Set(items.map(it => it.material_id).filter(id => id != null && id > 0))].join(',') } })
       for (const m of usedMaterials) if (m.id != null) materials.set(m.id, m)
+      for (const id of dirtyMatIds) if (id > 0 && matMap.has(id)) materials.set(id, matMap.get(id))
       for (const it of items) if (it.material_snapshot && it.material_id != null) materials.set(it.material_id, matMap.get(it.material_id))
       // 3) 图片：对用到的物料按 image_id 拉 dataURL → bytes
       const images = new Map<number, { bytes: Uint8Array; ext: string }>()
@@ -985,13 +992,13 @@ export default function ShipmentsPage() {
   }
   function mergedCellValue(row: number, field: string): string | number | undefined {
     const item = consolidatedItems[row]
-    const material = matMap.get(item?.material_id!)
+    const material = item?.material_id != null ? matMap.get(item.material_id) : undefined
     if (field === 'currency') return item?.currency || '¥'
     if (field === 'material:unit_kg') return material?.unit_kg || 'KGM'
     if (field === 'weighing_qty') return effectiveWeighingQty(item, material)
     if (item?.sources.length > 1 && field === 'po_date')
-      return [...new Set(item.sources.map(source => source.po_date).filter(Boolean))].join(' / ')
-    return field.startsWith('material:') ? material?.[field.slice(9)]
+      return shipmentPurchaseDates(item.sources).join(' / ')
+    return field.startsWith('material:') || field.startsWith('snapshot:') ? material?.[field.slice(9)]
       : item?.[field as keyof ShipmentItem] as string | number | undefined
   }
   async function writeMergedCells(edits: SheetEdit[], confirm: boolean) {
@@ -1019,8 +1026,10 @@ export default function ShipmentsPage() {
       }
       const apply = (result: ReturnType<typeof applyMergedShipmentEdits<ShipmentItem>>) => {
         setItems(result.items)
-        if (result.dirtyMaterials.size) {
+        if (result.dirtyMaterials.size || edits.some(edit => edit.field.startsWith('snapshot:'))) {
           setMatMap(result.materials)
+        }
+        if (result.dirtyMaterials.size) {
           setDirtyMatIds(current => new Set([...current, ...result.dirtyMaterials]))
         }
         setEditorDirty(true)
@@ -1032,6 +1041,7 @@ export default function ShipmentsPage() {
         content: <Space direction="vertical">
           <span>涉及 {new Set(edits.map(edit => edit.row)).size} 行。合并行的数量、重量及采购来源保持不变，普通资料同步修改；独立箱数按各批原箱数分配。确认后仍需保存走货单。</span>
           {result.dirtyMaterials.size > 0 && <Typography.Text type="warning">单位、尺寸、单个净重等属于物料资料；同物料所有行同步更新，保存时会写回货号库。Excel 导入资料仅更新本单。</Typography.Text>}
+          {edits.some(edit => edit.field.startsWith('snapshot:')) && <Typography.Text type="secondary">导入行的海关编码仅更新本票走货，保存及导出使用新编码，不写回货号库。</Typography.Text>}
         </Space>,
         okText: '确认写入', cancelText: '取消',
         afterClose: () => { sheetConfirmOpen.current = false },
@@ -1052,7 +1062,7 @@ export default function ShipmentsPage() {
       if (checksQuantity) setSheetEditing(false)
     }
   }
-  // 送货重量按所选单位：KGM 显示净重 KG，TNE/TON 显示净重吨数。
+  // 申报数量按所选单位：KGM 为净重，PCE 为件数，TNE 为吨数。
   function kgForItem(it: ShipmentItem, m: any): number {
     return shipmentKgWeight(m?.unit_kg, it.qty, m?.net_per_pc, m?.name_zh)
   }
@@ -1063,12 +1073,19 @@ export default function ShipmentsPage() {
   // 改物料主数据（单位/尺寸/毛净重）→ 更新 matMap、标脏、并按单位重算相关行的送货KG重量
   function patchMatDim(materialId: number | undefined, field: string, value: any) {
     if (materialId == null) return
+    if (field === 'unit_kg') {
+      const row = consolidatedItems.findIndex(item => item.material_id === materialId)
+      if (row >= 0) return writeMergedCells([{ row, field: 'material:unit_kg', value: String(value || 'KGM') }], false)
+      return
+    }
     setEditorDirty(true)
     const newM = { ...(matMap.get(materialId) || {}), [field]: value }
     setMatMap(prev => new Map(prev).set(materialId, newM))
     setDirtyMatIds(prev => new Set(prev).add(materialId))
-    if (field === 'unit_kg' || field === 'net_per_pc')
-      setItems(its => its.map(it => it.material_id === materialId ? { ...it, kg: kgForItem(it, newM) } : it))
+    if (field === 'net_per_pc')
+      setItems(its => its.map(it => it.material_id === materialId
+        ? { ...it, kg: kgForItem(it, newM) }
+        : it))
   }
   function addItem() {
     setEditorDirty(true)
@@ -1125,6 +1142,19 @@ export default function ShipmentsPage() {
         {control}
       </FillableShipmentCell>
     )
+  }
+
+  function importedHsCell(row: ShipmentItem, index: number, field: 'hs_cn' | 'hs_id') {
+    const code = matMap.get(row.material_id!)?.[field] ?? ''
+    if (!row.material_snapshot || !(row.material_id! < 0)) return code
+    const sheetField = `snapshot:${field}`
+    return <FillableShipmentCell rowIndex={index} field={sheetField} onFill={fillMaterialDown}
+      onFillToEnd={(sourceIndex, sourceField) => fillMaterialDown(sourceIndex, consolidatedItems.length - 1, sourceField)}>
+      <Input size="small" value={code} inputMode="numeric" maxLength={field === 'hs_cn' ? 10 : 8}
+        aria-label={`第 ${index + 1} 行${field === 'hs_cn' ? '中国' : '印尼'}海关编码`}
+        title="仅修改本票走货的导入资料，不写回货号库；支持粘贴和向下填充"
+        onChange={event => { void writeMergedCells([{ row: index, field: sheetField, value: event.target.value }], false) }} />
+    </FillableShipmentCell>
   }
 
   const filtered = useMemo(() => rows.filter(r => {
@@ -1302,7 +1332,7 @@ export default function ShipmentsPage() {
             <div className="shipment-summary">
               <span><b>{consolidatedItems.length}</b><small>明细行</small></span>
               <span><b>{tot.qty.toFixed(2)}</b><small>送货数量</small></span>
-              <span><b>{tot.kg.toFixed(2)} kg</b><small>送货重量</small></span>
+              <span><b>{tot.net.toFixed(2)} kg</b><small>净重合计</small></span>
               <span><b>{tot.gross.toFixed(2)} kg</b><small>毛重总重</small></span>
               <span><b>{tot.cartons}</b><small>总箱数</small></span>
               <span><b>{tot.cbm.toFixed(4)}</b><small>总 CBM</small></span>
@@ -1324,8 +1354,8 @@ export default function ShipmentsPage() {
                     if (target < 0) { next.push(row); return }
                     const old = next[target]
                     const provided = Object.fromEntries(Object.entries(row).filter(([, value]) => value != null && value !== ''))
-                    const material = Object.fromEntries(Object.entries(row.material_snapshot).filter(([, value]) => value != null && value !== ''))
-                    next[target] = { ...old, ...provided, material_snapshot: { ...matMap.get(old.material_id!), ...material } }
+                    next[target] = { ...old, ...provided, material_snapshot:
+                      mergeShipmentImportMaterial(matMap.get(old.material_id!), row.material_snapshot) }
                   })
                   return next
                 })
@@ -1350,9 +1380,21 @@ export default function ShipmentsPage() {
           {items.some(item => !shipmentUsesDeclarationPrice(item) && (item.purchase_charge_ratio ?? 1) < 1) && <Typography.Paragraph type="secondary">
             备品不收费：数量和重量保留实际走货（含备品），采购金额按对应采购明细的正常入库／总入库比例折算；分批及合并走货不重复计费。
           </Typography.Paragraph>}
+          {items.some(item => item.material_snapshot) && <Typography.Paragraph type="secondary">
+            Excel 导入行的中国／印尼海关编码可直接编辑、粘贴或向下填充；保存后仅影响本票走货及导出，不写回货号库。
+          </Typography.Paragraph>}
+          <Typography.Paragraph type="secondary">
+            申报数量按申报单位：PCE 为实际件数，SET 为套数，KGM 为净重公斤，TNE 为净重吨数。送货数量及其数量单位单独保留；毛重、净重始终以 kg 显示。
+          </Typography.Paragraph>
           <ShipmentSheetTable<MergedEditorRow<ShipmentItem>>
             fields={shipmentSheetFields}
-            editableAt={(row, field) => !(consolidatedItems[row]?.sources.length > 1 && mergedReadOnlyFields.has(field))}
+            editableAt={(row, field) => {
+              const item = consolidatedItems[row]
+              const material = item?.material_id != null ? matMap.get(item.material_id) : undefined
+              return !(item?.sources.length > 1 && mergedReadOnlyFields.has(field))
+                && (field !== 'kg' || !isShipmentCountUnit(material?.unit_kg))
+                && (!field.startsWith('snapshot:') || (!!item?.material_snapshot && item.material_id != null && item.material_id < 0))
+            }}
             onEdits={editSheetCells}
             rowOrder={consolidatedItems.map(item => item.sources.map(source => source._rowKey).join('-')).join(',')}
             valueAt={mergedCellValue}
@@ -1379,11 +1421,11 @@ export default function ShipmentsPage() {
                     : <span style={{ color: '#bbb', fontSize: 12 }}>无</span>
                 },
               },
-              { title: '物料ID', width: 80, render: (_v, r, i) => r.material_snapshot ? <Tag title="Excel 导入资料只保存在本次走货单">{r.material_snapshot.id || '导入'}</Tag> : r.material_id ? <Tag>{r.material_id}</Tag> : <Input.Search size="small" placeholder="物料ID" enterButton="选" onSearch={value => { const id = Number(value); if (Number.isInteger(id) && id > 0) { patchItem(i, 'material_id', id); loadMatsForItems([id]) } else message.warning('请输入有效物料 ID') }} /> },
+              { title: '物料ID', width: 100, render: (_v, r, i) => r.material_snapshot ? <><Tag title="Excel 导入资料只保存在本次走货单">{r.material_snapshot.id || '导入'}</Tag><ShipmentImportSource source={matMap.get(r.material_id!)?.import_source} /></> : r.material_id ? <Tag>{r.material_id}</Tag> : <Input.Search size="small" placeholder="物料ID" enterButton="选" onSearch={value => { const id = Number(value); if (Number.isInteger(id) && id > 0) { patchItem(i, 'material_id', id); loadMatsForItems([id]) } else message.warning('请输入有效物料 ID') }} /> },
               { title: '产品中文名称', width: 160, fixed: 'left', render: (_v, r) => matMap.get(r.material_id!)?.name_zh ?? '' },
               { title: '货号', width: 100, fixed: 'left', render: (_v, r) => matMap.get(r.material_id!)?.product_code ?? '' },
-              { title: '中国HSCODE', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.hs_cn ?? '' },
-              { title: '印尼HSCODE', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.hs_id ?? '' },
+              { title: '中国HSCODE', width: 150, render: (_v, r, i) => importedHsCell(r, i, 'hs_cn') },
+              { title: '印尼HSCODE', width: 140, render: (_v, r, i) => importedHsCell(r, i, 'hs_id') },
               { title: '套公式名称栏', width: 150, render: (_v, r, i) => fillable(i, 'formula_name', <Input size="small" value={r.formula_name} onChange={(e) => patchItem(i, 'formula_name', e.target.value)} />) },
               { title: '产品英文名称', width: 160, render: (_v, r) => matMap.get(r.material_id!)?.name_en ?? '' },
               { title: '规格', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.spec ?? '' },
@@ -1402,10 +1444,12 @@ export default function ShipmentsPage() {
                     setEditorDirty(true)
                   }} />
               } },
-              { title: '单位', width: 130, render: (_v, r, i) => fillableMaterial(i, 'unit_kg', <Select size="small" value={matMap.get(r.material_id!)?.unit_kg || 'KGM'} options={UNIT_LIST.map(u => ({ value: u, label: u }))} onChange={(v) => patchMatDim(r.material_id, 'unit_kg', v)} style={{ width: '100%' }} />) },
-              { title: '送货重量', width: 120, onCell: r => ({ style: r.sources.length > 1 ? GRAY : undefined }), render: (_v, r, i) => r.sources.length > 1 ? num(r.kg).toFixed(4) : fillable(i, 'kg', <ShipmentNumberCell value={r.kg} onCommit={v => patchItem(i, 'kg', v)} />) },
+              { title: '申报单位', width: 130, render: (_v, r, i) => fillableMaterial(i, 'unit_kg', <Select size="small" value={matMap.get(r.material_id!)?.unit_kg || 'KGM'} options={UNIT_LIST.map(u => ({ value: u, label: u }))} onChange={(v) => patchMatDim(r.material_id, 'unit_kg', v)} style={{ width: '100%' }} />) },
+              { title: '申报数量', width: 120, onCell: r => ({ style: r.sources.length > 1 || isShipmentCountUnit(matMap.get(r.material_id!)?.unit_kg) ? GRAY : undefined }), render: (_v, r, i) => r.sources.length > 1 || isShipmentCountUnit(matMap.get(r.material_id!)?.unit_kg)
+                ? <span title="按申报单位自动对应；PCE/SET 请修改送货数量">{num(r.kg).toLocaleString('en-US', { maximumFractionDigits: 4 })}</span>
+                : fillable(i, 'kg', <ShipmentNumberCell value={r.kg} onCommit={v => patchItem(i, 'kg', v)} />) },
               { title: '送货数量', width: 120, onCell: r => ({ style: r.sources.length > 1 ? GRAY : undefined }), render: (_v, r, i) => r.sources.length > 1 ? num(r.qty).toLocaleString('en-US', { maximumFractionDigits: 4 }) : fillable(i, 'qty', <ShipmentNumberCell value={r.qty} onCommit={v => patchQtyOrPack(i, 'qty', v)} />) },
-              { title: '单位', width: 60, align: 'center', render: (_v, r) => r.purchase_unit || (isPaperRope(matMap.get(r.material_id!)?.name_zh) ? '米' : '个') },
+              { title: '数量单位', width: 80, align: 'center', render: (_v, r) => r.purchase_unit || (isPaperRope(matMap.get(r.material_id!)?.name_zh) ? '米' : '个') },
               { title: '毛重总重', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.grossTotal ? c.grossTotal.toFixed(2) : '' } },
               { title: '净重总重', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.netTotal ? c.netTotal.toFixed(2) : '' } },
               { title: '立方数/每箱', width: 100, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.cbmEach ? c.cbmEach.toFixed(4) : '' } },
@@ -1415,7 +1459,7 @@ export default function ShipmentsPage() {
               { title: '合同日期', width: 155, render: (_v, r, i) => fillable(i, 'contract_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.contract_date ? dayjs(r.contract_date) : null} onChange={(v) => patchItem(i, 'contract_date', v ? v.format('YYYY-MM-DD') : '')} />) },
               { title: '发票号', width: 180, render: (_v, r, i) => fillable(i, 'invoice_no', <Input size="small" value={r.invoice_no} onChange={(e) => patchItem(i, 'invoice_no', e.target.value)} />) },
               { title: '发票日期', width: 155, render: (_v, r, i) => fillable(i, 'invoice_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.invoice_date ? dayjs(r.invoice_date) : null} onChange={(v) => patchItem(i, 'invoice_date', v ? v.format('YYYY-MM-DD') : '')} />) },
-              { title: '发票单价', width: 120, onCell: () => ({ style: GRAY }), render: (_v, r) => <InputNumber size="small" readOnly controls={false} precision={4} value={r.invoice_price} title="自动按导出公式计算；金额按送货重量计算" style={{ ...GRAY, width: '100%' }} /> },
+              { title: '发票单价', width: 120, onCell: () => ({ style: GRAY }), render: (_v, r) => <InputNumber size="small" readOnly controls={false} precision={4} value={r.invoice_price} title="自动按导出公式计算；金额按申报数量及申报单位计算" style={{ ...GRAY, width: '100%' }} /> },
               { title: '金额', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.invoiceAmount ? c.invoiceAmount.toFixed(2) : '' } },
               { title: '供应商', width: 160, render: (_v, r, i) => fillable(i, 'supplier', <Input size="small" value={r.supplier} onChange={(e) => patchItem(i, 'supplier', e.target.value)} />) },
               { title: '采购单日期', width: 160, onCell: r => ({ style: r.sources.length > 1 ? GRAY : undefined }), render: (_v, r, i) => r.sources.length > 1 ? mergedCellValue(i, 'po_date') : fillable(i, 'po_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.po_date ? dayjs(r.po_date) : null} onChange={(v) => patchItem(i, 'po_date', v ? v.format('YYYY-MM-DD') : '')} />) },

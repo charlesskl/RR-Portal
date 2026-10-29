@@ -143,7 +143,7 @@ ensure_service_base_images() { :; }
 
     def run_update_script(self, before_compose=b'services: {}\n', after_compose=b'services: {}\n',
                           changed_files='docker-compose.cloud.yml', services_config=None,
-                          include_helper=True, force=False):
+                          include_helper=True, force=False, fail_paiji_backup=False):
         install = self.path / 'install'
         (install / 'deploy').mkdir(parents=True)
         (install / 'apps').mkdir()
@@ -154,6 +154,17 @@ ensure_service_base_images() { :; }
         (self.path / 'after-compose.yml').write_bytes(after_compose)
         (self.path / 'changed-files').write_text(changed_files + '\n')
         shutil.copy(ROOT / 'deploy/service-maintenance.sh', install / 'deploy')
+        # The backup's real SQLite/WAL behavior has its own integration fixture.
+        # Here mock only that external boundary so rollout sequencing is tested.
+        (install / 'deploy/paiji-online-backup.sh').write_text('''#!/usr/bin/env bash
+set -euo pipefail
+python3 - <<'PY'
+import json, os, pathlib
+p = pathlib.Path(os.environ['FIXTURE_DIR'])
+with (p / 'calls').open('a') as f: f.write(json.dumps(['paiji-online-backup']) + '\\n')
+if os.environ.get('FAIL_PAIJI_BACKUP'): raise SystemExit(7)
+PY
+''')
         if include_helper:
             shutil.copy(ROOT / 'deploy/compose-mailbox-only-change.py', install / 'deploy')
         script = (ROOT / 'deploy/update-server.sh').read_text().replace(
@@ -182,6 +193,7 @@ ensure_service_base_images() { :; }
         (install / 'deploy' / 'maintenance').symlink_to(self.path / 'flags', target_is_directory=True)
         result = self.run_shell('bash "' + str(install / 'deploy/update-server.sh') + '"',
                                 '\n'.join(services_config), BEFORE_COMMIT='1' * 40, FULL_SCRIPT='1',
+                                FAIL_PAIJI_BACKUP='1' if fail_paiji_backup else '',
                                 FORCE_FULL_REBUILD='1' if force else '0', MAINT_HEALTH_TIMEOUT_SECONDS='2')
         calls_path = self.path / 'calls'
         calls = [json.loads(line) for line in calls_path.read_text().splitlines()] if calls_path.exists() else []
@@ -207,6 +219,27 @@ ensure_service_base_images() { :; }
         self.assertEqual([a[-1] for a in calls if 'build' in a], ['xingxin-invoice'])
         self.assertEqual([a[-1] for a in calls if 'up' in a], ['xingxin-invoice'])
         self.assertEqual(list(self.flags.iterdir()), [])
+
+    @unittest.skipUnless(BASH_MAJOR >= 4, 'full server script requires Bash 4+; covered on Linux CI')
+    def test_paiji_secret_reference_only_backs_up_then_deploys_paiji(self):
+        before = b'services:\n  paiji:\n    environment:\n      - PORT=3000\n'
+        after = before + b'      - ERP_RECEIPT_RETURN_TOKEN=${PAIJI_ERP_RECEIPT_RETURN_TOKEN:-}\n'
+        services = {svc: {} for svc in ['db', 'paiji', 'peise', 'nginx']}
+        result, calls = self.run_update_script(before, after, services_config=services)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([a[-1] for a in calls if 'up' in a], ['paiji'])
+        self.assertEqual([a[-1] for a in calls if 'build' in a], ['paiji'])
+        self.assertEqual(calls.count(['paiji-online-backup']), 1)
+        self.assertLess(calls.index(['paiji-online-backup']), next(i for i, a in enumerate(calls) if 'up' in a))
+
+    @unittest.skipUnless(BASH_MAJOR >= 4, 'full server script requires Bash 4+; covered on Linux CI')
+    def test_paiji_backup_failure_stops_before_any_recreate(self):
+        services = {svc: {} for svc in ['db', 'paiji', 'peise', 'nginx']}
+        result, calls = self.run_update_script(changed_files='apps/生产部/注塑啤机排产系统/server/db/init.js',
+                                              services_config=services, fail_paiji_backup=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls.count(['paiji-online-backup']), 1)
+        self.assertFalse(any('up' in call for call in calls))
 
     def mailbox_compose_fixture(self):
         before = b'services:\n  voyageplex-api:\n    environment:\n      ASPNETCORE_ENVIRONMENT: Production\n'

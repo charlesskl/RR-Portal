@@ -1,6 +1,6 @@
 "use client";
 // 导出日报表弹窗：选计划版/实际版 + 按拉别手填「表头人数说明」「杂工明细」，POST 拉取 xlsx 下载。
-// 备注临时填、不持久化（每次打开都空）。生产人数合计/上班人数等数字字段留待第二批（人数捆）。
+// 弹窗人数说明/杂工明细为本次导出追加内容；后端会自动带入已保存的当天拉别备注。
 import { useState } from "react";
 import { apiFetch } from "@/lib/apiFetch";
 
@@ -43,7 +43,7 @@ export default function ExportDialog({ date, lines }: { date: string; lines: { i
 
   return (
     <>
-      <button onClick={() => setOpen(true)}
+      <button onClick={() => { setExportDate(date); setOpen(true); }}
         className="ml-2 rounded-btn bg-mint-400 px-4 py-1.5 text-[13px] font-medium text-white hover:bg-mint-700">
         📥 导出 Excel
       </button>
@@ -64,6 +64,7 @@ export default function ExportDialog({ date, lines }: { date: string; lines: { i
                 实际版（次日早上发昨日实际，含生产数）
               </label>
             </div>
+            <p className="mb-3 text-[13px] text-text-secondary">底部备注自动带入排期页已保存的当天拉别备注，下方杂工明细会追加显示。</p>
             {lines.length === 0 && (
               <p className="mb-3 text-[13px] text-text-tertiary">当天无排期行，导出将为空表。</p>
             )}

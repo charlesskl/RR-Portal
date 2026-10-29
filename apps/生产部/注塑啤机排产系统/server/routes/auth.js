@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { signSession, readSession } = require('../services/erpReceiptAuth');
 
 // 默认密码（可用环境变量覆盖）— 内网生产系统简单口令，不强求 JWT
 const PASSWORDS = {
@@ -14,9 +15,10 @@ const LABELS = { A: 'A车间(兴信A)', B: 'B车间(兴信B)', C: '华登', W: '
 
 // 简单 token：base64(workshop:timestamp)，前端用作登录态标记
 function makeToken(workshop) {
-  return Buffer.from(`${workshop}:${Date.now()}`).toString('base64');
+  return signSession(workshop) || Buffer.from(`${workshop}:${Date.now()}`).toString('base64');
 }
 function parseToken(token) {
+  if (token.startsWith('v2.')) return readSession(token);
   try {
     const [ws, ts] = Buffer.from(token, 'base64').toString().split(':');
     return { workshop: ws, timestamp: Number(ts) };

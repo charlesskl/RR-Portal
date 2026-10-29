@@ -100,7 +100,7 @@ interface PoDetail extends PoSummary {
 }
 
 type SyncField = 'material_name' | 'category' | 'spec' | 'ship_unit' | 'net_per_pc'
-const SYNC_FIELDS: { field: SyncField; label: string; materialField: keyof Material }[] = [
+const SYNC_FIELDS: { field: SyncField; label: string; materialField: keyof Pick<Material, 'name_zh' | 'category' | 'spec' | 'unit_kg' | 'net_per_pc'> }[] = [
   { field: 'material_name', label: '物料名称', materialField: 'name_zh' },
   { field: 'category', label: '类别', materialField: 'category' },
   { field: 'spec', label: '规格', materialField: 'spec' },

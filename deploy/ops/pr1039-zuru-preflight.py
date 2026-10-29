@@ -1,7 +1,7 @@
 """INERT ZURU read-only profile. No application import, lifecycle or business writes."""
 import hashlib,importlib.util,json,os,pathlib,re,stat,subprocess,sys
 ROOT=pathlib.Path('/opt/rr-portal');APP='apps/业务部/ZURU接单表入单系统';SERVICE='zuru-order-system';ALIAS='rr-portal-zuru-order-system:latest'
-BRANCH='refs/heads/ops/pr-1039-20261029-zuru';OUT=ROOT/'deploy/backups/pr1039-zuru-preflight-1';BASE='91178c35b2013d32dc02808ece1d81924d567d0d';EXECUTE=True
+BRANCH='refs/heads/ops/pr-1039-20261029-zuru';OUT=ROOT/'deploy/backups/pr1039-zuru-preflight-1';BASE='91178c35b2013d32dc02808ece1d81924d567d0d';EXECUTE=False
 DEPS={'pr1035-quote-preflight.py':'2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5','pr1030-engineering-preflight.py':'3d06b2aef715f75740826ff75f91c1cb78e0927e030717795ef2733f0595a4d0'}
 DELTA={'157145':({'cn_name':'牙齿怪兽','workshop':'兴信A','schedule_name':'牙齿怪兽'},{'cn_name':'牙齿怪兽','workshop':'A-华嘉','schedule_name':'牙齿怪兽'}),'15752':({'cn_name':'牙齿怪兽','workshop':'A-华嘉','schedule_name':'牙齿怪兽'},{'cn_name':'牙齿怪兽','workshop':'兴信A','schedule_name':'牙齿怪兽'}),'71184':(None,{'cn_name':'客版眼镜蛇','workshop':'兴信A','schedule_name':'恐龙系列'}),'77965':(None,{'cn_name':'3PK双色龙','workshop':'华登','schedule_name':'双色龙'}),'MEC494':(None,{'cn_name':'157131+157130+157128','workshop':'兴信A','schedule_name':'牙齿怪兽'}),'MSLD192':(None,{'cn_name':'77772','workshop':'兴信B','schedule_name':'迷你唱片球'}),'MSLD227':(None,{'cn_name':'牙齿怪兽','workshop':'兴信A','schedule_name':'牙齿怪兽'})}
 STAGE='entry'

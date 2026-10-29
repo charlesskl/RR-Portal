@@ -1,6 +1,6 @@
 """INERT, read-only relay of exactly one sealed successful prepare receipt."""
 import hashlib,json,pathlib,stat,sys
-EXECUTE=True
+EXECUTE=False
 PHASE=pathlib.Path('/opt/rr-portal/deploy/backups/pr1030-engineering-20261029-r2/prepare')
 EXPECTED='777f648373df1dc66d407b42e154c884a4f148a2de6de2deb3bdfa7453421e12'
 TARGET='91178c35b2013d32dc02808ece1d81924d567d0d';TREE='2658ba6fcdcf656201d75847a9abc6c70f44849d';APP_TREE='ff7afc1432e3bbc72ad708233fc7cae5bf2685ba'

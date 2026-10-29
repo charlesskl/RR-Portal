@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  App, AutoComplete, Button, Card, Checkbox, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm,
-  Row, Select, Space, Table, Tag, Typography,
+  Alert, App, AutoComplete, Button, Card, Checkbox, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm,
+  Row, Select, Space, Spin, Table, Tag, Typography,
 } from 'antd'
 import dayjs from 'dayjs'
 import { api, type Dictionaries, type Material } from '../api/client'
@@ -190,6 +190,8 @@ export default function ShipmentsPage() {
   const [loading, setLoading] = useState(false)
   const [editing, setEditing] = useState<ShipmentDetail | null>(null)
   const [creating, setCreating] = useState(false)
+  const [editorLoad, setEditorLoad] = useState<'ready' | 'loading' | 'error'>('ready')
+  const editorLoadState = useRef<'ready' | 'loading' | 'error'>('ready')
   const [rawItems, setRawItems] = useState<ShipmentItem[]>([])
   const nextRowKey = useRef(0)
   const [cartonSelection, setCartonSelection] = useState<React.Key[]>([])
@@ -200,6 +202,7 @@ export default function ShipmentsPage() {
   const [saving, setSaving] = useState(false)
   const [sheetEditing, setSheetEditing] = useState(false)
   const editorSession = useRef(0)
+  useEffect(() => () => { editorSession.current++ }, [])
   const [editorDirty, setEditorDirty] = useState(false)
   const [customers, setCustomers] = useState<string[]>([])
   const [customsNames, setCustomsNames] = useState<string[]>([])
@@ -337,7 +340,7 @@ export default function ShipmentsPage() {
       setSchedRows(Array.isArray(parsed) ? parsed : [])
     } catch {}
   }
-  useEffect(() => { load(); loadCustomers(); loadLatestSchedule(); loadOutbound(); loadProductCodes() }, [])
+  useEffect(() => { load(); loadCustomers() }, [])
   useEffect(() => {
     void api.get<Dictionaries>('/dictionaries').then(({ data }) => {
       setCustomsNames((data.suppliers || []).flatMap(supplier => [supplier.full || '', supplier.customs || '']))
@@ -416,11 +419,13 @@ export default function ShipmentsPage() {
 
   // 加载这些物料的主数据（显示只读列 + 计算 + 写回基准）
   async function loadMatsForItems(idsRaw: (number | undefined)[], force = false) {
+    const session = editorSession.current
     const ids = [...new Set(idsRaw.filter((x): x is number => x != null && x > 0))]
     const missing = force ? ids : ids.filter(id => !matMap.has(id))
     if (!missing.length) return
     try {
       const { data } = await api.get<any[]>('/materials/by-ids', { params: { ids: missing.join(',') } })
+      if (editorSession.current !== session) return
       setMatMap(prev => {
         const next = new Map(prev)
         for (const m of (data || [])) if (m.id != null) next.set(m.id, m)
@@ -617,6 +622,7 @@ export default function ShipmentsPage() {
     } catch { setManMats([]) }
   }
   async function pullManual() {
+    if (outLoading) { message.info('正在读取出库量，请稍候再添加'); return }
     const picked = manSel.map(k => manMats.find(m => String(m.id) === String(k))).filter(Boolean)
     if (!picked.length) { message.warning('请先勾选物料'); return }
     const matToPo = await buildMatToPo()
@@ -648,27 +654,40 @@ export default function ShipmentsPage() {
   }
 
   function openCreate() {
-    editorSession.current++
+    const session = ++editorSession.current
+    editorLoadState.current = 'ready'; setEditorLoad('ready')
     setCreating(true); setEditing({ id: 0, status: 'draft', rate: 0.93, container_count: 1 })
     setItems([]); setMatMap(new Map()); setDirtyMatIds(new Set())
     setEditorDirty(false)
     form.resetFields()
-    loadOutbound()
-    setTimeout(() => form.setFieldsValue({
+    setTimeout(() => { if (editorSession.current !== session) return; form.setFieldsValue({
       status: 'draft',
       rate: 0.93,
       container_count: 1,
       ship_date: dayjs().format('YYYY-MM-DD'),
-    }), 0)
+    }) }, 0)
   }
   async function openEdit(s: ShipmentSummary) {
-    editorSession.current++
+    const session = ++editorSession.current
+    editorLoadState.current = 'loading'; setEditorLoad('loading')
     setCreating(false); setEditing(s)
     form.resetFields(); setItems([]); setMatMap(new Map()); setDirtyMatIds(new Set())
     setEditorDirty(false)
     try {
-      loadOutbound(s.id)
       const { data } = await api.get<ShipmentDetail>(`/shipments/${s.id}`)
+      if (editorSession.current !== session) return
+      if (data.id !== s.id || !Array.isArray(data.items)) throw new Error('走货详情响应不完整，请重试')
+      const its = data.items.map(item => ({
+        ...item,
+        material_snapshot: typeof item.material_snapshot === 'string' ? JSON.parse(item.material_snapshot) : item.material_snapshot,
+      }))
+      const ids = [...new Set(its.filter(item => !item.material_snapshot).map(item => item.material_id).filter((id): id is number => id != null && id > 0))]
+      const materials = ids.length ? (await api.get<Material[]>('/materials/by-ids', { params: { ids: ids.join(',') } })).data : []
+      if (editorSession.current !== session) return
+      if (!Array.isArray(materials) || ids.some(id => !materials.some(material => material.id === id)))
+        throw new Error('物料资料未完整加载，请重试后再编辑')
+      // Publish the detail and metadata together: no half-loaded editable table.
+      setMatMap(new Map(materials.map(material => [material.id!, material])))
       form.setFieldsValue({
         customer: data.customer,
         container_no: data.container_no,
@@ -679,18 +698,17 @@ export default function ShipmentsPage() {
         rate: data.rate,
         status: data.status,
       })
-      const its = Array.isArray(data.items) ? data.items.map(item => ({
-        ...item,
-        material_snapshot: typeof item.material_snapshot === 'string' ? JSON.parse(item.material_snapshot) : item.material_snapshot,
-      })) : []
       setItems(its)
-      loadMatsForItems(its.map(x => x.material_id), true)
       setEditorDirty(false)
+      editorLoadState.current = 'ready'; setEditorLoad('ready')
     } catch (e: any) {
+      if (editorSession.current !== session) return
+      editorLoadState.current = 'error'; setEditorLoad('error')
       message.error('加载失败: ' + (e?.message ?? e))
     }
   }
   async function save(closeAfterSave = false): Promise<boolean> {
+    if (editorLoadState.current !== 'ready') { message.info('明细尚未完整加载，请加载成功后再保存'); return false }
     if (sheetEditing) { message.info('数量正在校验，请完成后再保存'); return false }
     try {
       const v = await form.validateFields()
@@ -770,6 +788,7 @@ export default function ShipmentsPage() {
 
   function closeEditor() {
     editorSession.current++
+    editorLoadState.current = 'ready'; setEditorLoad('ready')
     closeOutboundLink()
     setEditing(null)
     setCreating(false)
@@ -1000,6 +1019,35 @@ export default function ShipmentsPage() {
       return shipmentPurchaseDates(item.sources).join(' / ')
     return field.startsWith('material:') || field.startsWith('snapshot:') ? material?.[field.slice(9)]
       : item?.[field as keyof ShipmentItem] as string | number | undefined
+  }
+  // Clipboard/previews read the full data model, never just the mounted viewport.
+  function sheetDisplayValue(row: number, col: number): string | number | undefined {
+    const item = consolidatedItems[row]
+    if (!item) return ''
+    const material = matMap.get(item.material_id!)
+    const field = shipmentSheetFields[col]
+    if (field) return mergedCellValue(row, field)
+    const calculated = calc(item)
+    switch (col) {
+      case 0: return row + 1
+      case 1: return item.outbound_ids.map(id => `OUT-${id}`).join(' / ') || '未关联'
+      case 3: return item.material_snapshot?.id || (item.material_snapshot ? '导入' : item.material_id)
+      case 4: return material?.name_zh
+      case 5: return material?.product_code
+      case 9: return material?.name_en
+      case 10: return material?.spec
+      case 11: return material?.category
+      case 15: return item.purchase_unit || (isPaperRope(material?.name_zh) ? '米' : '个')
+      case 16: return calculated.grossTotal ? calculated.grossTotal.toFixed(2) : ''
+      case 17: return calculated.netTotal ? calculated.netTotal.toFixed(2) : ''
+      case 18: return calculated.cbmEach ? calculated.cbmEach.toFixed(4) : ''
+      case 19: return calculated.cbmTotal ? calculated.cbmTotal.toFixed(4) : ''
+      case 25: return item.invoice_price?.toFixed(4)
+      case 26: return calculated.invoiceAmount ? calculated.invoiceAmount.toFixed(2) : ''
+      case 32: return calculated.purchaseAmount.toFixed(2)
+      case 44: return shipmentGrossPerPc(material?.weight_per_carton, effectiveWeighingQty(item, material)).toFixed(6)
+      default: return ''
+    }
   }
   async function writeMergedCells(edits: SheetEdit[], confirm: boolean) {
     if (!edits.length || sheetConfirmOpen.current) return false
@@ -1272,15 +1320,18 @@ export default function ShipmentsPage() {
         destroyOnClose
         extra={
           <Space size={8} wrap>
-            <Button onClick={runValidation}>🔍 运行核对</Button>
-            <Button onClick={exportShipmentExcel} loading={exporting}>📤 导出报关明细</Button>
+            <Button onClick={runValidation} disabled={editorLoad !== 'ready'}>🔍 运行核对</Button>
+            <Button onClick={exportShipmentExcel} loading={exporting} disabled={editorLoad !== 'ready'}>📤 导出报关明细</Button>
             <Button onClick={() => setDrawerFull(!drawerFull)}>{drawerFull ? '⤢ 退出全屏' : '⤡ 全屏'}</Button>
             <Button onClick={requestDiscardChanges} disabled={!editorDirty}>↩ 取消修改</Button>
-            <Button type="primary" onClick={() => save()} loading={saving || sheetEditing}>💾 保存</Button>
+            <Button type="primary" onClick={() => save()} loading={saving || sheetEditing} disabled={editorLoad !== 'ready'}>💾 保存</Button>
           </Space>
         }
       >
-        <Form form={form} layout="vertical" onValuesChange={() => setEditorDirty(true)}>
+        {editorLoad === 'loading' && <div className="shipment-editor-loading" role="status"><Spin /><Typography.Text>正在加载走货明细和物料资料，请稍候…</Typography.Text></div>}
+        {editorLoad === 'error' && <Alert type="error" showIcon message="走货资料加载失败，尚未修改原数据" description="请重试。详情和物料完整载入前不能编辑、保存或导出。" action={<Button onClick={() => editing && openEdit(editing)}>重新加载</Button>} />}
+        <div hidden={editorLoad !== 'ready'}>
+        <Form form={form} layout="vertical" disabled={editorLoad !== 'ready'} onValuesChange={() => setEditorDirty(true)}>
           <Row gutter={12}>
             <Col span={5}>
               <Form.Item name="customer" label="客户（分区 RRI/RRM，按 PO 前缀自动判定）">
@@ -1342,9 +1393,9 @@ export default function ShipmentsPage() {
           extra={
             <Space wrap>
               <Button size="small" type="primary" onClick={() => { setOutSel([]); loadOutbound(editing?.id || undefined); setOutOpen(true) }}>📦 从出库精确分配</Button>
-              <Button size="small" onClick={() => { setManOpen(true); if (!manMats.length) loadManMats(manCode) }}>🗂 按货号选物料</Button>
+              <Button size="small" onClick={() => { setManOpen(true); loadProductCodes(); loadOutbound(editing?.id || undefined); if (!manMats.length) loadManMats(manCode) }}>🗂 按货号选物料</Button>
               <Button size="small" onClick={openTools}>从工具库选择</Button>
-              <Button size="small" onClick={() => setSchedPickerOpen(true)}>🔗 从排期勾选</Button>
+              <Button size="small" onClick={() => { loadLatestSchedule(); setSchedPickerOpen(true) }}>🔗 从排期勾选</Button>
               <Button size="small" onClick={addItem}>➕ 加一行</Button>
               <ShipmentImport existing={items.map(row => ({ ...row, material_snapshot: matMap.get(row.material_id!) }))} onImport={(imported: ShipmentImportItem[], targets: number[]) => {
                 setItems(current => {
@@ -1398,6 +1449,10 @@ export default function ShipmentsPage() {
             onEdits={editSheetCells}
             rowOrder={consolidatedItems.map(item => item.sources.map(source => source._rowKey).join('-')).join(',')}
             valueAt={mergedCellValue}
+            displayAt={sheetDisplayValue}
+            extraEditorAt={(row, col) => col === 3 ? !consolidatedItems[row]?.material_id && !consolidatedItems[row]?.material_snapshot
+              : col === 11 && !consolidatedItems[row]?.outbound_id && !!matMap.get(consolidatedItems[row]?.material_id!)}
+            viewportOffset={drawerFull ? 350 : 400}
             rowKey={r => String(r._rowKey)}
             rowSelection={{ selectedRowKeys: cartonSelection.map(String), onChange: keys => setCartonSelection(keys.map(Number)), fixed: true }}
             size="small"
@@ -1459,7 +1514,7 @@ export default function ShipmentsPage() {
               { title: '合同日期', width: 155, render: (_v, r, i) => fillable(i, 'contract_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.contract_date ? dayjs(r.contract_date) : null} onChange={(v) => patchItem(i, 'contract_date', v ? v.format('YYYY-MM-DD') : '')} />) },
               { title: '发票号', width: 180, render: (_v, r, i) => fillable(i, 'invoice_no', <Input size="small" value={r.invoice_no} onChange={(e) => patchItem(i, 'invoice_no', e.target.value)} />) },
               { title: '发票日期', width: 155, render: (_v, r, i) => fillable(i, 'invoice_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.invoice_date ? dayjs(r.invoice_date) : null} onChange={(v) => patchItem(i, 'invoice_date', v ? v.format('YYYY-MM-DD') : '')} />) },
-              { title: '发票单价', width: 120, onCell: () => ({ style: GRAY }), render: (_v, r) => <InputNumber size="small" readOnly controls={false} precision={4} value={r.invoice_price} title="自动按导出公式计算；金额按申报数量及申报单位计算" style={{ ...GRAY, width: '100%' }} /> },
+              { title: '发票单价', width: 120, onCell: () => ({ style: GRAY }), render: (_v, r) => <span title="自动按导出公式计算；金额按申报数量及申报单位计算">{r.invoice_price?.toFixed(4)}</span> },
               { title: '金额', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.invoiceAmount ? c.invoiceAmount.toFixed(2) : '' } },
               { title: '供应商', width: 160, render: (_v, r, i) => fillable(i, 'supplier', <Input size="small" value={r.supplier} onChange={(e) => patchItem(i, 'supplier', e.target.value)} />) },
               { title: '采购单日期', width: 160, onCell: r => ({ style: r.sources.length > 1 ? GRAY : undefined }), render: (_v, r, i) => r.sources.length > 1 ? mergedCellValue(i, 'po_date') : fillable(i, 'po_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.po_date ? dayjs(r.po_date) : null} onChange={(v) => patchItem(i, 'po_date', v ? v.format('YYYY-MM-DD') : '')} />) },
@@ -1484,7 +1539,7 @@ export default function ShipmentsPage() {
               { title: '高', width: 90, render: (_v, r, i) => fillableMaterial(i, 'height', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.height || null} onChange={(v) => patchMatDim(r.material_id, 'height', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '每箱重量', width: 100, render: (_v, r, i) => fillableMaterial(i, 'weight_per_carton', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.weight_per_carton || null} onChange={(v) => patchMatDim(r.material_id, 'weight_per_carton', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '称重数量', width: 100, render: (_v, r, i) => { const m = matMap.get(r.material_id!); return fillable(i, 'weighing_qty', <InputNumber size="small" controls={false} min={0} step={1} value={effectiveWeighingQty(r, m)} onChange={(v) => patchItem(i, 'weighing_qty', v ?? 0)} style={{ width: '100%' }} />) } },
-              { title: '单个毛重', width: 100, render: (_v, r) => { const m = matMap.get(r.material_id!); return <InputNumber size="small" min={0} precision={6} readOnly controls={false} title="单个毛重 = 每箱重量 ÷ 称重数量" value={shipmentGrossPerPc(m?.weight_per_carton, effectiveWeighingQty(r, m))} style={{ ...GRAY, width: '100%' }} /> } },
+              { title: '单个毛重', width: 100, onCell: () => ({ style: GRAY }), render: (_v, r) => { const m = matMap.get(r.material_id!); return <span title="单个毛重 = 每箱重量 ÷ 称重数量">{shipmentGrossPerPc(m?.weight_per_carton, effectiveWeighingQty(r, m)).toFixed(6)}</span> } },
               { title: '单个净重', width: 100, render: (_v, r, i) => fillableMaterial(i, 'net_per_pc', <InputNumber size="small" controls={false} min={0} step={0.000001} value={matMap.get(r.material_id!)?.net_per_pc} onChange={(v) => patchMatDim(r.material_id, 'net_per_pc', v ?? 0)} style={{ width: '100%' }} />) },
               {
                 title: '', width: 44, fixed: 'right',
@@ -1497,6 +1552,7 @@ export default function ShipmentsPage() {
             ]}
           />
         </Card>
+        </div>
       </Drawer>
 
       <Modal open={mergeOpen} title="合并箱数" onCancel={() => setMergeOpen(false)} onOk={mergeCartons}
@@ -1679,7 +1735,7 @@ export default function ShipmentsPage() {
             onChange={(v) => loadManMats(v)}
             filterOption={(input, opt) => (opt?.value?.toString() ?? '').toLowerCase().includes(input.toLowerCase())}
           />
-          <Button type="primary" disabled={!manSel.length} onClick={pullManual}>📥 添加选中物料</Button>
+          <Button type="primary" disabled={!manSel.length || outLoading} loading={outLoading} onClick={pullManual}>📥 添加选中物料</Button>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>有出库记录的物料自动带入出库量，否则数量=0 待填</Typography.Text>
         </Space>
         <Table

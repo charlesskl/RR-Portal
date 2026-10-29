@@ -69,7 +69,9 @@ function setup(key: string, at = { row: 1, col: 1 }) {
   const state = {
     sheetArrowKeys, sheetArrowPoint, sheetArrowUsesEditor, point: () => at,
     count: 3, fields: ['', 'name', 'qty'], editableAt: () => true,
-    cellAt: () => ({ querySelector: () => null }), editorAt: vi.fn(() => ({} as HTMLElement | null)), focus: vi.fn(),
+    cellAt: () => ({ querySelector: () => null }), hasCell: () => true,
+    canEdit: (p: { row: number; col: number }): boolean => p.col === 0 ? !!state.editorAt() : state.editableAt(),
+    editorAt: vi.fn(() => ({} as HTMLElement | null)), focus: vi.fn(),
     setAnchor: vi.fn(), setEnd: vi.fn(), fillDown: vi.fn(),
     event: { key, target: input, nativeEvent: { isComposing: false },
       ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false,

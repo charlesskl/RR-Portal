@@ -149,12 +149,13 @@
   touch-action: none;
 }
 .shipment-sheet-resize:hover { background: #1677ff44; }
-.shipment-sheet .ant-table-tbody > tr > td {
+.shipment-sheet [data-sheet-col] {
   padding: 3px 6px !important;
   font-variant-numeric: tabular-nums;
   vertical-align: middle;
 }
-.shipment-sheet .ant-table-body { scroll-padding-left: var(--sheet-fixed-width); scroll-padding-right: 60px; }
+.shipment-sheet .ant-table-body,
+.shipment-sheet .ant-table-tbody-virtual-holder { scroll-padding-left: var(--sheet-fixed-width); scroll-padding-right: 60px; }
 .shipment-sheet .shipment-fillable-cell { padding-right: 8px; }
 .shipment-sheet .ant-input,
 .shipment-sheet .ant-input-number,
@@ -165,13 +166,15 @@
   background: transparent !important;
   box-shadow: none !important;
 }
-.shipment-sheet td:focus-within { outline: 2px solid #1677ff; outline-offset: -2px; }
-.shipment-sheet .ant-table-tbody > tr > td.shipment-sheet-protected { background: #f0f3f7; }
-.shipment-sheet .ant-table-tbody > tr > td.shipment-sheet-selected { background: #e6f4ff !important; }
-.shipment-sheet .ant-table-tbody > tr > td.shipment-sheet-selected::after {
+.shipment-sheet [data-sheet-col]:focus-within { outline: 2px solid #1677ff; outline-offset: -2px; }
+.shipment-sheet [data-sheet-col].shipment-sheet-protected { background: #f0f3f7; }
+.shipment-sheet [data-sheet-col].shipment-sheet-selected { background: #e6f4ff !important; }
+.shipment-sheet [data-sheet-col].shipment-sheet-selected::after {
   pointer-events: none;
 }
 .shipment-sheet .shipment-fill-handle { width: 8px; height: 8px; font-size: 0; border-radius: 0; right: -3px; bottom: 0; }
+.shipment-sheet-preview { display: block; min-height: 24px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.shipment-editor-loading { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 240px; }
 
 @media (max-width: 1200px) {
   .shipment-editor .ant-drawer-header {

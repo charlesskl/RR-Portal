@@ -585,7 +585,7 @@ def parse(filepath):
             'line_no': rd['line_no'],
             'sku': rd['sku'],
             'sku_spec': rd['spec'],
-            'simple_no': _extract_simple_no(rd['spec'] or rd['sku']),
+            'simple_no': _extract_simple_no(rd['spec']) or _extract_simple_no(rd['sku']),
             'name': rd['name'],
             'inner_pcs': rd['inner_pcs'],
             'outer_pcs': rd['outer_pcs'],

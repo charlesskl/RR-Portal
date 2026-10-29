@@ -237,33 +237,43 @@ _pos_cache = {'key': None, 'pos': set()}
 
 
 def _read_existing_pos(filepath):
-    """读取接单表B列所有PO号，返回set。mtime 没变则命中缓存。"""
+    """读取唯一的「排期」工作表B列PO；读表失败不能视为没有旧单。"""
     try:
         st = os.stat(filepath)
         key = (filepath, st.st_mtime, st.st_size)
     except OSError as e:
-        logging.error(f'读取接单表 stat 失败: {filepath} - {e}')
-        return set()
+        raise ValueError('无法读取接单表文件，请重新选择或上传') from e
 
     with _pos_cache_lock:
         if _pos_cache['key'] == key:
             return _pos_cache['pos']
 
     pos = set()
+    wb = None
     try:
         wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
-        ws = wb.active
-        # iter_rows 流式读取：对 2500+ 行比 ws.cell(r,c) 快 ~200×
-        for row in ws.iter_rows(min_row=3, min_col=2, max_col=2, values_only=True):
-            v = row[0]
-            if v:
-                s = str(v).strip().replace('.0', '')
-                if s:
-                    pos.add(s)
-        wb.close()
+        sheets = [n for n in wb.sheetnames if str(n).strip() == '排期']
+        if not sheets:
+            raise ValueError('找不到「排期」工作表，请确认选择的是接单表文件')
+        if len(sheets) != 1:
+            raise ValueError('存在多个「排期」工作表，请保留唯一的排期页')
+        for row in wb[sheets[0]].iter_rows(min_row=3, min_col=2,
+                                           max_col=2, values_only=True):
+            if row[0]:
+                value = str(row[0]).strip()
+                if value.endswith('.0'):
+                    value = value[:-2]
+                if value:
+                    pos.add(value)
     except Exception as e:
         logging.error(f'读取接单表失败: {filepath} - {e}')
-        return set()
+        raise ValueError('读取接单表失败：' + str(e)[:120]) from e
+    finally:
+        if wb is not None:
+            wb.close()
+
+    if not pos:
+        raise ValueError('「排期」工作表没有可用的PO数据，请确认接单表内容')
 
     with _pos_cache_lock:
         _pos_cache['key'] = key
@@ -540,6 +550,12 @@ def _generate_excel(parsed_orders, custom_date=None):
             # "9574-STD\nPRODUCT" 两段富文本），不是货号后缀，货号写本体；
             # 普通格式取第一个-前，但第二段是纯字母后缀（如 125160A-PLB-S007 的 PLB）需拼接保留
             raw_item = ln['sku_spec'] or ln['sku'] or ''
+            if (simple_no and ln['sku'] and raw_item
+                    and not raw_item.strip().upper().startswith(simple_no.upper())):
+                warnings.append(
+                    f'PO {po}: 货号{simple_no}的SKU-SPEC栏内容异常'
+                    f'（{raw_item[:30]}...），货号已按SKU列写为{ln["sku"]}，请核对')
+                raw_item = ln['sku']
             if 'SLB' in raw_item and simple_no:
                 ws.cell(r, 4, simple_no + 'SLB')
             else:
@@ -738,7 +754,10 @@ def check_path():
     path = data.get('path', '').strip()
     if not path or not os.path.isfile(path):
         return jsonify({'ok': False, 'error': '文件不存在'}), 400
-    pos = _read_existing_pos(path)
+    try:
+        pos = _read_existing_pos(path)
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
     return jsonify({'ok': True, 'count': len(pos)})
 
 
@@ -751,15 +770,32 @@ def upload_table():
     ext = os.path.splitext(f.filename)[1].lower()
     if ext not in ('.xlsx', '.xls'):
         return jsonify({'ok': False, 'error': '仅支持Excel文件'}), 400
-    save_path = os.path.join(app.config['DATA_FOLDER'], 'uploaded_order_table.xlsx')
-    f.save(save_path)
-    pos = _read_existing_pos(save_path)
-    if not pos:
-        return jsonify({'ok': False, 'error': '未能读取到PO数据，请确认是接单表文件'}), 400
-    cfg = _load_config()
-    cfg['order_table_path'] = save_path
-    _save_config(cfg)
-    return jsonify({'ok': True, 'count': len(pos), 'filename': f.filename})
+    # Validate a private new file before atomically publishing its config pointer.
+    # A rejected upload never replaces the previous valid workbook.
+    with tempfile.NamedTemporaryFile(prefix='uploaded_order_table_', suffix='.xlsx',
+                                     dir=app.config['DATA_FOLDER'], delete=False) as tmp:
+        save_path = tmp.name
+    accepted = False
+    try:
+        f.save(save_path)
+        pos = _read_existing_pos(save_path)
+        if not pos:
+            return jsonify({'ok': False, 'error': '未能读取到PO数据，请确认是接单表文件'}), 400
+        cfg = _load_config()
+        cfg['order_table_path'] = save_path
+        _atomic_json(_CONFIG_FILE, cfg)
+        accepted = True
+        return jsonify({'ok': True, 'count': len(pos), 'filename': f.filename})
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    except OSError as e:
+        return jsonify({'ok': False, 'error': f'保存接单表失败: {e}'}), 500
+    finally:
+        if not accepted:
+            try:
+                os.remove(save_path)
+            except OSError:
+                pass
 
 
 @app.route('/api/update_items', methods=['POST'])
@@ -870,7 +906,10 @@ def classify():
     if not table_path or not os.path.isfile(table_path):
         return jsonify({'error': '未设置接单表路径或文件不存在'}), 400
 
-    existing_pos = _read_existing_pos(table_path)
+    try:
+        existing_pos = _read_existing_pos(table_path)
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
 
     saved = []
     for f in request.files.getlist('files'):
@@ -963,8 +1002,16 @@ def process():
     cfg = _load_config()
     table_path = cfg.get('order_table_path', '')
     existing_pos = set()
-    if table_path and os.path.isfile(table_path):
-        existing_pos = _read_existing_pos(table_path)
+    if table_path:
+        try:
+            existing_pos = _read_existing_pos(table_path)
+        except ValueError as e:
+            for _, path in saved:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            return jsonify({'ok': False, 'error': str(e)}), 400
 
     task = _new_task()
     task['total'] = len(saved)

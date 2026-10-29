@@ -1,6 +1,6 @@
 """Inert, one-service read-only evidence collector. No service or business writes."""
 import datetime, hashlib, importlib.util, json, os, pathlib, re, stat, subprocess, sys
-EXECUTE = True
+EXECUTE = False
 BRANCH = 'refs/heads/ops/pr-1030-1033-20261029-engineering'
 ROOT = pathlib.Path('/opt/rr-portal')
 OUT = ROOT / 'deploy/backups/pr1030-engineering-preflight-1'

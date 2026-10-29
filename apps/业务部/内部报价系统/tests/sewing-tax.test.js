@@ -130,3 +130,130 @@ test('旧表只有车衣时，未税设置同步移除合计退税和Excel税后
  const ws=saved.getWorksheet('TOMY');near(ws.getCell('CY5').result,0);near(ws.getCell('CZ5').result,10);
  assert.match(ws.getCell('CY5').formula,/CW5\*11.5%/);assert.doesNotMatch(ws.getCell('CY5').formula,/CV5/);
 });
+
+test('SPIN四种工艺及单列人工保留成本，仅布料参与退税；其他客户保持原口径', async()=>{
+ const sewing={tax_label:'含税',sewing_groups:[{category:'车衣',product_qty:1,labor_amount:6,items:[
+  {fabric:'布料',usage:1,mat_price:10},
+  ...['电绣','裁床','车缝','手工'].map((craft,i)=>({fabric:'工费',craft,usage:1,mat_price:i+2})),
+ ]}]};
+ assert.equal(Tax.hasSetting({...sewing,tax_label:''},'SPIN'),true);
+ for(const customer of ['SPIN','SpinMaster-毛绒（印尼）','SPINMASTER','TOMY']){
+  const q={...quote,customer}, s=sections(payload(sewing)), r=buildQuoteSummary(q,s);
+  const eligible=customer==='TOMY'?30:10;
+  near(r.components_before_tax.sewing_cloth,30);
+  near(r.sewing_taxable.sewing_cloth,eligible);
+  near(r.components.sewing_cloth,30-eligible*.115);
+  near(r.summary_values.cloth_13_cost,eligible);
+  const wb=await buildWorkbook({quote:q,sections:s});
+  const tax=taxCells(wb.getWorksheet('报价明细'));
+  near(tax.amount.result,eligible);near(tax.deduction.result,eligible*.115);
+ }
+ const allLabor={sewing_groups:[{items:[{fabric:'裁床人工',usage:1,mat_price:3},{fabric:'车缝人工',usage:1,mat_price:4},{fabric:'手工人工',usage:1,mat_price:5},{fabric:'绣花',usage:1,mat_price:2}],labor_amount:12}]};
+ near(Tax.fractions(allLabor,'SPIN').sewing_cloth,0);
+});
+
+test('SPIN按产品用量、车衣车发分别计算可退税材料，含税选择不能让工费参与退税',()=>{
+ const sew={sewing_groups:[
+  {category:'车衣',product_qty:2,items:[{fabric:'布料',usage:1,mat_price:10},{fabric:'工费',craft:'电绣',usage:1,mat_price:10}]},
+  {...group(20,'不含税'),product_qty:1},
+  {category:'车发',product_qty:1,items:[{fabric:'头发',usage:1,mat_price:8},{fabric:'手工',usage:1,mat_price:4}]},
+ ]};
+ const r=buildQuoteSummary({...quote,customer:'SPIN'},sections(payload(sew)));
+ near(r.components_before_tax.sewing_cloth,15);near(r.sewing_taxable.sewing_cloth,5);
+ near(r.components_before_tax.sewing_hair,3);near(r.sewing_taxable.sewing_hair,2);
+ assert.equal(Tax.craftFor({craft:'手工',fabric:'电绣'}),'手工');
+ assert.equal(Tax.craftFor({material:'裁床人工'}),'裁床');
+ assert.equal(Tax.isSpin('TOMY'),false);
+});
+
+test('SPIN网页和汇总Excel一致使用材料退税基数，工艺下拉提供四项',async()=>{
+ const sew={sewing_groups:[{items:[{fabric:'布料',usage:1,mat_price:10},{fabric:'加工',craft:'电绣',usage:1,mat_price:10}]}]};
+ const q={...quote,customer:'SPIN'},s=sections(payload(sew)),r=buildQuoteSummary(q,s);
+ const source=fs.readFileSync(path.join(__dirname,'../frontend/workbench.js'),'utf8');
+ const host={innerHTML:'',querySelector:()=>null};
+ const context=vm.createContext({window:{SewingTax:Tax,__data:{quote:q,sections:s}},num:v=>Number(v)||0,sum:obj=>Object.values(obj||{}).reduce((a,b)=>a+(Number(b)||0),0),formatNum:String});
+ vm.runInContext(source.slice(source.indexOf('function renderTaxDeductionBlock('),source.indexOf('\nfunction hasSlushCostingInputs(')),context);
+ const sales={};context.renderTaxDeductionBlock(host,sales,null,{}, {base_price:40,sewing_hair:0,sewing_cloth:20});
+ near(sales.pricing_summary.t4.sewcloth13.amt,10);
+ const wb=buildSummaryWorkbook([r]),keys=[...BASE_SUMMARY_COLUMNS,...SUMMARY_COLUMNS],ws=wb.getWorksheet('各客报价汇总');
+ const cell=key=>ws.getCell(5,keys.findIndex(c=>c[0]===key)+1);
+ near(cell('cloth_13_cost').result,10);near(cell('sewing_cloth_after_tax').result,18.85);
+ assert.match(source,/spinSewing \? \['电绣', '裁床', '车缝', '手工'\]/);
+});
+
+test('SPIN混装按各小产品和共用费用分别排除工费退税',()=>{
+ const make=(material,labor)=>({sewing_groups:[{items:[{fabric:'布料',usage:1,mat_price:material},{fabric:'加工',craft:'手工',usage:1,mat_price:labor}]}]});
+ const p=payload({mixed_products:{a:make(10,10),b:make(4,6)},mixed_shared:make(0,5)});
+ p.sales.mixed_quote={enabled:true,na_direct:true,mode:'ratio',units_per_pack:1,products:[{id:'a',code:'A',name:'A',ratio:.25,na_ratio:.25},{id:'b',code:'B',name:'B',ratio:.75,na_ratio:.75}]};
+ p.molding={mixed_molds:[]};
+ const r=buildQuoteSummary({...quote,customer:'SPIN'},sections(p));
+ near(r.components_before_tax.sewing_cloth,17.5);near(r.sewing_taxable.sewing_cloth,5.5);
+ near(r.components.sewing_cloth,17.5-5.5*.115);
+});
+
+test('SPIN原表核价汇总即使未设置整单不含税，也排除已识别电绣工费',()=>{
+ const {buildVerificationRow}=require('../backend/services/verificationSummary');
+ const cells={},groups=[];
+ const add=(title,row,labels,values)=>{const h=labels.map((_,i)=>'s!'+String.fromCharCode(65+i)+row),v=h.map(id=>id.replace(String(row),String(row+1)));h.forEach((id,i)=>cells[id]={v:labels[i]});v.forEach((id,i)=>cells[id]={v:values[i]});groups.push({title,rows:[h,v]});};
+ add('货价与材料',1,['货价','车衣','车发'],[30,10,0]);
+ add('包装与外购',4,['纸箱'],[0]);
+ add('人工与成本',7,['总成本','不含人工成本'],[10,10]);
+ add('减税与税后结果',10,['车衣类13%','车发类13%'],[.115,.115]);
+ groups[3].rows.push(['s!A13','s!B13']);cells['s!A13']={v:1.15};cells['s!B13']={v:0};cells['s!K1']={v:1.15};cells['s!K2']={v:8.85};
+ const model={cells,groups,metrics:{price:'s!A2',total:'s!A8',no_labor:'s!B8',deduction:'s!K1',after_cost:'s!K2'}};
+ const s=sections({sales:{legacy_import:{excel_model:model}},sewing:{sewing_groups:[{items:[{fabric:'布料',usage:1,mat_price:5},{craft:'电绣',usage:1,mat_price:5}]}]}});
+ const q={...quote,customer:'SPIN'};
+ const r=buildVerificationRow(q,{id:1,label:'V1',status:'drafting'},s,[{customer:'SPIN',sku:'SEW',qty:100,source:'test'}]);
+ near(r.values.BM,10);near(r.values.CW,5);near(r.values.BN,9.425);
+});
+
+test('SPIN截图四行：名称为裁床、车缝、手工而工艺留空时也不退税',()=>{
+ const sewing={tax_label:'含税',sewing_groups:[{items:[
+  {fabric:'其余材料合计',usage:1,mat_price:16.1172},
+  {fabric:'脸部 密绣眼睛',craft:'电绣',usage:1,mat_price:1.6995},
+  {fabric:'裁床',craft:'',usage:1,mat_price:2.3697},
+  {fabric:'车缝',craft:'',usage:1,mat_price:4.93},
+  {fabric:'手工',craft:'',usage:1,mat_price:1.995},
+ ]}]};
+ const result=buildQuoteSummary({...quote,customer:'SPIN'},sections(payload(sewing)));
+ near(result.components_before_tax.sewing_cloth,27.1114);
+ near(result.sewing_taxable.sewing_cloth,16.1172);
+ near(result.components.sewing_cloth,27.1114-16.1172*.115);
+});
+
+
+test('SPIN旧版逐项核价继续应用客户工费规则，汇总Excel与普通客户分离', async()=>{
+ const sewing={sewing_groups:[{items:[{fabric:'布料',usage:1,mat_price:10},{fabric:'工费',craft:'手工',usage:1,mat_price:10}]}],
+  legacy_items:[{include_in_summary:true,cost_category:'sewing_cloth',formula_kind:'quantity_x_unit',formula_quantity:1,formula_unit_hkd:20}]};
+ const p=payload(sewing);
+ p.sales.legacy_import={formula_mode:'itemized_v1',formula_offsets:{},formula_markup_x:1};
+ for(const customer of ['SPIN','TOMY']){
+  const r=buildQuoteSummary({...quote,customer},sections(p)),eligible=customer==='SPIN'?10:20;
+  near(r.components_before_tax.sewing_cloth,20);
+  near(r.sewing_taxable.sewing_cloth,eligible);
+  near(r.components.sewing_cloth,20-eligible*.115);
+  near(r.summary_values.cloth_13_cost,eligible);
+  const wb=buildSummaryWorkbook([r]),saved=new(require('exceljs').Workbook)();
+  await saved.xlsx.load(await wb.xlsx.writeBuffer());
+  const ws=saved.getWorksheet('各客报价汇总'),keys=[...BASE_SUMMARY_COLUMNS,...SUMMARY_COLUMNS];
+  const cell=key=>ws.getCell(5,keys.findIndex(c=>c[0]===key)+1);
+  near(cell('cloth_13_cost').result,eligible);
+  near(cell('sewing_cloth_after_tax').result,20-eligible*.115);
+  assert.match(cell('cloth_13_cost').formula,customer==='SPIN'?/\*0\.5$/:/\*1$/);
+ }
+});
+
+test('SPIN材料名称中的工艺词不误当工费，显式工艺与明确加工费仍优先',()=>{
+ for(const fabric of ['车缝线','绣花线','手工布料','車縫線','繡花線','embroidery thread']){
+  const sewing={sewing_groups:[{items:[{fabric,usage:1,mat_price:10},{fabric:'手工工费',usage:1,mat_price:10}]}]};
+  const r=buildQuoteSummary({...quote,customer:'SPIN'},sections(payload(sewing)));
+  near(r.components_before_tax.sewing_cloth,20);
+  near(r.sewing_taxable.sewing_cloth,10);
+  near(r.components.sewing_cloth,18.85);
+  assert.equal(Tax.craftFor({fabric}),'');
+  assert.equal(Tax.craftFor({fabric,craft:'电绣'}),'电绣');
+  assert.equal(Tax.craftFor({fabric,craft:'绣花'}),'电绣');
+ }
+ for(const [craft,expected] of [['車縫','车缝'],['裁床加工','裁床'],['手工制作','手工']])assert.equal(Tax.craftFor({fabric:'布料',craft}),expected);
+ for(const fabric of ['脸部绣花','车缝加工费','裁床人工','布料手工加工费'])assert.notEqual(Tax.craftFor({fabric}),'');
+});

@@ -31,14 +31,26 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Validate optional Paiji ERP return secret
+        shell: bash
+        env:
+          PAIJI_ERP_RECEIPT_RETURN_TOKEN: ${{ secrets.PAIJI_ERP_RECEIPT_RETURN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$PAIJI_ERP_RECEIPT_RETURN_TOKEN" && ! "$PAIJI_ERP_RECEIPT_RETURN_TOKEN" =~ ^[a-fA-F0-9]{64}$ ]]; then
+            echo 'PAIJI_ERP_RECEIPT_RETURN_TOKEN must be empty or a 64-character hex secret.' >&2
+            exit 1
+          fi
       - name: Deploy via SSH
+        env:
+          PAIJI_ERP_RECEIPT_RETURN_TOKEN: ${{ secrets.PAIJI_ERP_RECEIPT_RETURN_TOKEN }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           command_timeout: 60m
-          envs: BEFORE_COMMIT,AFTER_COMMIT,FORCE_FULL_REBUILD
+          envs: BEFORE_COMMIT,AFTER_COMMIT,FORCE_FULL_REBUILD,PAIJI_ERP_RECEIPT_RETURN_TOKEN
           # BEFORE_COMMIT / AFTER_COMMIT 传给 update-server.sh 用于算 diff
           # 脚本自己负责 git pull，不要在这里先 pull（否则 pull 后 HEAD 已经前进，脚本的 BEFORE==AFTER）
           script: |
@@ -179,6 +191,12 @@ jobs:
             # 与 JWT 签名密钥（改动后下次部署随镜像重建生效）
             sync_qc_plan_secret ERP_SA_PASSWORD '${{ secrets.ERP_SA_PASSWORD }}'
             sync_qc_plan_secret ERP_JWT_KEY '${{ secrets.ERP_JWT_KEY }}'
+
+            # 独立 ERP 退回密钥；空 Secret 保留现状，不触发任何服务重建。
+            if [ -n "${PAIJI_ERP_RECEIPT_RETURN_TOKEN:-}" ]; then
+              [[ "$PAIJI_ERP_RECEIPT_RETURN_TOKEN" =~ ^[a-fA-F0-9]{64}$ ]] || { echo '[FAIL] Paiji ERP return secret 格式无效' >&2; exit 1; }
+            fi
+            sync_qc_plan_secret PAIJI_ERP_RECEIPT_RETURN_TOKEN "${PAIJI_ERP_RECEIPT_RETURN_TOKEN:-}"
 
             # PrintLink 采集站配置（清溪 Windows 桥接）：secret 为单行 stations.json 内容
             # （含站点令牌，不进仓库、不回显）。start.mjs 检测到平台数据目录里的

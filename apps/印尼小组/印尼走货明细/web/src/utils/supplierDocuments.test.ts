@@ -510,12 +510,19 @@ describe('supplier document export', () => {
       }
     }
   })
-  it('displays Chinese invoice units without changing source quantities or units', async () => {
+  it('uses each declaration unit without changing source quantities, paid amounts or physical net weight', async () => {
     const codes = ['KGM', 'PCS', 'SET', 'MTR', '个']
+    const items = codes.map((_, i) => ({
+      material_id: i + 1, supplier: seller.keyword, kg: i + 0.25, qty: 100,
+      price: i + 2, purchase_charge_ratio: 0.9,
+    }))
+    const original = structuredClone(items)
     const file = await buildCustomsWorkbook({
       templateBuffer: rrmTemplateBuffer, seller,
-      items: codes.map((_, i) => ({ material_id: i + 1, supplier: seller.keyword, kg: i + 0.25, qty: 100 })),
-      materials: new Map(codes.map((unit, i) => [i + 1, { id: i + 1, name_zh: `测试${i}`, unit_kg: unit, supplier: seller.keyword }])),
+      items,
+      materials: new Map(codes.map((unit, i) => [i + 1, {
+        id: i + 1, name_zh: `测试${i}`, unit_kg: unit, supplier: seller.keyword, net_per_pc: 0.2,
+      }])),
       supplierProfiles: [seller], productHs: new Map(), images: new Map(),
       form: { customer: 'RRM', containerNo: 'UNIT-TEST' },
     })
@@ -523,9 +530,20 @@ describe('supplier document export', () => {
     ;['千克', '个', '套', '米', '个'].forEach((unit, i) => {
       expect(wb.Sheets['发票'][`G${i + 9}`].v).toBe(unit)
       expect(wb.Sheets['发票'][`G${i + 9}`].f).toContain(`'UNIT-TEST'!J${i + 4}`)
-      expect(wb.Sheets['发票'][`F${i + 9}`].v).toBe(i + 0.25)
-      expect(wb.Sheets['UNIT-TEST'][`J${i + 4}`].v).toBe(codes[i])
+      const declarationQuantity = i === 0 ? original[i].kg : original[i].qty
+      const paidAmount = original[i].qty * original[i].price * original[i].purchase_charge_ratio
+      const main = wb.Sheets['UNIT-TEST']
+      const invoice = wb.Sheets['发票']
+      expect(invoice[`F${i + 9}`]).toMatchObject({ f: `'UNIT-TEST'!K${i + 4}`, v: declarationQuantity })
+      expect(main[`J${i + 4}`].v).toBe(codes[i])
+      expect(main[`K${i + 4}`].v).toBe(declarationQuantity)
+      expect(main[`L${i + 4}`].v).toBe(original[i].qty)
+      expect(main[`Q${i + 4}`].v).toBe(20)
+      expect(main[`AP${i + 4}`].v).toBeCloseTo(paidAmount, 8)
+      expect(invoice[`I${i + 9}`].v).toBeCloseTo(paidAmount, 8)
+      expect(invoice[`F${i + 9}`].v * invoice[`H${i + 9}`].v).toBeCloseTo(paidAmount, 8)
     })
+    expect(items).toEqual(original)
   })
   it.each(['legacy', 'RRI', 'RRM'])('uses shipping weight and its unit for generic invoice quantity (%s)', async variant => {
     const file = await buildCustomsWorkbook({

@@ -4,13 +4,14 @@
  */
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { loadDashboard } from "@/lib/dashboard";
+import { StitchIcon } from "@/components/StitchIcon";
 import type { Dashboard, DashboardProject, View } from "@/types";
 
-const DOC_NAMES = ["作业指导书", "外购件清单", "排模表", "排模图", "生产注意事项"];
 
-function timeAgo(ts: number): string {
+function timeAgo(ts: number, scannedAt: number): string {
   if (!ts) return "-";
-  const s = Math.floor((Date.now() - ts) / 1000);
+  const s = Math.floor((scannedAt - ts) / 1000);
   if (s < 3600) return `${Math.max(1, Math.floor(s / 60))} 分钟前`;
   if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
   return `${Math.floor(s / 86400)} 天前`;
@@ -18,7 +19,7 @@ function timeAgo(ts: number): string {
 
 /** 按资料完成度分四个阶段门 */
 function stageOf(p: DashboardProject): number {
-  const pct = p.done / p.total;
+  const pct = p.total > 0 ? p.done / p.total : 0;
   if (pct >= 1) return 3;
   if (pct >= 0.6) return 2;
   if (pct > 0) return 1;
@@ -28,24 +29,27 @@ const STAGES = [
   { name: "01. 待启动 · 资料未做", dot: "bg-error" },
   { name: "02. 资料编制中", dot: "bg-tertiary" },
   { name: "03. 收尾补齐中", dot: "bg-secondary" },
-  { name: "04. 已齐套放行", dot: "bg-surface-variant" },
+  { name: "04. 资料已齐套", dot: "bg-surface-variant" },
 ];
 
-export default function DashboardView({ onNavigate }: { onNavigate: (v: View) => void }) {
+export default function DashboardView({ onNavigate, refreshKey = 0 }: { onNavigate: (v: View) => void; refreshKey?: number }) {
   const [data, setData] = useState<Dashboard | null>(null);
   const [err, setErr] = useState("");
 
   useEffect(() => {
-    api.dashboard().then(setData).catch((e) => setErr(e.message));
-  }, []);
+    let alive = true;
+    loadDashboard(api).then((value) => { if (alive) { setErr(""); setData(value); } }).catch((e) => { if (alive) setErr(e.message); });
+    return () => { alive = false; };
+  }, [refreshKey]);
 
   if (err) return <div className="p-8 text-center text-error">加载失败:{err}</div>;
   if (!data) return <div className="p-8 text-center text-on-surface-variant font-body-md">正在扫描资料库…</div>;
 
   const { stats } = data;
-  const weekAgo = Date.now() - 7 * 86400_000;
+  const DOC_NAMES = data.docTypes;
+  const weekAgo = data.scannedAt - 7 * 86400_000;
   const activeWeek = data.projects.filter((p) => p.mtime > weekAgo);
-  const incomplete = data.projects.filter((p) => p.done < p.total);
+  const incomplete = data.projects.filter((p) => p.total === 0 || p.done < p.total);
   const worst = incomplete.slice().sort((a, b) => a.done - b.done).slice(0, 3).map((p) => p.project);
   const clients = new Set(data.projects.map((p) => p.client)).size;
   const byStage = STAGES.map((_, i) => data.projects.filter((p) => stageOf(p) === i));
@@ -57,18 +61,18 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
     <div className="flex flex-col w-full py-space-lg pb-margin-desktop space-y-space-xl">
       {/* ── Top Operational Context Ribbon ── */}
       <div className="w-full flex flex-col md:flex-row md:items-center justify-between gap-space-md bg-surface-container-low p-space-md rounded shadow-sm">
-        <div className="flex items-center gap-space-lg">
+        <div className="flex flex-wrap items-center gap-space-lg">
           <div className="flex items-center gap-space-xs font-label-md text-label-md text-secondary">
             <span className="w-2 h-2 rounded-full bg-secondary animate-ping"></span>
-            <span>REALTIME RADAR ACTIVE</span>
+            <span>资料目录扫描</span>
           </div>
           <div className="h-4 w-[1px] bg-surface-container-highest"></div>
           <span className="font-body-sm text-body-sm text-on-surface-variant">
-            资料库实时扫描: <span className="text-on-surface font-label-md">{stats.projects} 个项目 / {clients} 个客户</span>
+            当前扫描结果: <span className="text-on-surface font-label-md">{stats.projects} 个项目 / {clients} 个客户</span>
           </span>
           <div className="hidden lg:flex items-center gap-space-xs text-on-surface-variant font-body-sm text-body-sm">
-            <span className="material-symbols-outlined text-[15px] text-tertiary">security</span>
-            <span>受控放产防呆机制: <strong className="text-secondary font-medium">制单台编辑锁已使能</strong></span>
+            <StitchIcon name="security" className="text-[15px] text-tertiary" />
+            <span>审核状态: <strong className="text-secondary font-medium">请进入项目查看受控记录</strong></span>
           </div>
         </div>
         <div className="flex items-center gap-space-sm">
@@ -76,7 +80,7 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
             onClick={() => onNavigate({ type: "clients" })}
             className="px-space-md py-[4px] bg-secondary text-on-secondary text-label-md font-label-md rounded font-semibold hover:bg-secondary-fixed transition-colors flex items-center gap-space-xs"
           >
-            <span className="material-symbols-outlined text-[15px]">dataset</span>
+            <StitchIcon name="dataset" className="text-[15px]" />
             <span>进入资料库做资料</span>
           </button>
         </div>
@@ -84,7 +88,7 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
 
       {/* ── KPI Precision Grid (5-column) ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-space-md">
-        <Kpi label="推进中放产项目" icon="rocket_launch" iconCls="text-secondary"
+        <Kpi label="资料库项目" icon="rocket_launch" iconCls="text-secondary"
           value={<>{stats.projects}<span className="font-body-sm text-body-sm text-on-surface-variant font-normal ml-space-xs">个项目</span></>}
           badge={<span className="font-label-sm text-label-sm text-secondary bg-surface-container px-space-xs py-[2px] rounded font-semibold">{clients} 客户</span>}
           foot={<><span>客户覆盖</span><span className="text-on-surface font-label-md text-label-md">{clients} 客户 / 全部年度</span></>} />
@@ -92,19 +96,19 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
           value={<>{stats.incomplete}<span className="font-body-sm text-body-sm text-on-surface-variant font-normal ml-space-xs">个项目</span></>}
           badge={<span className="font-label-sm text-label-sm text-tertiary bg-tertiary-container px-space-xs py-[2px] rounded">ACTION</span>}
           foot={<><span>焦灼项目:</span><span className="text-tertiary-fixed-dim font-label-sm text-label-sm truncate">{worst.join(", ") || "无"}</span></>} />
-        <Kpi label="资料已齐套放行" icon="rate_review" iconCls="text-secondary"
+        <Kpi label="资料已齐套" icon="rate_review" iconCls="text-secondary"
           value={<>{stats.complete}<span className="font-body-sm text-body-sm text-on-surface-variant font-normal ml-space-xs">个项目</span></>}
-          badge={<span className="font-label-sm text-label-sm text-secondary bg-surface-container px-space-xs py-[2px] rounded font-semibold">五类齐全</span>}
+          badge={<span className="font-label-sm text-label-sm text-secondary bg-surface-container px-space-xs py-[2px] rounded font-semibold">文件齐全</span>}
           foot={<><span>齐套率:</span><span className="text-secondary font-label-md text-label-md">{stats.projects ? Math.round((stats.complete / stats.projects) * 100) : 0}%</span></>} />
         {/* Card 4: 完整度 + 进度条 */}
         <div className="bg-surface-container-low p-space-md rounded shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="flex items-center justify-between text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider">
-            <span>工程资料受控完整度</span>
-            <span className="material-symbols-outlined text-secondary text-[16px]">verified_user</span>
+            <span>工程资料文件完整度</span>
+            <StitchIcon name="verified_user" className="text-secondary text-[16px]" />
           </div>
           <div className="mt-space-md flex items-baseline justify-between">
             <span className="font-headline-xl text-headline-xl text-on-surface font-bold">{stats.readiness}%</span>
-            <span className="font-label-sm text-label-sm text-secondary bg-surface-container px-space-xs py-[2px] rounded">五类资料</span>
+            <span className="font-label-sm text-label-sm text-secondary bg-surface-container px-space-xs py-[2px] rounded">文件完整度</span>
           </div>
           <div className="mt-space-sm pt-space-xs">
             <div className="w-full bg-surface-container-highest h-1 rounded-full overflow-hidden">
@@ -119,7 +123,7 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
         <Kpi label="7 天内有更新" icon="difference" iconCls="text-secondary-fixed-dim"
           value={<>{activeWeek.length}<span className="font-body-sm text-body-sm text-on-surface-variant font-normal ml-space-xs">个项目</span></>}
           badge={<span className="font-label-sm text-label-sm text-secondary bg-surface-container px-space-xs py-[2px] rounded">活跃</span>}
-          foot={<><span>最近更新:</span><span className="text-secondary font-label-md text-label-md">{data.projects[0] ? timeAgo(data.projects[0].mtime) : "-"}</span></>} />
+          foot={<><span>最近更新:</span><span className="text-secondary font-label-md text-label-md">{data.projects[0] ? timeAgo(data.projects[0].mtime, data.scannedAt) : "-"}</span></>} />
       </div>
 
       {/* ── Stage-Gate Kanban ── */}
@@ -127,15 +131,15 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm bg-surface-container-lowest p-space-sm rounded">
           <div className="flex items-center gap-space-md">
             <div className="p-space-xs bg-surface-container-high rounded text-secondary flex items-center justify-center">
-              <span className="material-symbols-outlined text-[18px]">alt_route</span>
+              <StitchIcon name="alt_route" className="text-[18px]" />
             </div>
             <div>
-              <span className="font-headline-sm text-headline-sm text-on-surface font-semibold">放产资料推进全流程管道</span>
+              <span className="font-headline-sm text-headline-sm text-on-surface font-semibold">工程资料准备进度</span>
               <span className="ml-space-sm font-label-sm text-label-sm text-on-surface-variant">STAGE-GATE FLOW KANBAN · 按资料完成度分级</span>
             </div>
           </div>
-          <div className="flex items-center gap-space-lg">
-            <div className="flex items-center gap-space-sm font-label-sm text-label-sm text-on-surface-variant">
+          <div className="flex flex-wrap items-center gap-space-lg">
+            <div className="flex flex-wrap items-center gap-space-sm font-label-sm text-label-sm text-on-surface-variant">
               {STAGES.map((s) => (
                 <span key={s.name} className="flex items-center gap-1">
                   <span className={`w-2 h-2 rounded-full ${s.dot}`}></span> {s.name.slice(4)}
@@ -155,23 +159,23 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
                 <div className="p-space-md text-center font-label-sm text-label-sm text-on-surface-variant">空</div>
               )}
               {byStage[i].slice(0, 5).map((p) => {
-                const pct = Math.round((p.done / p.total) * 100);
+                const pct = Math.round(p.total > 0 ? (p.done / p.total) * 100 : 0);
                 return (
-                  <div key={p.path} onClick={() => go(p)}
-                    className="bg-surface-container-low p-space-md rounded hover:bg-surface-container-highest transition-colors space-y-space-xs cursor-pointer">
+                  <button type="button" key={p.path} onClick={() => go(p)}
+                    className="bg-surface-container-low p-space-md rounded hover:bg-surface-container-highest transition-colors space-y-space-xs cursor-pointer text-left w-full">
                     <div className="flex items-start justify-between">
                       <span className="font-label-md text-label-md text-on-surface font-semibold">{p.project}</span>
                       <span className="font-label-sm text-label-sm text-secondary px-space-xs py-[1px] bg-surface-container rounded font-bold">{p.year}</span>
                     </div>
                     <p className="font-body-sm text-body-sm text-on-surface-variant line-clamp-1">{p.client}</p>
                     <div className="pt-space-xs flex items-center justify-between font-label-sm text-label-sm text-on-surface-variant">
-                      <span>更新: {timeAgo(p.mtime)}</span>
+                      <span>更新: {timeAgo(p.mtime, data.scannedAt)}</span>
                       <span>资料: <strong className="text-on-surface">{pct}%</strong></span>
                     </div>
                     <div className="w-full bg-surface-container-highest h-1 rounded-full overflow-hidden">
                       <div className={`h-full rounded-full ${pct === 100 ? "bg-secondary" : "bg-primary"}`} style={{ width: `${pct}%` }}></div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
               {byStage[i].length > 5 && (
@@ -187,7 +191,7 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
         <div className="xl:col-span-2 bg-surface-container-low p-space-md rounded shadow-sm flex flex-col space-y-space-sm">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold">项目放产资料健康度与风险矩阵</h3>
+              <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold">项目资料完整度矩阵</h3>
               <span className="font-label-sm text-label-sm text-on-surface-variant">RELEASE PACKAGE READINESS &amp; AUDIT MATRIX</span>
             </div>
             <span className="font-label-sm text-label-sm text-on-surface-variant">全部项目 ({data.projects.length})</span>
@@ -204,7 +208,7 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
               </thead>
               <tbody className="divide-y-0">
                 {data.projects.slice(0, 15).map((p) => {
-                  const pct = Math.round((p.done / p.total) * 100);
+                  const pct = Math.round(p.total > 0 ? (p.done / p.total) * 100 : 0);
                   return (
                     <tr key={p.path} onClick={() => go(p)}
                       className="bg-surface-container/50 hover:bg-surface-container-high/80 transition-colors cursor-pointer">
@@ -218,17 +222,17 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
                         </div>
                       </td>
                       {DOC_NAMES.map((d) => (
-                        <td key={d} className="py-space-sm px-space-xs text-center">
+                        <td key={d} aria-label={d + (p.docs[d] ? "：已有文件" : "：缺少文件")} className="py-space-sm px-space-xs text-center">
                           {p.docs[d]
-                            ? <span className="material-symbols-outlined text-secondary text-[16px]">check_circle</span>
-                            : <span className="material-symbols-outlined text-error text-[16px]">radio_button_unchecked</span>}
+                            ? <StitchIcon name="check_circle" className="text-secondary text-[16px]" />
+                            : <StitchIcon name="radio_button_unchecked" className="text-error text-[16px]" />}
                         </td>
                       ))}
                       <td className="py-space-sm px-space-sm text-center">
                         <span className={`font-label-md text-label-md font-bold ${pct === 100 ? "text-secondary" : pct >= 60 ? "text-tertiary" : "text-error"}`}>{pct}%</span>
                       </td>
                       <td className="py-space-sm px-space-md text-right">
-                        <span className="font-label-sm text-label-sm text-secondary hover:text-secondary-fixed">进入项目</span>
+                        <button type="button" onClick={(event) => { event.stopPropagation(); go(p); }} className="min-h-11 px-2 font-label-sm text-label-sm text-secondary hover:text-secondary-fixed focus-visible:outline focus-visible:outline-2">进入项目</button>
                       </td>
                     </tr>
                   );
@@ -242,7 +246,7 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
         <div className="bg-surface-container-low p-space-md rounded shadow-sm flex flex-col space-y-space-sm">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-space-xs">
-              <span className="material-symbols-outlined text-error text-[18px]">notification_important</span>
+              <StitchIcon name="notification_important" className="text-error text-[18px]" />
               <span className="font-headline-sm text-headline-sm text-on-surface font-semibold">资料待补齐告警 ({incomplete.length})</span>
             </div>
           </div>
@@ -253,8 +257,8 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
             {incomplete.slice(0, 10).map((p) => {
               const missing = DOC_NAMES.filter((d) => !p.docs[d]);
               return (
-                <div key={p.path} onClick={() => go(p)}
-                  className="bg-surface-container rounded p-space-md hover:bg-surface-container-high transition-colors cursor-pointer space-y-space-xs">
+                <button type="button" key={p.path} onClick={() => go(p)}
+                  className="bg-surface-container rounded p-space-md hover:bg-surface-container-high transition-colors cursor-pointer space-y-space-xs text-left w-full">
                   <div className="flex items-center justify-between">
                     <span className="font-label-md text-label-md text-on-surface font-semibold">{p.project}</span>
                     <span className="font-label-sm text-label-sm text-error bg-error-container/30 px-space-xs py-[1px] rounded">缺 {missing.length} 项</span>
@@ -262,7 +266,7 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: View) =>
                   <div className="font-label-sm text-label-sm text-on-surface-variant truncate">
                     {p.client} · 缺:{missing.join("、")}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -281,7 +285,7 @@ function Kpi({ label, icon, iconCls, value, badge, foot }: {
       <div className="absolute -right-4 -bottom-4 w-20 h-20 bg-secondary/5 rounded-full blur-xl group-hover:bg-secondary/10 transition-all pointer-events-none"></div>
       <div className="flex items-center justify-between text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider">
         <span>{label}</span>
-        <span className={`material-symbols-outlined ${iconCls} text-[16px]`}>{icon}</span>
+        <StitchIcon name={icon} className={`${iconCls} text-[16px]`} />
       </div>
       <div className="mt-space-md flex items-baseline justify-between">
         <span className="font-headline-xl text-headline-xl text-on-surface font-bold">{value}</span>

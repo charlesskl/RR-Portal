@@ -5,8 +5,12 @@ on:
     paths:
       - 'deploy/update-server.sh'
       - 'deploy/service-maintenance.sh'
+      - 'deploy/paiji-online-backup.sh'
+      - 'deploy/compose-mailbox-only-change.py'
       - 'deploy/tests/**'
       - '.github/workflows/deploy.yml'
+      - '.github/workflows/paiji-data-ops.yml'
+      - 'docker-compose.cloud.yml'
       - 'nginx/nginx.cloud.conf'
       - 'frontend/maintenance.html'
       - '.github/workflows/maintenance-regression.yml'
@@ -20,6 +24,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+      - name: Install locked Paiji SQLite dependency for real WAL backup tests
+        working-directory: apps/生产部/注塑啤机排产系统/server
+        run: npm ci --omit=dev --no-audit --no-fund
       - name: Install nginx for local integration tests
         run: |
           sudo apt-get update -qq
@@ -28,5 +38,5 @@ jobs:
         env:
           NGINX_BIN: /usr/sbin/nginx
         run: |
-          bash -n deploy/update-server.sh deploy/service-maintenance.sh
+          bash -n deploy/update-server.sh deploy/service-maintenance.sh deploy/paiji-online-backup.sh
           python3 -m unittest discover -s deploy/tests -v

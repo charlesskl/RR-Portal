@@ -6,6 +6,7 @@ import { toolImportDefaults } from '../utils/toolImportDefaults'
 import { createCartonGroupId } from '../utils/cartonGroupId'
 import ShipmentImportSource from './ShipmentImportSource'
 import { shipmentGrossPerPc, shipmentWeightQuantity } from '../utils/shipmentWeight'
+import { isShipmentCountUnit } from '../utils/shipmentDeclaration'
 
 const currencies = ['¥', 'US$', 'HK$', 'IDR'].map(value => ({ value, label: value }))
 export default function ShipmentImport({ existing, onImport }: { existing: ExistingShipmentImportRow[]; onImport: (rows: ShipmentImportItem[], targets: number[]) => void }) {
@@ -14,7 +15,12 @@ export default function ShipmentImport({ existing, onImport }: { existing: Exist
   const [rows, setRows] = useState<ShipmentImportRow[] | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [fileName, setFileName] = useState('')
-  const change = (key: string, fields: Partial<ShipmentImportItem>) => setRows(current => current!.map(r => r.key === key ? { ...r, item: { ...r.item, ...fields } } : r))
+  const change = (key: string, fields: Partial<ShipmentImportItem>) => setRows(current => current!.map(r => {
+    if (r.key !== key) return r
+    const item = { ...r.item, ...fields }
+    if ('qty' in fields && isShipmentCountUnit(item.material_snapshot.unit_kg)) item.kg = fields.qty
+    return { ...r, item }
+  }))
   async function read(file: File) {
     setBusy(true)
     try {
@@ -115,7 +121,7 @@ export default function ShipmentImport({ existing, onImport }: { existing: Exist
           { title: '货号 / 物料', width: 230, render: (_, r) => <>{r.item.material_snapshot.product_code}<br />{r.item.material_snapshot.name_zh}</> },
           { title: '供应商 / 报关公司', width: 220, render: (_, r) => <>{r.item.supplier}<br />{r.item.customs_company || '未填'}</> },
           { title: '送货数量', width: 110, render: (_, r) => <InputNumber min={0} value={r.item.qty} onChange={v => change(r.key, { qty: v ?? undefined })} style={{ width: '100%' }} /> },
-          { title: '申报量 / 单位', width: 130, render: (_, r) => <><InputNumber min={0} value={r.item.kg} onChange={v => change(r.key, { kg: v ?? undefined })} style={{ width: '100%' }} />{r.item.material_snapshot.unit_kg}</> },
+          { title: '申报数量 / 单位', width: 130, render: (_, r) => <><InputNumber min={0} readOnly={isShipmentCountUnit(r.item.material_snapshot.unit_kg)} value={r.item.kg} onChange={v => change(r.key, { kg: v ?? undefined })} style={{ width: '100%' }} />{r.item.material_snapshot.unit_kg}</> },
           { title: '箱数', width: 90, render: (_, r) => <>{r.item.cartons ?? '—'}{r.item.carton_group ? '（共箱）' : ''}</> },
           { title: '采购单价 / 币种', width: 140, render: (_, r) => <>{r.item.price ?? '—'}<Select style={{ width: '100%' }} value={r.item.currency} options={currencies} onChange={currency => change(r.key, { currency })} /></> },
           { title: '采购单号', width: 150, render: (_, r) => r.item.po_no || '—' },

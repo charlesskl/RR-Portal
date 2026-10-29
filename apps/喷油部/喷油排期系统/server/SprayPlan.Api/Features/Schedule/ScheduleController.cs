@@ -136,7 +136,10 @@ public class ScheduleController(AppDbContext db) : ControllerBase
             ScheduleCalc.SafeArr(p.MachineNos), p.WorkerCount, p.GoodQty, p.InboundQty, p.Remark,
             p.Order?.ExternalOrderNo ?? "-", PlanDateRules.CanReschedule(p))).ToList();
 
-        return Ok(new OverviewResult(lines, planDtos));
+        var notes = await db.DailyLineNotes.AsNoTracking()
+            .Where(n => n.NoteDate >= fromD && n.NoteDate <= toD).ToListAsync();
+        return Ok(new OverviewResult(lines, planDtos, notes.Select(n =>
+            new DailyLineNoteDto(n.LineId, ScheduleCalc.Ymd(n.NoteDate), n.Text, n.Version)).ToList()));
     }
 
     // 取当前登录用户（与 PlansController 对齐，用 username claim）

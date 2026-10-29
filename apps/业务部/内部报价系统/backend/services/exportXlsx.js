@@ -569,7 +569,7 @@ async function buildWorkbook({ quote, sections }) {
   subRefs.shipSurtaxHkdFormula = shipOpts.shipSurtaxHkdFormula;
 
   // ---------- 减税明细 / 成本汇总 ----------
-  row = renderTaxSummary(ws, row, sales, { subRefs, fxRH, summaryRow, sewing });
+  row = renderTaxSummary(ws, row, sales, { subRefs, fxRH, summaryRow, sewing, customer: quote.customer });
 
   // 业务算价参数说明
   ws.mergeCells(row, 1, row, 13);
@@ -2845,7 +2845,7 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const rmbBuyFormula =
     `${tA.dom_mat}+${tA.sewing_hair}+${tA.sewing_cloth}+${tA.hardware}+${tA.electronic}+${tA.motor}`
     + `+${tB.color_box}+${tB.battery}+${tB.libao}+${tB.plating}+${tB.flocking}+${tB.other_buy}+${tB.carton}+${tB.misc}+${tA.glue_bag}+${T3_PMAT}`;
-  const sewingTaxShares = require('../../frontend/sewing-tax').fractions(extra.sewing || {});
+  const sewingTaxShares = require('../../frontend/sewing-tax').fractions(extra.sewing || {}, extra.customer);
   const T4_FORMULA = {
     rmb_buy: rmbBuyFormula,
     tax13: `${tA.dom_mat}+${tA.hardware}+${tA.motor}+${tB.color_box}+${tB.battery}+${tB.libao}+${tB.flocking}+${tB.other_buy}+${T3_PMAT}+${tA.glue_bag}`,

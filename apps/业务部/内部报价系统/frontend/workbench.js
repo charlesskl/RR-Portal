@@ -2829,7 +2829,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
     const sewingPayload = typeof window !== 'undefined' && window.__data?.sections
       ? JSON.parse(window.__data.sections.find(section => section.dept === 'sewing')?.payload_json || '{}') : {};
     const sewingTaxable = autoFill.sewing_taxable || (typeof window !== 'undefined' && window.SewingTax
-      ? window.SewingTax.taxableAmounts(sewingPayload, ps.t1)
+      ? window.SewingTax.taxableAmounts(sewingPayload, ps.t1, window.__data?.quote?.customer)
       : { sewing_hair: num(ps.t1.sewing_hair), sewing_cloth: num(ps.t1.sewing_cloth) });
     setT4Amt('sewhair13', sewingTaxable.sewing_hair);                             // 车发类13% = 车发
     setT4Amt('sewcloth13', sewingTaxable.sewing_cloth);                           // 车衣类13% = 车衣
@@ -3031,6 +3031,7 @@ function renderSlush(host, payload, canEdit, onChange, fxRmbHkd) {
 
 // ============== 车缝部门 ==============
 function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
+  const spinSewing = typeof window !== 'undefined' && window.SewingTax?.isSpin(window.__data?.quote?.customer);
   payload.sewing_groups = payload.sewing_groups || [];
   payload.sewing_loss_pct = payload.sewing_loss_pct ?? 1;
   const fx = num(fxRmbHkd) || 0.85;
@@ -3038,7 +3039,8 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
   const itemCols = [
     { key: 'fabric', label: '布料名称', type: 'textarea', width: '240px' },
     { key: 'part', label: '部位', width: '90px' },
-    { key: 'craft', label: '工艺', type: 'select', options: ['电绣'], width: '80px' },
+    { key: 'craft', label: '工艺', type: 'select', options: spinSewing ? ['电绣', '裁床', '车缝', '手工'] : ['电绣'], width: '80px' },
+    ...(spinSewing ? [{ key: 'refund', label: '退税处理', readonly: true, calc: row => window.SewingTax.craftFor(row) || /人工/.test(String(row.fabric || row.part || row.name || '')) ? '不退税' : '按组税项', width: '100px' }] : []),
     { key: 'pieces', label: '裁片数', type: 'number', width: '70px' },
     { key: 'usage', label: '用量/码', type: 'number', width: '90px' },
     { key: 'mat_price', label: '物料价 (RMB)', type: 'number', width: '100px' },
@@ -3100,7 +3102,7 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
     <label>车缝报价 <select id="sw-tax-label" ${canEdit ? '' : 'disabled'}>
       <option value="含税" ${payload.tax_label !== '不含税' ? 'selected' : ''}>含税</option>
       <option value="不含税" ${payload.tax_label === '不含税' ? 'selected' : ''}>不含税（不退税）</option>
-    </select></label><p class="muted">仅含税车缝费用参与退税；各产品组可单独选择。此选项不改变已填报价金额。</p>
+    </select></label><p class="muted">仅含税车缝费用参与退税；各产品组可单独选择。此选项不改变已填报价金额。${spinSewing ? 'SPIN 的电绣、裁床、车缝、手工及人工费用不参与退税，保留成本；布料等材料按所选税项计算。' : ''}</p>
     <div id="sw-import-preview"></div>
     <div id="sw-groups"></div>`;
     renderLegacyItems(host, payload, canEdit, onChange);
@@ -3218,7 +3220,7 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
             items: (g.items || []).map(it => ({
               fabric: it.material || '',
               part: it.part || '',
-              craft: /电绣|绣花|embroider/i.test(String(it.material || '') + ' ' + String(it.note || '')) ? '电绣' : '',
+              craft: (spinSewing && window.SewingTax.craftFor(it)) || (/电绣|绣花|embroider/i.test(String(it.material || '') + ' ' + String(it.note || '')) ? '电绣' : ''),
               pieces: 1,
               usage: it.qty || 0,
               mat_price: it.unit_price || 0,
@@ -3470,6 +3472,48 @@ function renderCartonCalc(host, c, canEdit, onChange) {
 }
 
 function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty, quoteCustomer, { inputId, previewId, targetKey, label, mixedConfig, mixedRoot, mixedTotalCode, getMixedTotalCode, getMixedImportTarget, onApplied }) {
+    // Build new arrays first so a conflict in one product cannot partially apply a batch.
+    const mergeMaterials = (existing, incoming, byCode) => {
+      const normalize = value => String(value ?? '').normalize('NFKC').replace(/\s+/g, '').replace(/[×＊*]/g, 'X').toUpperCase();
+      const code = value => normalize(value).replace(/^BEAUTYMINI[_-]S3-(\d+)$/, (_, number) => `BEAUTYM-S3-${String(Number(number)).padStart(3, '0')}`);
+      const key = row => JSON.stringify([byCode ? code(row.product_code) : '', normalize(row.name), normalize(row.spec)]);
+      const positions = new Map(), seen = new Set(), replacements = new Map(), removed = new Set(), addedRows = [];
+      (existing || []).forEach((row, index) => {
+        if (row.is_subtotal || row.children?.length) return;
+        const identity = key(row);
+        if (!positions.has(identity)) positions.set(identity, []);
+        positions.get(identity).push(index);
+      });
+      let updated = 0, added = 0, duplicates = 0;
+      for (const row of incoming) {
+        if (!normalize(row.name)) throw Error('物料名称缺失，不能更新匹配物料');
+        const identity = key(row);
+        if (seen.has(identity)) throw Error(`${row.product_code || ''} ${row.name} 在本次报价中有多条相同名称和规格，请核对后再更新`);
+        seen.add(identity);
+        const matches = positions.get(identity) || [];
+        if (!matches.length) { addedRows.push({ ...row }); added++; continue; }
+        const replacement = { ...existing[matches[0]], ...row };
+        // Replaced numbers must not keep an older editable/exported formula.
+        for (const field of ['qty', 'unit_price_rmb', 'unit_price_usd', 'unit_price']) {
+          if (Object.hasOwn(row, field) && !Object.hasOwn(row, field + '_raw')) delete replacement[field + '_raw'];
+        }
+        replacements.set(matches[0], replacement);
+        matches.slice(1).forEach(index => removed.add(index));
+        updated++;
+        duplicates += matches.length - 1;
+      }
+      return { rows: (existing || []).flatMap((row, index) => removed.has(index) ? [] : [replacements.get(index) || row]).concat(addedRows), updated, added, duplicates };
+    };
+    const updatePlan = (items, allocation, sharedImport) => {
+      if (allocation?.unmatched.length) throw Error('存在无法分配的货号，请先核对');
+      const batches = !mixedConfig ? [{ id: null, items, existing: payload[targetKey] }]
+        : sharedImport ? [{ id: '__shared__', items, existing: mixedRoot.mixed_shared?.[targetKey] }]
+        : [
+          ...(allocation.sharedItems.length ? [{ id: '__shared__', items: allocation.sharedItems, existing: mixedRoot.mixed_shared?.[targetKey] }] : []),
+          ...allocation.groups.map(group => ({ id: group.product.id, items: group.items, existing: mixedRoot.mixed_products?.[group.product.id]?.[targetKey] })),
+        ];
+      return batches.map(batch => ({ id: batch.id, ...mergeMaterials(batch.existing, batch.items, !mixedConfig || batch.id === '__shared__') }));
+    };
     const fileInput = host.querySelector(inputId);
     if (!fileInput) return;
     let importSequence = 0;
@@ -3543,6 +3587,9 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
           if (totalCodeChanged()) { invalidateTotalCode(); return; }
           const normalizedItems = result.items.map(selectedItem);
           const allocation = mixedConfig && !sharedImport ? window.MixedSku.planSupplier(mixedConfig, normalizedItems, importTotalCode) : null;
+          let updates, updateError = '';
+          try { updates = updatePlan(normalizedItems, allocation, sharedImport); } catch (error) { updateError = error.message; }
+          const updateCounts = (updates || []).reduce((sum, batch) => ({ updated: sum.updated + batch.updated, added: sum.added + batch.added, duplicates: sum.duplicates + batch.duplicates }), { updated: 0, added: 0, duplicates: 0 });
           preview.innerHTML = `
             <div class="card" style="background:#f0fdf4;border:1px solid #86efac;">
               <p>从 <b>${escapeHtml(result.sheet_used || '')}</b> 解析到 <b>${normalizedItems.length}</b> 条${escapeHtml(label)}明细；可逐项选择识别到的 MOQ 与币种：</p>
@@ -3569,8 +3616,11 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
               </tbody></table>
               ${sharedImport ? '<p>导入到：每包装共有费用（计一次）。表内货号保留作来源，不匹配小产品。</p>' : ''}
               ${allocation ? `<p>${allocation.unmatched.length ? '无法分配：'+allocation.unmatched.map(escapeHtml).join('、') : '已匹配 '+allocation.groups.length+' 款小产品；总货号共用项目 '+allocation.sharedItems.length+' 条，每包装计一次。未涉及的资料保留。'}</p>` : ''}
+              <p>更新匹配物料：按同一产品下的物料名称和规格匹配，更新价格、用量及报价资料；未涉及的收缩膜等材料保留。新名称或新规格会新增。共有费用另按来源货号区分。</p>
+              <p data-supplier-update-status role="status">${updateError ? escapeHtml(updateError) : `预计更新 ${updateCounts.updated} 条、新增 ${updateCounts.added} 条${updateCounts.duplicates ? `，合并 ${updateCounts.duplicates} 条旧重复资料（应用前需确认）` : ''}。`}</p>
               <div style="margin-top:10px">
-                <button data-action="replace" ${allocation?.unmatched.length ? 'disabled' : ''}>${sharedImport ? '替换共有费用的'+escapeHtml(label) : allocation ? '替换匹配归属的'+escapeHtml(label) : '应用（替换全部'+escapeHtml(label)+'）'}</button>
+                <button data-action="update" ${updateError ? 'disabled' : ''}>更新匹配物料（推荐）</button>
+                <button data-action="replace" class="mini" ${allocation?.unmatched.length ? 'disabled' : ''}>${sharedImport ? '替换共有费用的'+escapeHtml(label) : allocation ? '替换匹配归属的'+escapeHtml(label) : '应用（替换全部'+escapeHtml(label)+'）'}</button>
                 <button data-action="append" class="mini" ${allocation?.unmatched.length ? 'disabled' : ''}>追加到现有列表</button>
                 <button data-action="cancel" class="mini danger">取消</button>
               </div>
@@ -3584,9 +3634,37 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
             renderPreview();
           });
           const finish = (mode) => {
+            if (!canEdit) return;
             if (!active()) return;
             if (totalCodeChanged()) { invalidateTotalCode(); return; }
             const appliedItems = result.items.map(selectedItem);
+            if (mode === 'update') {
+              if (getMixedImportTarget && getMixedImportTarget() !== importTarget) {
+                ++importSequence;
+                preview.innerHTML = '报价对象已切换，请重新选择文件，核对导入归属。';
+                fileInput.value = ''; return;
+              }
+              try {
+                const allocation = mixedConfig && !sharedImport ? window.MixedSku.planSupplier(mixedConfig, appliedItems, importTotalCode) : null;
+                const batches = updatePlan(appliedItems, allocation, sharedImport);
+                const duplicates = batches.reduce((sum, batch) => sum + batch.duplicates, 0);
+                if (duplicates && !confirm(`将按新报价更新匹配物料，并合并 ${duplicates} 条相同产品、名称和规格的旧重复资料，其他材料保留。确认？`)) return;
+                ++importSequence;
+                for (const batch of batches) {
+                  const target = !mixedConfig ? payload : batch.id === '__shared__' ? (mixedRoot.mixed_shared ||= {}) : ((mixedRoot.mixed_products ||= {})[batch.id] ||= {});
+                  target[targetKey] = batch.rows;
+                }
+                fileInput.value = ''; onChange();
+                if (mixedConfig) {
+                  preview.innerHTML = '已更新匹配物料，未涉及的材料已保留，请保存工程/业务草稿。';
+                  onApplied?.();
+                } else {
+                  preview.innerHTML = '';
+                  renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty, quoteCustomer);
+                }
+              } catch (error) { preview.querySelector('[data-supplier-update-status]').textContent = error.message; }
+              return;
+            }
             if (mixedConfig) {
               if (getMixedImportTarget && getMixedImportTarget() !== importTarget) {
                 ++importSequence;
@@ -3628,6 +3706,7 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
             renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty, quoteCustomer);
             onChange();
           };
+          preview.querySelector('[data-action="update"]').onclick = () => finish('update');
           preview.querySelector('[data-action="replace"]').onclick = () => finish('replace');
           preview.querySelector('[data-action="append"]').onclick = () => finish('append');
           preview.querySelector('[data-action="cancel"]').onclick = () => {

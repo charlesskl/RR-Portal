@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/connection');
+const { createErpReceiptReview, parseRequest, parseQuantities, ReviewError } = require('../services/erpReceiptReview');
+const { requireIntegration, requireWorkshop } = require('../services/erpReceiptAuth');
+const review = createErpReceiptReview(db);
+router.use(require('../middleware/materialName'));
 
 const COLS = [
-  'delivery_date', 'delivery_code', 'order_no', 'mold_no', 'part_name', 'color',
+  'delivery_date', 'delivery_code', 'order_no', 'mold_no', 'part_name', 'material_name', 'color',
   'order_qty', 'delivery_pcs', 'cavity', 'delivery_shots',
   'shot_weight', 'material_kg', 'material_type',
   'unit_price', 'amount',
@@ -28,6 +32,55 @@ function recalcAmount(row) {
   }
   return row;
 }
+
+// Dedicated integration actions never pass through the legacy full-row PUT.
+function reviewAction(kind) {
+  return (req, res, next) => {
+    try {
+      const dto = parseRequest(req.body, kind);
+      if (kind === 'resubmit' && !requireWorkshop(req, res, dto.workshop)) return;
+      const result = kind === 'return' ? review.returnReceipt(dto) : kind === 'reopen' ? review.reopen(dto) : review.resubmit(dto);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ReviewError) return res.status(error.status).json({ message: error.message });
+      next(error);
+    }
+  };
+}
+router.post('/_/erp-return', requireIntegration, reviewAction('return'));
+router.post('/_/erp-reopen', requireIntegration, reviewAction('reopen'));
+router.post('/_/erp-resubmit', reviewAction('resubmit'));
+// ERP may add display-only names to its exact known receipt IDs, including
+// locked correction rows. No source, quantity, timestamp or review field moves.
+router.post('/_/erp-material-names', requireIntegration, (req, res, next) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Object.keys(body).some(k => !['workshop', 'rows'].includes(k)) ||
+      !['A', 'AT', 'B', 'C', 'W'].includes(body.workshop) || !Array.isArray(body.rows) ||
+      body.rows.length < 1 || body.rows.length > 1000 || body.rows.some(row =>
+        !row || typeof row !== 'object' || Object.keys(row).some(k => !['id', 'material_name'].includes(k)) ||
+        !Number.isSafeInteger(row.id) || row.id < 1 || typeof row.material_name !== 'string' ||
+        !row.material_name.trim() || row.material_name.length > 1000) ||
+      new Set(body.rows.map(row => row.id)).size !== body.rows.length) {
+    return res.status(400).json({ message: '仅接受同车间1至1000条唯一ID及非空物料名称（最多1000字）' });
+  }
+  try {
+    db.transaction(() => {
+      const current = body.rows.map(row => db.prepare('SELECT workshop FROM pi_warehouse_orders WHERE id=?').get(row.id));
+      if (current.some(row => !row || row.workshop !== body.workshop))
+        throw new ReviewError('入库单不存在或车间不一致，整批物料名称未更新');
+      const update = db.prepare('UPDATE pi_warehouse_orders SET material_name=? WHERE id=?');
+      for (const row of body.rows) update.run(row.material_name, row.id);
+    })();
+    res.json({ workshop: body.workshop, updated: body.rows.length, ids: body.rows.map(row => row.id) });
+  } catch (error) {
+    if (error instanceof ReviewError) return res.status(error.status).json({ message: error.message });
+    next(error);
+  }
+});
+router.get('/_/erp-returns', (req, res) => {
+  if (!['A', 'AT', 'B', 'C', 'W'].includes(req.query.workshop)) return res.status(400).json({ message: '车间无效' });
+  res.json(review.list(req.query.workshop));
+});
 
 // ---- 列表 ----
 // 参数: workshop, month (YYYY-MM), pmc, status, order_no
@@ -71,8 +124,20 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   const cur = db.prepare('SELECT * FROM pi_warehouse_orders WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ message: '不存在' });
+  if (cur.erp_return_token) {
+    if (!requireWorkshop(req, res, cur.workshop)) return;
+    try {
+      if (Object.keys(req.body).some(k => !['delivery_pcs', 'delivery_shots'].includes(k)))
+        return res.status(409).json({ message: 'ERP打回单只能修改实收件数和送货啤数，来源、出模数和审批状态不能修改' });
+      return res.json(review.updateQuantities(cur.id, parseQuantities(req.body)));
+    } catch (error) {
+      if (error instanceof ReviewError) return res.status(error.status).json({ message: error.message });
+      throw error;
+    }
+  }
 
   const merged = { ...cur, ...pick(req.body) };
+  if (req.body.material_name === undefined) merged.material_name = cur.material_name;
   // 单价或送货啤数变了 → 重算金额（除非用户显式传了 amount）
   if (req.body.amount == null && (req.body.delivery_shots !== undefined || req.body.unit_price !== undefined)) {
     merged.amount = (merged.delivery_shots != null && merged.unit_price != null)
@@ -90,6 +155,8 @@ router.put('/:id', (req, res) => {
 
 // ---- 删除 ----
 router.delete('/:id', (req, res) => {
+  const current = db.prepare('SELECT erp_return_token FROM pi_warehouse_orders WHERE id=?').get(req.params.id);
+  if (current?.erp_return_token) return res.status(409).json({ message: 'ERP打回单保留原单历史，不能删除' });
   const info = db.prepare('DELETE FROM pi_warehouse_orders WHERE id = ?').run(req.params.id);
   if (info.changes === 0) return res.status(404).json({ message: '不存在' });
   res.json({ ok: true });
@@ -97,6 +164,8 @@ router.delete('/:id', (req, res) => {
 
 // ---- 标记入库 / 取消入库 ----
 router.post('/:id/check-in', (req, res) => {
+  const current = db.prepare('SELECT erp_return_token FROM pi_warehouse_orders WHERE id=?').get(req.params.id);
+  if (current?.erp_return_token) return res.status(409).json({ message: 'ERP打回单请从整单待办修改并重新送审，不能另行入库或撤回' });
   const { undo } = req.body || {};
   if (undo) {
     db.prepare("UPDATE pi_warehouse_orders SET status='pending', checked_in_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.params.id);
@@ -112,16 +181,16 @@ router.post('/:id/check-in', (req, res) => {
 router.get('/_/completed-orders', (req, res) => {
   const workshop = req.query.workshop || 'B';
   const keyword = (req.query.keyword || '').trim();
-  let sql = `SELECT id, product_code, mold_no, mold_name, color, color_powder_no,
+  let sql = `SELECT id, product_code, mold_no, mold_name, material_name, color, color_powder_no,
                     material_type, shot_weight, material_kg, quantity_needed, accumulated,
                     cavity, order_no, packing_qty, order_notes
              FROM orders
              WHERE workshop = ? AND status = 'completed'`;
   const params = [workshop];
   if (keyword) {
-    sql += ' AND (mold_no LIKE ? OR mold_name LIKE ? OR product_code LIKE ? OR order_no LIKE ?)';
+    sql += ' AND (mold_no LIKE ? OR mold_name LIKE ? OR material_name LIKE ? OR product_code LIKE ? OR order_no LIKE ?)';
     const kw = `%${keyword}%`;
-    params.push(kw, kw, kw, kw);
+    params.push(kw, kw, kw, kw, kw);
   }
   sql += ' ORDER BY created_at DESC, id DESC LIMIT 300';
   res.json(db.prepare(sql).all(...params));

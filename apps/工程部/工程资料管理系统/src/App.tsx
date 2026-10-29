@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, type EditorLease } from "@/lib/api";
+import { CoreAccountControl, EpmsAccountProvider } from "@/components/EpmsAccount";
+import { useEpmsAccess } from "@/lib/epms-access";
 import type { AppConfig, View } from "@/types";
 import ClientsView from "@/sections/ClientsView";
 import ClientView from "@/sections/ClientView";
@@ -21,7 +23,8 @@ import {
   RenameDialog,
   type DialogState,
 } from "@/sections/Dialogs";
-import { FolderPlus, HardDriveDownload } from "lucide-react";
+import { Menu, X, FolderPlus, HardDriveDownload } from "lucide-react";
+import { StitchIcon } from "@/components/StitchIcon";
 
 /** 侧边导航项（Stitch 设计稿结构；尚无对应模块的显示"规划中"） */
 const NAV: { group: string; badge?: string; items: { icon: string; label: string; view?: View["type"]; soon?: boolean }[] }[] = [
@@ -49,22 +52,35 @@ const NAV: { group: string; badge?: string; items: { icon: string; label: string
   {
     group: "底座与设置",
     items: [
-      { icon: "inventory", label: "受控归档分发与水印", view: "trash" },
+      { icon: "inventory", label: "回收站", view: "trash" },
       { icon: "search", label: "全盘搜索", view: "search" },
       { icon: "update", label: "最近更新", view: "recent" },
     ],
   },
 ];
 
-export default function App() {
+function EngineeringApp() {
+  const { session, revision } = useEpmsAccess();
+  const [editorLease, setEditorLease] = useState<EditorLease | null>(null);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [configError, setConfigError] = useState("");
   const [view, setView] = useState<View>({ type: "dashboard" });
   const [dialog, setDialog] = useState<DialogState>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshCount, setRefreshCount] = useState(0);
+  const refreshKey = refreshCount + revision;
   const [searchQ, setSearchQ] = useState("");
+  const [searchRequest, setSearchRequest] = useState({ text: "", id: 0 });
+  const [navOpen, setNavOpen] = useState(false);
+  const menuRef = useRef<HTMLButtonElement>(null);
+  const closeNav = useCallback(() => { setNavOpen(false); menuRef.current?.focus(); }, []);
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") closeNav(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen, closeNav]);
 
-  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+  const refresh = useCallback(() => setRefreshCount((k) => k + 1), []);
 
   useEffect(() => {
     api
@@ -73,12 +89,13 @@ export default function App() {
       .catch((e) => setConfigError(e.message));
   }, []);
 
-  const navigate = useCallback((v: View) => setView(v), []);
-  const goPath = useCallback((path: string) => setView({ type: "explorer", path }), []);
+  const navigate = useCallback((v: View) => { setEditorLease(null); setView(v); }, []);
+  const goPath = useCallback((path: string) => { setEditorLease(null); setView({ type: "explorer", path }); }, []);
 
   // 进入编辑器前的视图，用于「返回」
   const editorBackRef = useRef<View>({ type: "dashboard" });
-  const openEditor = useCallback((path: string, name: string) => {
+  const openEditor = useCallback((path: string, name: string, lease?: EditorLease) => {
+    setEditorLease(lease || null);
     setView((cur) => {
       if (cur.type !== "editor") editorBackRef.current = cur;
       return { type: "editor", path, name };
@@ -102,10 +119,10 @@ export default function App() {
     return (
       <div className="h-screen overflow-hidden bg-background text-foreground">
         {view.type === "editor" ? (
-          <DocEditor path={view.path} name={view.name} onClose={() => setView(editorBackRef.current)} onSaved={refresh} />
+          <DocEditor path={view.path} name={view.name} lease={editorLease} onClose={() => setView(editorBackRef.current)} onSaved={refresh} />
         ) : (
           <div className="h-full overflow-y-auto">
-            <WorkbenchView client={view.client} year={view.year} project={view.project} onNavigate={navigate} onOpenEditor={openEditor} />
+            <WorkbenchView key={view.client + "/" + view.year + "/" + view.project} initialLease={editorLease} client={view.client} year={view.year} project={view.project} onNavigate={navigate} onOpenEditor={openEditor} />
           </div>
         )}
         <Toaster richColors position="top-center" />
@@ -118,13 +135,14 @@ export default function App() {
   return (
     <div className="bg-background font-body-md text-on-surface antialiased h-screen overflow-hidden">
       {/* ── 侧边栏（Stitch 设计稿原样） ── */}
-      <aside className="fixed left-0 top-0 h-full w-72 bg-surface-container-low z-50 flex flex-col shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
+      {navOpen && <button type="button" aria-label="关闭导航" onClick={closeNav} className="fixed inset-0 z-40 bg-black/40 lg:hidden" />}
+      <aside id="engineering-navigation" aria-label="主导航" className={[(navOpen ? "flex" : "hidden"), "lg:flex fixed left-0 top-0 h-full w-72 max-w-[calc(100vw-2rem)] bg-surface-container-low z-50 flex-col shadow-[0_1px_8px_rgba(0,0,0,0.04)]"].join(" ")}>
         <div className="h-14 px-space-xl flex items-center justify-between bg-surface-container-lowest">
           <div className="flex items-center gap-space-sm">
-            <span className="material-symbols-outlined text-secondary text-[20px]">tune</span>
+            <StitchIcon name="tune" className="text-secondary text-[20px]" />
             <span className="font-label-lg text-label-lg text-primary tracking-wide">ENGINEERING PDM</span>
           </div>
-          <span className="font-label-sm text-label-sm text-secondary px-space-xs py-[2px] bg-surface-container-high rounded">V3.8</span>
+          <button type="button" aria-label="关闭导航" onClick={closeNav} className="lg:hidden min-h-11 min-w-11"><X className="h-5 w-5" /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-space-md py-space-lg space-y-space-xl">
           {NAV.map((g) => (
@@ -145,17 +163,17 @@ export default function App() {
                     ? "bg-surface-container-high text-secondary border-l-2 border-secondary font-semibold"
                     : "text-on-surface-variant hover:bg-surface-container hover:text-on-surface";
                   return (
-                    <a
+                    <button type="button"
                       key={it.label}
-                      className={`flex items-center gap-space-md px-space-md py-space-sm rounded transition-colors font-body-md text-body-md cursor-pointer ${cls}`}
+                      className={`w-full min-h-11 lg:min-h-0 text-left flex items-center gap-space-md px-space-md py-space-sm rounded transition-colors font-body-md text-body-md cursor-pointer ${cls}`}
                       onClick={() => {
                         if (it.soon) { toast.info(`「${it.label}」模块规划中，后续上线`); return; }
-                        if (it.view) navigate({ type: it.view } as View);
+                        if (it.view) { navigate({ type: it.view } as View); setNavOpen(false); }
                       }}
                     >
-                      <span className="material-symbols-outlined text-[18px]">{it.icon}</span>
-                      <span>{it.label}</span>
-                    </a>
+                      <StitchIcon name={it.icon} className="text-[18px]" />
+                      <span>{it.label}</span>{it.soon && <small className="ml-auto whitespace-nowrap">规划中</small>}
+                    </button>
                   );
                 })}
               </nav>
@@ -165,38 +183,38 @@ export default function App() {
         <div className="p-space-md bg-surface-container-lowest flex items-center justify-between text-on-surface-variant">
           <div className="flex items-center gap-space-sm font-label-sm text-label-sm">
             <span className="inline-block w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
-            <span>资料库连接正常</span>
+            <span>{config ? (config.mounted ? "资料目录已连接" : "资料目录不可用") : "正在连接资料目录"}</span>
           </div>
           <span className="font-label-sm text-label-sm text-primary">{config?.root?.split("/").pop()}</span>
         </div>
       </aside>
 
-      <div className="pl-72 h-full flex flex-col">
+      <div className="lg:pl-72 h-full min-w-0 flex flex-col">
         {/* ── 顶栏（Stitch 设计稿原样） ── */}
-        <header className="h-14 shrink-0 bg-surface-container-low/95 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-40 px-gutter flex items-center justify-between">
-          <div className="flex items-center gap-gutter">
-            <div className="flex flex-col">
+        <header className="min-h-14 shrink-0 bg-surface-container-low/95 shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-30 px-3 sm:px-gutter py-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <button ref={menuRef} type="button" aria-label="打开主导航" aria-expanded={navOpen} aria-controls="engineering-navigation" onClick={() => setNavOpen(true)} className="lg:hidden min-h-11 min-w-11"><Menu className="h-5 w-5" /></button>
+            <div className="flex min-w-0 flex-col">
               <span className="font-headline-sm text-headline-sm text-on-surface tracking-tight leading-none">EPMS 工程放产协同中枢</span>
               <span className="font-label-sm text-label-sm text-on-surface-variant">Engineering Production Release Matrix</span>
             </div>
           </div>
-          <div className="flex items-center gap-space-lg">
-            <div className="relative flex items-center">
-              <span className="material-symbols-outlined absolute left-space-md text-[16px] text-on-surface-variant pointer-events-none">search</span>
+          <div className="flex w-full sm:w-auto min-w-0 flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-space-lg">
+            <form role="search" className="relative min-w-0 basis-full sm:basis-auto flex-1 flex items-center" onSubmit={(event) => { event.preventDefault(); if (searchQ.trim()) { setSearchRequest((previous) => ({ text: searchQ.trim(), id: previous.id + 1 })); navigate({ type: "search" }); } }}>
+              <StitchIcon name="search" className="absolute left-space-md text-[16px] text-on-surface-variant pointer-events-none" />
               <input
-                className="w-56 pl-8 pr-space-md py-[5px] bg-surface-container-highest text-on-surface font-body-sm text-body-sm rounded placeholder:text-on-surface-variant/70 focus:outline-none focus:ring-1 focus:ring-secondary"
+                className="w-full sm:w-56 min-h-11 sm:min-h-0 min-w-0 pl-8 pr-space-md py-[5px] bg-surface-container-highest text-on-surface font-body-sm text-body-sm rounded placeholder:text-on-surface-variant/70 focus:outline-none focus:ring-1 focus:ring-secondary"
                 placeholder="搜索料号/资料/项目..."
-                type="text"
+                type="search"
+                aria-label="搜索工程资料"
                 value={searchQ}
                 onChange={(e) => setSearchQ(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && searchQ.trim()) navigate({ type: "search" });
-                }}
-                onFocus={() => navigate({ type: "search" })}
               />
-            </div>
+            </form>
+            <CoreAccountControl />
             <button
-              className="flex items-center gap-space-xs px-space-md py-[5px] bg-secondary text-on-secondary font-label-md text-label-md rounded font-semibold hover:bg-secondary-fixed transition-colors"
+              disabled={!session?.canEdit}
+              className="min-h-11 sm:min-h-0 flex items-center gap-space-xs px-space-md py-[5px] bg-secondary text-on-secondary font-label-md text-label-md rounded font-semibold hover:bg-secondary-fixed transition-colors"
               onClick={() => setDialog({ type: "newProject" })}
             >
               <FolderPlus className="h-4 w-4" />
@@ -211,8 +229,9 @@ export default function App() {
           </div>
         )}
 
-        <main className="relative flex-1 overflow-y-auto w-full px-gutter bg-surface">
-          {view.type === "dashboard" && <DashboardView onNavigate={navigate} />}
+        <main className="relative min-h-0 flex-1 overflow-y-auto w-full min-w-0 px-3 sm:px-gutter bg-surface">
+          <div className={view.type === "dashboard" ? "" : "legacy-surface min-h-full"}>
+          {view.type === "dashboard" && <DashboardView onNavigate={navigate} refreshKey={refreshKey} />}
           {view.type === "clients" && <ClientsView onNavigate={navigate} refreshKey={refreshKey} />}
           {view.type === "client" && (
             <ClientView client={view.client} onNavigate={navigate} onOpenDialog={setDialog} refreshKey={refreshKey} />
@@ -239,9 +258,10 @@ export default function App() {
               onChanged={refresh}
             />
           )}
-          {view.type === "search" && <SearchView onNavigate={navigate} onOpenDialog={setDialog} onOpenEditor={openEditor} />}
+          {view.type === "search" && <SearchView request={searchRequest} onNavigate={navigate} onOpenDialog={setDialog} onOpenEditor={openEditor} />}
           {view.type === "recent" && <RecentView onNavigate={navigate} onOpenDialog={setDialog} onOpenEditor={openEditor} />}
           {view.type === "trash" && <TrashView refreshKey={refreshKey} onChanged={refresh} />}
+          </div>
         </main>
       </div>
 
@@ -295,4 +315,8 @@ export default function App() {
       <Toaster richColors position="top-center" />
     </div>
   );
+}
+
+export default function App() {
+  return <EpmsAccountProvider><EngineeringApp /></EpmsAccountProvider>;
 }

@@ -49,13 +49,20 @@ test('restored hash mismatch rejects before UPDATE', () => {
 test('trigger modifying another row is detected and entire transaction is rolled back', () => {
   const f = fixture(); try {
     f.db.exec("CREATE TRIGGER accidental_side_effect AFTER UPDATE ON pi_warehouse_orders WHEN new.id=372 BEGIN UPDATE pi_warehouse_orders SET amount=999 WHERE id=373; END");
-    const before = all(f.db); assert.throws(() => repair(f.db, f.plan), /outside the two timestamps/); assert.deepEqual(all(f.db), before);
+    const before = all(f.db); assert.throws(() => repair(f.db, f.plan), /Additional SQLite writes|outside the two timestamps/); assert.deepEqual(all(f.db), before);
   } finally { f.close(); }
 });
 test('trigger modifying the target name is detected and rolled back', () => {
   const f = fixture(); try {
     f.db.exec("CREATE TRIGGER accidental_side_effect AFTER UPDATE ON pi_warehouse_orders WHEN new.id=372 BEGIN UPDATE pi_warehouse_orders SET material_name='invalid' WHERE id=372; END");
-    const before = all(f.db); assert.throws(() => repair(f.db, f.plan), /outside the two timestamps/); assert.deepEqual(all(f.db), before);
+    const before = all(f.db); assert.throws(() => repair(f.db, f.plan), /Additional SQLite writes|outside the two timestamps/); assert.deepEqual(all(f.db), before);
+  } finally { f.close(); }
+});
+test('trigger writing a second table is detected and both tables are rolled back', () => {
+  const f = fixture(); try {
+    f.db.exec("CREATE TABLE synthetic_ledger (id INTEGER); CREATE TRIGGER cross_table_write AFTER UPDATE ON pi_warehouse_orders WHEN new.id=372 BEGIN INSERT INTO synthetic_ledger VALUES(1); END");
+    const before = all(f.db); assert.throws(() => repair(f.db, f.plan), /Additional SQLite writes/);
+    assert.deepEqual(all(f.db), before); assert.deepEqual(f.db.prepare('SELECT * FROM synthetic_ledger').all(), []); assert.equal(f.db.inTransaction, false);
   } finally { f.close(); }
 });
 test('a second connection writer is blocked while BEGIN IMMEDIATE owns the CAS snapshot', () => {

@@ -42,6 +42,7 @@ function repair(db, plan) {
     requireCondition(current.checked_in_at !== plan.restore.checked_in_at && current.updated_at !== plan.restore.updated_at, 'Exactly both timestamps must change');
     const restored = { ...current, ...plan.restore };
     requireCondition(digest(rowJson(restored)) === plan.restoredRowSha256, 'Restored full receipt hash differs');
+    const beforeChanges = db.prepare('SELECT total_changes() AS count').get().count;
     const result = db.prepare(`UPDATE pi_warehouse_orders
       SET checked_in_at = @checked, updated_at = @updated
       WHERE id = @id AND workshop = @workshop
@@ -51,6 +52,8 @@ function repair(db, plan) {
       currentChecked: current.checked_in_at, currentUpdated: current.updated_at,
     });
     requireCondition(result.changes === 1, 'Receipt repair did not change exactly one row');
+    const afterChanges = db.prepare('SELECT total_changes() AS count').get().count;
+    requireCondition(afterChanges - beforeChanges === 1, 'Additional SQLite writes were detected');
     const after = db.prepare('SELECT * FROM pi_warehouse_orders ORDER BY id').all();
     const expected = before.map(row => row.id === plan.id ? restored : row);
     requireCondition(tableHash(after) === tableHash(expected), 'Receipt table changed outside the two timestamps');

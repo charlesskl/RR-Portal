@@ -131,6 +131,39 @@ router.get('/', async (req, res) => {
   });
 });
 
+// Explicit undo is separate from normal confirmation saves: stale autosaves cannot unlock a quote.
+router.post('/:id/revoke-confirmation', quoteWriteRoute(db, req => Number(req.params.id), async (req, res) => {
+  if (req.user.dept !== 'sales' && !isAdmin(req.user)) return res.status(403).json({error:'只有业务或管理员可撤销客价确认'});
+  const id = Number(req.params.id);
+  const access = await quoteAccess(req.user, id);
+  if (access.status !== 200) return res.status(access.status).json({error:'报价单不存在或无权操作'});
+  const existing = await db.prepare('SELECT * FROM quote_customer_confirmations WHERE quote_id=?').get(id);
+  const revision = Number((await db.prepare(`SELECT MAX(id) AS revision FROM audit_log WHERE quote_id=?
+    AND action IN ('customer_confirmation','customer_confirmation_revoke')`).get(id)).revision || 0);
+  if (!Number.isSafeInteger(req.body?.base_confirmation_revision) || req.body.base_confirmation_revision !== revision || existing?.status !== 'confirmed') {
+    return res.status(409).json({error:'确认状态已更新，请刷新列表后重试'});
+  }
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+  if (!reason || reason.length > 300) return res.status(400).json({error:'请填写撤销原因（1–300字）'});
+  if (await db.prepare('SELECT 1 FROM quote_verification_versions WHERE quote_id=? LIMIT 1').get(id)) {
+    return res.status(409).json({error:'已有核价版本，不能直接撤销确认，以免影响核价资料；请先核对后续核价记录'});
+  }
+  const verification = await db.prepare('SELECT * FROM quote_verifications WHERE quote_id=?').get(id);
+  if (verification && (verification.status !== 'not_started' || Object.keys(parseJson(verification.verified_values_json, {unknown:true})).length
+      || Object.keys(parseJson(verification.verified_sections_json, {unknown:true})).length || verification.note)) {
+    return res.status(409).json({error:'已有核价填写记录，不能直接撤销确认'});
+  }
+  // Save the complete automatic snapshot before removing only the unused case.
+  // No version, department payload, original quote or attachment is removed.
+  await db.prepare(`INSERT INTO audit_log(quote_id,dept,actor,action,detail)
+    VALUES (?,'sales',?,'customer_confirmation_revoke',?)`).run(id,req.user.name,
+      JSON.stringify({reason,previous_confirmation:existing,unused_verification:verification || null}));
+  await db.prepare('DELETE FROM quote_verifications WHERE quote_id=?').run(id);
+  await db.prepare(`UPDATE quote_customer_confirmations SET status='pending',confirmed_by=NULL,confirmed_at=NULL,
+    updated_at=CURRENT_TIMESTAMP WHERE quote_id=?`).run(id);
+  res.json({ok:true,status:'pending'});
+}));
+
 router.put('/:id/confirmation', quoteWriteRoute(db, req => Number(req.params.id), async (req, res) => {
   if (req.user.dept !== 'sales' && !isAdmin(req.user)) {
     return res.status(403).json({ error: '只有业务或超级管理员可确认客价和分派车间' });

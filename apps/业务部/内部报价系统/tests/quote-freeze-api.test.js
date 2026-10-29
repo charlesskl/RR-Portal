@@ -44,6 +44,37 @@ test('customer confirmation atomically freezes matching price, header and sectio
     const b=JSON.parse((await readDb.prepare('SELECT baseline_json FROM quote_verifications WHERE quote_id=?').get(qid)).baseline_json);
     assert.deepEqual(JSON.parse((await readDb.prepare('SELECT payload_json FROM quote_sections WHERE id=?').get(sec.id)).payload_json),b.sections.find(s=>s.dept==='sales').payload);
   }
+  // A deliberate undo uses a separate endpoint and a revision; stale generic
+  // pending autosaves remain blocked, and a reconfirmation gets a fresh baseline.
+  const undone=await api('/quotes','POST',{quote_no:'UNDO-MISTAKE',customer:'TEST',product_name:'before'});
+  const uid=undone.body.id;
+  await api(`/quote-summary/${uid}/confirmation`,'PUT',{status:'confirmed',confirmed_price:12,confirmed_qty:20});
+  const undoRow=()=>readDb.prepare('SELECT * FROM quote_customer_confirmations WHERE quote_id=?').get(uid);
+  const revision=async qid=>Number((await readDb.prepare(`SELECT MAX(id) AS r FROM audit_log WHERE quote_id=? AND action IN ('customer_confirmation','customer_confirmation_revoke')`).get(qid)).r||0);
+  const rev=await revision(uid);
+  assert.equal((await api(`/quotes`)).body.find(q=>q.id===uid).confirmation_revision,rev);
+  const undoBody={base_confirmation_revision:rev,reason:'误点确认'};
+  assert.equal((await api(`/quote-summary/${uid}/revoke-confirmation`,'POST',{...undoBody,reason:''})).status,400);
+  assert.equal((await undoRow()).status,'confirmed');
+  const beforeUndoSection=await readDb.prepare("SELECT payload_json FROM quote_sections WHERE quote_id=? AND dept='sales'").get(uid);
+  const concurrentUndo=await Promise.all([api(`/quote-summary/${uid}/revoke-confirmation`,'POST',undoBody),api(`/quote-summary/${uid}/revoke-confirmation`,'POST',undoBody)]);
+  assert.deepEqual(concurrentUndo.map(r=>r.status).sort(),[200,409]);
+  const pending=await undoRow();assert.equal(pending.status,'pending');assert.equal(pending.confirmed_by,null);assert.equal(pending.confirmed_at,null);
+  assert.equal(pending.confirmed_price,12);assert.equal(pending.confirmed_qty,20);
+  assert.equal(await readDb.prepare('SELECT * FROM quote_verifications WHERE quote_id=?').get(uid),undefined);
+  assert.equal((await readDb.prepare("SELECT payload_json FROM quote_sections WHERE quote_id=? AND dept='sales'").get(uid)).payload_json,beforeUndoSection.payload_json);
+  const audit=JSON.parse((await readDb.prepare("SELECT detail FROM audit_log WHERE quote_id=? AND action='customer_confirmation_revoke'").get(uid)).detail);
+  assert.equal(audit.previous_confirmation.status,'confirmed');assert.ok(audit.unused_verification.baseline_json);
+  assert.equal((await api(`/quotes/${uid}/header`,'PUT',{product_name:'corrected'})).status,200);
+  assert.equal((await api(`/quote-summary/${uid}/confirmation`,'PUT',{status:'confirmed'})).status,200);
+  assert.equal(JSON.parse((await readDb.prepare('SELECT baseline_json FROM quote_verifications WHERE quote_id=?').get(uid)).baseline_json).quote.product_name,'corrected');
+  assert.equal((await api(`/quote-summary/${uid}/revoke-confirmation`,'POST',undoBody)).status,409);
+  // Viewing the costing task may initialize its first version; any
+  // resulting version must survive an attempted undo, even if it is still empty.
+  assert.equal((await api(`/verifications/${uid}`)).status,200);
+  assert.equal((await api(`/quote-summary/${uid}/revoke-confirmation`,'POST',{...undoBody,base_confirmation_revision:await revision(uid)})).status,409);
+  assert.ok(await readDb.prepare('SELECT id FROM quote_verification_versions WHERE quote_id=?').get(uid));
+  assert.equal((await undoRow()).status,'confirmed');
   // A global publication is also an original-quote writer. Existing frozen
   // payloads must survive both the new basis and the legacy material API.
   const basis=(await api('/admin/costing-basis')).body.data;basis.exchange.rmb_hkd=.91;basis.materials[0].price+=1;

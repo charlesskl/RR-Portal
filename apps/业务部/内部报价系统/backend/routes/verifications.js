@@ -1,3 +1,4 @@
+const {lockQuote}=require('../services/quoteFreeze');
 const {resolveWorkshop, workshopName} = require('../services/verificationWorkshops');
 const {payloadRevision,validRevision,assertRevision,saveMetadataSql} = require('../services/verificationMetadata');
 const express = require('express');
@@ -86,6 +87,10 @@ async function createVersion(quoteId, source, user, versionNo, label, costingBas
 
 async function ensureCaseAndFirstVersion(quote, user) {
   const tx = db.transaction(async () => {
+    // Serialize automatic initialization with confirmation revocation.
+    await lockQuote(db, Number(quote.id));
+    const confirmation = await db.prepare('SELECT status FROM quote_customer_confirmations WHERE quote_id=?').get(quote.id);
+    if (confirmation?.status !== 'confirmed') return null;
     let verification = await db.prepare('SELECT * FROM quote_verifications WHERE quote_id=?').get(quote.id);
     if (!verification) {
       const sections = await db.prepare(`SELECT s.dept, d.name_cn AS dept_name, s.status, s.payload_json
@@ -253,7 +258,7 @@ router.post('/:quoteId/versions', async (req, res) => {
   const quoteId = Number(req.params.quoteId);
   const loaded = await loadConfirmedQuote(req.user, quoteId);
   if (loaded.error) return res.status(loaded.error).json({ error: '报价未确认或无权操作' });
-  await ensureCaseAndFirstVersion(loaded.quote, req.user);
+  if (!await ensureCaseAndFirstVersion(loaded.quote, req.user)) return res.status(409).json({error:'客价确认已撤销，请刷新列表'});
   const latest = await db.prepare(`SELECT * FROM quote_verification_versions
     WHERE quote_id=? ORDER BY version_no DESC LIMIT 1`).get(quoteId);
   if (latest && latest.status !== 'completed') {
@@ -331,6 +336,7 @@ router.get('/:quoteId', async (req, res) => {
   const loaded = await loadConfirmedQuote(req.user, quoteId);
   if (loaded.error) return res.status(loaded.error).json({ error: loaded.error === 409 ? '报价尚未确认，不能创建核价任务' : '无权查看该报价' });
   const verification = await ensureCaseAndFirstVersion(loaded.quote, req.user);
+  if (!verification) return res.status(409).json({error:'客价确认已撤销，请刷新列表'});
   const versions = await db.prepare(`SELECT v.*,
     (SELECT COUNT(*) FROM quote_verification_sections s WHERE s.version_id=v.id) AS total_count,
     (SELECT COUNT(*) FROM quote_verification_sections s WHERE s.version_id=v.id AND s.status='approved') AS approved_count

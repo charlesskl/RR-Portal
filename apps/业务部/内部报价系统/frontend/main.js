@@ -169,7 +169,7 @@ function renderQuotes() {
     const canConfirm = window.__me && (window.__me.dept === 'sales' || window.__me.role === 'admin');
     const confirmationStatus = q.customer_confirmation_status === 'confirmed' ? 'confirmed' : 'pending';
     const confirmationCell = canConfirm
-      ? `<select class="quote-confirm" data-id="${q.id}" data-current="${confirmationStatus}"><option value="pending" ${confirmationStatus === 'pending' ? 'selected' : ''}>待确认</option><option value="confirmed" ${confirmationStatus === 'confirmed' ? 'selected' : ''}>已确认</option></select>`
+      ? `<select class="quote-confirm" data-id="${q.id}" data-current="${confirmationStatus}" data-revision="${Number(q.confirmation_revision || 0)}" data-no="${esc(q.quote_no)}" aria-label="客价确认 ${esc(q.quote_no)}"><option value="pending" ${confirmationStatus === 'pending' ? 'selected' : ''}>待确认</option><option value="confirmed" ${confirmationStatus === 'confirmed' ? 'selected' : ''}>已确认</option></select>`
       : `<span class="badge ${confirmationStatus === 'confirmed' ? 'b-approved' : 'b-filled'}">${confirmationStatus === 'confirmed' ? '已确认' : '待确认'}</span>`;
     tr.innerHTML = `
       <td class="ro">${rowNo}</td>
@@ -195,9 +195,20 @@ function renderQuotes() {
   document.querySelectorAll('.btn-clone').forEach(b => b.onclick = () => cloneQuote(b.dataset.id, b.dataset.no, b.dataset.name));
   document.querySelectorAll('.btn-del').forEach(b => b.onclick = () => deleteQuote(b.dataset.id, b.dataset.no));
   document.querySelectorAll('.quote-confirm').forEach(select => select.onchange = async () => {
+    const revoking = select.dataset.current === 'confirmed' && select.value === 'pending';
+    let reason;
+    if (revoking) {
+      reason = prompt(`撤销货号 ${select.dataset.no} 的客价确认，恢复为待确认。\n仅未开始核价的报价可撤销，原报价内容会保留。\n请输入撤销原因：`, '误点确认');
+      if (!reason?.trim()) { select.value = select.dataset.current; return; }
+    } else if (select.value === 'confirmed' && !confirm(`确认货号 ${select.dataset.no} 的客价？\n确认后原报价将锁定，后续调整在核价中心进行。`)) {
+      select.value = select.dataset.current; return;
+    }
     select.disabled = true;
     try {
-      await api(`/quote-summary/${select.dataset.id}/confirmation`, {
+      if (revoking) await api(`/quote-summary/${select.dataset.id}/revoke-confirmation`, {
+        method: 'POST', body: JSON.stringify({ reason, base_confirmation_revision: Number(select.dataset.revision) }),
+      });
+      else await api(`/quote-summary/${select.dataset.id}/confirmation`, {
         method: 'PUT', body: JSON.stringify({ status: select.value }),
       });
       select.dataset.current = select.value;

@@ -2829,7 +2829,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
     const sewingPayload = typeof window !== 'undefined' && window.__data?.sections
       ? JSON.parse(window.__data.sections.find(section => section.dept === 'sewing')?.payload_json || '{}') : {};
     const sewingTaxable = autoFill.sewing_taxable || (typeof window !== 'undefined' && window.SewingTax
-      ? window.SewingTax.taxableAmounts(sewingPayload, ps.t1)
+      ? window.SewingTax.taxableAmounts(sewingPayload, ps.t1, window.__data?.quote?.customer)
       : { sewing_hair: num(ps.t1.sewing_hair), sewing_cloth: num(ps.t1.sewing_cloth) });
     setT4Amt('sewhair13', sewingTaxable.sewing_hair);                             // 车发类13% = 车发
     setT4Amt('sewcloth13', sewingTaxable.sewing_cloth);                           // 车衣类13% = 车衣
@@ -3031,6 +3031,7 @@ function renderSlush(host, payload, canEdit, onChange, fxRmbHkd) {
 
 // ============== 车缝部门 ==============
 function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
+  const spinSewing = typeof window !== 'undefined' && window.SewingTax?.isSpin(window.__data?.quote?.customer);
   payload.sewing_groups = payload.sewing_groups || [];
   payload.sewing_loss_pct = payload.sewing_loss_pct ?? 1;
   const fx = num(fxRmbHkd) || 0.85;
@@ -3038,7 +3039,8 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
   const itemCols = [
     { key: 'fabric', label: '布料名称', type: 'textarea', width: '240px' },
     { key: 'part', label: '部位', width: '90px' },
-    { key: 'craft', label: '工艺', type: 'select', options: ['电绣'], width: '80px' },
+    { key: 'craft', label: '工艺', type: 'select', options: spinSewing ? ['电绣', '裁床', '车缝', '手工'] : ['电绣'], width: '80px' },
+    ...(spinSewing ? [{ key: 'refund', label: '退税处理', readonly: true, calc: row => window.SewingTax.craftFor(row) || /人工/.test(String(row.fabric || row.part || row.name || '')) ? '不退税' : '按组税项', width: '100px' }] : []),
     { key: 'pieces', label: '裁片数', type: 'number', width: '70px' },
     { key: 'usage', label: '用量/码', type: 'number', width: '90px' },
     { key: 'mat_price', label: '物料价 (RMB)', type: 'number', width: '100px' },
@@ -3100,7 +3102,7 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
     <label>车缝报价 <select id="sw-tax-label" ${canEdit ? '' : 'disabled'}>
       <option value="含税" ${payload.tax_label !== '不含税' ? 'selected' : ''}>含税</option>
       <option value="不含税" ${payload.tax_label === '不含税' ? 'selected' : ''}>不含税（不退税）</option>
-    </select></label><p class="muted">仅含税车缝费用参与退税；各产品组可单独选择。此选项不改变已填报价金额。</p>
+    </select></label><p class="muted">仅含税车缝费用参与退税；各产品组可单独选择。此选项不改变已填报价金额。${spinSewing ? 'SPIN 的电绣、裁床、车缝、手工及人工费用不参与退税，保留成本；布料等材料按所选税项计算。' : ''}</p>
     <div id="sw-import-preview"></div>
     <div id="sw-groups"></div>`;
     renderLegacyItems(host, payload, canEdit, onChange);
@@ -3218,7 +3220,7 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
             items: (g.items || []).map(it => ({
               fabric: it.material || '',
               part: it.part || '',
-              craft: /电绣|绣花|embroider/i.test(String(it.material || '') + ' ' + String(it.note || '')) ? '电绣' : '',
+              craft: (spinSewing && window.SewingTax.craftFor(it)) || (/电绣|绣花|embroider/i.test(String(it.material || '') + ' ' + String(it.note || '')) ? '电绣' : ''),
               pieces: 1,
               usage: it.qty || 0,
               mat_price: it.unit_price || 0,

@@ -208,7 +208,7 @@ function calculateLegacyFormulaCosts(quote, payloads) {
   const quotedPrice = total * (number(legacy.formula_markup_x) || 1);
   components.abs_material = components.abs_cost;
   return { components, quotedPrice, rawQuotedPrice: quotedPrice, hasSourceData: true,
-    sewing_taxable: require('../../frontend/sewing-tax').taxableAmounts(payloads.sewing || {}, components) };
+    sewing_taxable: require('../../frontend/sewing-tax').taxableAmounts(payloads.sewing || {}, components, quote.customer) };
 }
 
 module.exports = {

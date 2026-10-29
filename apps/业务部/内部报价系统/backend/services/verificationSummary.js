@@ -224,8 +224,8 @@ function buildVerificationRow(quote, version, sections, quantities) {
   const sewingSection=(sections || []).find(section=>section.dept==='sewing');
   const sewingPayload=JSON.parse(sewingSection?.payload_json || '{}');
   const sewingTax=require('../../frontend/sewing-tax');
-  if(sewingTax.hasSetting(sewingPayload)) {
-    const shares=sewingTax.fractions(sewingPayload);
+  if(sewingTax.hasSetting(sewingPayload, quote.customer)) {
+    const shares=sewingTax.fractions(sewingPayload, quote.customer);
     let oldDeduction=0,newDeduction=0;
     const changedTaxTerms=[];
     for(const [input,out,tax,key] of [['BI','BJ','CV','sewing_hair'],['BM','BN','CW','sewing_cloth']]) {

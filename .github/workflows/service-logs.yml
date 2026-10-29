@@ -2,7 +2,7 @@ name: PR 1035 Scoped Quote Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [reconcile]}
+      mode: {type: choice, required: true, options: [diagnose]}
 permissions:
   contents: read
 concurrency:
@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1035-20261029-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = reconcile ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1035-20261029-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose ]] || exit 1
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ && "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run reviewed one-service quote phase reconcile
+      - name: Read sealed quote lifecycle events
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -47,22 +47,28 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1035-20261029-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = reconcile && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
-            cd /opt/rr-portal
-            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1035-20261029-quote:refs/remotes/origin/ops/pr-1035-20261029-quote >/dev/null 2>&1 || exit 1
-            [[ "$(git rev-parse refs/remotes/origin/ops/pr-1035-20261029-quote)" = "$RELEASE_SHA" ]] || exit 1
-            umask 077
-            scoped_release_tmp=$(mktemp -d /tmp/pr1035-quote-release.XXXXXX)
-            trap 'rm -rf "$scoped_release_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1035-reconcile.py" > "$scoped_release_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/run.py" | cut -d ' ' -f1)" = 5c2c02fc4242d93c320ebdca9bb378b67e92491e86465d0bca1fcb17307ee430 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1035-quote-preflight.py" > "$scoped_release_tmp/pr1035-quote-preflight.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1035-quote-preflight.py" | cut -d ' ' -f1)" = 2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$scoped_release_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$scoped_release_tmp/release-data-library.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1035-quote-release.py" > "$scoped_release_tmp/pr1035-original-release.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$scoped_release_tmp/pr1035-original-release.py" | cut -d ' ' -f1)" = 2ea1fa14e1a415dd9205761754616e6a2bf1496f46e5159d01059edd902a23c1 ]] || exit 1
-            timeout --signal=TERM --kill-after=30s 22m python3 -B "$scoped_release_tmp/run.py" "$RELEASE_MODE"
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1035-20261029-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose ]] || exit 1
+            python3 - <<'PY_DIAG'
+            import pathlib,json,hashlib,re,subprocess
+            p=pathlib.Path('/opt/rr-portal/deploy/backups/pr1035-quote-20261029/reconcile-1')
+            sha=lambda b:hashlib.sha256(b).hexdigest()
+            assert not p.is_symlink() and sha((p/'manifest.json').read_bytes())=='0b3d7cf2fb17e847f002885212204a296ca4636f3f14944052601ff2a88f93ac'
+            m=json.loads((p/'manifest.json').read_bytes()); rows=[]; inventories=[]
+            for n,h in m.items():
+             q=pathlib.PurePosixPath(n);assert not q.is_absolute() and '..' not in q.parts
+             f=p/n;assert not f.is_symlink() and f.is_file() and f.stat().st_size<64*1024**2
+             b=f.read_bytes();assert sha(b)==h
+             if n.endswith('-stdout.private'):
+              local=[]
+              for line in b.splitlines():
+               try:r=json.loads(line)
+               except ValueError:continue
+               if isinstance(r,dict) and isinstance(r.get('Actor'),dict):
+                local.append({'id':r['Actor'].get('ID'),'action':r.get('Action',r.get('status')),'time':r.get('time'),'timeNano':r.get('timeNano')})
+              if local:inventories.append({'file':n,'rows':local});rows.extend(local)
+            assert sha((p/'result.private.json').read_bytes())=='922f7a781ce1046c3e5c45860f34a43dc9f8c8c7c5badbf84e9079c4120aa295'
+            counts={a:sum(r['action']==a for r in rows)for a in sorted({r['action']for r in rows})}
+            print(json.dumps({'sealedEventInventories':inventories,'eventCounts':counts,'allFilesMatchFailureManifest':True}),flush=True)
+            fmt='{"id":{{json .Id}},"running":{{json .State.Running}},"started":{{json .State.StartedAt}},"pid":{{json .State.Pid}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}}'
+            r=subprocess.run(['docker','inspect','--format',fmt,'0cfa8edaff44bbc74b4443b6dec444c90e2f115833ff9913abf8c9b6c462ef7a'],capture_output=True,timeout=15);assert r.returncode==0;v=json.loads(r.stdout);assert v['id']=='0cfa8edaff44bbc74b4443b6dec444c90e2f115833ff9913abf8c9b6c462ef7a';print(json.dumps({'actualQuoteRuntime':v,'readOnly':True}),flush=True)
+            PY_DIAG

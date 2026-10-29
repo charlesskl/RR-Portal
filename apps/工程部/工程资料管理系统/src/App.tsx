@@ -13,6 +13,7 @@ import WorkbenchView from "@/sections/WorkbenchView";
 import SearchView from "@/sections/SearchView";
 import RecentView from "@/sections/RecentView";
 import TrashView from "@/sections/TrashView";
+import DashboardView from "@/sections/DashboardView";
 import {
   ConfirmDeleteDialog,
   NewFolderDialog,
@@ -22,19 +23,62 @@ import {
   RenameDialog,
   type DialogState,
 } from "@/sections/Dialogs";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { Clock3, FolderPlus, HardDriveDownload, LayoutGrid, Search, Trash2 } from "lucide-react";
+import { Menu, X, FolderPlus, HardDriveDownload } from "lucide-react";
+import { StitchIcon } from "@/components/StitchIcon";
 
-function LegacyEngineeringApp() {
+/** 侧边导航项（Stitch 设计稿结构；尚无对应模块的显示"规划中"） */
+const NAV: { group: string; badge?: string; items: { icon: string; label: string; view?: View["type"]; soon?: boolean }[] }[] = [
+  {
+    group: "核心驾驶舱",
+    items: [{ icon: "space_dashboard", label: "放产态势大盘", view: "dashboard" }],
+  },
+  {
+    group: "在线工程资料库",
+    badge: "CORE",
+    items: [
+      { icon: "dataset", label: "工程资料在线工作台", view: "clients" },
+      { icon: "account_tree", label: "BOM 结构与替代料库", soon: true },
+      { icon: "developer_board", label: "数字化工序 SOP 卡编排", soon: true },
+      { icon: "precision_manufacturing", label: "工装夹具与检验标准", soon: true },
+    ],
+  },
+  {
+    group: "受控放行与审批",
+    items: [
+      { icon: "verified", label: "多方放产会签评审", soon: true },
+      { icon: "difference", label: "工程变更与版本差异 (ECN)", soon: true },
+    ],
+  },
+  {
+    group: "底座与设置",
+    items: [
+      { icon: "inventory", label: "回收站", view: "trash" },
+      { icon: "search", label: "全盘搜索", view: "search" },
+      { icon: "update", label: "最近更新", view: "recent" },
+    ],
+  },
+];
+
+function EngineeringApp() {
   const { session, revision } = useEpmsAccess();
   const [editorLease, setEditorLease] = useState<EditorLease | null>(null);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [configError, setConfigError] = useState("");
-  const [view, setView] = useState<View>({ type: "clients" });
+  const [view, setView] = useState<View>({ type: "dashboard" });
   const [dialog, setDialog] = useState<DialogState>(null);
   const [refreshCount, setRefreshCount] = useState(0);
   const refreshKey = refreshCount + revision;
+  const [searchQ, setSearchQ] = useState("");
+  const [searchRequest, setSearchRequest] = useState({ text: "", id: 0 });
+  const [navOpen, setNavOpen] = useState(false);
+  const menuRef = useRef<HTMLButtonElement>(null);
+  const closeNav = useCallback(() => { setNavOpen(false); menuRef.current?.focus(); }, []);
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") closeNav(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen, closeNav]);
 
   const refresh = useCallback(() => setRefreshCount((k) => k + 1), []);
 
@@ -49,150 +93,177 @@ function LegacyEngineeringApp() {
   const goPath = useCallback((path: string) => { setEditorLease(null); setView({ type: "explorer", path }); }, []);
 
   // 进入编辑器前的视图，用于「返回」
-  const editorBackRef = useRef<View>({ type: "clients" });
-  const openEditor = useCallback(
-    (path: string, name: string, lease?: EditorLease) => {
-      setEditorLease(lease || null);
-      setView((cur) => {
-        if (cur.type !== "editor") editorBackRef.current = cur;
-        return { type: "editor", path, name };
-      });
-    },
-    [],
-  );
+  const editorBackRef = useRef<View>({ type: "dashboard" });
+  const openEditor = useCallback((path: string, name: string, lease?: EditorLease) => {
+    setEditorLease(lease || null);
+    setView((cur) => {
+      if (cur.type !== "editor") editorBackRef.current = cur;
+      return { type: "editor", path, name };
+    });
+  }, []);
 
   if (configError) {
     return (
-      <div className="flex h-screen items-center justify-center bg-slate-50">
-        <div className="rounded-xl border bg-white p-8 text-center shadow-sm">
-          <HardDriveDownload className="mx-auto mb-3 h-10 w-10 text-slate-400" />
-          <p className="font-medium text-slate-700">无法连接本地资料服务</p>
-          <p className="mt-1 text-sm text-slate-500">{configError}</p>
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="rounded-xl border bg-card p-8 text-center shadow-sm">
+          <HardDriveDownload className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+          <p className="font-medium">无法连接本地资料服务</p>
+          <p className="mt-1 text-sm text-muted-foreground">{configError}</p>
         </div>
       </div>
     );
   }
 
-  const navBtn = (
-    icon: React.ReactNode,
-    label: string,
-    active: boolean,
-    onClick: () => void,
-  ) => (
-    <button
-      onClick={onClick}
-      className={cn(
-        "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
-        active ? "bg-blue-600 font-medium text-white" : "text-slate-600 hover:bg-slate-200/70",
-      )}
-    >
-      {icon}
-      {label}
-    </button>
-  );
+  // 编辑器 / 制单台：全屏不带壳
+  if (view.type === "editor" || view.type === "workbench") {
+    return (
+      <div className="h-screen overflow-hidden bg-background text-foreground">
+        {view.type === "editor" ? (
+          <DocEditor path={view.path} name={view.name} lease={editorLease} onClose={() => setView(editorBackRef.current)} onSaved={refresh} />
+        ) : (
+          <div className="h-full overflow-y-auto">
+            <WorkbenchView key={view.client + "/" + view.year + "/" + view.project} initialLease={editorLease} client={view.client} year={view.year} project={view.project} onNavigate={navigate} onOpenEditor={openEditor} />
+          </div>
+        )}
+        <Toaster richColors position="top-center" />
+      </div>
+    );
+  }
+
+  const isClientsFamily = view.type === "clients" || view.type === "client" || view.type === "project" || view.type === "explorer";
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-100 text-slate-900">
-      {/* 顶部导航栏 */}
-      {view.type !== "workbench" && view.type !== "editor" && <header className="flex shrink-0 flex-wrap items-center gap-3 border-b bg-white px-4 py-2.5">
-        <div className="flex items-baseline gap-2">
-          <h1 className="text-base font-bold tracking-tight">工程资料管理系统</h1>
-          <span className="hidden max-w-72 truncate text-xs text-slate-400 lg:inline" title={config?.root}>
-            {config?.root}
-          </span>
+    <div className="bg-background font-body-md text-on-surface antialiased h-screen overflow-hidden">
+      {/* ── 侧边栏（Stitch 设计稿原样） ── */}
+      {navOpen && <button type="button" aria-label="关闭导航" onClick={closeNav} className="fixed inset-0 z-40 bg-black/40 lg:hidden" />}
+      <aside id="engineering-navigation" aria-label="主导航" className={[(navOpen ? "flex" : "hidden"), "lg:flex fixed left-0 top-0 h-full w-72 max-w-[calc(100vw-2rem)] bg-surface-container-low z-50 flex-col shadow-[0_1px_8px_rgba(0,0,0,0.04)]"].join(" ")}>
+        <div className="h-14 px-space-xl flex items-center justify-between bg-surface-container-lowest">
+          <div className="flex items-center gap-space-sm">
+            <StitchIcon name="tune" className="text-secondary text-[20px]" />
+            <span className="font-label-lg text-label-lg text-primary tracking-wide">ENGINEERING PDM</span>
+          </div>
+          <button type="button" aria-label="关闭导航" onClick={closeNav} className="lg:hidden min-h-11 min-w-11"><X className="h-5 w-5" /></button>
         </div>
-        <nav className="ml-4 flex items-center gap-1">
-          {navBtn(<LayoutGrid className="h-4 w-4" />, "客户", view.type === "clients" || view.type === "client", () =>
-            navigate({ type: "clients" }),
-          )}
-          {navBtn(<Search className="h-4 w-4" />, "全盘搜索", view.type === "search", () =>
-            navigate({ type: "search" }),
-          )}
-          {navBtn(<Clock3 className="h-4 w-4" />, "最近更新", view.type === "recent", () =>
-            navigate({ type: "recent" }),
-          )}
-          {navBtn(<Trash2 className="h-4 w-4" />, "回收站", view.type === "trash", () =>
-            navigate({ type: "trash" }),
-          )}
-        </nav>
-        <div className="ml-auto flex items-center gap-3">
-          <CoreAccountControl />
-          <Button disabled={!session?.canEdit} size="sm" onClick={() => setDialog({ type: "newProject" })}>
-            <FolderPlus className="mr-1.5 h-4 w-4" /> 新建项目
-          </Button>
+        <div className="flex-1 overflow-y-auto px-space-md py-space-lg space-y-space-xl">
+          {NAV.map((g) => (
+            <div className="space-y-space-xs" key={g.group}>
+              <div className="px-space-sm py-space-xs flex items-center justify-between font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">
+                <span>{g.group}</span>
+                {g.badge && (
+                  <span className="font-label-sm text-label-sm text-tertiary bg-tertiary-container px-space-xs py-[1px] rounded">{g.badge}</span>
+                )}
+              </div>
+              <nav className="space-y-[2px]">
+                {g.items.map((it) => {
+                  const active =
+                    (it.view === "dashboard" && view.type === "dashboard") ||
+                    (it.view === "clients" && isClientsFamily) ||
+                    (it.view && view.type === it.view);
+                  const cls = active
+                    ? "bg-surface-container-high text-secondary border-l-2 border-secondary font-semibold"
+                    : "text-on-surface-variant hover:bg-surface-container hover:text-on-surface";
+                  return (
+                    <button type="button"
+                      key={it.label}
+                      className={`w-full min-h-11 lg:min-h-0 text-left flex items-center gap-space-md px-space-md py-space-sm rounded transition-colors font-body-md text-body-md cursor-pointer ${cls}`}
+                      onClick={() => {
+                        if (it.soon) { toast.info(`「${it.label}」模块规划中，后续上线`); return; }
+                        if (it.view) { navigate({ type: it.view } as View); setNavOpen(false); }
+                      }}
+                    >
+                      <StitchIcon name={it.icon} className="text-[18px]" />
+                      <span>{it.label}</span>{it.soon && <small className="ml-auto whitespace-nowrap">规划中</small>}
+                    </button>
+                  );
+                })}
+              </nav>
+            </div>
+          ))}
         </div>
-      </header>}
+        <div className="p-space-md bg-surface-container-lowest flex items-center justify-between text-on-surface-variant">
+          <div className="flex items-center gap-space-sm font-label-sm text-label-sm">
+            <span className="inline-block w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
+            <span>{config ? (config.mounted ? "资料目录已连接" : "资料目录不可用") : "正在连接资料目录"}</span>
+          </div>
+          <span className="font-label-sm text-label-sm text-primary">{config?.root?.split("/").pop()}</span>
+        </div>
+      </aside>
 
-      {!config?.mounted && config && (
-        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-          ⚠️ 资料存储目录不可用：{config.root}（请联系管理员检查服务器）
-        </div>
-      )}
+      <div className="lg:pl-72 h-full min-w-0 flex flex-col">
+        {/* ── 顶栏（Stitch 设计稿原样） ── */}
+        <header className="min-h-14 shrink-0 bg-surface-container-low/95 shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-30 px-3 sm:px-gutter py-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <button ref={menuRef} type="button" aria-label="打开主导航" aria-expanded={navOpen} aria-controls="engineering-navigation" onClick={() => setNavOpen(true)} className="lg:hidden min-h-11 min-w-11"><Menu className="h-5 w-5" /></button>
+            <div className="flex min-w-0 flex-col">
+              <span className="font-headline-sm text-headline-sm text-on-surface tracking-tight leading-none">EPMS 工程放产协同中枢</span>
+              <span className="font-label-sm text-label-sm text-on-surface-variant">Engineering Production Release Matrix</span>
+            </div>
+          </div>
+          <div className="flex w-full sm:w-auto min-w-0 flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-space-lg">
+            <form role="search" className="relative min-w-0 basis-full sm:basis-auto flex-1 flex items-center" onSubmit={(event) => { event.preventDefault(); if (searchQ.trim()) { setSearchRequest((previous) => ({ text: searchQ.trim(), id: previous.id + 1 })); navigate({ type: "search" }); } }}>
+              <StitchIcon name="search" className="absolute left-space-md text-[16px] text-on-surface-variant pointer-events-none" />
+              <input
+                className="w-full sm:w-56 min-h-11 sm:min-h-0 min-w-0 pl-8 pr-space-md py-[5px] bg-surface-container-highest text-on-surface font-body-sm text-body-sm rounded placeholder:text-on-surface-variant/70 focus:outline-none focus:ring-1 focus:ring-secondary"
+                placeholder="搜索料号/资料/项目..."
+                type="search"
+                aria-label="搜索工程资料"
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+              />
+            </form>
+            <CoreAccountControl />
+            <button
+              disabled={!session?.canEdit}
+              className="min-h-11 sm:min-h-0 flex items-center gap-space-xs px-space-md py-[5px] bg-secondary text-on-secondary font-label-md text-label-md rounded font-semibold hover:bg-secondary-fixed transition-colors"
+              onClick={() => setDialog({ type: "newProject" })}
+            >
+              <FolderPlus className="h-4 w-4" />
+              <span>新建项目</span>
+            </button>
+          </div>
+        </header>
 
-      <main className="min-h-0 flex-1 overflow-hidden">
-        {view.type === "workbench" ? (
-          <div className="h-full overflow-y-auto">
-            <WorkbenchView
-              key={view.client + "/" + view.year + "/" + view.project}
-              initialLease={editorLease}
+        {!config?.mounted && config && (
+          <div className="shrink-0 border-b border-tertiary-container bg-tertiary-container/30 px-gutter py-2 font-body-sm text-body-sm text-tertiary">
+            ⚠️ 资料存储目录不可用：{config.root}（请联系管理员检查服务器）
+          </div>
+        )}
+
+        <main className="relative min-h-0 flex-1 overflow-y-auto w-full min-w-0 px-3 sm:px-gutter bg-surface">
+          <div className={view.type === "dashboard" ? "" : "legacy-surface min-h-full"}>
+          {view.type === "dashboard" && <DashboardView onNavigate={navigate} refreshKey={refreshKey} />}
+          {view.type === "clients" && <ClientsView onNavigate={navigate} refreshKey={refreshKey} />}
+          {view.type === "client" && (
+            <ClientView client={view.client} onNavigate={navigate} onOpenDialog={setDialog} refreshKey={refreshKey} />
+          )}
+          {view.type === "project" && (
+            <ProjectView
               client={view.client}
               year={view.year}
               project={view.project}
               onNavigate={navigate}
+              onOpenDialog={setDialog}
               onOpenEditor={openEditor}
+              refreshKey={refreshKey}
+              onChanged={refresh}
             />
+          )}
+          {view.type === "explorer" && (
+            <ExplorerView
+              path={view.path}
+              onNavigate={navigate}
+              onOpenDialog={setDialog}
+              onOpenEditor={openEditor}
+              refreshKey={refreshKey}
+              onChanged={refresh}
+            />
+          )}
+          {view.type === "search" && <SearchView request={searchRequest} onNavigate={navigate} onOpenDialog={setDialog} onOpenEditor={openEditor} />}
+          {view.type === "recent" && <RecentView onNavigate={navigate} onOpenDialog={setDialog} onOpenEditor={openEditor} />}
+          {view.type === "trash" && <TrashView refreshKey={refreshKey} onChanged={refresh} />}
           </div>
-        ) : view.type === "editor" ? (
-          <DocEditor
-            lease={editorLease}
-            path={view.path}
-            name={view.name}
-            onClose={() => setView(editorBackRef.current)}
-            onSaved={refresh}
-          />
-        ) : (
-          <div className="h-full overflow-y-auto">
-            {view.type === "clients" && <ClientsView onNavigate={navigate} refreshKey={refreshKey} />}
-            {view.type === "client" && (
-              <ClientView
-                client={view.client}
-                onNavigate={navigate}
-                onOpenDialog={setDialog}
-                refreshKey={refreshKey}
-              />
-            )}
-            {view.type === "project" && (
-              <ProjectView
-                client={view.client}
-                year={view.year}
-                project={view.project}
-                onNavigate={navigate}
-                onOpenDialog={setDialog}
-                onOpenEditor={openEditor}
-                refreshKey={refreshKey}
-                onChanged={refresh}
-              />
-            )}
-            {view.type === "explorer" && (
-              <ExplorerView
-                path={view.path}
-                onNavigate={navigate}
-                onOpenDialog={setDialog}
-                onOpenEditor={openEditor}
-                refreshKey={refreshKey}
-                onChanged={refresh}
-              />
-            )}
-            {view.type === "search" && (
-              <SearchView onNavigate={navigate} onOpenDialog={setDialog} onOpenEditor={openEditor} />
-            )}
-            {view.type === "recent" && (
-              <RecentView onNavigate={navigate} onOpenDialog={setDialog} onOpenEditor={openEditor} />
-            )}
-            {view.type === "trash" && <TrashView refreshKey={refreshKey} onChanged={refresh} />}
-          </div>
-        )}
-      </main>
+        </main>
+      </div>
 
       {/* 全局对话框 */}
       <NewProjectDialog
@@ -247,5 +318,5 @@ function LegacyEngineeringApp() {
 }
 
 export default function App() {
-  return <EpmsAccountProvider><LegacyEngineeringApp /></EpmsAccountProvider>;
+  return <EpmsAccountProvider><EngineeringApp /></EpmsAccountProvider>;
 }

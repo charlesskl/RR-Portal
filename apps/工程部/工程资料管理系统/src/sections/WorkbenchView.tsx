@@ -1,26 +1,20 @@
+import { StitchIcon } from "@/components/StitchIcon";
 /**
- * EPMS 制单台（工程部放产资料管理工作台）
- * 按 Stitch 设计稿实现：客户/项目上下文、防串单编辑锁、保存草稿、提交审核、审核归档。
- * 数据存在项目目录 .epms/<单据>.json，与 xlsx 资料互不干扰。
+ * EPMS 制单台 — 按 Stitch 设计稿(_7)逐块移植，数据与逻辑全部真实。
+ * 草稿/锁/审核流存于项目目录 .epms/<单据>.json。
  */
-import { useEffect, useRef, useState } from "react";
-import {
-  ArrowLeft, Lock, LockOpen, Save, Send, BadgeCheck, Undo2, Plus, Trash2,
-  UploadCloud, FileImage, Loader2, Users, FolderArchive, ClipboardList,
-} from "lucide-react";
+import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type ReactElement } from "react";
+import { Plus, Trash2, Loader2, UploadCloud, FileImage } from "lucide-react";
 import { toast } from "sonner";
 import { api, type EpmsRecordPublic, type EditorLease } from "@/lib/api";
 import { CoreAccountControl } from "@/components/EpmsAccount";
 import { useEpmsAccess } from "@/lib/epms-access";
 import type { DocTypeItem, View } from "@/types";
 
-/* ---------- 样式常量（暗色受控风格） ---------- */
-const BG = "min-h-screen bg-[#0b1220] text-slate-200";
-const CARD = "rounded-lg border border-[#1e2d4a] bg-[#111c30]";
-const INPUT =
-  "w-full rounded border border-[#26375a] bg-[#0d1729] px-2 py-1.5 text-sm text-cyan-100 outline-none focus:border-cyan-500 disabled:opacity-50";
-const LABEL = "mb-1 block text-xs text-slate-400";
-const BTN = "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition disabled:opacity-40";
+const FIELD_INPUT =
+  "w-full bg-surface-container-highest border border-outline-variant/60 rounded px-2 py-1 text-xs font-mono font-bold text-secondary focus:border-secondary focus:ring-0 focus:outline-none disabled:opacity-50";
+const CELL_INPUT =
+  "w-full bg-surface-container-highest border border-outline-variant/50 rounded px-2 py-1 text-xs text-on-surface focus:border-secondary focus:ring-0 focus:outline-none disabled:opacity-50";
 
 interface Props {
   client: string;
@@ -31,9 +25,7 @@ interface Props {
   initialLease?: EditorLease | null;
 }
 
-interface CavityRow {
-  cavity: string; partName: string; partNo: string; gate: string; eject: string; note: string;
-}
+interface CavityRow { cavity: string; partName: string; partNo: string; gate: string; eject: string; note: string }
 interface PaiMoForm {
   moldNo: string; cavities: string; tonnage: string; material: string;
   shrinkage: string; cycle: string; weight: string;
@@ -45,18 +37,15 @@ const emptyForm: PaiMoForm = {
 };
 
 type DocTab = "排模表" | "排模图" | "外购件清单" | "作业指导书";
-const TABS: { key: DocTab; label: string }[] = [
-  { key: "排模表", label: "【1. 排模表】" },
-  { key: "排模图", label: "【2. 排模图(图纸)】" },
-  { key: "外购件清单", label: "【3. 外购件清单】" },
-  { key: "作业指导书", label: "【4. 作业指导书(SOP)】" },
+const TABS: { key: DocTab; label: string; icon: string }[] = [
+  { key: "排模表", label: "【1. 排模表】", icon: "grid_on" },
+  { key: "排模图", label: "【2. 排模图 (图纸上传与受控图)】", icon: "image" },
+  { key: "外购件清单", label: "【3. 外购件清单】", icon: "list_alt" },
+  { key: "作业指导书", label: "【4. 作业指导书 (SOP)】", icon: "menu_book" },
 ];
 
-const STATUS_TEXT: Record<string, { text: string; cls: string }> = {
-  none: { text: "未开始", cls: "text-slate-400" },
-  draft: { text: "制单中（待提交审核）", cls: "text-amber-400" },
-  pending: { text: "审核中", cls: "text-cyan-400" },
-  approved: { text: "审核记录已确认", cls: "text-emerald-400" },
+const STATUS_TEXT: Record<string, string> = {
+  none: "未开始", draft: "制单中(待提交审核)", pending: "审核中", approved: "审核记录已确认",
 };
 
 export default function WorkbenchView({ client, year, project, onNavigate, onOpenEditor, initialLease }: Props) {
@@ -177,210 +166,319 @@ export default function WorkbenchView({ client, year, project, onNavigate, onOpe
     : readOnly ? "当前为只读模式，无法修改或保存草稿。"
     : "已持有操作锁；修改后请点击保存草稿，未保存的输入不会自动同步。";
 
-  const st = STATUS_TEXT[rec?.status || "none"];
-
   return (
-    <div className={BG}>
-      {/* 顶栏 */}
-      <div className="border-b border-[#1e2d4a] bg-[#0d1628] px-4 py-2.5">
-        <div className="flex flex-wrap items-center gap-3">
+    <div className="bg-background font-body-md text-on-surface antialiased min-h-screen flex flex-col">
+      {/* ── 顶部紧凑导航栏 ── */}
+      <header className="sticky top-0 z-50 bg-surface-container-low border-b border-surface-container-highest px-4 py-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
           <button onClick={() => { if (mayLeave()) onNavigate({ type: "project", client, year, project }); }}
-            className="flex items-center gap-1 text-sm text-slate-400 hover:text-cyan-300">
-            <ArrowLeft className="h-4 w-4" /> 返回
+            className="w-8 h-8 rounded bg-secondary/15 flex items-center justify-center text-secondary border border-secondary/30 hover:bg-secondary/25 transition"
+            title="返回项目">
+            <StitchIcon name="table_chart" className="text-[20px]" />
           </button>
-          <div className="text-base font-bold text-slate-100">工程部放产资料管理 · 制单台</div>
-          <span className="rounded border border-[#26375a] px-2 py-0.5 text-xs text-cyan-300">
-            客户：{client} / {project}
-          </span>
-          <span className="rounded border border-[#26375a] px-2 py-0.5 text-xs text-cyan-300">
-            唯一受控编号：{rec?.docNo || "保存后生成"}
-          </span>
-          {rec?.lock && !lockedByOther && (
-            <span className="flex items-center gap-1 rounded border border-emerald-700 bg-emerald-900/30 px-2 py-0.5 text-xs text-emerald-400">
-              <Lock className="h-3 w-3" /> 独占操作锁已持有（倒计时 {mm}:{ss}）
-            </span>
-          )}
-          {lockedByOther && (
-            <span className="flex items-center gap-1 rounded border border-amber-700 bg-amber-900/30 px-2 py-0.5 text-xs text-amber-400">
-              <LockOpen className="h-3 w-3" /> {lockedByOther.by} 正在编辑，你为只读
-            </span>
-          )}
-          <div className="ml-auto"><CoreAccountControl beforeLogout={releaseForLogout} /></div>
+          <div>
+            <h1 className="text-base font-bold text-on-surface tracking-tight leading-tight">工程部放产资料管理</h1>
+            <p className="text-[11px] text-on-surface-variant leading-none">Engineering Production Release Workbench</p>
+          </div>
         </div>
-        {/* 操作按钮 */}
-        <div className="mt-2.5 flex flex-wrap items-center gap-2">
-          <button className={`${BTN} border border-[#26375a] text-slate-300 hover:border-cyan-500`}
+
+        {/* 上下文信息 */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center bg-surface-container border border-surface-container-highest rounded px-2 py-1 text-xs">
+            <span className="text-on-surface-variant mr-1">客户:</span>
+            <span className="text-secondary font-medium">{client}</span>
+          </div>
+          <div className="flex items-center bg-surface-container border border-surface-container-highest rounded px-2 py-1 text-xs">
+            <span className="text-on-surface-variant mr-1">模号 / 机型:</span>
+            <span className="text-on-surface font-mono font-medium">{project}</span>
+          </div>
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-surface-container border border-surface-container-highest text-xs font-mono">
+            <span className="text-on-surface-variant text-[11px]">唯一受控编号:</span>
+            <span className="text-secondary font-bold">{rec?.docNo || "保存后生成"}</span>
+          </div>
+          {rec?.lock && !lockedByOther && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-950/80 text-emerald-300 text-xs font-medium border border-emerald-500/40">
+              <StitchIcon name="lock" className="text-[14px] text-emerald-400" />
+              <span>独占操作锁已持有</span>
+              <span className="font-mono text-[10px] text-emerald-400/80 ml-0.5">(倒计时 {mm}:{ss})</span>
+            </div>
+          )}
+          <CoreAccountControl beforeLogout={releaseForLogout} />
+        </div>
+
+        {/* 动作按钮区 */}
+        <div className="flex max-w-full flex-wrap items-center gap-2">
+          <button
+            className="min-h-11 sm:min-h-0 flex items-center gap-1 px-3 py-1.5 rounded bg-surface-container-highest hover:bg-surface-bright text-xs text-on-surface border border-surface-container-highest transition disabled:opacity-40"
             disabled={busy || readOnly || tab !== "排模表"}
             onClick={() => act((owned, version) => api.epmsSave(projPath, tab, form, owned, version), "草稿已保存")}>
-            <Save className="h-4 w-4" /> 保存草稿
+            <StitchIcon name="save" className="text-[16px]" />
+            <span>保存草稿</span>
           </button>
-          <button className={`${BTN} bg-blue-600 text-white hover:bg-blue-500`}
+          <button
+            className="min-h-11 sm:min-h-0 flex items-center gap-1 px-3 py-1.5 rounded bg-secondary-container hover:bg-secondary text-xs text-on-secondary-container font-semibold transition shadow-sm disabled:opacity-40"
             disabled={busy || readOnly || (rec?.status !== "draft" && rec?.status !== "none")}
-            onClick={() => act(async (owned, version, observedSave) => { const saved = tab === "排模表" ? await api.epmsSave(projPath, tab, form, owned, version) : rec!; observedSave(saved); return api.epmsStatus(projPath, tab, "submit", owned, saved.version); }, "已提交工程师审核")}>
-            <Send className="h-4 w-4" /> 提交工程师审核
+            onClick={() => act(async (owned, version, observedSave) => {
+              const saved = tab === "排模表" ? await api.epmsSave(projPath, tab, form, owned, version) : rec!;
+              observedSave(saved);
+              return api.epmsStatus(projPath, tab, "submit", owned, saved.version);
+            }, "已提交工程师审核")}>
+            <StitchIcon name="send" className="text-[16px]" />
+            <span>提交工程师审核</span>
           </button>
-          <button className={`${BTN} bg-emerald-600 text-white hover:bg-emerald-500`}
+          <button
+            className="min-h-11 sm:min-h-0 flex items-center gap-1 px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-xs text-white font-semibold transition shadow-sm disabled:opacity-40"
             disabled={busy || loading || !session?.canReview || !token || rec?.status !== "pending"}
             onClick={() => act((owned, version) => api.epmsStatus(projPath, tab, "approve", owned, version), "审核通过，已归档")}>
-            <BadgeCheck className="h-4 w-4" /> 审核通过并归档
+            <StitchIcon name="verified" className="text-[16px]" />
+            <span>审核通过并归档</span>
           </button>
-          <button className={`${BTN} border border-red-800 text-red-400 hover:bg-red-900/30`}
+          <button
+            className="min-h-11 sm:min-h-0 flex items-center gap-1 px-3 py-1.5 rounded bg-surface-container-highest hover:bg-error-container/40 text-xs text-error border border-surface-container-highest transition disabled:opacity-40"
             disabled={busy || loading || !session?.canReview || !token || rec?.status !== "pending"}
             onClick={() => act((owned, version) => api.epmsStatus(projPath, tab, "return", owned, version), "已驳回，退回制单")}>
-            <Undo2 className="h-4 w-4" /> 驳回
+            <StitchIcon name="undo" className="text-[16px]" />
+            <span>驳回</span>
           </button>
-          <span className={`text-sm ${st.cls}`}>资料编制状态：{st.text}</span>
         </div>
-      </div>
+      </header>
 
-      {!session?.canRead && <div role="status" className="mx-4 mt-3 rounded border border-amber-700 p-3 text-sm text-amber-300">请使用门户个人账号登录；姓名和权限以服务端验证为准。</div>}
-      {message && <div role="alert" className="mx-4 mt-3 rounded border border-red-700 p-3 text-sm text-red-300">{message}</div>}
-      {rec?.status === "approved" && rec.integrityStatus !== "verified" && <div role="alert" className="mx-4 mt-3 rounded border border-red-700 p-3 text-sm text-red-300">
+      {!session?.canRead && <div role="status" className="m-4 rounded border border-tertiary p-3 text-tertiary">请使用核心系统个人账号登录；姓名和权限由服务端验证。</div>}
+      {message && <div role="alert" className="m-4 rounded border border-error p-3 text-error">{message}</div>}
+      {rec?.status === "approved" && rec.integrityStatus !== "verified" && <div role="alert" className="m-4 rounded border border-error p-3 text-error">
         {rec.integrityStatus === "changed" ? "当前文件与审核时记录不一致，不能视为已批准文件。" : "当前无法核验文件与审核记录是否一致，不能视为已批准文件。"}
       </div>}
-      <p className="px-4 py-2 text-xs text-slate-400">{workflowNote}</p>
-      {/* 页签 */}
-      <div className="flex gap-1 border-b border-[#1e2d4a] bg-[#0d1628] px-4 pt-2">
-        {TABS.map((t) => (
-          <button key={t.key} onClick={() => {
+      {/* ── 主工作区 ── */}
+      <main className="flex-1 max-w-[1720px] w-full mx-auto p-4 flex flex-col gap-4">
+        {/* Tab 切换栏 + 锁定提示徽章 */}
+        <div className="bg-surface-container-low border border-surface-container-highest rounded px-3 py-2 flex flex-wrap items-center justify-between gap-2 shadow-sm">
+          <div className="flex max-w-full min-w-0 items-center gap-1 overflow-x-auto">
+            {TABS.map((t) => (
+              <button key={t.key} aria-pressed={tab === t.key} onClick={() => {
                 if (tab === t.key || !mayLeave()) return;
                 generationRef.current++;
                 const owned = tokenRef.current; tokenRef.current = "";
                 if (owned) void api.epmsUnlock(projPath, tab, owned).catch(() => {});
                 setToken(""); setRec(null); setForm(structuredClone(emptyForm)); setLoading(true); setDirty(false); setTab(t.key);
               }}
-            className={`rounded-t px-3 py-1.5 text-sm ${tab === t.key ? "bg-[#16233d] text-cyan-300 border border-b-0 border-[#26375a]" : "text-slate-400 hover:text-slate-200"}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {lockedByOther && (
-        <div className="mx-4 mt-3 flex items-center gap-2 rounded border border-amber-700/60 bg-amber-900/20 px-3 py-2 text-xs text-amber-300">
-          <Users className="h-4 w-4" />
-          {workflowNote}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-[1fr_320px]">
-        {/* 主区 */}
-        <div>
-          {tab === "排模表" && (
-            <div className={CARD + " p-4"}>
-              <div className="mb-3 flex items-center justify-between border-b border-[#1e2d4a] pb-2">
-                <div className="text-sm font-semibold text-slate-100">
-                  <span className="mr-2 rounded bg-[#16233d] px-2 py-0.5 text-xs text-cyan-300">FORM-TPL-01</span>
-                  模具排模规格与排产基准表 (Die & Cavity Layout Sheet)
-                </div>
-                <div className="text-xs text-slate-400">填报人：{rec?.by || session?.name || "-"}</div>
-              </div>
-
-              <div className="mb-1 text-xs font-semibold text-cyan-400">一、模具基础参数设定（基础字段）</div>
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                {([
-                  ["moldNo", "模具编号", "MOLD-2026-088"],
-                  ["cavities", "模具穴数", "1*4 穴（平衡）"],
-                  ["tonnage", "机台吨位", "250 T"],
-                  ["material", "胶件材质", "ABS + PC"],
-                  ["shrinkage", "材料缩水率 %", "0.5"],
-                  ["cycle", "成型周期 s", "28.0"],
-                  ["weight", "产品单重 g", "45.2"],
-                ] as [keyof PaiMoForm, string, string][]).map(([k, label, ph]) => (
-                  <div key={k}>
-                    <label className={LABEL}>{label}</label>
-                    <input className={INPUT} placeholder={ph} disabled={readOnly}
-                      aria-label={label} value={form[k] as string} onChange={(e) => setField(k, e.target.value)} />
-                  </div>
-                ))}
-              </div>
-
-              <div className="mb-1 mt-5 flex items-center justify-between">
-                <span className="text-xs font-semibold text-cyan-400">二、穴位与模仁排位细表</span>
-                <button className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300 disabled:opacity-40"
-                  disabled={readOnly}
-                  onClick={() => { setDirty(true); setForm((f) => ({ ...f, rows: [...f.rows, { cavity: "", partName: "", partNo: "", gate: "", eject: "", note: "" }] })); }}>
-                  <Plus className="h-3.5 w-3.5" /> 添加穴位
-                </button>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-[#26375a] text-left text-xs text-slate-400">
-                      <th className="py-1.5 pr-2">序号</th><th className="pr-2">模穴编号</th><th className="pr-2">对应零件名称</th>
-                      <th className="pr-2">零件料号</th><th className="pr-2">浇口类型</th><th className="pr-2">顶出方式</th>
-                      <th className="pr-2">模仁状态/工艺备注</th><th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {form.rows.map((r, i) => (
-                      <tr key={i} className="border-b border-[#1a2947]">
-                        <td className="py-1 pr-2 text-slate-400">{String(i + 1).padStart(2, "0")}</td>
-                        {(["cavity", "partName", "partNo", "gate", "eject", "note"] as (keyof CavityRow)[]).map((k) => (
-                          <td key={k} className="pr-2 py-1">
-                            <input className={INPUT} disabled={readOnly} aria-label={String(k) + " 第 " + (i + 1) + " 行"} value={r[k]}
-                              onChange={(e) => setRow(i, k, e.target.value)} />
-                          </td>
-                        ))}
-                        <td>
-                          <button aria-label={"删除第 " + (i + 1) + " 行"} className="text-red-400 hover:text-red-300 disabled:opacity-30" disabled={readOnly || form.rows.length <= 1}
-                            onClick={() => { setDirty(true); setForm((f) => ({ ...f, rows: f.rows.filter((_, j) => j !== i) })); }}>
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {tab !== "排模表" && <DocTabPanel key={tab} tab={tab} projPath={projPath} item={docItemsByName[tab]} onOpenEditor={openFile} readOnly={readOnly} lockToken={token} onChanged={() => api.doctypes(projPath).then((d) => setDocItems(d.items))} />}
-        </div>
-
-        {/* 右栏 */}
-        <div className="space-y-4">
-          <div className={CARD + " p-3"}>
-            <div className="mb-2 text-xs font-semibold text-cyan-400">协同防串与操作锁状态</div>
-            <div className="space-y-1 text-xs text-slate-300">
-              <div>当前锁持有者：<span className="text-cyan-300">{rec?.lock ? rec.lock.by : "空闲"}</span></div>
-              <div>最近操作：<span className="text-cyan-300">{rec?.by || "-"}</span> {rec?.updatedAt ? new Date(rec.updatedAt).toLocaleString("zh-CN") : ""}</div>
-              <div>锁规则：独占 15 分钟，无操作自动释放</div>
-            </div>
-          </div>
-          <div className={CARD + " p-3"}>
-            <div className="mb-2 flex items-center gap-1 text-xs font-semibold text-cyan-400"><FolderArchive className="h-3.5 w-3.5" /> 归档客户库信息</div>
-            <div className="rounded bg-[#0d1729] p-2 font-mono text-xs text-slate-300">
-              📁 {client}<br />└ 📁 {year}<br /> └ 📁 {project}
-            </div>
-          </div>
-          <div className={CARD + " p-3"}>
-            <div className="mb-2 flex items-center gap-1 text-xs font-semibold text-cyan-400"><ClipboardList className="h-3.5 w-3.5" /> 工程师审核链（3 步极简流程）</div>
-            {[
-              { n: 1, t: "制单人填报", on: true },
-              { n: 2, t: "工程师审核", on: rec?.status === "pending" || rec?.status === "approved" },
-              { n: 3, t: "审核记录已确认", on: rec?.status === "approved" },
-            ].map((s) => (
-              <div key={s.n} className="flex items-center gap-2 py-1.5 text-xs">
-                <span className={`flex h-5 w-5 items-center justify-center rounded-full border ${s.on ? "border-emerald-500 text-emerald-400" : "border-[#26375a] text-slate-500"}`}>{s.n}</span>
-                <span className={s.on ? "text-slate-200" : "text-slate-500"}>{s.t}</span>
-              </div>
+                className={tab === t.key
+                  ? "flex items-center gap-1.5 px-4 py-1.5 rounded bg-secondary text-on-secondary font-bold text-xs shadow-sm"
+                  : "flex items-center gap-1.5 px-3 py-1.5 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container text-xs transition"}>
+                <StitchIcon name={t.icon} className="text-[16px]" />
+                <span>{t.label}</span>
+                {tab === t.key && <span className="text-[10px] bg-on-secondary/20 px-1 rounded ml-1">当前</span>}
+              </button>
             ))}
-            {rec?.history?.length ? (
-              <div className="mt-2 border-t border-[#1e2d4a] pt-2 text-xs text-slate-400">
-                {rec.history.slice(-4).reverse().map((h, i) => (
-                  <div key={i}>{h.action} · {h.by} · {new Date(h.at).toLocaleString("zh-CN")}</div>
-                ))}
-              </div>
-            ) : null}
+          </div>
+          <div className="flex items-center gap-2 px-2.5 py-1 rounded bg-surface-container-lowest border border-tertiary/40 text-xs">
+            <StitchIcon name="shield_lock" className="text-[15px] text-tertiary" />
+            <span className="text-tertiary font-medium">服务器并发防串机制生效中</span>
+            <span className="text-outline-variant">·</span>
+            <span className="text-on-surface-variant text-[11px]">
+              {workflowNote}
+            </span>
           </div>
         </div>
-      </div>
+
+        {/* 内容 + 侧边信息布局 */}
+        <div className="grid grid-cols-12 gap-4 items-start">
+          <div className="col-span-12 xl:col-span-9 flex flex-col gap-4">
+            {tab === "排模表" ? (
+              <section className="bg-surface-container-low border border-surface-container-highest rounded shadow-sm overflow-hidden">
+                {/* 表格头部说明栏 */}
+                <div className="bg-surface-container px-4 py-2.5 border-b border-surface-container-highest flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs bg-secondary/15 text-secondary px-1.5 py-0.5 rounded font-bold border border-secondary/30">FORM-TPL-01</span>
+                    <h2 className="text-sm font-bold text-on-surface">模具排模规格与排产基准表 (Die & Cavity Layout Sheet)</h2>
+                  </div>
+                  <div className="text-xs text-on-surface-variant font-mono">
+                    状态: <span className="text-secondary font-semibold">{STATUS_TEXT[rec?.status || "none"]}</span> | 填报人: {rec?.by || session?.name || "-"}
+                  </div>
+                </div>
+
+                {/* 基础信息 */}
+                <div className="p-3 bg-surface-container-lowest border-b border-surface-container-highest">
+                  <div className="text-xs font-semibold text-secondary mb-2 flex items-center gap-1">
+                    <StitchIcon name="tune" className="text-[15px]" />
+                    <span>一、模具基础参数设定 (基础字段)</span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+                    <FieldBox label="模具编号">
+                      <input className={FIELD_INPUT} type="text" placeholder="MOLD-2026-088" disabled={readOnly}
+                        value={form.moldNo} onChange={(e) => setField("moldNo", e.target.value)} />
+                    </FieldBox>
+                    <FieldBox label="模具穴数">
+                      <input className={FIELD_INPUT} type="text" placeholder="1*4 穴 (平衡)" disabled={readOnly}
+                        value={form.cavities} onChange={(e) => setField("cavities", e.target.value)} />
+                    </FieldBox>
+                    <FieldBox label="机台吨位">
+                      <input className={FIELD_INPUT} type="text" placeholder="250 T" disabled={readOnly}
+                        value={form.tonnage} onChange={(e) => setField("tonnage", e.target.value)} />
+                    </FieldBox>
+                    <FieldBox label="胶件材质">
+                      <input className={FIELD_INPUT} type="text" placeholder="ABS + PC (阻燃V0)" disabled={readOnly}
+                        value={form.material} onChange={(e) => setField("material", e.target.value)} />
+                    </FieldBox>
+                    <FieldBox label="材料缩水率" suffix="%">
+                      <input className={FIELD_INPUT + " rounded-l rounded-none"} type="text" placeholder="0.5" disabled={readOnly}
+                        value={form.shrinkage} onChange={(e) => setField("shrinkage", e.target.value)} />
+                    </FieldBox>
+                    <FieldBox label="成型周期" suffix="s">
+                      <input className={FIELD_INPUT + " rounded-l rounded-none"} type="text" placeholder="28.0" disabled={readOnly}
+                        value={form.cycle} onChange={(e) => setField("cycle", e.target.value)} />
+                    </FieldBox>
+                    <FieldBox label="产品单重" suffix="g">
+                      <input className={FIELD_INPUT + " rounded-l rounded-none"} type="text" placeholder="45.2" disabled={readOnly}
+                        value={form.weight} onChange={(e) => setField("weight", e.target.value)} />
+                    </FieldBox>
+                  </div>
+                </div>
+
+                {/* 穴位与模仁排位细表 */}
+                <div className="p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-semibold text-secondary flex items-center gap-1">
+                      <StitchIcon name="apps" className="text-[15px]" />
+                      <span>二、穴位与模仁排位细表 (表头格式严格锁定)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-on-surface-variant bg-surface-container px-2 py-0.5 rounded border border-surface-container-highest">共 {form.rows.length} 个受控排穴位</span>
+                      <button className="flex items-center gap-1 text-[11px] text-secondary hover:text-secondary-fixed disabled:opacity-40"
+                        disabled={readOnly}
+                        onClick={() => { setDirty(true); setForm((f) => ({ ...f, rows: [...f.rows, { cavity: "", partName: "", partNo: "", gate: "", eject: "", note: "" }] })); }}>
+                        <Plus className="h-3.5 w-3.5" /> 添加穴位
+                      </button>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto border border-surface-container-highest rounded">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-surface-container text-on-surface font-semibold border-b border-surface-container-highest">
+                          <th className="py-2 px-3 w-12 text-center text-on-surface-variant">序号</th>
+                          <th className="py-2 px-3 w-28 text-secondary">模穴编号 (Cavity)</th>
+                          <th className="py-2 px-3 w-44">对应零件名称</th>
+                          <th className="py-2 px-3 w-40 font-mono">零件料号 (P/N)</th>
+                          <th className="py-2 px-3 w-32">浇口类型</th>
+                          <th className="py-2 px-3 w-32">顶出方式</th>
+                          <th className="py-2 px-3">模仁状态 / 工艺备注</th>
+                          <th className="w-10"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-surface-container-highest bg-surface-container-low/70">
+                        {form.rows.map((r, i) => (
+                          <tr key={i} className="hover:bg-surface-container/60 transition">
+                            <td className="py-2 px-3 text-center font-mono text-on-surface-variant">{String(i + 1).padStart(2, "0")}</td>
+                            <td className="py-2 px-3"><input className={CELL_INPUT + " font-bold text-secondary"} placeholder="A1" disabled={readOnly} aria-label={"cavity 第 " + (i + 1) + " 行"} value={r.cavity} onChange={(e) => setRow(i, "cavity", e.target.value)} /></td>
+                            <td className="py-2 px-3"><input className={CELL_INPUT} placeholder="零件名称" disabled={readOnly} aria-label={"partName 第 " + (i + 1) + " 行"} value={r.partName} onChange={(e) => setRow(i, "partName", e.target.value)} /></td>
+                            <td className="py-2 px-3"><input className={CELL_INPUT + " font-mono"} placeholder="P/N" disabled={readOnly} aria-label={"partNo 第 " + (i + 1) + " 行"} value={r.partNo} onChange={(e) => setRow(i, "partNo", e.target.value)} /></td>
+                            <td className="py-2 px-3"><input className={CELL_INPUT} placeholder="热咀直浇口" disabled={readOnly} aria-label={"gate 第 " + (i + 1) + " 行"} value={r.gate} onChange={(e) => setRow(i, "gate", e.target.value)} /></td>
+                            <td className="py-2 px-3"><input className={CELL_INPUT} placeholder="圆顶针+扁顶针" disabled={readOnly} aria-label={"eject 第 " + (i + 1) + " 行"} value={r.eject} onChange={(e) => setRow(i, "eject", e.target.value)} /></td>
+                            <td className="py-2 px-3"><input className={CELL_INPUT + " text-on-surface-variant"} placeholder="718H钢材淬火 / 咬花等级" disabled={readOnly} aria-label={"note 第 " + (i + 1) + " 行"} value={r.note} onChange={(e) => setRow(i, "note", e.target.value)} /></td>
+                            <td className="py-2 px-1 text-center">
+                              <button aria-label={"删除第 " + (i + 1) + " 行"} className="text-error hover:text-error/80 disabled:opacity-30" disabled={readOnly || form.rows.length <= 1}
+                                onClick={() => { setDirty(true); setForm((f) => ({ ...f, rows: f.rows.filter((_, j) => j !== i) })); }}>
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
+            ) : (
+              <DocTabPanel key={tab} tab={tab} projPath={projPath} item={docItemsByName[tab]} onOpenEditor={openFile} readOnly={readOnly} lockToken={token}
+                onChanged={() => api.doctypes(projPath).then((d) => setDocItems(d.items))} />
+            )}
+          </div>
+
+          {/* ── 右侧信息栏 ── */}
+          <div className="col-span-12 xl:col-span-3 flex flex-col gap-4">
+            <div className="bg-surface-container-low border border-surface-container-highest rounded shadow-sm p-3">
+              <div className="text-xs font-semibold text-secondary mb-2 flex items-center gap-1">
+                <StitchIcon name="group" className="text-[15px]" />
+                <span>协同防串与操作锁状态</span>
+              </div>
+              <div className="space-y-1.5 text-[11px] text-on-surface-variant">
+                <div className="flex justify-between"><span>当前锁持有者:</span><span className="text-on-surface font-medium">{rec?.lock ? rec.lock.by : "空闲"}</span></div>
+                <div className="flex justify-between"><span>最近操作:</span><span className="text-on-surface font-medium">{rec?.by || "-"}</span></div>
+                <div className="flex justify-between"><span>锁规则:</span><span>独占 15 分钟自动释放</span></div>
+                <div className="flex justify-between"><span>单据状态:</span><span className="text-secondary font-medium">{STATUS_TEXT[rec?.status || "none"]}</span></div>
+              </div>
+            </div>
+
+            <div className="bg-surface-container-low border border-surface-container-highest rounded shadow-sm p-3">
+              <div className="text-xs font-semibold text-secondary mb-2 flex items-center gap-1">
+                <StitchIcon name="folder_open" className="text-[15px]" />
+                <span>归档客户库信息</span>
+              </div>
+              <div className="rounded bg-surface-container-lowest border border-surface-container-highest p-2 font-mono text-[11px] text-on-surface-variant leading-relaxed">
+                📁 {client}<br />└ 📁 {year}<br /> └ 📁 {project}<br />  └ 📁 工程放产资料
+              </div>
+            </div>
+
+            <div className="bg-surface-container-low border border-surface-container-highest rounded shadow-sm p-3">
+              <div className="text-xs font-semibold text-secondary mb-2 flex items-center gap-1">
+                <StitchIcon name="fact_check" className="text-[15px]" />
+                <span>工程师审核链 (3步极简流程)</span>
+              </div>
+              {[
+                { n: 1, t: "制单人填报", on: true, cur: rec?.status === "draft" || !rec || rec.status === "none" },
+                { n: 2, t: "工程师审核", on: rec?.status === "pending" || rec?.status === "approved", cur: rec?.status === "pending" },
+                { n: 3, t: "审核记录已确认", on: rec?.status === "approved", cur: rec?.status === "approved" },
+              ].map((s) => (
+                <div key={s.n} className="flex items-center gap-2 py-1.5 text-xs">
+                  <span className={`flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-bold ${s.on ? "border-secondary text-secondary" : "border-surface-container-highest text-on-surface-variant"}`}>{s.n}</span>
+                  <span className={s.on ? "text-on-surface" : "text-on-surface-variant"}>{s.t}</span>
+                  {s.cur && <span className="text-[10px] text-tertiary bg-tertiary-container px-1 rounded">当前</span>}
+                </div>
+              ))}
+              {rec?.history?.length ? (
+                <div className="mt-2 border-t border-surface-container-highest pt-2 space-y-1 text-[10px] text-on-surface-variant">
+                  <div>最近 4 条操作（共 {rec.history.length} 条记录）</div>
+                  {rec.history.slice(-4).reverse().map((h, i) => (
+                    <div key={i}>{h.action} · {h.by} · {new Date(h.at).toLocaleString("zh-CN")}</div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="bg-surface-container-low border border-tertiary/30 rounded shadow-sm p-3">
+              <div className="text-xs font-semibold text-tertiary mb-1.5 flex items-center gap-1">
+                <StitchIcon name="tips_and_updates" className="text-[15px]" />
+                <span>制单与防呆提醒</span>
+              </div>
+              <ul className="text-[10px] text-on-surface-variant space-y-1 list-disc pl-4">
+                <li>单据按「项目+资料类型」锁定，他人打开自动只读</li>
+                <li>{workflowNote}</li>
+                <li>提交审核后锁定编辑，驳回后退回制单人</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
 
-/* ---------- 排模图 / 外购清单 / 作业指导书 页签 ---------- */
+function FieldBox({ label, suffix, children }: { label: string; suffix?: string; children: React.ReactNode }) {
+  const id = useId();
+  const control = isValidElement(children) ? cloneElement(children as ReactElement<{ id?: string; "aria-label"?: string }>, { id, "aria-label": label }) : children;
+  return (
+    <div className="bg-surface-container p-2 rounded border border-surface-container-highest">
+      <label htmlFor={id} className="text-[11px] text-on-surface-variant block mb-1">{label}</label>
+      {suffix ? (
+        <div className="flex items-center">
+          {control}
+          <span className="bg-surface-container-highest border-y border-r border-outline-variant/60 text-xs px-1.5 py-1 text-on-surface-variant rounded-r">{suffix}</span>
+        </div>
+      ) : control}
+    </div>
+  );
+}
+
+/* ── 排模图 / 外购清单 / 作业指导书 页签 ── */
 function DocTabPanel({ tab, projPath, item, onOpenEditor, onChanged, readOnly, lockToken }: {
   tab: DocTab; projPath: string; item?: DocTypeItem; readOnly: boolean; lockToken: string;
   onOpenEditor: (path: string, name: string) => void; onChanged: () => void;
@@ -392,7 +490,9 @@ function DocTabPanel({ tab, projPath, item, onOpenEditor, onChanged, readOnly, l
 
   const doUpload = async (f: File) => {
     if (readOnly || !lockToken) return;
-    if (!f.name.includes(tab) && !(tab === "外购件清单" && f.name.includes("外购清单"))) { toast.error("文件名需包含资料类型（" + tab + "）"); return; }
+    if (!f.name.includes(tab) && !(tab === "外购件清单" && f.name.includes("外购清单"))) {
+      toast.error("文件名需包含资料类型（" + tab + "），以便归入正确单据"); return;
+    }
     setUploading(true);
     try {
       await api.upload(projPath + "/" + (item?.dir || "工程放产资料"), f, undefined, { lockToken });
@@ -405,36 +505,38 @@ function DocTabPanel({ tab, projPath, item, onOpenEditor, onChanged, readOnly, l
   };
 
   return (
-    <div className={CARD + " p-6"}>
-      <div className="mb-4 text-sm font-semibold text-slate-100">{tab}</div>
+    <section className="bg-surface-container-low border border-surface-container-highest rounded shadow-sm p-6">
+      <div className="text-sm font-bold text-on-surface mb-4">{tab}</div>
       {existingFull ? (
         <div className="space-y-3">
-          <div className="rounded bg-[#0d1729] p-3 text-sm text-cyan-200">{item!.existing}</div>
+          <div className="rounded bg-surface-container-lowest border border-surface-container-highest p-3 text-xs font-mono text-secondary">{item!.existing}</div>
           <div className="flex gap-2">
             {isXlsx ? (
-              <button className={`${BTN} bg-blue-600 text-white hover:bg-blue-500`} onClick={() => onOpenEditor(existingFull, tab)}>
-                {readOnly ? "只读查看表格" : "打开网页编辑"}
+              <button className="min-h-11 sm:min-h-0 flex items-center gap-1 px-3 py-1.5 rounded bg-secondary-container hover:bg-secondary text-xs text-on-secondary-container font-semibold transition"
+                onClick={() => onOpenEditor(existingFull, tab)}>
+                <StitchIcon name="edit_document" className="text-[16px]" /> {readOnly ? "只读查看表格" : "打开网页编辑"}
               </button>
             ) : (
-              <a className={`${BTN} bg-blue-600 text-white hover:bg-blue-500`} href={api.fileUrl(existingFull, true)} download>
-                下载查看
+              <a className="min-h-11 sm:min-h-0 flex items-center gap-1 px-3 py-1.5 rounded bg-secondary-container hover:bg-secondary text-xs text-on-secondary-container font-semibold transition"
+                href={api.fileUrl(existingFull, true)} download>
+                <StitchIcon name="download" className="text-[16px]" /> 下载查看
               </a>
             )}
           </div>
         </div>
       ) : (
-        <div className="space-y-3 text-sm text-slate-400">
+        <div className="space-y-3 text-xs text-on-surface-variant">
           <p>该资料还没有文件。{tab === "排模图" ? "可以上传图纸/图片/PDF：" : "可以上传做好的表格："}</p>
-          <button className={`${BTN} border border-dashed border-[#26375a] text-slate-300 hover:border-cyan-500`}
+          <button className="flex items-center gap-1.5 px-3 py-2 rounded border border-dashed border-surface-container-highest text-on-surface hover:border-secondary transition disabled:opacity-40"
             disabled={uploading || readOnly} onClick={() => fileRef.current?.click()}>
             {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : tab === "排模图" ? <FileImage className="h-4 w-4" /> : <UploadCloud className="h-4 w-4" />}
             上传{tab}文件
           </button>
-          <p className="text-xs text-slate-500">上传后回到项目页也可以用「从模板新建」生成空白表格在线填写。</p>
+          <p className="text-[10px]">上传后回到项目页也可以用「从模板新建」生成空白表格在线填写。</p>
         </div>
       )}
       <input ref={fileRef} type="file" className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) doUpload(f); e.target.value = ""; }} />
-    </div>
+    </section>
   );
 }

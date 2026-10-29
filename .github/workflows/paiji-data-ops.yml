@@ -5,6 +5,7 @@ name: Paiji Data Ops
 #   mode=check-outsource       —— 只读：打印四张外发表的当前行数。
 #   mode=backup-only           —— SQLite 在线备份、完整性检查和 SHA256；不改库、不重启。
 #   mode=prepare-erp-receipt-return —— 先在线备份，再同步独立集成密钥；不重启/迁移。
+#   mode=repair-receipt-timestamps —— 本次分支专用：先备份，再严格CAS修复两个时间字段。
 #   mode=apply-outsource-seed  —— 应用 server/seed/outsource-2026-07-22.sql：
 #                                 先做 SQLite 在线备份（包含已提交 WAL），
 #                                 再用 better-sqlite3 执行种子 SQL（事务包裹，只 DELETE+INSERT
@@ -20,7 +21,7 @@ on:
         type: choice
         required: true
         default: check-outsource
-        options: [check-outsource, backup-only, prepare-erp-receipt-return, apply-outsource-seed]
+        options: [check-outsource, backup-only, prepare-erp-receipt-return, apply-outsource-seed, repair-receipt-timestamps]
 
 permissions:
   contents: read
@@ -40,12 +41,17 @@ jobs:
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           OPS_MODE: ${{ inputs.mode }}
+          OPS_REF: ${{ github.ref }}
+          P90_PAIJI_TIMESTAMP_REPAIR_PLAN: ${{ secrets.P90_PAIJI_TIMESTAMP_REPAIR_PLAN }}
           PAIJI_ERP_RECEIPT_RETURN_TOKEN: ${{ secrets.PAIJI_ERP_RECEIPT_RETURN_TOKEN }}
         run: |
           set -euo pipefail
           if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
             echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
             exit 1
+          fi
+          if [[ "$OPS_MODE" == repair-receipt-timestamps ]]; then
+            [[ "$OPS_REF" == refs/heads/codex/p90-paiji-timestamp-repair && -n "$P90_PAIJI_TIMESTAMP_REPAIR_PLAN" ]] || { echo 'Receipt timestamp repair requires its reviewed branch and private plan.' >&2; exit 1; }
           fi
           if [[ "$OPS_MODE" == prepare-erp-receipt-return && ! "$PAIJI_ERP_RECEIPT_RETURN_TOKEN" =~ ^[a-fA-F0-9]{64}$ ]]; then
             echo 'PAIJI_ERP_RECEIPT_RETURN_TOKEN must be a configured 64-character hex secret.' >&2
@@ -56,6 +62,8 @@ jobs:
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           OPS_MODE: ${{ inputs.mode }}
+          OPS_REF: ${{ github.ref }}
+          P90_PAIJI_TIMESTAMP_REPAIR_PLAN: ${{ secrets.P90_PAIJI_TIMESTAMP_REPAIR_PLAN }}
           OPS_REVISION: ${{ github.sha }}
           PAIJI_ERP_RECEIPT_RETURN_TOKEN: ${{ secrets.PAIJI_ERP_RECEIPT_RETURN_TOKEN }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
@@ -65,11 +73,11 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 8m
-          envs: OPS_MODE,OPS_REVISION,PAIJI_ERP_RECEIPT_RETURN_TOKEN
+          envs: OPS_MODE,OPS_REF,OPS_REVISION,PAIJI_ERP_RECEIPT_RETURN_TOKEN,P90_PAIJI_TIMESTAMP_REPAIR_PLAN
           script: |
             set -euo pipefail
             MODE="${OPS_MODE:-check-outsource}"
-            case "$MODE" in check-outsource|backup-only|prepare-erp-receipt-return|apply-outsource-seed) ;; *) echo '[FAIL] 未知 mode' >&2; exit 1 ;; esac
+            case "$MODE" in check-outsource|backup-only|prepare-erp-receipt-return|apply-outsource-seed|repair-receipt-timestamps) ;; *) echo '[FAIL] 未知 mode' >&2; exit 1 ;; esac
             echo "=================== MODE: $MODE ==================="
             cd /opt/rr-portal
             CT="$(docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production ps -q paiji)"
@@ -77,14 +85,35 @@ jobs:
 
             online_backup() (
               umask 077
-              [[ "$OPS_REVISION" =~ ^[a-f0-9]{40}$ ]] || { echo '[FAIL] 无效运维版本' >&2; exit 1; }
+              backup_revision="$OPS_REVISION"
+              if [[ "$MODE" == repair-receipt-timestamps ]]; then
+                # The branch helper is not merged; backup still uses the approved main implementation.
+                backup_revision=f22fbffa1789234fe1c78bf776f4dcb3fe867d0c
+              fi
+              [[ "$backup_revision" =~ ^[a-f0-9]{40}$ ]] || { echo '[FAIL] 无效运维版本' >&2; exit 1; }
               git fetch origin main
-              git merge-base --is-ancestor "$OPS_REVISION" origin/main || { echo '[FAIL] 运维版本必须已合入 main' >&2; exit 1; }
+              git merge-base --is-ancestor "$backup_revision" origin/main || { echo '[FAIL] 运维版本必须已合入 main' >&2; exit 1; }
               runner=$(mktemp)
               trap 'rm -f "$runner"' EXIT
-              git show "$OPS_REVISION:deploy/paiji-online-backup.sh" > "$runner"
+              git show "$backup_revision:deploy/paiji-online-backup.sh" > "$runner"
               bash "$runner"
             )
+
+            if [[ "$MODE" == repair-receipt-timestamps ]]; then
+              [[ "${OPS_REF:-}" == refs/heads/codex/p90-paiji-timestamp-repair && "$OPS_REVISION" =~ ^[a-f0-9]{40}$ && -n "${P90_PAIJI_TIMESTAMP_REPAIR_PLAN:-}" ]] || { echo '[FAIL] 修复分支或私密计划不正确' >&2; exit 1; }
+              online_backup
+              umask 077
+              helper=$(mktemp)
+              trap 'rm -f "$helper"' EXIT
+              git fetch --no-tags origin "$OPS_REVISION"
+              git show "$OPS_REVISION:deploy/paiji-repair-receipt-timestamps.cjs" > "$helper"
+              chmod 600 "$helper"
+              # Secret value is passed by environment only; argv/stdout contain no plan or timestamps.
+              export P90_PAIJI_TIMESTAMP_REPAIR_PLAN
+              docker exec -i -e P90_PAIJI_TIMESTAMP_REPAIR_PLAN "$CT" node - < "$helper"
+              echo '[OK] 严格CAS时间修复完成；未重启、未恢复整库或执行种子'
+              exit 0
+            fi
 
             counts() {
               docker exec "$CT" node -e "

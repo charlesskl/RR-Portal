@@ -6,6 +6,7 @@ on:
       - 'deploy/update-server.sh'
       - 'deploy/service-maintenance.sh'
       - 'deploy/paiji-online-backup.sh'
+      - 'deploy/paiji-repair-receipt-timestamps.cjs'
       - 'deploy/compose-mailbox-only-change.py'
       - 'deploy/tests/**'
       - '.github/workflows/deploy.yml'

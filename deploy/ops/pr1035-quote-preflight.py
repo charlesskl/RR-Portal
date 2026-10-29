@@ -1,6 +1,6 @@
 """Inert Quote readonly preflight: hashes only; no lifecycle, SQL writes or copies of business files."""
 import hashlib,json,os,pathlib,re,stat,subprocess,sys
-EXECUTE=True
+EXECUTE=False
 TARGET='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c'
 BRANCH='refs/heads/ops/pr-1035-20261029-quote'
 ROOT=pathlib.Path('/opt/rr-portal')

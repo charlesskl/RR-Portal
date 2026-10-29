@@ -6,7 +6,7 @@ OUT=ROOT/'deploy/backups/pr1030-engineering-prepare-diagnostic-1'
 MANIFEST_SHA256='90282d32240e4e13dfca997b523202bb33faf63ae46d4b610150e1edc21d7a6d'
 RESULT_SHA256='43abc8c275ea8aeec576122053d2197be2d7202d009bff32ba9d280c2f949b6e'
 BRANCH='refs/heads/ops/pr-1030-1033-20261029-engineering'
-EXECUTE=True
+EXECUTE=False
 def need(v,label):
  if not v:raise RuntimeError(label)
 def enc(v):return json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).encode()

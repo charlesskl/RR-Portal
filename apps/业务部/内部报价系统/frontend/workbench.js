@@ -3473,10 +3473,11 @@ function renderCartonCalc(host, c, canEdit, onChange) {
 
 function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty, quoteCustomer, { inputId, previewId, targetKey, label, mixedConfig, mixedRoot, mixedTotalCode, getMixedTotalCode, getMixedImportTarget, onApplied }) {
     // Build new arrays first so a conflict in one product cannot partially apply a batch.
+    const supplierSync = window.SupplierMaterialSync;
     const mergeMaterials = (existing, incoming, byCode) => {
       const normalize = value => String(value ?? '').normalize('NFKC').replace(/\s+/g, '').replace(/[×＊*]/g, 'X').toUpperCase();
       const code = value => normalize(value).replace(/^BEAUTYMINI[_-]S3-(\d+)$/, (_, number) => `BEAUTYM-S3-${String(Number(number)).padStart(3, '0')}`);
-      const key = row => JSON.stringify([byCode ? code(row.product_code) : '', normalize(row.name), normalize(row.spec)]);
+      const key = row => JSON.stringify([normalize(row.supplier_id || row.supplier_name), byCode ? code(row.product_code) : '', normalize(row.name), normalize(row.spec)]);
       const positions = new Map(), seen = new Set(), replacements = new Map(), removed = new Set(), addedRows = [];
       (existing || []).forEach((row, index) => {
         if (row.is_subtotal || row.children?.length) return;
@@ -3539,6 +3540,7 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
         const fd = new FormData();
         fd.append('file', file);
         fd.append('target_qty', '5000');
+        if (supplierSync) fd.append('full_supplier_snapshot', '1');
         const response = await fetch('/api/uploads/hardware-sheet', { method: 'POST', credentials: 'include', body: fd });
         if (!active()) return;
         const result = await response.json();
@@ -3582,6 +3584,59 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
             note: [...baseNote, tier.moq ? `适用MOQ：${tier.moq}` : '', `价格来源：${priceSource}`].filter(Boolean).join('；'),
           };
         };
+        let supplierChoice = '', newSupplierName = '', legacyClaims = new Set(), syncPreview = null, snapshotSignature = null;
+        const scopeBatches = items => {
+          if (!mixedConfig) return [{id:'__single__',label:'当前产品',byCode:true,existing:payload[targetKey] || [],items}];
+          if (sharedImport) return [{id:'__shared__',label:'每包装共有费用',byCode:true,existing:mixedRoot.mixed_shared?.[targetKey] || [],items}];
+          const allocation = window.MixedSku.planSupplier(mixedConfig,items,importTotalCode);
+          if (allocation.unmatched.length) throw Error('存在无法分配的货号：' + allocation.unmatched.join('、'));
+          const grouped = new Map(allocation.groups.map(group=>[group.product.id,group.items]));
+          return [...mixedConfig.products.map(product=>({id:product.id,label:product.code,byCode:false,
+            existing:mixedRoot.mixed_products?.[product.id]?.[targetKey] || [],items:grouped.get(product.id) || []})),
+            {id:'__shared__',label:'每包装共有费用',byCode:true,existing:mixedRoot.mixed_shared?.[targetKey] || [],items:allocation.sharedItems}];
+        };
+        const signature = batches => JSON.stringify(batches.map(batch=>[batch.id,batch.label,batch.byCode,batch.existing]));
+        const selectedSupplier = batches => {
+          if (supplierChoice !== '__new__') return supplierSync.suppliers(batches).find(supplier=>supplier.id===supplierChoice);
+          if (supplierSync.suppliers(batches).some(supplier=>supplierSync.normalize(supplier.name)===supplierSync.normalize(newSupplierName))) throw Error('该供应商已存在，请从列表选择');
+          return {name:newSupplierName};
+        };
+        const hasTrackedSuppliers = () => {
+          const targets = !mixedConfig ? [payload] : [mixedRoot.mixed_shared,...Object.values(mixedRoot.mixed_products || {})];
+          return targets.some(target=>(target?.[targetKey] || []).some(row=>row.supplier_id || row.supplier_name));
+        };
+        const syncHtml = items => {
+          if (!supplierSync) return '';
+          let batches, syncResult, error='';
+          try {
+            batches=scopeBatches(items);
+            const state=signature(batches);
+            if(snapshotSignature!==null && snapshotSignature!==state)throw Error('物料资料已变更，请重新选择文件并核对变更明细');
+            snapshotSignature=state;
+            if (result.supplier_snapshot_version !== 1) throw Error('解析服务尚未加载供应商同步，请更新或重启本地服务后再试');
+            if (resultSheetIncomplete()) throw Error('有物料缺少可识别报价，不能作为完整清单同步；请补齐后重新导入');
+            syncResult=supplierSync.plan({supplier:selectedSupplier(batches),batches,legacyClaims:[...legacyClaims],sourceFile:file.name || '',sourceSheet:resultSheet()});
+          } catch(e) {error=e.message;}
+          // Allocation errors must not hide the supplier selector or silently widen the scope.
+          const available=batches || scopeBatches([]), known=supplierSync.suppliers(available);
+          syncPreview=syncResult ? {plan:syncResult,signature:signature(available)} : null;
+          const legacy=available.flatMap(batch=>batch.existing.flatMap((row,index)=>!supplierSync.supplierId(row) && supplierSync.isDetail(row)
+            ? [{batch,row,token:supplierSync.legacyToken(batch.id,index)}] : []));
+          const beforeAfter=(row,field)=>row ? escapeHtml(row[field] ?? '—') : '—';
+          const price=row=>row ? escapeHtml((row.source_currency || (row.unit_price_rmb!=null?'RMB':'HKD')) + ' ' + (row.source_currency==='USD' ? row.unit_price_usd ?? '—' : row.unit_price_rmb ?? row.unit_price ?? '—')) : '—';
+          const c=syncResult?.counts;
+          return `<section class="mixed-config" data-supplier-sync><h4>按供应商同步完整最新清单</h4>
+            <p>同步范围：${escapeHtml(label)} · ${mixedConfig && !sharedImport ? '当前报价的全部小产品及共有费用' : sharedImport ? '当前每包装共有费用' : '当前产品'}。只更新所选供应商；其他供应商及其他物料类别保留。</p>
+            <label>本次供应商 <select data-sync-supplier aria-label="本次供应商"><option value="">请选择供应商</option>${known.map(supplier=>`<option value="${escapeHtml(supplier.id)}" ${supplierChoice===supplier.id?'selected':''}>${escapeHtml(supplier.name)}</option>`).join('')}<option value="__new__" ${supplierChoice==='__new__'?'selected':''}>＋ 新增供应商</option></select></label>
+            ${supplierChoice==='__new__'?`<label>供应商名称 <input data-new-supplier aria-label="供应商名称" maxlength="100" value="${escapeHtml(newSupplierName)}" placeholder="填写实际供应商名称"></label>`:''}
+            ${legacy.length?`<details data-legacy-suppliers><summary>确认历史物料归属（${legacy.length} 条未标供应商）</summary><p>仅勾选确属本次供应商的旧物料。勾选后会按新清单更新或删除；未勾选的旧资料保留。</p><div style="max-height:260px;overflow:auto"><table class="wb-table"><thead><tr><th>属于本次供应商</th><th>产品归属</th><th>货号</th><th>旧物料</th><th>规格</th><th>用量</th></tr></thead><tbody>${legacy.map(({batch,row,token})=>`<tr><td><input type="checkbox" data-claim-supplier="${escapeHtml(token)}" ${legacyClaims.has(token)?'checked':''} ${supplierChoice?'':'disabled'} aria-label="归属本次供应商：${escapeHtml(batch.label)} ${escapeHtml(row.name)}"></td><td>${escapeHtml(batch.label)}</td><td>${escapeHtml(row.product_code || '')}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.spec)}</td><td>${escapeHtml(row.qty)}</td></tr>`).join('')}</tbody></table></div></details>`:''}
+            <p data-supplier-sync-status role="status">${error?escapeHtml(error):`预计更新 ${c.updated} 条、新增 ${c.added} 条、删除 ${c.deleted} 条；保留其他供应商 ${c.otherKept} 条、未归属历史物料 ${c.legacyKept} 条。`}</p>
+            ${c?.legacyConflicts?`<p class="mixed-error">另有 ${c.legacyConflicts} 条同名历史物料未确认供应商，仍会保留；请先核对归属，避免重复报价。</p>`:''}
+            ${syncResult?`<div style="max-height:320px;overflow:auto"><table class="wb-table"><thead><tr><th>变更</th><th>产品归属</th><th>物料</th><th>规格（旧 → 新）</th><th>用量（旧 → 新）</th><th>原币单价（旧 → 新）</th></tr></thead><tbody>${syncResult.changes.map(change=>`<tr><td>${change.type}</td><td>${escapeHtml(change.batchLabel)}</td><td>${beforeAfter(change.before,'name')} → ${beforeAfter(change.after,'name')}</td><td>${beforeAfter(change.before,'spec')} → ${beforeAfter(change.after,'spec')}</td><td>${beforeAfter(change.before,'qty')} → ${beforeAfter(change.after,'qty')}</td><td>${price(change.before)} → ${price(change.after)}</td></tr>`).join('')}</tbody></table></div>`:''}
+            <button type="button" data-action="supplier-sync" ${error?'disabled':''}>按此供应商同步最新清单</button> <button type="button" class="mini" data-action="supplier-cancel">取消</button><p class="muted">确认后更新当前草稿，保存工程/业务草稿后生效。本次文件中未出现的该供应商旧物料将删除。</p></section>`;
+        };
+        const resultSheet=()=>result.sheet_used || '';
+        const resultSheetIncomplete=()=>!!result.unpriced_items?.length;
         const renderPreview = () => {
           if (!active()) return;
           if (totalCodeChanged()) { invalidateTotalCode(); return; }
@@ -3616,15 +3671,28 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
               </tbody></table>
               ${sharedImport ? '<p>导入到：每包装共有费用（计一次）。表内货号保留作来源，不匹配小产品。</p>' : ''}
               ${allocation ? `<p>${allocation.unmatched.length ? '无法分配：'+allocation.unmatched.map(escapeHtml).join('、') : '已匹配 '+allocation.groups.length+' 款小产品；总货号共用项目 '+allocation.sharedItems.length+' 条，每包装计一次。未涉及的资料保留。'}</p>` : ''}
-              <p>更新匹配物料：按同一产品下的物料名称和规格匹配，更新价格、用量及报价资料；未涉及的收缩膜等材料保留。新名称或新规格会新增。共有费用另按来源货号区分。</p>
+              ${syncHtml(normalizedItems)}
+              <div ${supplierChoice || hasTrackedSuppliers() ? 'hidden' : ''}><p>更新匹配物料：按同一产品下的物料名称和规格匹配，更新价格、用量及报价资料；未涉及的收缩膜等材料保留。新名称或新规格会新增。共有费用另按来源货号区分。</p>
               <p data-supplier-update-status role="status">${updateError ? escapeHtml(updateError) : `预计更新 ${updateCounts.updated} 条、新增 ${updateCounts.added} 条${updateCounts.duplicates ? `，合并 ${updateCounts.duplicates} 条旧重复资料（应用前需确认）` : ''}。`}</p>
               <div style="margin-top:10px">
-                <button data-action="update" ${updateError ? 'disabled' : ''}>更新匹配物料（推荐）</button>
+                <button data-action="update" ${updateError ? 'disabled' : ''}>仅更新匹配物料（不删除）</button>
                 <button data-action="replace" class="mini" ${allocation?.unmatched.length ? 'disabled' : ''}>${sharedImport ? '替换共有费用的'+escapeHtml(label) : allocation ? '替换匹配归属的'+escapeHtml(label) : '应用（替换全部'+escapeHtml(label)+'）'}</button>
                 <button data-action="append" class="mini" ${allocation?.unmatched.length ? 'disabled' : ''}>追加到现有列表</button>
                 <button data-action="cancel" class="mini danger">取消</button>
-              </div>
+              </div></div>
             </div>`;
+          const supplierSelect=preview.querySelector('[data-sync-supplier]');
+          if(supplierSelect)supplierSelect.onchange=event=>{
+            supplierChoice=event.target.value;legacyClaims.clear();renderPreview();
+          };
+          const supplierNameInput=preview.querySelector('[data-new-supplier]');
+          if(supplierNameInput)supplierNameInput.onchange=event=>{
+            newSupplierName=event.target.value;legacyClaims.clear();renderPreview();
+          };
+          preview.querySelectorAll('[data-claim-supplier]').forEach(box=>box.onchange=()=>{
+            if(box.checked)legacyClaims.add(box.dataset.claimSupplier);else legacyClaims.delete(box.dataset.claimSupplier);
+            renderPreview();const details=preview.querySelector('[data-legacy-suppliers]');if(details)details.open=true;
+          });
           preview.querySelectorAll('[data-tier-index]').forEach(select => select.onchange = () => {
             selections[Number(select.dataset.tierIndex)].moqQty = Number(select.value);
             renderPreview();
@@ -3638,6 +3706,30 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
             if (!active()) return;
             if (totalCodeChanged()) { invalidateTotalCode(); return; }
             const appliedItems = result.items.map(selectedItem);
+            if (mode === 'supplier-sync') {
+              if (!supplierSync || !syncPreview) return;
+              try {
+                if (getMixedImportTarget && getMixedImportTarget() !== importTarget) throw Error('报价对象已切换，请重新选择文件，核对同步范围');
+                const batches=scopeBatches(appliedItems);
+                if(signature(batches)!==syncPreview.signature)throw Error('物料资料已变更，请重新选择文件并核对变更明细');
+                const plan=supplierSync.plan({supplier:selectedSupplier(batches),batches,legacyClaims:[...legacyClaims],sourceFile:file.name || '',sourceSheet:resultSheet()});
+                const c=plan.counts;
+                if(!confirm(`供应商：${plan.supplier.name}\n类别：${label}\n将更新 ${c.updated} 条、新增 ${c.added} 条、删除 ${c.deleted} 条。其他供应商资料保留。${c.legacyConflicts?`\n另有 ${c.legacyConflicts} 条未归属同名旧物料保留，请确认它们属于其他供应商。`:''}\n确认同步完整最新清单？`))return;
+                ++importSequence;
+                for(const batch of plan.batches){
+                  if(!batch.changed)continue;
+                  const target=!mixedConfig?payload:batch.id==='__shared__'?(mixedRoot.mixed_shared ||= {}):((mixedRoot.mixed_products ||= {})[batch.id] ||= {});
+                  target[targetKey]=batch.rows;
+                }
+                fileInput.value='';onChange();
+                preview.innerHTML=`已同步供应商 ${escapeHtml(plan.supplier.name)}：更新 ${c.updated} 条、新增 ${c.added} 条、删除 ${c.deleted} 条。请保存工程/业务草稿。`;
+                if(mixedConfig)onApplied?.();else renderEngineering(host,payload,canEdit,onChange,fxRmbHkd,fxHkdUsd,quoteQty,quoteCustomer);
+              }catch(error){preview.querySelector('[data-supplier-sync-status]').textContent=error.message;}
+              return;
+            }
+            if(supplierChoice || hasTrackedSuppliers()){
+              preview.querySelector('[data-supplier-update-status]').textContent='本类物料已按供应商区分，请选择供应商并使用“同步最新清单”';return;
+            }
             if (mode === 'update') {
               if (getMixedImportTarget && getMixedImportTarget() !== importTarget) {
                 ++importSequence;
@@ -3706,6 +3798,10 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
             renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty, quoteCustomer);
             onChange();
           };
+          const syncButton=preview.querySelector('[data-action="supplier-sync"]');
+          if(syncButton)syncButton.onclick=()=>finish('supplier-sync');
+          const syncCancel=preview.querySelector('[data-action="supplier-cancel"]');
+          if(syncCancel)syncCancel.onclick=()=>preview.querySelector('[data-action="cancel"]').onclick();
           preview.querySelector('[data-action="update"]').onclick = () => finish('update');
           preview.querySelector('[data-action="replace"]').onclick = () => finish('replace');
           preview.querySelector('[data-action="append"]').onclick = () => finish('append');
@@ -3951,6 +4047,7 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
     },
   };
   const freeCols = [
+    { key: 'supplier_name', label: '供应商', readonly: true, calc: r => r.supplier_name || r.supplier_id || '未标供应商', width: '140px' },
     { key: 'name', label: '零件名称' },
     { key: 'spec', label: '规格' },
     { key: 'qty', label: '用量', type: 'formula', width: '80px' },
@@ -3966,6 +4063,7 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
   ];
   // 辅助材料：在五金列基础上插入「类别」列（减税明细按类别统计）
   const auxCols = [
+    { key: 'supplier_name', label: '供应商', readonly: true, calc: r => r.supplier_name || r.supplier_id || '未标供应商', width: '140px' },
     { key: 'name', label: '零件名称' },
     { key: 'spec', label: '规格' },
     { key: 'category', label: '类别', type: 'select', options: MAT_CATEGORIES, width: '120px' },
@@ -4002,6 +4100,7 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
 
   // 六、包装材料
   const pkCols = [
+    { key: 'supplier_name', label: '供应商', readonly: true, calc: r => r.supplier_name || r.supplier_id || '未标供应商', width: '140px' },
     { key: 'name', label: '零件名称' },
     { key: 'spec', label: '规格', type: 'textarea' },
     { key: 'category', label: '类别', type: 'select', options: MAT_CATEGORIES, width: '120px' },
@@ -6285,6 +6384,12 @@ function matchFreightByName(name) {
 
 function renderShipping(host, payload, header, canEdit, onChange, freightMap, priceHkdPerPcs, surtaxHkdPerPcs, amortSharesUsd, sideItemsHkd) {
   freightMap = freightMap || {};
+  // 旧草稿或部分导入可能只保存码点/除数，没有场景数组。
+  if (!payload.shipping || typeof payload.shipping !== 'object' || Array.isArray(payload.shipping)) payload.shipping = {};
+  if (!Array.isArray(payload.shipping.scenarios)) payload.shipping.scenarios = [];
+  for (const [key, value] of Object.entries({freight_pct:48, lifting_pct:52, markup_x:1.2, divisor:.98, target_usd:0})) {
+    if (payload.shipping[key] == null) payload.shipping[key] = value;
+  }
   // 自动确保第一个场景是"出厂价"（freight/lifting = 0）
   if (!payload.shipping.scenarios.length || !payload.shipping.scenarios[0].is_factory) {
     payload.shipping.scenarios.unshift({ name: '出厂价', base_rmb: 0, mold_share_rmb: 0, is_factory: true });

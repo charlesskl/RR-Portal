@@ -146,6 +146,16 @@ async function readSheets(buffer) {
 
 async function parseSheets(sheets, options = {}) {
   if (!sheets.length) return { error: '工作簿为空' };
+  if (options.allSheets && sheets.length > 1) {
+    const matched = sheets.filter(sheet => sheet.rows.some(isHeader));
+    if (!matched.length) return { error: '未找到供应商报价明细表头' };
+    const parsed = await Promise.all(matched.map(sheet => parseSheets([sheet], {...options, allSheets:false})));
+    const failed = parsed.find(result => result.error);
+    if (failed) return failed;
+    const items = parsed.flatMap((result,index) => result.items.map(item => ({...item, source_sheet:matched[index].name})));
+    return {...parsed[0], items, count:items.length, sheet_used:matched.map(sheet=>sheet.name).join('、'),
+      sheets_used:matched.map(sheet=>sheet.name), unpriced_items:parsed.flatMap(result=>result.unpriced_items || [])};
+  }
 
   let picked = null;
   let headerRow = -1;
@@ -301,12 +311,13 @@ async function parseSheets(sheets, options = {}) {
       sheet_used: picked.name,
       header_row: headerRow + 1,
       template_type: 'supplier_quote',
+      unpriced_items: groups.filter(group=>group.name && !chooseTier(group.tiers, options.targetQty, options.targetCurrency)).map(group=>({name:group.name, product_code:group.product_code, sheet:picked.name})),
       target_qty: Number(options.targetQty) || null,
       target_currency: options.targetCurrency || null,
     };
   }
 
-  const items = [];
+  const items = [], unpricedItems = [];
   for (let index = headerRow + 1; index < picked.rows.length; index += 1) {
     const row = picked.rows[index] || [];
     const name = toStr(row[cols.name]);
@@ -317,6 +328,7 @@ async function parseSheets(sheets, options = {}) {
     const qty = toNum(row[cols.qty]);
     const unitPrice = toNum(row[cols.unitPrice]);
     if (qty == null && unitPrice == null && /合计|合計|总计|總計/.test(rowText)) continue;
+    if (unitPrice == null) unpricedItems.push({name, sheet:picked.name, row:index + 1});
 
     items.push({
       ...(cols.productCode == null ? {} : {product_code: toStr(row[cols.productCode])}),
@@ -330,7 +342,7 @@ async function parseSheets(sheets, options = {}) {
   }
 
   if (!items.length) return { error: '未解析到五金明细行' };
-  return { items, count: items.length, sheet_used: picked.name, header_row: headerRow + 1 };
+  return { items, count: items.length, sheet_used: picked.name, header_row: headerRow + 1, unpriced_items:unpricedItems };
 }
 
 async function parseWorkbook(buffer, options = {}) {

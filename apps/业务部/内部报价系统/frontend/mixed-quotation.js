@@ -152,7 +152,7 @@
     window.renderTable(host.querySelector('[data-material-table]'), [{key:'name',label:'料名'},{key:'model',label:'型号'},{key:'price',label:'HKD/磅',type:'number'},{key:'per_g',label:'HKD/g',readonly:true,calc:r=>Number(r.price || 0)/454}], root.material_prices, {readonly:!edit,onChange:changed});
     window.renderTable(host.querySelector('[data-machine-table]'), [{key:'model',label:'机型'},{key:'normal',label:'普通机'},{key:'price',label:'HKD/台班',type:'number'}], root.machine_prices, {readonly:!edit,onChange:changed});
   }
-  function renderCatalog(host, root, cfg, edit, changed, productId) {
+  function renderCatalog(host, root, cfg, edit, changed, productId, preferredPartIds = []) {
     const catalog = root.parts_catalog;
     if (!catalog) {
       host.innerHTML = '<h3>统一零件与产品组成</h3><p>将现有零件整理为统一明细，保留现有各款费用和共模分摊来源。</p>' + (edit ? '<button type="button">启用统一零件编辑</button>' : '<p>进入编辑后可启用。</p>');
@@ -174,7 +174,10 @@
     const selection = catalog.selections[productId] || [];
     const moldKey = p => String(p.mold_no || '').trim();
     const orderedParts = [...catalog.parts].sort((a,b) => {
-      if (selectionMode) return Number(selection.some(r => r.part_id === b.id)) - Number(selection.some(r => r.part_id === a.id));
+      if (selectionMode) {
+        const priority = part => Number(selection.some(r => r.part_id === part.id)) * 2 + Number(preferredPartIds.includes(part.id));
+        return priority(b) - priority(a);
+      }
       const x = moldKey(a), y = moldKey(b);
       return !x ? (!y ? 0 : 1) : !y ? -1 : x.localeCompare(y, 'zh', { numeric: true });
     });
@@ -290,7 +293,7 @@
       const left = scroll?.scrollLeft || 0, top = scroll?.scrollTop || 0;
       const pageX = window.scrollX, pageY = window.scrollY;
       const search = host.querySelector('[data-part-search]').value;
-      renderCatalog(host, root, cfg, edit, changed, productId);
+      renderCatalog(host, root, cfg, edit, changed, productId, preferredPartIds);
       const next = host.querySelector('.mixed-scroll');
       if (next) { next.scrollLeft = left; next.scrollTop = top; }
       const filter = host.querySelector('[data-part-search]'); filter.value = search; filter.oninput({target:filter});
@@ -535,6 +538,49 @@
       note: `${p.note || ''}${p.catalog_usage ? `；本款用量 ${p.catalog_usage}` : ''}` }));
     return { injection, molds };
   }
+  // A catalog is a list of selectable parts; it must not hide molds imported
+  // directly into the shared or product editor. This merge is display-only.
+  function engineeringDisplayMolds(catalogRoot, cfg, productId, payload = {}) {
+    if (!catalogRoot.parts_catalog) return payload.molds || [];
+    const molds = nativeCatalogData(catalogRoot, cfg, productId, true).molds;
+    for (const mold of payload.molds || []) for (const part of mold.parts?.length ? mold.parts : [mold]) {
+      const incoming = { ...mold, ...part, ...window.MixedMolds.inheritMoldFields(part, mold),
+        mold_no: mold.mold_no || part.mold_no || '', parts: undefined };
+      const same = row => row.mold_no === incoming.mold_no && row.name === incoming.name
+        && ['material','color','source_file'].every(key => !row[key] || !incoming[key] || row[key] === incoming[key]);
+      const matches = molds.filter(same);
+      if (matches.length === 1) {
+        // Current catalog edits take precedence; a blank field may use the
+        // saved engineering value. Never change catalog selections or costs.
+        for (const [key, value] of Object.entries(incoming)) {
+          if ((matches[0][key] == null || matches[0][key] === '') && value != null && value !== '') matches[0][key] = value;
+        }
+      } else {
+        const catalogMatches = catalogRoot.parts_catalog.parts.filter(same);
+        if (catalogMatches.length === 1) {
+          const catalogPart = catalogMatches[0];
+          // A shared import can exist in both the old editor and the catalog
+          // without a selection. Show one row, while keeping the missing usage explicit.
+          for (const [key, value] of Object.entries(catalogPart)) {
+            if (value != null && value !== '') incoming[key] = value;
+          }
+          incoming.catalog_part_id = catalogPart.id;
+          incoming.note = [incoming.note, '工程模具明细已保存；本项尚未配置零件库用量，未按此归属计入零件库成本'].filter(Boolean).join('；');
+        }
+        molds.push(incoming);
+      }
+    }
+    return molds;
+  }
+  function unassignedEngineeringMolds(catalogRoot, cfg, records) {
+    const validIds = new Set([...cfg.products.map(product => product.id), '__shared__']);
+    const selected = new Set(Object.entries(catalogRoot.parts_catalog?.selections || {})
+      .filter(([id]) => validIds.has(id)).flatMap(([, refs]) => refs.map(ref => ref.part_id)));
+    for (const record of records) for (const mold of record.molds) if (mold.catalog_part_id) selected.add(mold.catalog_part_id);
+    return (catalogRoot.parts_catalog?.parts || []).filter(part => !selected.has(part.id))
+      .map(part => ({ ...part, catalog_usage: null, usage: null,
+        note: [part.note, '已导入，尚未分配到小产品或每包装共有费用；未计入报价'].filter(Boolean).join('；') }));
+  }
   function applyAssemblyBaseRate(root, cfg, value) {
     if (String(value ?? '').trim() === '' || !Number.isFinite(Number(value)) || Number(value) < 0) {
       throw new Error('请输入大于等于0的有效基数');
@@ -564,7 +610,7 @@
     const value = v => v == null || v === '' ? '—' : esc(v);
     const number = v => Number(v) || 0;
     const sum = (rows, get) => rows.reduce((total,row) => total + get(row),0);
-    const link = product => `<button type="button" class="mixed-product-link" data-open-engineering-product="${esc(product.id)}">${esc(product.code)}</button>`;
+    const link = product => `<button type="button" class="mixed-product-link" data-open-engineering-product="${esc(product.id === '__unassigned__' ? '__all_molds__' : product.id)}">${esc(product.code)}</button>`;
     const cells = values => values.map(v => `<td>${v}</td>`).join('');
     const row = (record,values,subtotal=false) => `<tr data-engineering-product="${esc(record.product.id)}"${subtotal ? ' class="mixed-detail-subtotal"' : ''}>${cells([link(record.product),...values,esc(record.product.name)])}</tr>`;
     const footer = (width,label,amount) => `<tfoot><tr><th colspan="${width}">${label}：${amount}</th></tr></tfoot>`;
@@ -582,15 +628,15 @@
           const usd=window.usesFreeUsdPrice(item);
           const currency=usd?'USD':window.hasFreeRmbPrice(item)?'RMB':'HKD';
           const unit=usd?window.freeUsdSourcePrice(item):currency==='RMB'?item.unit_price_rmb:item.unit_price;
-          return row(record,[value(item.name),value(item.spec),value(item.category),item.is_subtotal?'原表小计':value(item.qty_raw ?? item.qty),
+          return row(record,[value(item.supplier_name || item.supplier_id || '未标供应商'),value(item.name),value(item.spec),value(item.category),item.is_subtotal?'原表小计':value(item.qty_raw ?? item.qty),
             item.is_subtotal?'—':currency,item.is_subtotal?'—':value(item[usd?'unit_price_usd_raw':currency==='RMB'?'unit_price_rmb_raw':'unit_price_raw'] ?? unit),
             item.is_subtotal?'—':fmt(window.freeUnitHkd(item,fxRmbHkd,fxHkdUsd)),fmt(cost),value(record.payload.indo_pct),fmt(ship),value(item.tax_pct),
             value(item.moq ?? item.selected_moq),value(item.note),value(item.source_file)]);
         }).join('');
         amount+=subtotal;freight+=indo;
-        return html+row(record,[`本款小计（${rows.length} 条）`,'','','','','','',fmt(subtotal),'',fmt(indo),'','','',''],true);
+        return html+row(record,[`本款小计（${rows.length} 条）`,'','','','','','','',fmt(subtotal),'',fmt(indo),'','','',''],true);
       }).join('');
-      return group(key,title,['物料名称','规格','类别','用量 / 公式','币种','原币单价 / 公式','单价 HKD','金额 HKD','印尼运费 %','印尼运费 HKD','税点 %','MOQ','备注','来源文件'],body,`${fmt(amount)} HKD；印尼运费 ${fmt(freight)} HKD`);
+      return group(key,title,['供应商','物料名称','规格','类别','用量 / 公式','币种','原币单价 / 公式','单价 HKD','金额 HKD','印尼运费 %','印尼运费 HKD','税点 %','MOQ','备注','来源文件'],body,`${fmt(amount)} HKD；印尼运费 ${fmt(freight)} HKD`);
     };
     const molds=records.map(record=>{
       if(record.moldError) return row(record,[esc(record.moldError)]);
@@ -667,7 +713,7 @@
       let overallSearch = '';
       let overallScroll = {left:0,top:0};
       function openOverviewProduct(id) {
-        if (id !== '__shared__' && !cfg.products.some(product => product.id === id)) return;
+        if (!['__shared__','__all_molds__'].includes(id) && !cfg.products.some(product => product.id === id)) return;
         const scroll = (dept === 'engineering' ? detail.querySelector('[data-engineering-tables]') : detail)?.querySelector('.mixed-scroll');
         overallScroll = {left:scroll?.scrollLeft || 0,top:scroll?.scrollTop || 0};
         selected = id;
@@ -828,12 +874,19 @@
             const payload = product.id === '__shared__' ? root.mixed_shared : root.mixed_products[product.id] || {};
             let molds = payload.molds || [], moldError = '';
             if (catalog.parts_catalog) {
-              try { molds = nativeCatalogData(catalog, cfg, product.id, true).molds; }
+              try { molds = engineeringDisplayMolds(catalog, cfg, product.id, payload); }
               catch (error) { moldError = error.message; }
             }
             const moldCount = new Set(molds.map((mold,index) => String(mold.mold_no || '').trim() || `unfilled_${index}`)).size;
             return {product,payload,molds,moldCount,partCount:molds.reduce((count,mold) => count + (mold.parts?.length || 1),0),moldError,
               costs:window.engineeringSummaryTotals(payload,args[0],args[1])};
+          });
+          const unassigned = unassignedEngineeringMolds(catalog, cfg, totals);
+          if (unassigned.length) totals.push({
+            product: { id: '__unassigned__', code: '已导入 · 待分配', name: '未计入报价；点击进入全部模具配置产品组成' },
+            payload: {}, molds: unassigned,
+            moldCount: new Set(unassigned.map(part => part.mold_no || part.id)).size,
+            partCount: unassigned.length, costs: window.engineeringSummaryTotals({}, args[0], args[1])
           });
           detail.innerHTML = `<h3>工程/业务整体明细与汇总</h3><p class="muted">全部小产品按类别集中列出完整明细；每款有小计，每类有合计。各款为未乘比例的原值，共有费用只列一次；最终报价仍按混装比例汇总。点击货号可修改对应资料。</p>
             <input type="search" data-engineering-search placeholder="查找货号或品名" aria-label="查找工程明细与汇总"><div data-engineering-tables></div>`;
@@ -860,6 +913,7 @@
               const split = marker.lastIndexOf(':');
               const id = marker.slice(0,split), index = marker.slice(split+1);
               const record = visible.find(item => item.product.id === id);
+              if (!record) return;
               const parts = record.molds.flatMap(mold => (mold.parts?.length ? mold.parts : [mold]).map(part => ({...mold,...part})));
               window.renderImageCell?.(cell,{images:[...(parts[Number(index)]?.images || [])]},false,()=>{});
             });
@@ -1044,13 +1098,25 @@
           const moldingRoot = window.MixedMolds.engineeringCatalog(JSON.parse(window.__data.sections.find(s => s.dept === 'molding')?.payload_json || '{}'), root);
           if (moldingRoot.parts_catalog) {
             moldingRoot.parts_catalog.selections = root.mixed_part_selections || moldingRoot.parts_catalog.selections;
-            const compositionPanel = document.createElement('details'); compositionPanel.className = 'mixed-config'; compositionPanel.innerHTML = '<summary>配置产品组成（选择零件及用量）</summary>'; detail.appendChild(compositionPanel);
+            const compositionPanel = document.createElement('details'); compositionPanel.className = 'mixed-config';
+            const sharedParts = selected === '__shared__' ? engineeringDisplayMolds(moldingRoot, cfg, selected, payload) : [];
+            const sharedRefs = moldingRoot.parts_catalog.selections.__shared__ || [];
+            const pendingShared = sharedParts.filter(part => part.catalog_part_id && !sharedRefs.some(ref => ref.part_id === part.catalog_part_id));
+            compositionPanel.open = edit && pendingShared.length > 0;
+            compositionPanel.innerHTML = '<summary>配置产品组成（选择零件及用量）</summary>' + (pendingShared.length ? `<p class="mixed-error" data-pending-shared>以下共用模具已保存，尚未配置每包装用量：${pendingShared.map(part => esc(part.name)).join('、')}。请勾选并核对用量，再保存工程草稿；料价、机型和日产啤次在啤机部填写。</p>` : '');
+            detail.appendChild(compositionPanel);
             const composition = document.createElement('section'); compositionPanel.appendChild(composition);
             renderCatalog(composition, moldingRoot, cfg, edit, () => {
               root.mixed_part_selections = JSON.parse(JSON.stringify(moldingRoot.parts_catalog.selections)); onChange();
+              const notice = compositionPanel.querySelector('[data-pending-shared]');
+              if (notice) {
+                const remaining = pendingShared.filter(part => !(root.mixed_part_selections.__shared__ || []).some(ref => ref.part_id === part.catalog_part_id));
+                notice.hidden = !remaining.length;
+                notice.textContent = `以下共用模具已保存，尚未配置每包装用量：${remaining.map(part => part.name).join('、')}。请勾选并核对用量，再保存工程草稿；料价、机型和日产啤次在啤机部填写。`;
+              }
               const table = detail.querySelector('#wb-molds');
-              if (table) renderGroupedNativeMolds(table, nativeCatalogData(moldingRoot, cfg, selected, true).molds, ...args.slice(0,2));
-            }, selected);
+              if (table) renderGroupedNativeMolds(table, engineeringDisplayMolds(moldingRoot, cfg, selected, payload), ...args.slice(0,2));
+            }, selected, pendingShared.map(part => part.catalog_part_id));
           }
         }
         const editor = document.createElement('div'); detail.appendChild(editor);
@@ -1058,7 +1124,7 @@
         if (dept === 'engineering') {
           const catalogRoot = window.MixedMolds.engineeringCatalog(JSON.parse(window.__data.sections.find(s => s.dept === 'molding')?.payload_json || '{}'), root);
           if (catalogRoot.parts_catalog && editor.querySelector('#wb-molds')) {
-            renderGroupedNativeMolds(editor.querySelector('#wb-molds'), nativeCatalogData(catalogRoot, cfg, selected, true).molds, ...args.slice(0,2));
+            renderGroupedNativeMolds(editor.querySelector('#wb-molds'), engineeringDisplayMolds(catalogRoot, cfg, selected, payload), ...args.slice(0,2));
             const shared = editor.querySelector('#wb-molds-shared'); if (shared) shared.innerHTML = '';
           }
         }

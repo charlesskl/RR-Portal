@@ -223,7 +223,7 @@ it('真实单位下拉接入同一粘贴业务链，空草稿选单位后填量�
   const state = {
     items, matMap: map, consolidatedItems: consolidateShipmentItems(items, map),
     applyMergedShipmentEdits, outRows: [], editing: { id: 9 }, customsOptions: [],
-    sheetRevision: { current: { rawItems: items, matMap: map, session: 1 } }, sheetConfirmOpen: { current: false },
+    sheetRevision: { current: { rawItems: items, matMap: map, session: 1 } }, sheetWritePending: { current: false },
     dirtyMatIds: new Set<number>(), setItems: vi.fn(), setMatMap: vi.fn(), setDirtyMatIds: vi.fn(),
     setEditorDirty: vi.fn(), setSheetEditing: vi.fn(), setOutRows: vi.fn(),
     api: { get: vi.fn(async () => ({ data: [] })), put: vi.fn(), post: vi.fn() },
@@ -290,7 +290,7 @@ it('实际页面保存使用按单位校正的申报量，采购日期展示去�
   const api = { put: vi.fn(async (..._args: any[]) => { void _args; return {} }) }
   const context = createContext({
     items, consolidatedItems: consolidateShipmentItems(items, materials), matMap: materials, api, creating: false, editing: { id: 9001 },
-    sheetEditing: false, dirtyMatIds: new Set(), form: { validateFields: async () => ({ customer: 'RRI' }) },
+    editorLoadState: { current: 'ready' }, sheetEditing: false, dirtyMatIds: new Set(), form: { validateFields: async () => ({ customer: 'RRI' }) },
     setSaving: vi.fn(), setEditing: vi.fn(), setEditorDirty: vi.fn(), closeEditor: vi.fn(), load: vi.fn(),
     shipmentPurchaseDates, shipmentPackingAverageQty, shipmentWeightQuantity, shipmentDeclarationSaveError, message: { success: vi.fn() },
   })
@@ -322,7 +322,7 @@ it('整行粘贴换单位和数量后，实际保存、真实模板导出及重�
   const api = { put: vi.fn(async (..._args: any[]) => { void _args; return {} }) }
   const context = createContext({
     items, matMap: edited.materials, api, creating: false, editing: { id: 9001 },
-    sheetEditing: false, dirtyMatIds: edited.dirtyMaterials,
+    editorLoadState: { current: 'ready' }, sheetEditing: false, dirtyMatIds: edited.dirtyMaterials,
     form: { validateFields: async () => ({ customer: 'RRM', container_no: 'PASTE-TEST' }) },
     setSaving: vi.fn(), setEditing: vi.fn(), setEditorDirty: vi.fn(), setDirtyMatIds: vi.fn(), closeEditor: vi.fn(), load: vi.fn(),
     shipmentPackingAverageQty, shipmentWeightQuantity, shipmentDeclarationSaveError, message: { success: vi.fn() },

@@ -69,8 +69,12 @@ function setup(key: string, at = { row: 1, col: 1 }) {
   const state = {
     sheetArrowKeys, sheetArrowPoint, sheetArrowUsesEditor, point: () => at,
     count: 3, fields: ['', 'name', 'qty'], editableAt: () => true,
-    cellAt: () => ({ querySelector: () => null }), editorAt: vi.fn(() => ({} as HTMLElement | null)), focus: vi.fn(),
+    cellAt: () => ({ querySelector: () => null }), hasCell: () => true,
+    canEdit: (p: { row: number; col: number }): boolean => p.col === 0 ? !!state.editorAt() : state.editableAt(),
+    editorAt: vi.fn(() => ({} as HTMLElement | null)), focus: vi.fn(),
     setAnchor: vi.fn(), setEnd: vi.fn(), fillDown: vi.fn(),
+    editingCell: null as { row: number; col: number } | null, setEditingCell: vi.fn(),
+    batchPending: { current: false }, anchor: at,
     event: { key, target: input, nativeEvent: { isComposing: false },
       ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false,
       preventDefault: vi.fn(), stopPropagation: vi.fn() },
@@ -120,8 +124,18 @@ it('输入法、系统修饰键和打开的下拉选择不被方向导航抢占'
     expect(state.event.preventDefault).not.toHaveBeenCalled()
   }
 })
+it.each(['Enter', 'Tab', 'ArrowDown', 'd'])('Safari 输入法选字的 %s（keyCode=229）不跳格或填充', key => {
+  const { state, run } = setup(key)
+  Object.assign(state.event.nativeEvent, { keyCode: 229 })
+  if (key === 'd') state.event.metaKey = true
+  run()
+  expect(state.focus).not.toHaveBeenCalled()
+  expect(state.fillDown).not.toHaveBeenCalled()
+  expect(state.event.preventDefault).not.toHaveBeenCalled()
+})
 it.each(['.ant-select', '.ant-picker'])('F2 后处于可编辑列的闭合%s 内，方向键交给控件而非跳到下一行', control => {
   const { state, run } = setup('ArrowDown')
+  state.editingCell = { row: 1, col: 1 }
   const input = { tagName: 'INPUT', readOnly: control === '.ant-select', value: '', selectionStart: 0, selectionEnd: 0 }
   state.event.target.closest = ((selector: string) => {
     if (selector === '.ant-select,.ant-picker') return {}
@@ -132,6 +146,73 @@ it.each(['.ant-select', '.ant-picker'])('F2 后处于可编辑列的闭合%s 内
   expect(state.focus).not.toHaveBeenCalled()
   expect(state.event.preventDefault).not.toHaveBeenCalled()
   expect(state.event.stopPropagation).not.toHaveBeenCalled()
+})
+
+it.each(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'])('单击选格后即使焦点在多行文本框内，%s 仍跳格', key => {
+  const { state, run } = setup(key)
+  const editor = { tagName: 'TEXTAREA', value: '1-2/1卡', selectionStart: 3, selectionEnd: 3 }
+  state.event.target = target(editor)
+  run()
+  expect(state.focus).toHaveBeenCalledWith(sheetArrowPoint({ row: 1, col: 1 }, key, 3, 3, () => true), false)
+  expect(state.event.preventDefault).toHaveBeenCalledOnce()
+})
+it.each(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'])('F2或开始打字后，多行编辑器的 %s 保留文字光标行为', key => {
+  const { state, run } = setup(key)
+  state.editingCell = { row: 1, col: 1 }
+  state.event.target = target({ tagName: 'TEXTAREA', value: '1-2/1卡', selectionStart: 3, selectionEnd: 3 })
+  run()
+  expect(state.focus).not.toHaveBeenCalled()
+  expect(state.event.preventDefault).not.toHaveBeenCalled()
+})
+it.each(['k', '卡', 'Backspace', 'Delete'])('选择模式的首个 %s 按键原生进入编辑，不吞键或转发伪造输入', key => {
+  const { state, run } = setup(key)
+  state.event.target = target({ tagName: 'TEXTAREA' })
+  run()
+  expect(state.setEditingCell).toHaveBeenCalledWith({ row: 1, col: 1 })
+  expect(state.focus).not.toHaveBeenCalled()
+  expect(state.event.preventDefault).not.toHaveBeenCalled()
+})
+it.each(['a', '卡', 'Process'])('开始编辑后连续 %s 不再逐字更新表格选择状态', key => {
+  const { state, run } = setup(key)
+  state.editingCell = { row: 1, col: 1 }
+  if (key === 'Process') state.event.nativeEvent.isComposing = true
+  run()
+  expect(state.setEditingCell).not.toHaveBeenCalled()
+  expect(state.event.preventDefault).not.toHaveBeenCalled()
+})
+it('Esc提交当前编辑并返回导航模式，下次方向键不再移动文字光标', () => {
+  const { state, run } = setup('Escape')
+  state.editingCell = { row: 1, col: 1 }
+  state.event.target = target({ tagName: 'TEXTAREA' })
+  run()
+  expect(state.focus).toHaveBeenCalledWith({ row: 1, col: 1 }, false)
+  expect(state.event.preventDefault).toHaveBeenCalledOnce()
+  expect(state.event.stopPropagation).toHaveBeenCalledOnce()
+})
+
+it('真实点击处理：单击预览选格、再次点输入框进入文字编辑、双击和输入法开始也能编辑', () => {
+  const attrs: Record<string, string> = {}
+  const collect = (node: ts.Node) => {
+    if (ts.isJsxAttribute(node) && ['onClickCapture', 'onDoubleClickCapture', 'onCompositionStartCapture'].includes(node.name.getText(tree)))
+      attrs[node.name.getText(tree)] = ((node.initializer as ts.JsxExpression).expression!).getText(tree)
+    ts.forEachChild(node, collect)
+  }
+  collect(tree)
+  const context = createContext({ point: () => ({ row: 1, col: 1 }), anchor: null, editingCell: null, batchPending: { current: false }, suppressClick: { current: false },
+    canEdit: () => true, setAnchor: vi.fn(), setEnd: vi.fn(), setEditingCell: vi.fn(), focus: vi.fn(),
+    event: { shiftKey: false, target: target() } })
+  const execute = (name: string) => runInContext(ts.transpileModule(`(${attrs[name]})(event)`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText, context)
+  execute('onClickCapture')
+  expect(context.focus).toHaveBeenLastCalledWith({ row: 1, col: 1 }, false)
+  context.event.target.closest = () => ({}) as any
+  execute('onClickCapture')
+  expect(context.focus).toHaveBeenLastCalledWith({ row: 1, col: 1 })
+  execute('onDoubleClickCapture')
+  expect(context.focus).toHaveBeenLastCalledWith({ row: 1, col: 1 })
+  execute('onCompositionStartCapture')
+  expect(context.setEditingCell).toHaveBeenCalledTimes(1)
 })
 it('F2可进入编辑，Tab/Enter/向下填充继续使用原有逻辑', () => {
   const edit = setup('F2'); edit.run()

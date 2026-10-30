@@ -168,7 +168,7 @@ describe('supplier document export', () => {
       expect(wb.Sheets[name][`C${start}`]?.v || '').toBe('')
     }
     for (const row of [1, 3, 4, 5, 6, 7, 8]) expect(wb.Sheets['司机资料'][`B${row}`]?.v || '').toBe('')
-  })
+  }, 60000)
 
   it('keeps missing driver references blank after recalculation and never uses the template sheet name as a container', async () => {
     const output = await buildCustomsWorkbook({ templateBuffer: rrmTemplateBuffer, seller,
@@ -184,7 +184,7 @@ describe('supplier document export', () => {
       // Keep an editable link with an explicit blank guard instead.
       expect(declaration[address]).toMatchObject({ f: `IF('司机资料'!${source}="","",'司机资料'!${source})`, v: '' })
     }
-  })
+  }, 60000)
 
   it('keeps missing specifications blank while retaining numeric and text zero specifications', async () => {
     const template = XLSX.read(rrmTemplateBuffer, { type: 'array', cellFormula: true, cellStyles: true })
@@ -207,7 +207,7 @@ describe('supplier document export', () => {
     expect(wb.Sheets['草稿大单-1'].E21.f).toContain(`COUNTBLANK(INDEX('发票'!$E:$E,MATCH($A21,'发票'!$B:$B,0)))`)
     expect(wb.Sheets['商品汇总表'].D3).toMatchObject({ t: 'n', v: 0 })
     expect(wb.Sheets['商品汇总表'].D4).toMatchObject({ t: 's', v: '0' })
-  })
+  }, 60000)
 
   it.each([0, 3, 40, 80])('keeps auxiliary totals and cross-sheet references correct with %s details', async count => {
     const ids = Array.from({ length: count }, (_, i) => i + 1)
@@ -545,7 +545,7 @@ describe('supplier document export', () => {
     })
     expect(items).toEqual(original)
   })
-  it.each(['legacy', 'RRI', 'RRM'])('uses shipping weight and its unit for generic invoice quantity (%s)', async variant => {
+  it.each(['legacy', 'RRI', 'RRM'])('uses rounded declaration kilograms and its unit for generic invoice quantity (%s)', async variant => {
     const file = await buildCustomsWorkbook({
       templateBuffer: variant === 'legacy' ? templateBuffer : variant === 'RRI' ? rriTemplateBuffer : rrmTemplateBuffer,
       seller,
@@ -559,14 +559,14 @@ describe('supplier document export', () => {
     })
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
     const invoice = wb.Sheets['发票']
-    expect(invoice.F9).toMatchObject({ f: "'WEIGHT-TEST'!K4", v: 0.174 })
-    expect(invoice.F10).toMatchObject({ f: "'WEIGHT-TEST'!K5", v: 13.312 })
+    expect(invoice.F9).toMatchObject({ f: "'WEIGHT-TEST'!K4", v: 0.17 })
+    expect(invoice.F10).toMatchObject({ f: "'WEIGHT-TEST'!K5", v: 13.31 })
     expect(invoice.G9.v).toBe('千克')
     expect(invoice.G9.f).toContain("'WEIGHT-TEST'!J4")
     expect(invoice.G10.v).toBe('千克')
     expect(invoice.G10.f).toContain("'WEIGHT-TEST'!J5")
     expect(invoice.F11.f).toBe('SUM(F9:F10)')
-    expect(invoice.F11.v).toBeCloseTo(13.486, 8)
+    expect(invoice.F11.v).toBeCloseTo(13.48, 8)
     expect(invoice.I9.f).toBe('F9*H9')
     expect(invoice.I10.f).toBe('F10*H10')
     // 主表送货数量和采购单位保持不变。

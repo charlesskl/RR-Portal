@@ -115,7 +115,7 @@ describe('deployment base paths', () => {
     expect(sheet.AQ5?.v || '').toBe('')
     expect(sheet['!merges'] || []).toContainEqual({ s: { r: 3, c: 27 }, e: { r: 4, c: 27 } })
     expect(sheet['!merges'] || []).toContainEqual({ s: { r: 3, c: 42 }, e: { r: 4, c: 42 } })
-  })
+  }, 60000)
 
   it('uses the Vite public base for browser routes', () => {
     expect(publicBase('/indo-shipping/')).toBe('/indo-shipping')

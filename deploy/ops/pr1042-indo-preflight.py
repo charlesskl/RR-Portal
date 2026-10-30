@@ -9,7 +9,7 @@ SERVICE='indo-shipping'
 ALIAS='rr-portal-indo-shipping:latest'
 SHARED=('docker-compose.cloud.yml','frontend/index.cloud.html','nginx/nginx.cloud.conf','deploy/update-server.sh','deploy/service-maintenance.sh')
 KNOWN_DIRTY=set(SHARED)|{'.env.cloud.production','.github/workflows/deploy.yml'}
-EXECUTE=True
+EXECUTE=False
 STAGE='entry'
 
 def need(v,label):

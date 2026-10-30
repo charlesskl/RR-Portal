@@ -2,7 +2,7 @@ name: PR 1040 Scoped Quote Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [prepare]}
+      mode: {type: choice, required: true, options: [deploy]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '139f6efc485a28d06f6c8dd6594d2e710ca14667336e38ae243ccd3484428de2'
+  SCOPED_RELEASE_HELPER_SHA256: '20ebedc7ddd4c2aad7b1d86a67537eade97e86854a37aaf00a3b2383aed62312'
 jobs:
   fixed-quote-phase:
     runs-on: ubuntu-latest
@@ -27,10 +27,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 139f6efc485a28d06f6c8dd6594d2e710ca14667336e38ae243ccd3484428de2 ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1040-20261030-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 20ebedc7ddd4c2aad7b1d86a67537eade97e86854a37aaf00a3b2383aed62312 ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1040-20261030-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run exact Quote prepare helper
+      - name: Run exact Quote deploy helper
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -47,8 +47,8 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 139f6efc485a28d06f6c8dd6594d2e710ca14667336e38ae243ccd3484428de2 ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1040-20261030-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 20ebedc7ddd4c2aad7b1d86a67537eade97e86854a37aaf00a3b2383aed62312 ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1040-20261030-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1040-20261030-quote:refs/remotes/origin/ops/pr-1040-20261030-quote >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/ops/pr-1040-20261030-quote)" = "$RELEASE_SHA" ]] || exit 1
@@ -56,7 +56,7 @@ jobs:
             quote_tmp=$(mktemp -d /tmp/pr1040-quote.XXXXXX)
             trap 'rm -rf "$quote_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1040-quote-release.py" > "$quote_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$quote_tmp/run.py" | cut -d ' ' -f1)" = 139f6efc485a28d06f6c8dd6594d2e710ca14667336e38ae243ccd3484428de2 ]] || exit 1
+            [[ "$(sha256sum "$quote_tmp/run.py" | cut -d ' ' -f1)" = 20ebedc7ddd4c2aad7b1d86a67537eade97e86854a37aaf00a3b2383aed62312 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1035-quote-preflight.py" > "$quote_tmp/pr1035-quote-preflight.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$quote_tmp/pr1035-quote-preflight.py" | cut -d ' ' -f1)" = 2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$quote_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
@@ -65,4 +65,4 @@ jobs:
             [[ "$(sha256sum "$quote_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1030-engineering-preflight.py" > "$quote_tmp/pr1030-engineering-preflight.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$quote_tmp/pr1030-engineering-preflight.py" | cut -d ' ' -f1)" = 3d06b2aef715f75740826ff75f91c1cb78e0927e030717795ef2733f0595a4d0 ]] || exit 1
-            timeout --signal=TERM --kill-after=30s 22m python3 -B "$quote_tmp/run.py" prepare
+            timeout --signal=TERM --kill-after=30s 22m python3 -B "$quote_tmp/run.py" deploy

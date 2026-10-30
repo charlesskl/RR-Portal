@@ -1091,12 +1091,24 @@ function copyMoldRow(molds, index) {
   return copy;
 }
 
+function cleanupMoldNumberObservers(root) {
+  if (!root) return;
+  const owners = new Set([root]);
+  for (const table of root.querySelectorAll?.('.mold-table') || []) owners.add(table.parentElement);
+  for (const owner of owners) {
+    owner?._moldNumberObserver?.disconnect();
+    if (owner) owner._moldNumberObserver = null;
+  }
+}
+
 function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
+  cleanupMoldNumberObservers(container);
+  const moldNumberInputs = new Map();
   container.innerHTML = '';
   const table = document.createElement('table'); table.className = 'wb-table mold-table';
   table.innerHTML = `<thead><tr>
     <th style="width:40px">序号</th>
-    <th style="width:70px">模号</th>
+    <th class="mold-number-cell">模号</th>
     <th style="width:160px">模具名称</th>
     <th style="width:120px">模胚类型</th>
     <th style="width:70px">材质</th>
@@ -1116,7 +1128,7 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
   const tbody = table.querySelector('tbody');
 
   const fields = [
-    ['mold_no', 'text'],
+    ['mold_no', 'textarea'],
     ['name', 'textarea'],
     ['mold_type', 'textarea'],
     ['material', 'text'], ['color', 'text'], ['cavity', 'text'], ['sets', 'number'],
@@ -1258,9 +1270,13 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
           td.className = 'ro'; td.style.whiteSpace = 'pre-wrap'; td.textContent = formatNum(get() ?? '');
         } else if (type === 'textarea') {
           const ta = document.createElement('textarea');
-          ta.rows = 3; ta.value = get() ?? '';
+          ta.rows = k === 'mold_no' ? 1 : 3; ta.value = get() ?? '';
           ta.style.resize = 'vertical';
-          const autoSize = () => { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; };
+          const autoSize = () => { if (!ta.isConnected) return; ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; };
+          if (k === 'mold_no') {
+            ta.setAttribute('aria-label', `第${idx + 1}行模号`);
+            moldNumberInputs.set(ta, { autoSize, width: 0 });
+          }
           ta.oninput = () => { set(ta.value); autoSize(); onChange(); };
           td.appendChild(ta);
           setTimeout(autoSize, 0);
@@ -1288,6 +1304,7 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
         addPart.onclick = () => { addMoldPart(m); renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd); onChange(); };
         td.appendChild(addPart);
       }
+      if (f && f[0] === 'mold_no') td.classList.add('mold-number-cell');
       tr.appendChild(td);
     });
 
@@ -1339,6 +1356,38 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
   tbody.appendChild(trSub);
 
   container.appendChild(table);
+  if (moldNumberInputs.size && typeof ResizeObserver === 'function') {
+    const pending = new Set();
+    let frame = 0;
+    let disposed = false;
+    const observer = new ResizeObserver(entries => {
+      if (disposed) return;
+      for (const entry of entries) {
+        const state = moldNumberInputs.get(entry.target);
+        const width = Math.round(entry.contentRect.width * 100);
+        if (state && state.width !== width) { state.width = width; pending.add(entry.target); }
+      }
+      if (pending.size && !frame) {
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          if (disposed) return;
+          for (const input of pending) {
+            if (input.isConnected) moldNumberInputs.get(input)?.autoSize();
+          }
+          pending.clear();
+        });
+      }
+    });
+    for (const input of moldNumberInputs.keys()) observer.observe(input);
+    container._moldNumberObserver = {
+      disconnect() {
+        disposed = true;
+        observer.disconnect();
+        if (frame) cancelAnimationFrame(frame);
+        pending.clear();
+      },
+    };
+  }
   if (canEdit) {
     const add = document.createElement('button');
     add.textContent = '+ 新增模具行'; add.className = 'mini';
@@ -3862,6 +3911,7 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
   payload.electronics_extra = payload.electronics_extra || { test_repair: 0, packing_shipping: 0, profit_pct: 10, tax_diff: 0, tax_payable: 0 };
   ['profit_pct', 'tax_diff', 'tax_payable'].forEach(k => { if (payload.electronics_extra[k] == null) payload.electronics_extra[k] = k === 'profit_pct' ? 10 : 0; });
 
+  cleanupMoldNumberObservers(host);
   host.innerHTML = `
     <h3>一、模具部分
       ${canEdit ? `<small><label class="upload-mold-sheet" style="display:inline-block;margin-left:12px">
@@ -6929,6 +6979,7 @@ async function renderQuotePage() {
   ).join(' ');
 
   // 工作台容器
+  cleanupMoldNumberObservers($('sections'));
   const mySec = sections.find(s => s.dept === me.dept);
   if (!mySec) { $('sections').innerHTML = '<i>未找到本部门 section</i>'; return; }
   const payload = sectionDraft(mySec);
@@ -7089,6 +7140,7 @@ async function renderQuotePage() {
     const renderMyDepartment = () => {
       renderedRates = quotationExchangeRates(sections, data.quotation_rates);
       const { rmb_hkd: fx, hkd_usd: fxHU } = renderedRates;
+      cleanupMoldNumberObservers(body);
       body.innerHTML = '';
       if (me.dept === 'engineering') {
         const headerHost = document.createElement('div');
@@ -7147,6 +7199,7 @@ async function renderQuotePage() {
       const renderBody = () => {
         renderedRates = quotationExchangeRates(sections, data.quotation_rates);
         const { rmb_hkd: fxRate, hkd_usd: fxRateUsd } = renderedRates;
+        cleanupMoldNumberObservers(body);
         body.innerHTML = '';
         const onChangeOther = () => markDirty(s.dept);
         if (s.dept === 'engineering') renderEngineering(body, sectionPayload, inEdit, onChangeOther, fxRate, fxRateUsd, quote.qty, quote.customer);
@@ -7434,6 +7487,7 @@ if (window.MixedQuotation && !window.__WORKBENCH_EMBED__) {
   };
 }
 window.VerificationWorkbench = {
+  cleanupMoldNumberObservers,
   renderSummaryPane,
   renderEngineering,
   renderElectronic,

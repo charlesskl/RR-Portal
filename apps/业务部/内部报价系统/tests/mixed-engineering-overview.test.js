@@ -117,7 +117,7 @@ test('新小产品不创建模费，历史本款模费保留可见编辑且按�
  const source=fs.readFileSync(require.resolve('../frontend/workbench.js'),'utf8');
  const start=source.indexOf('function renderEngineering('),next=source.slice(start+1).search(/^function /m);
  const stop=new Error('stop after form rendering');
- const context={window:s.window,num:value=>Number(value)||0,renderLegacyItems(){},renderMolds(){throw stop;}};
+ const context={window:s.window,num:value=>Number(value)||0,cleanupMoldNumberObservers(){},renderLegacyItems(){},renderMolds(){throw stop;}};
  vm.createContext(context);vm.runInContext(source.slice(start,start+1+next),context);
  const inspect=payload=>{
    const host=element();

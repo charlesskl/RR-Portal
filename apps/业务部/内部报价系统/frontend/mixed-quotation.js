@@ -704,6 +704,7 @@
         `<optgroup label="本次导入 · ${importedProducts.length} 个小产品">${options.filter(([id]) => importedProducts.some(p => p.id === id)).map(optionHtml).join('')}</optgroup>` +
         (existingProducts.length ? `<optgroup label="已有产品 · ${existingProducts.length} 个（保留原资料）">${options.filter(([id]) => existingProducts.some(p => p.id === id)).map(optionHtml).join('')}</optgroup>` : '') +
         options.filter(([id]) => id === '__shared__').map(optionHtml).join('') : options.map(optionHtml).join('');
+      window.VerificationWorkbench?.cleanupMoldNumberObservers?.(host);
       host.innerHTML = `<div class="mixed-switch"><div><span class="mixed-tag">混装款</span><strong>当前报价对象（共 ${cfg.products.length} 个小产品）</strong></div>
         <select aria-label="选择小产品">${groupedOptions}</select>
         <p class="muted mixed-help"></p></div><div class="mixed-detail"></div>`;
@@ -826,6 +827,7 @@
       if (dept === 'molding') { const merged = window.MixedMolds.engineeringCatalog(root, savedEngineering); if (merged.parts_catalog) root.parts_catalog = merged.parts_catalog; }
       function draw() {
         sessionStorage.setItem(key, selected);
+        window.VerificationWorkbench?.cleanupMoldNumberObservers?.(detail);
         detail.innerHTML = '';
         host.querySelector('.mixed-help').textContent = selected === '__shared__'
           ? `本页费用按每个销售包装填写，只计一次。每包装含 ${cfg.units_per_pack} 个小产品。`

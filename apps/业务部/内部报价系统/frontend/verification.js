@@ -765,6 +765,7 @@ function hasOriginalWorkbook() {
 function renderDetail() {
   const quote = taskState.quote;
   const version = taskState.selected_version;
+  window.VerificationWorkbench?.cleanupMoldNumberObservers?.($('verification-detail'));
   $('verification-detail').innerHTML = `<header class="verification-detail-head">
       <button id="verification-back" class="mini">← 返回核价任务</button>
       <div><span class="eyebrow">核价明细</span><h1>${esc(quote.quote_no)} · ${esc(quote.product_name)}</h1>
@@ -820,6 +821,7 @@ function renderDetail() {
 
 function renderWorkflow() {
   const host = $('verification-detail-content');
+  window.VerificationWorkbench?.cleanupMoldNumberObservers?.(host);
   const navigationHost = $('verification-workflow-navigation');
   const version = taskState.selected_version;
   const departments = taskState.sections;
@@ -951,6 +953,7 @@ function currentSectionsForWorkbench() {
 
 function renderDepartmentWorkbench() {
   const host = $('verification-department-workbench');
+  window.VerificationWorkbench?.cleanupMoldNumberObservers?.(host);
   if (activeDepartment === '__summary__') {
     renderVersionSummary(host);
     return;

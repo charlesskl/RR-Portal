@@ -184,9 +184,9 @@ router.put('/:id/confirmation', quoteWriteRoute(db, req => Number(req.params.id)
   const requestedWorkshop = typeof body.workshop === 'string' ? body.workshop
     : (Array.isArray(body.workshops) ? body.workshops[0] : (existingWorkshops[0] || ''));
   const workshops = allowed.has(requestedWorkshop) ? [requestedWorkshop] : [];
-  const confirmedPrice = !Object.prototype.hasOwnProperty.call(body, 'confirmed_price') ? (existing?.confirmed_price ?? null)
+  const confirmedPrice = !Object.prototype.hasOwnProperty.call(body, 'confirmed_price') ? (existing?.confirmed_price == null ? null : Number(existing.confirmed_price))
     : (body.confirmed_price === '' || body.confirmed_price == null ? null : Number(body.confirmed_price));
-  const confirmedQty = !Object.prototype.hasOwnProperty.call(body, 'confirmed_qty') ? (existing?.confirmed_qty ?? null)
+  const confirmedQty = !Object.prototype.hasOwnProperty.call(body, 'confirmed_qty') ? (existing?.confirmed_qty == null ? null : Number(existing.confirmed_qty))
     : (body.confirmed_qty === '' || body.confirmed_qty == null ? null : Math.round(Number(body.confirmed_qty)));
   const note = Object.prototype.hasOwnProperty.call(body, 'note') ? String(body.note || '').trim() : String(existing?.note || '');
   if (confirmedPrice != null && (!Number.isFinite(confirmedPrice) || confirmedPrice < 0)) return res.status(400).json({ error: '确认客价格式不正确' });

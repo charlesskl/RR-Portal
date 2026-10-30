@@ -60,13 +60,13 @@ test('customer confirmation atomically freezes matching price, header and sectio
   const concurrentUndo=await Promise.all([api(`/quote-summary/${uid}/revoke-confirmation`,'POST',undoBody),api(`/quote-summary/${uid}/revoke-confirmation`,'POST',undoBody)]);
   assert.deepEqual(concurrentUndo.map(r=>r.status).sort(),[200,409]);
   const pending=await undoRow();assert.equal(pending.status,'pending');assert.equal(pending.confirmed_by,null);assert.equal(pending.confirmed_at,null);
-  assert.equal(pending.confirmed_price,12);assert.equal(pending.confirmed_qty,20);
+  assert.equal(Number(pending.confirmed_price),12);assert.equal(pending.confirmed_qty,20);
   assert.equal(await readDb.prepare('SELECT * FROM quote_verifications WHERE quote_id=?').get(uid),undefined);
   assert.equal((await readDb.prepare("SELECT payload_json FROM quote_sections WHERE quote_id=? AND dept='sales'").get(uid)).payload_json,beforeUndoSection.payload_json);
   const audit=JSON.parse((await readDb.prepare("SELECT detail FROM audit_log WHERE quote_id=? AND action='customer_confirmation_revoke'").get(uid)).detail);
   assert.equal(audit.previous_confirmation.status,'confirmed');assert.ok(audit.unused_verification.baseline_json);
   assert.equal((await api(`/quotes/${uid}/header`,'PUT',{product_name:'corrected'})).status,200);
-  assert.equal((await api(`/quote-summary/${uid}/confirmation`,'PUT',{status:'confirmed'})).status,200);
+  const reconfirm=await api(`/quote-summary/${uid}/confirmation`,'PUT',{status:'confirmed'});assert.equal(reconfirm.status,200,JSON.stringify(reconfirm.body));
   assert.equal(JSON.parse((await readDb.prepare('SELECT baseline_json FROM quote_verifications WHERE quote_id=?').get(uid)).baseline_json).quote.product_name,'corrected');
   assert.equal((await api(`/quote-summary/${uid}/revoke-confirmation`,'POST',undoBody)).status,409);
   // Viewing the costing task may initialize its first version; any

@@ -107,8 +107,14 @@ async function extractPages(buffer) {
 async function parsePdf(buffer, options = {}) {
   try {
     const pages = await extractPages(buffer);
-    const sheets = pages.map((items, index) => ({ name: `PDF 第 ${index + 1} 页`, rows: rowsFromPage(items) }))
-      .filter(sheet => sheet.rows.length);
+    const pageSheets = pages.map((items, index) => ({ name: `PDF 第 ${index + 1} 页`, rows: rowsFromPage(items) }));
+    // Partial extraction remains useful for ordinary imports, but must never
+    // authorize deleting supplier rows that may be on an unreadable page.
+    if (options.allSheets) {
+      const unreadable = pageSheets.find(sheet => !sheet.rows.length);
+      if (unreadable) return { error: `${unreadable.name}未能完整识别，不能作为供应商完整清单同步；请提供完整 Excel，或移除空白、说明及无法识别的页面后重新上传。` };
+    }
+    const sheets = pageSheets.filter(sheet => sheet.rows.length);
     if (!sheets.length) {
       return { error: '未识别到可读取的供应商报价表格。请上传由 Excel 导出的文字型 PDF；扫描图片型 PDF 请先转为可搜索 PDF 或 Excel。' };
     }

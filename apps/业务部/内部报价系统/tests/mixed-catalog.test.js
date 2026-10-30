@@ -10,3 +10,16 @@ test('共模转换按封穴参数重算且不重复叠加旧分摊',()=>{const r
 test('拒绝无效用量、孤立引用和负数',()=>{const r=root();M.enableCatalog(r,cfg,100);r.parts_catalog.selections.a[0].usage=0;assert.throws(()=>M.catalogRows(r,cfg,100),/用量/);r.parts_catalog.selections.a=[{part_id:'missing',usage:1}];assert.throws(()=>M.catalogRows(r,cfg,100),/不存在/);r.parts_catalog.selections.a=[];r.parts_catalog.parts[0].machine_price=-1;assert.throws(()=>M.catalogRows(r,cfg,100),/机台日费用/);});
 test('工程产品组成优先于旧啤机选用，物料及啤工按工程用量计算',()=>{const r=root();M.enableCatalog(r,cfg,100);const bom=JSON.parse(JSON.stringify(r.parts_catalog.selections));bom.a[0].usage=3;const sections=[{dept:'sales',payload_json:JSON.stringify({mixed_quote:cfg})},{dept:'engineering',payload_json:JSON.stringify({mixed_part_selections:bom})},{dept:'molding',payload_json:JSON.stringify(r)}];const result=calculateMixedQuote({qty:100},sections,{strict:true});assert.ok(Math.abs(result.products[0].components.injection_labor-.6)<1e-10);assert.ok(Math.abs(result.products[0].components.dom_mat-.618)<1e-10);assert.equal(result.products[1].components.injection_labor,.2);});
 test('工程统一上传零件可选用，缺参数阻止完成，补齐后按参数计价',()=>{const r=root();M.enableCatalog(r,cfg,100);const engineering={mixed_imported_parts:[{id:'uploaded',name:'新盖子',weight_g:1,material:'PVC',material_unit_price:0,shot_price:0,machine_price:30,target:'',cavity:1,production_demand:100,price_pending:true}],mixed_part_selections:{a:[{part_id:'uploaded',usage:2}],b:r.parts_catalog.selections.b}};const sections=()=>[{dept:'sales',payload_json:JSON.stringify({mixed_quote:cfg})},{dept:'engineering',payload_json:JSON.stringify(engineering)},{dept:'molding',payload_json:JSON.stringify(r)}];assert.equal(calculateMixedQuote({qty:100},sections()).valid,false);const merged=M.engineeringCatalog(r,engineering);const newPart=merged.parts_catalog.parts.find(p=>p.id==='uploaded');newPart.price_pending=false;newPart.target=100;newPart.shot_price=999;r.parts_catalog=merged.parts_catalog;const result=calculateMixedQuote({qty:100},sections(),{strict:true});assert.equal(result.products[0].components.injection_labor,.6);});
+
+test('共有球壳补齐每包装用量后仅计共有成本一次，缺日产啤次时仍阻止计算',()=>{
+ const parts=[{id:'upper_shell',name:'球上壳',mold_no:'SH-U',weight_g:15,material:'PP',material_unit_price:.1,machine_price:100,target:'',cavity:6,loss_pct:0},
+  {id:'lower_shell',name:'球下壳',mold_no:'SH-L',weight_g:19,material:'PP',material_unit_price:.1,machine_price:100,target:1000,cavity:6,loss_pct:0}];
+ const engineering={mixed_imported_parts:parts,mixed_part_selections:{a:[],b:[],__shared__:[{part_id:'upper_shell',usage:1},{part_id:'lower_shell',usage:2}]}};
+ assert.throws(()=>M.catalogRows(M.engineeringCatalog({},engineering),cfg,100),/日产啤次/);
+ parts[0].target=1000;
+ const rows=M.applyCatalog(M.engineeringCatalog({},engineering),cfg,100);
+ assert.equal(rows.mixed_products.a.injection.length,0);assert.equal(rows.mixed_products.b.injection.length,0);
+ assert.equal(rows.mixed_shared.injection.length,2);
+ assert.ok(Math.abs(rows.mixed_shared.injection.reduce((total,p)=>total+p.weight_g*p.material_unit_price,0)-5.3)<1e-12);
+ assert.equal(rows.mixed_shared.injection.reduce((total,p)=>total+p.shot_price,0),.05);
+});

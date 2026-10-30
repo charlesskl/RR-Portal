@@ -48,11 +48,17 @@ test('PostgreSQL 和 SQLite 使用兼容的空时间版本比较', () => {
   assert.doesNotMatch(route, /COALESCE\(filled_at, ''\)/);
 });
 
-test('报价和核价入口加载最新的保存队列脚本', () => {
-  for (const [page, version] of [['quote.html', '20261028-spin-sewing'], ['verification.html', '20261028-spin-sewing']]) {
+test('报价和核价入口一致加载带版本的共享工作台与供应商同步依赖', () => {
+  const entries = ['quote.html', 'verification.html'].map(page => {
     const html = fs.readFileSync(path.join(root, 'frontend', page), 'utf8');
-    assert.ok(html.includes('workbench.js?v=' + version));
-  }
+    const scripts = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/g)].map(match => match[1]);
+    const workbench = scripts.find(value => /^\.\/workbench\.js\?v=/.test(value));
+    assert.match(workbench || '', /^\.\/workbench\.js\?v=\d{8}-[A-Za-z0-9-]+$/);
+    const sync = scripts.findIndex(value => /^\.\/supplier-material-sync\.js\?v=/.test(value));
+    assert.ok(sync >= 0 && sync < scripts.indexOf(workbench), '供应商同步依赖在工作台之前加载');
+    return workbench;
+  });
+  assert.equal(entries[0], entries[1], '报价和核价复用同一工作台版本');
 });
 
 

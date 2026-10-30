@@ -38,9 +38,9 @@ test('工程概览金额沿用明细币种换算、纸箱和平卡公式，不�
  assert.equal(totals({},.85,7.8).total,0);
 });
 
-function element(){return {nodes:{},children:[],_html:'',dataset:{},style:{},textContent:'',value:'',selectedOptions:[{textContent:'包装材料'}],
+function element(){return {nodes:{},children:[],_html:'',dataset:{},style:{},rows:[],textContent:'',value:'',selectedOptions:[{textContent:'包装材料'}],
  get innerHTML(){return this._html;},set innerHTML(value){this._html=value;this.nodes={};this.children=[];},
- appendChild(node){this.children.push(node);},append(...nodes){this.children.push(...nodes);},insertBefore(node){this.children.push(node);},
+ addEventListener(){},appendChild(node){this.children.push(node);},append(...nodes){this.children.push(...nodes);},insertBefore(node){this.children.push(node);},
  querySelector(key){return this.nodes[key] ||= element();},
  querySelectorAll(key){
   const attributes={'[data-engineering-product]':['data-engineering-product','engineeringProduct'],'[data-open-engineering-product]':['data-open-engineering-product','openEngineeringProduct']};
@@ -49,9 +49,9 @@ function element(){return {nodes:{},children:[],_html:'',dataset:{},style:{},tex
   return this.nodes[key] ||= [...this._html.matchAll(new RegExp(attribute+'="([^"]+)"','g'))].map(match=>({dataset:{[name]:match[1]},hidden:false}));
  },
 };}
-function setup(configuration=cfg){
- const root=fixture(),host=element(),rendered=[],session=new Map();let changes=0;
- const window={MixedMolds:M,...calculators,attachSupplierMaterialImportUI(){},__data:{quote:{id:12,qty:100},mixed_quote:configuration,sections:[]}};
+function setup(configuration=cfg,{root=fixture(),molding={}}={}){
+ const host=element(),rendered=[],session=new Map();let changes=0;
+ const window={MixedMolds:M,...calculators,renderMolds(){},renderImageCell(){},attachSupplierMaterialImportUI(){},__data:{quote:{id:12,qty:100},mixed_quote:configuration,sections:[{dept:"molding",payload_json:JSON.stringify(molding)}]}};
  vm.runInNewContext(fs.readFileSync(require.resolve('../frontend/mixed-quotation.js'),'utf8'),{window,document:{createElement:element},sessionStorage:{getItem:key=>session.get(key)||null,setItem:(key,value)=>session.set(key,value)}});
  window.MixedQuotation.wrap((box,payload,edit,onChange)=>rendered.push({payload,edit,onChange}),'engineering')(host,root,true,()=>changes++,.85,7.8,100);
  return {window,host,root,rendered,detail:host.querySelector('.mixed-detail'),get tables(){return host.querySelector('.mixed-detail').querySelector('[data-engineering-tables]');},changes:()=>changes};
@@ -117,7 +117,7 @@ test('新小产品不创建模费，历史本款模费保留可见编辑且按�
  const source=fs.readFileSync(require.resolve('../frontend/workbench.js'),'utf8');
  const start=source.indexOf('function renderEngineering('),next=source.slice(start+1).search(/^function /m);
  const stop=new Error('stop after form rendering');
- const context={window:s.window,num:value=>Number(value)||0,renderLegacyItems(){},renderMolds(){throw stop;}};
+ const context={window:s.window,num:value=>Number(value)||0,cleanupMoldNumberObservers(){},renderLegacyItems(){},renderMolds(){throw stop;}};
  vm.createContext(context);vm.runInContext(source.slice(start,start+1+next),context);
  const inspect=payload=>{
    const host=element();
@@ -143,4 +143,76 @@ test('新小产品不创建模费，历史本款模费保留可见编辑且按�
  assert.equal(s.window.MixedQuotation.showsEngineeringMoldCosts(s.root.mixed_shared),true);
  assert.match(inspect(s.root.mixed_shared),/生产模具费用/);
  const ordinary={};assert.match(inspect(ordinary),/生产模具费用/);assert.ok(ordinary.mold_costs);
+});
+
+function moldSection(s){return s.tables.innerHTML.split('<section data-engineering-category="molds">')[1].split('</section>')[0];}
+const catalogPart=(id,name)=>({id,mold_no:'14M',name,material:'ABS',color:'红色',weight_g:1,cavity:2});
+test('零件库存在时，共有费用中直接导入的共用模具仍展示，金额与原资料保持不变',()=>{
+ const root=fixture();
+ root.mixed_shared.molds=[{mold_no:'COMMON-01',price_rmb:850,parts:[{name:'共用模具零件',material:'PP'}]}];
+ const before=JSON.stringify(root),molding={parts_catalog:{parts:[catalogPart('selected','已关联零件')],selections:{a:[{part_id:'selected',usage:1}]}}};
+ const s=setup(cfg,{root,molding}),html=moldSection(s);
+ assert.match(html,/COMMON-01/);assert.match(html,/共用模具零件/);assert.match(html,/850/);
+ assert.match(html,/1000\.0000/);assert.match(html,/已关联零件/);
+ assert.match(s.tables.innerHTML,/模具费用 RMB 100\.0000/);
+ assert.equal(JSON.stringify(root),before);assert.equal(s.changes(),0);
+});
+test('未分配的导入零件在总览中明确显示，链接进入全部模具且不改动费用或关联',()=>{
+ const root=fixture(),part={...catalogPart('upload_pending','待分配共用零件'),source_file:'<来源>.xlsx',price_rmb:170};
+ root.mixed_imported_parts=[part];root.mixed_imported_molds=[{mold_no:'14M',parts:[part]}];
+ const before=JSON.stringify(root),s=setup(cfg,{root}),html=moldSection(s);
+ assert.match(html,/待分配共用零件/);assert.match(html,/已导入 · 待分配/);
+ assert.match(html,/尚未分配到小产品或每包装共有费用/);
+ assert.match(html,/&lt;来源&gt;\.xlsx/);assert.ok(!html.includes('<来源>'));
+ assert.match(html,/data-open-engineering-product="__all_molds__"/);
+ assert.match(s.tables.innerHTML,/模具费用 RMB 100\.0000/);
+ assert.equal(JSON.stringify(root),before);assert.equal(s.changes(),0);
+});
+test('同一共用零件分别选入两个产品时保留两款引用，不误报待分配或重复旧行',()=>{
+ const root=fixture(),part={...catalogPart('shared','双方共用零件'),price_rmb:170};
+ root.mixed_products.a.molds=[{mold_no:'14M',parts:[{...part,price_rmb:85}]}];
+ const molding={parts_catalog:{parts:[part],selections:{a:[{part_id:'shared',usage:1}],b:[{part_id:'shared',usage:2}]}}};
+ const before=JSON.stringify({root,molding}),s=setup(cfg,{root,molding}),html=moldSection(s);
+ assert.equal([...html.matchAll(/双方共用零件/g)].length,2);
+ assert.ok(!html.includes('已导入 · 待分配'));
+ assert.ok(!html.includes('<td>85</td>'));assert.equal([...html.matchAll(/<td>170<\/td>/g)].length,2);
+ assert.equal(JSON.stringify({root,molding}),before);
+});
+test('已删除零件不会重新出现在待分配区，失效产品引用不会藏起现存零件',()=>{
+ const root=fixture(),deleted=catalogPart('old','已删除零件'),orphan=catalogPart('current','现存未分配零件');
+ root.mixed_deleted_part_ids=['old'];
+ const molding={parts_catalog:{parts:[deleted,orphan],selections:{removed:[{part_id:'current',usage:1}]}}};
+ const s=setup(cfg,{root,molding}),html=moldSection(s);
+ assert.ok(!html.includes('已删除零件'));assert.match(html,/现存未分配零件/);
+ assert.match(html,/已导入 · 待分配/);
+});
+
+test('共有模具同时保存在旧明细和未选零件库时仅显示一次，明确提示用量未配置',()=>{
+ const root=fixture();
+ const parts=[{id:'upload_upper',mold_no:'01M',name:'球上壳',weight_g:15,cavity:6,sets:6,material:'再生PP+PP',source_file:'共用球壳.xlsx'},
+  {id:'upload_lower',mold_no:'02M',name:'球下壳',weight_g:19,cavity:6,sets:6,material:'再生PP+PP',source_file:'共用球壳.xlsx'}];
+ root.mixed_shared.molds=parts.map(({id,source_file,...part})=>({...part,parts:[{name:part.name,weight_g:part.weight_g,material:part.material,cavity:String(part.cavity)}]}));
+ root.mixed_imported_parts=parts;
+ root.mixed_imported_molds=parts.map(part=>({...part,parts:[part]}));
+ root.mixed_part_selections={a:[],b:[]};
+ const before=JSON.stringify(root),s=setup(cfg,{root}),html=moldSection(s);
+ for(const name of ['球上壳','球下壳'])assert.equal([...html.matchAll(new RegExp('<td>'+name+'</td>','g'))].length,1,name);
+ assert.match(html,/共用球壳\.xlsx/);assert.match(html,/尚未配置零件库用量/);
+ assert.ok(!html.includes('已导入 · 待分配'));
+ assert.equal(JSON.stringify(root),before);assert.equal(s.changes(),0);
+});
+
+test('进入共有费用编辑时展开缺失用量配置，共用球壳在未选零件前列出，仍需正常保存',()=>{
+ const root=fixture(),shared={...catalogPart('upload_shell','共用球壳'),mold_no:'COMMON'};
+ root.mixed_shared.molds=[{...shared,parts:[shared]}];
+ root.mixed_imported_parts=[shared];root.mixed_part_selections={a:[],b:[]};
+ const molding={parts_catalog:{version:1,parts:[catalogPart('other','其他未选零件')],selections:{}}};
+ const before=JSON.stringify(root),s=setup(cfg,{root,molding});
+ s.tables.querySelectorAll('[data-open-engineering-product]').find(button=>button.dataset.openEngineeringProduct==='__shared__').onclick();
+ const panel=s.detail.children.find(child=>child.className==='mixed-config');
+ assert.ok(panel.open);assert.match(panel.innerHTML,/尚未配置每包装用量：共用球壳/);
+ const html=panel.children[0].innerHTML;
+ assert.ok(html.indexOf('data-part-id="upload_shell"')<html.indexOf('data-part-id="other"'));
+ assert.match(html,/aria-label="共用球壳 用量"/);assert.match(html,/保存草稿/);
+ assert.equal(JSON.stringify(root),before);assert.equal(s.changes(),0);
 });

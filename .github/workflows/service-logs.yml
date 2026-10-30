@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   external-read-only-network:
-    if: github.ref == 'refs/heads/ops/pr-1040-20261030-quote' && github.run_attempt == 1 && inputs.mode == 'network'
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

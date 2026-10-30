@@ -4,7 +4,7 @@ import ts from 'typescript'
 import { expect, it, vi } from 'vitest'
 import { applyMergedShipmentEdits } from './shipmentMergedEditor'
 
-// Execute the actual page confirmation handler: no API writes occur on paste.
+// Execute the actual page batch handler: no confirmation or API writes on paste.
 const source = readFileSync(new URL('../pages/ShipmentsPage.tsx', import.meta.url), 'utf8')
 const tree = ts.createSourceFile('page.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 const handlers: string[] = []
@@ -23,8 +23,8 @@ function setup() {
     items, matMap, applyMergedShipmentEdits, customsOptions: [{ value: '已配置公司' }],
     consolidatedItems: [{ ...items[0], sources: items, outbound_ids: [7] }],
     outRows: [], editing: { id: 9 }, setOutRows: vi.fn(),
-    api: { get: vi.fn(async () => ({ data: [{ outbound_id: 7, allocatable_qty: 100 }] })) },
-    sheetRevision: { current: { rawItems: items, matMap, session: 1 } }, sheetConfirmOpen: { current: false },
+    api: { get: vi.fn(async () => ({ data: [{ outbound_id: 7, allocatable_qty: 100 }] })), put: vi.fn(), post: vi.fn() },
+    sheetRevision: { current: { rawItems: items, matMap, session: 1 } }, sheetWritePending: { current: false },
     Modal: { confirm: vi.fn() }, React: { createElement: () => null }, Space: {}, Typography: { Text: {} },
     setItems: vi.fn(), setMatMap: vi.fn(), setDirtyMatIds: vi.fn(), setEditorDirty: vi.fn(), setSheetEditing: vi.fn(),
     message: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
@@ -37,32 +37,32 @@ function setup() {
   }
   return { state, edit }
 }
-it('validates, confirms once, and only changes editor state after confirmation', async () => {
+it('validates once and applies immediately without a confirmation or duplicate write', async () => {
   const { state, edit } = setup()
   await Promise.all([edit(), edit()])
-  expect(state.Modal.confirm).toHaveBeenCalledTimes(1)
-  expect(state.setItems).not.toHaveBeenCalled()
-  const modal = state.Modal.confirm.mock.calls[0][0]
-  await modal.onOk()
+  expect(state.Modal.confirm).not.toHaveBeenCalled()
+  expect(state.api.get).toHaveBeenCalledOnce()
+  expect(state.setItems).toHaveBeenCalledOnce()
   expect(state.setItems.mock.calls[0][0][0]).toMatchObject({ outbound_id: 7, material_id: 2, qty: 20, kg: 4 })
   expect(state.setEditorDirty).toHaveBeenCalledWith(true)
   expect(state.setMatMap).not.toHaveBeenCalled()
-  modal.afterClose()
-  expect(state.sheetConfirmOpen.current).toBe(false)
+  expect(state.api.put).not.toHaveBeenCalled()
+  expect(state.api.post).not.toHaveBeenCalled()
+  expect(state.sheetWritePending.current).toBe(false)
 })
-it('rejects stale confirmation after rows change rather than overwriting newer edits', async () => {
+it('rejects stale quantity validation after rows change rather than overwriting newer edits', async () => {
   const { state, edit } = setup()
-  await edit()
+  const pending = edit()
   state.sheetRevision.current.rawItems = [...state.items]
-  await expect(state.Modal.confirm.mock.calls[0][0].onOk()).rejects.toThrow('明细已变化')
+  expect(await pending).toBe(false)
   expect(state.setItems).not.toHaveBeenCalled()
   expect(state.message.error).toHaveBeenCalled()
 })
-it('rejects stale confirmation after material metadata changes, without overwriting either state', async () => {
+it('rejects stale quantity validation after material metadata changes, without overwriting either state', async () => {
   const { state, edit } = setup()
-  await edit('material:net_per_pc', '.5')
+  const pending = edit()
   state.sheetRevision.current.matMap = new Map([[2, { net_per_pc: .8, unit_kg: 'KGM' }]])
-  await expect(state.Modal.confirm.mock.calls[0][0].onOk()).rejects.toThrow('明细已变化')
+  expect(await pending).toBe(false)
   expect(state.setItems).not.toHaveBeenCalled()
   expect(state.setMatMap).not.toHaveBeenCalled()
   expect(state.setDirtyMatIds).not.toHaveBeenCalled()
@@ -75,29 +75,34 @@ it('rejects invalid values and unknown customs companies without opening confirm
   expect(state.setItems).not.toHaveBeenCalled()
   expect(state.message.error).toHaveBeenCalledTimes(2)
 })
-it('closing confirmation without accepting leaves editor unchanged', async () => {
+it('material paste updates the draft without a dialog or persistence', async () => {
   const { state, edit } = setup()
   await edit('material:net_per_pc', '.5')
-  state.Modal.confirm.mock.calls[0][0].afterClose()
-  expect(state.setItems).not.toHaveBeenCalled()
-  expect(state.setMatMap).not.toHaveBeenCalled()
+  expect(state.Modal.confirm).not.toHaveBeenCalled()
+  expect(state.setItems).toHaveBeenCalledOnce()
+  expect(state.setMatMap.mock.calls[0][0].get(2).net_per_pc).toBe(.5)
+  expect(state.setDirtyMatIds).toHaveBeenCalledOnce()
+  expect(state.api.put).not.toHaveBeenCalled()
+  expect(state.api.post).not.toHaveBeenCalled()
   expect(state.matMap.get(2)?.net_per_pc).toBe(.2)
 })
 
-it('rechecks outbound capacity at confirmation and does not apply stale balances', async () => {
+it('checks fresh outbound capacity before applying, rejects excess and unlocks subsequent edits', async () => {
   const { state, edit } = setup()
-  await edit()
   state.api.get.mockResolvedValue({ data: [{ outbound_id: 7, allocatable_qty: 15 }] })
-  await expect(state.Modal.confirm.mock.calls[0][0].onOk()).rejects.toThrow('OUT-7')
-  expect(state.api.get).toHaveBeenCalledTimes(2)
+  expect(await edit()).toBe(false)
+  expect(state.api.get).toHaveBeenCalledOnce()
   expect(state.setItems).not.toHaveBeenCalled()
+  expect(state.message.error).toHaveBeenCalledWith(expect.stringContaining('OUT-7'))
+  expect(state.sheetWritePending.current).toBe(false)
+  expect(await edit('contract_no', 'NEXT')).toBe(true)
 })
 
 it('does not apply a response to an editor that has been closed or reopened', async () => {
   const { state, edit } = setup()
-  await edit()
+  const pending = edit()
   state.sheetRevision.current.session++
-  await expect(state.Modal.confirm.mock.calls[0][0].onOk()).rejects.toThrow('明细已变化')
+  expect(await pending).toBe(false)
   expect(state.setItems).not.toHaveBeenCalled()
 })
 
@@ -118,12 +123,19 @@ it('direct typing preserves intermediate spaces and newlines in controlled text 
   expect(state.items).toEqual(before)
 })
 
-it('confirmed paste still normalizes text and cannot submit formulas', async () => {
+it('文字离格同步写入，紧接着保存/复制时无需等待异步微任务', async () => {
+  const { state, edit } = setup()
+  const pending = edit('pallet', '1-2/1卡', false)
+  expect(state.setItems).toHaveBeenCalledOnce()
+  expect(state.setItems.mock.calls[0][0][0]).toMatchObject({ pallet: '1-2/1卡' })
+  expect(state.api.get).not.toHaveBeenCalled()
+  expect(await pending).toBe(true)
+})
+
+it('immediate paste still normalizes text and cannot submit formulas', async () => {
   const { state, edit } = setup()
   await edit('contract_no', ' Royal Regent ')
-  await state.Modal.confirm.mock.calls[0][0].onOk()
   expect(state.setItems.mock.calls[0][0][0]).toMatchObject({ contract_no: 'Royal Regent' })
-  state.Modal.confirm.mock.calls[0][0].afterClose()
   const writes = state.setItems.mock.calls.length
   expect(await edit('contract_no', ' =1+2')).toBe(false)
   expect(state.setItems).toHaveBeenCalledTimes(writes)

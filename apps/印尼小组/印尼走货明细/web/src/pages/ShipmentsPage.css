@@ -153,7 +153,10 @@
   padding: 3px 6px !important;
   font-variant-numeric: tabular-nums;
   vertical-align: middle;
+  user-select: none;
 }
+.shipment-sheet [data-sheet-mode="edit"] input,
+.shipment-sheet [data-sheet-mode="edit"] textarea { user-select: text; }
 .shipment-sheet .ant-table-body,
 .shipment-sheet .ant-table-tbody-virtual-holder { scroll-padding-left: var(--sheet-fixed-width); scroll-padding-right: 60px; }
 .shipment-sheet .shipment-fillable-cell { padding-right: 8px; }
@@ -169,6 +172,8 @@
 .shipment-sheet [data-sheet-col]:focus-within { outline: 2px solid #1677ff; outline-offset: -2px; }
 .shipment-sheet [data-sheet-col].shipment-sheet-protected { background: #f0f3f7; }
 .shipment-sheet [data-sheet-col].shipment-sheet-selected { background: #e6f4ff !important; }
+.shipment-sheet [data-sheet-mode="navigate"] input,
+.shipment-sheet [data-sheet-mode="navigate"] textarea { caret-color: transparent; }
 .shipment-sheet [data-sheet-col].shipment-sheet-selected::after {
   pointer-events: none;
 }

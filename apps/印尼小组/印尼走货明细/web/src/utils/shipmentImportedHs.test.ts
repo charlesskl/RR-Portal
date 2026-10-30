@@ -87,7 +87,7 @@ it('实际页面输入后刷新快照缓存，保存仅调用走货 API，重读
   const state = {
     items: structuredClone(rows), matMap: new Map(materials), consolidatedItems: consolidateShipmentItems(rows, materials),
     applyMergedShipmentEdits, outRows: [], editing: { id: 9 }, creating: false, editorLoadState: { current: 'ready' }, sheetEditing: false,
-    sheetConfirmOpen: { current: false }, sheetRevision: { current: { rawItems: rows, matMap: materials, session: 1 } },
+    sheetWritePending: { current: false }, sheetRevision: { current: { rawItems: rows, matMap: materials, session: 1 } },
     customsOptions: [], dirtyMatIds: new Set(), setDirtyMatIds: vi.fn(),
     api: { put: vi.fn(async (..._args: any[]) => { void _args; return {} }), get: vi.fn() },
     form: { validateFields: async () => ({ container_no: 'HS-LOCAL', customer: 'RRI' }) },

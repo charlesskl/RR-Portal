@@ -1,12 +1,13 @@
-import { cloneElement, isValidElement, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { cloneElement, isValidElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { App, Button, Space, Table, Typography } from 'antd'
 import type { GetRef, TableProps } from 'antd'
-import { parseSheetClipboard, sheetFillDownEdits, sheetPasteEdits, type SheetEdit, type SheetPoint } from '../utils/shipmentSheet'
+import { parseSheetClipboard, sheetFillDownEdits, sheetPasteSelectionEdits, type SheetEdit, type SheetPoint } from '../utils/shipmentSheet'
 import { sheetArrowKeys, sheetArrowPoint, sheetArrowUsesEditor } from '../utils/shipmentSheetNavigation'
+import { ShipmentSheetDraftContext, ShipmentSheetFillContext, type ShipmentDraftCommit } from './ShipmentSheetDraft'
 
 type Props<T extends object> = TableProps<T> & {
   fields: readonly string[]
-  onEdits: (edits: SheetEdit[]) => void
+  onEdits: (edits: SheetEdit[]) => void | boolean | Promise<void | boolean>
   rowOrder: string
   valueAt: (row: number, field: string) => string | number | undefined
   editableAt?: (row: number, field: string) => boolean
@@ -32,6 +33,21 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
   const { message } = App.useApp()
   const root = useRef<HTMLDivElement>(null)
   const table = useRef<GetRef<typeof Table>>(null)
+  const drafts = useRef(new Set<ShipmentDraftCommit>())
+  const batchPending = useRef(false)
+  const latest = useRef({ onEdits, valueAt, rowOrder })
+  latest.current = { onEdits, valueAt, rowOrder }
+  const registerDraft = useCallback((commit: ShipmentDraftCommit, pending: () => Promise<boolean> | null) => {
+    drafts.current.add(commit)
+    return () => {
+      // Wheel scrolling may unmount a number while its capacity check is in
+      // flight. A subsequent batch must still await that existing commit.
+      const task = pending()
+      const remove = () => { drafts.current.delete(commit) }
+      if (task) void task.then(remove, remove)
+      else remove()
+    }
+  }, [])
   const [editingCell, setEditingCell] = useState<SheetPoint | null>(null)
   const pendingFocus = useRef<{ point: SheetPoint; edit: boolean } | null>(null)
   const [viewportHeight, setViewportHeight] = useState(() => Math.max(200, window.innerHeight - viewportOffset))
@@ -42,10 +58,40 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
   }, [viewportOffset])
   const [anchor, setAnchor] = useState<SheetPoint | null>(null)
   const [end, setEnd] = useState<SheetPoint | null>(null)
+  const selectionGesture = useRef<{ anchor: SheetPoint; end: SheetPoint; dragged: boolean } | null>(null)
+  const suppressClick = useRef(false)
+  const finishSelection = useCallback(() => {
+    const gesture = selectionGesture.current
+    if (!gesture) return
+    if (gesture.dragged) {
+      // Focus the grid, never an endpoint input: focus must not collapse the
+      // range or start editing the last cell when the mouse is released.
+      pendingFocus.current = null
+      suppressClick.current = true
+      root.current?.focus({ preventScroll: true })
+      setEditingCell(null)
+      setAnchor(gesture.anchor); setEnd(gesture.end)
+    }
+    selectionGesture.current = null
+  }, [])
+  useEffect(() => {
+    const cancel = () => { selectionGesture.current = null; suppressClick.current = false }
+    window.addEventListener('pointerup', finishSelection)
+    window.addEventListener('pointercancel', cancel)
+    window.addEventListener('blur', cancel)
+    return () => {
+      window.removeEventListener('pointerup', finishSelection)
+      window.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('blur', cancel)
+    }
+  }, [finishSelection])
   const [widths, setWidths] = useState<Record<number, number>>({})
   const resizeCleanup = useRef<(() => void) | null>(null)
   useEffect(() => () => resizeCleanup.current?.(), [])
-  useEffect(() => { setAnchor(null); setEnd(null); setEditingCell(null); pendingFocus.current = null }, [rowOrder])
+  useEffect(() => {
+    setAnchor(null); setEnd(null); setEditingCell(null); pendingFocus.current = null
+    selectionGesture.current = null; suppressClick.current = false
+  }, [rowOrder])
   const count = props.dataSource?.length || 0
   const inSelection = (row: number, col: number) => anchor && end
     && row >= Math.min(anchor.row, end.row) && row <= Math.max(anchor.row, end.row)
@@ -109,22 +155,42 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
           table.current?.scrollTo(position)
         }
       }
-      ;(pending.edit ? editorAt(pending.point) || cell : cell).focus({ preventScroll: true })
+      // Keep one real input focused even in navigation mode. The first letter
+      // or IME composition can then type natively without losing its first key.
+      ;(editorAt(pending.point) || cell).focus({ preventScroll: true })
       pendingFocus.current = null
     }
     apply()
     return () => cancelAnimationFrame(frame)
   })
-  const fillDown = () => {
-    try { onEdits(sheetFillDownEdits(anchor, end, count, fields, valueAt)) }
-    catch (error) { message.info((error as Error).message) }
+  const runBatch = async (build: (values: typeof latest.current) => SheetEdit[]) => {
+    if (batchPending.current) return
+    batchPending.current = true
+    const originalOrder = latest.current.rowOrder
+    try {
+      // Finish the source before applying the batch, using its latest committed value.
+      for (const commit of [...drafts.current]) if (!await commit()) return
+      if (latest.current.rowOrder !== originalOrder) {
+        message.info('明细顺序已变化，当前输入已保留，请重新选择范围后操作')
+        return
+      }
+      await latest.current.onEdits(build(latest.current))
+    } catch (error) { message.error((error as Error).message) }
+    finally { batchPending.current = false }
   }
+  const fillDown = () => { void runBatch(values => sheetFillDownEdits(anchor, end, count, fields, values.valueAt)) }
+  const fillFrom = (source: number, target: number, field: string) => { void runBatch(values => {
+    if (target <= source) throw new Error('请把复制点向下拖动到目标行')
+    const col = fields.indexOf(field)
+    return sheetFillDownEdits({ row: source, col }, { row: target, col }, count, fields, values.valueAt)
+  }) }
   const mapped = columns.map((column, col) => ({
     ...column,
     width: widths[col] || Number(column.width) || 120,
     render: (value: unknown, record: T, row: number) => {
       const rendered = column.render?.(value, record, row) ?? value as React.ReactNode
-      if (!canEdit({ row, col }) || (editingCell?.row === row && editingCell.col === col)) return rendered
+      if (!canEdit({ row, col }) || (editingCell?.row === row && editingCell.col === col)
+        || (!editingCell && anchor?.row === row && anchor.col === col)) return rendered
       const preview = <span className="shipment-sheet-preview">{String(displayAt(row, col) ?? '') || '\u00a0'}</span>
       // Keep lightweight fill/drop handles; only mount their input on activation.
       return isValidElement<{ children?: React.ReactNode; onFill?: unknown }>(rendered) && rendered.props.onFill
@@ -147,44 +213,104 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       const original = column.onCell?.(record, row) || {}
       return { ...original, tabIndex: -1,
         'data-sheet-row': row, 'data-sheet-col': col,
+        'data-sheet-mode': editingCell?.row === row && editingCell.col === col ? 'edit' : 'navigate',
         className: [original.className, !fields[col] || editableAt?.(row, fields[col]) === false ? 'shipment-sheet-protected' : '', inSelection(row, col) ? 'shipment-sheet-selected' : ''].filter(Boolean).join(' '),
       }
     },
   }))
   const fixedWidth = mapped.reduce((total, col) => total + (col.fixed === 'left' ? Number(col.width) : 0), 64)
-  return <div className="shipment-sheet" ref={root} style={{ '--sheet-fixed-width': `${fixedWidth}px` } as React.CSSProperties}
+  return <ShipmentSheetDraftContext.Provider value={registerDraft}><ShipmentSheetFillContext.Provider value={fillFrom}><div className="shipment-sheet" ref={root} tabIndex={-1} style={{ '--sheet-fixed-width': `${fixedWidth}px` } as React.CSSProperties}
     onWheelCapture={() => {
-      // Flush number drafts before wheel scrolling can unmount a virtual row.
+      // Flush drafts before wheel scrolling can unmount a virtual row.
       const active = document.activeElement as HTMLElement | null
-      if (root.current?.contains(active) && active?.closest('.ant-input-number')) active.blur()
+      if (root.current?.contains(active) && active?.matches('input,textarea') && !active.closest('.ant-select,.ant-picker')) active.blur()
     }}
     onPointerDownCapture={event => {
-      if (!point(event.target)) {
+      suppressClick.current = false
+      if (batchPending.current) { event.preventDefault(); event.stopPropagation(); return }
+      const p = point(event.target)
+      if (!p) {
         const active = document.activeElement as HTMLElement | null
-        if (root.current?.contains(active) && active?.closest('.ant-input-number')) active.blur()
+        if (root.current?.contains(active) && active?.matches('input,textarea') && !active.closest('.ant-select,.ant-picker')) active.blur()
+        return
       }
+      if (event.button !== 0 || event.pointerType === 'touch' || !hasCell(p)) return
+      const target = event.target as HTMLElement
+      if (target.closest('button,a,[role="button"],input[type="checkbox"],.shipment-fill-handle,.shipment-sheet-resize')) return
+      if (!event.shiftKey && target.closest('.ant-select,.ant-picker')) return
+      const isEditing = editingCell?.row === p.row && editingCell.col === p.col
+      if (!event.shiftKey && isEditing && target.closest('input,textarea,.ant-select,.ant-picker,[contenteditable="true"]')) return
+      event.preventDefault()
+      pendingFocus.current = null
+      const start = event.shiftKey && anchor ? anchor : p
+      selectionGesture.current = { anchor: start, end: p, dragged: !!event.shiftKey && !!anchor }
+      if (event.shiftKey && anchor) { setEnd(p); root.current?.focus({ preventScroll: true }) }
     }}
-    onFocusCapture={event => { const p = point(event.target); if (p) { setAnchor(p); setEnd(p) } }}
+    onPointerMoveCapture={event => {
+      const gesture = selectionGesture.current
+      if (!gesture || !(event.buttons & 1) || batchPending.current) return
+      const p = point(event.target)
+      if (!p || !hasCell(p) || (p.row === gesture.end.row && p.col === gesture.end.col)) return
+      event.preventDefault()
+      gesture.end = p; gesture.dragged = true
+      pendingFocus.current = null
+      root.current?.focus({ preventScroll: true })
+      setEditingCell(null)
+      setAnchor(gesture.anchor); setEnd(p)
+    }}
+    onPointerUpCapture={finishSelection}
+    onDragStartCapture={event => { if (selectionGesture.current) event.preventDefault() }}
+    onFocusCapture={event => {
+      if (selectionGesture.current?.dragged || suppressClick.current) return
+      const p = point(event.target); if (p) { setAnchor(p); setEnd(p) }
+    }}
+    onCompositionStartCapture={event => {
+      const p = point(event.target)
+      if (p && canEdit(p) && (editingCell?.row !== p.row || editingCell.col !== p.col)) setEditingCell(p)
+    }}
     onClickCapture={event => {
+      if (suppressClick.current) { suppressClick.current = false; event.preventDefault(); event.stopPropagation(); return }
+      if (batchPending.current) { event.preventDefault(); event.stopPropagation(); return }
       const p = point(event.target); if (!p) return
-      if (event.shiftKey && anchor) { event.preventDefault(); event.stopPropagation(); setEnd(p) }
+      if (event.shiftKey && anchor) {
+        pendingFocus.current = null
+        event.preventDefault(); event.stopPropagation(); setEnd(p)
+        // A virtualized anchor can be offscreen. Keep keyboard events within
+        // the grid without focusing another cell and collapsing the range.
+        if (!root.current?.contains(document.activeElement)) root.current?.focus({ preventScroll: true })
+      }
       else {
         setAnchor(p); setEnd(p)
+        if ((event.target as HTMLElement).closest('input,textarea,.ant-select,.ant-picker')) {
+          // Pointer-down selection prevents native focus. Explicitly restore
+          // it when a click is intended to edit the already mounted input.
+          if (canEdit(p)) focus(p)
+          return
+        }
         // Plain/read-only cells must receive focus too, not only their inputs.
-        if (!(event.target as HTMLElement).closest('input,textarea,button,a,select,[contenteditable="true"],.ant-select,.ant-picker,.ant-input-number'))
-          focus(p)
+        if (!(event.target as HTMLElement).closest('input,textarea,button,[role="button"],a,select,[contenteditable="true"],.ant-select,.ant-picker'))
+          focus(p, false)
       }
     }}
-    onMouseDownCapture={event => { if (event.shiftKey && anchor && point(event.target)) event.preventDefault() }}
+    onDoubleClickCapture={event => {
+      const p = point(event.target)
+      if (p && canEdit(p)) focus(p)
+    }}
+    onMouseDownCapture={event => { if (selectionGesture.current || (event.shiftKey && anchor && point(event.target))) event.preventDefault() }}
     onPasteCapture={event => {
-      const start = point(event.target) || anchor
+      if (batchPending.current) { event.preventDefault(); event.stopPropagation(); return }
+      const multiple = !!anchor && !!end && (anchor.row !== end.row || anchor.col !== end.col)
+      const start = multiple ? anchor : point(event.target) || anchor
       if (!start) return
       const text = event.clipboardData.getData('text/plain')
       // Quoted Excel multiline cells are parsed as one value, not unrelated rows.
       const nativeEditor = (event.target as HTMLElement).closest('input:not([readonly]):not([disabled]),textarea:not([readonly]):not([disabled])')
-      if (!text.includes('\t') && !text.includes('\n') && nativeEditor) return
+      if (!multiple && !text.includes('\t') && !text.includes('\n') && nativeEditor) return
       event.preventDefault(); event.stopPropagation()
-      try { onEdits(sheetPasteEdits(parseSheetClipboard(text), start, count, fields)) }
+      try {
+        const matrix = parseSheetClipboard(text)
+        void runBatch(() => sheetPasteSelectionEdits(matrix, start, multiple ? end : null, count, fields))
+      }
       catch (error) { message.error((error as Error).message) }
     }}
     onCopyCapture={event => {
@@ -195,27 +321,47 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       const values: string[] = []
       for (let row = Math.min(anchor.row, end.row); row <= Math.max(anchor.row, end.row); row++) {
         const cells: string[] = []
-        for (let col = Math.min(anchor.col, end.col); col <= Math.max(anchor.col, end.col); col++)
-          cells.push(quote(fields[col] ? String(valueAt(row, fields[col]) ?? '') : String(displayAt(row, col) ?? cellText(cellAt({ row, col })))))
+        for (let col = Math.min(anchor.col, end.col); col <= Math.max(anchor.col, end.col); col++) {
+          const input = cellAt({ row, col })?.querySelector<HTMLInputElement | HTMLTextAreaElement>('input:not([readonly]),textarea:not([readonly])')
+          cells.push(quote(input?.value ?? (fields[col] ? String(valueAt(row, fields[col]) ?? '') : String(displayAt(row, col) ?? cellText(cellAt({ row, col }))))))
+        }
         values.push(cells.join('\t'))
       }
       event.clipboardData.setData('text/plain', values.join('\n'))
     }}
     onKeyDownCapture={event => {
-      if (event.nativeEvent.isComposing) return
+      if (batchPending.current) { event.preventDefault(); event.stopPropagation(); return }
+      // Never intercept the first key of an IME session or recreate its input.
+      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
+        const composingPoint = point(event.target)
+        if (composingPoint && canEdit(composingPoint)
+          && (editingCell?.row !== composingPoint.row || editingCell.col !== composingPoint.col)) setEditingCell(composingPoint)
+        return
+      }
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'd') {
         event.preventDefault(); event.stopPropagation()
         if (!event.repeat) fillDown()
         return
       }
-      const p = point(event.target); if (!p) return
+      const p = point(event.target) || anchor; if (!p) return
       const target = event.target as HTMLElement
+      const isEditing = editingCell?.row === p.row && editingCell.col === p.col
+      // A selected input stays mounted: native typing/selection, including the
+      // very first character, starts editing without forwarding synthetic keys.
+      if (!isEditing && !event.ctrlKey && !event.metaKey && !event.altKey
+        && (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') && canEdit(p))
+        setEditingCell(p)
       // Existing pickers in protected columns (new-row material selection,
       // category selection) keep their own keyboard behaviour.
       const protectedControl = target.closest('input,textarea,button,[role="combobox"]')
       const readOnlyDisplay = target.closest('input[readonly],textarea[readonly]') && !target.closest('.ant-select,.ant-picker')
       if (!fields[p.col] && protectedControl && !(sheetArrowKeys.has(event.key) && readOnlyDisplay)) return
-      if (event.key === 'Escape') { setAnchor(null); setEnd(null); return }
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation()
+        // Commit the draft by blurring, then return to four-arrow navigation.
+        focus(p, false)
+        return
+      }
       if (target.getAttribute('aria-expanded') === 'true' || target.closest('[aria-expanded="true"]')
         || cellAt(p)?.querySelector('[aria-expanded="true"]')) return
       // Batch-protected columns can still contain their own material/category
@@ -225,7 +371,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       }
       if (sheetArrowKeys.has(event.key)) {
         if (event.ctrlKey || event.metaKey || event.altKey || (event.shiftKey && target.closest('input,textarea'))
-          || sheetArrowUsesEditor(target, event.key)) return
+          || (isEditing && sheetArrowUsesEditor(target, event.key))) return
         event.preventDefault(); event.stopPropagation()
         const next = sheetArrowPoint(p, event.key, count, fields.length, hasCell)
         // Focus the cell, so following arrow presses keep navigating the grid.
@@ -251,12 +397,12 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     }}>
     <Space wrap className="shipment-sheet-toolbar">
       <Typography.Text strong>表格编辑</Typography.Text>
-      <Typography.Text type="secondary">↑↓←→ 跳转单元格 · F2 编辑 · Tab 左右切换 · Enter 下一行 · Shift 点击选区 · Ctrl/Cmd+C 复制 · 粘贴 Excel 多格数据</Typography.Text>
+      <Typography.Text aria-live="polite">{anchor && end
+        ? `已选 ${Math.abs(anchor.row - end.row) + 1} 行 × ${Math.abs(anchor.col - end.col) + 1} 列（${(Math.abs(anchor.row - end.row) + 1) * (Math.abs(anchor.col - end.col) + 1)} 格）`
+        : '尚未选择单元格'}</Typography.Text>
       <Button size="small" onClick={fillDown} title="Ctrl/⌘D：单选复制上一行；多行选区按首行向下填充">向下填充选区</Button>
-      <Typography.Text type="secondary">Ctrl/⌘D：单选复制上一行，多行按首行填充</Typography.Text>
-      <Typography.Text type="secondary">灰底列禁止批量覆盖；拖动表头右边线调整列宽。修改后请保存。</Typography.Text>
     </Space>
     <Table<T> {...props} ref={table} virtual bordered columns={mapped}
       scroll={{ ...props.scroll, y: viewportHeight, x: mapped.reduce((total, col) => total + Number(col.width), 40) }} />
-  </div>
+  </div></ShipmentSheetFillContext.Provider></ShipmentSheetDraftContext.Provider>
 }

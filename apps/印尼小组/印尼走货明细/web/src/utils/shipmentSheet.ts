@@ -77,6 +77,27 @@ export function sheetPasteEdits(matrix: string[][], start: SheetPoint, rowCount:
   return edits
 }
 
+/** Paste at a single cell, or repeat the entire copied block over a selection. */
+export function sheetPasteSelectionEdits(matrix: string[][], anchor: SheetPoint, end: SheetPoint | null,
+  rowCount: number, fields: readonly string[] = shipmentSheetFields): SheetEdit[] {
+  if (!end || (anchor.row === end.row && anchor.col === end.col))
+    return sheetPasteEdits(matrix, anchor, rowCount, fields)
+  const start = { row: Math.min(anchor.row, end.row), col: Math.min(anchor.col, end.col) }
+  const rows = Math.abs(anchor.row - end.row) + 1, columns = Math.abs(anchor.col - end.col) + 1
+  if (!Number.isSafeInteger(rows) || !Number.isSafeInteger(columns) || rows * columns > 10000)
+    throw new Error('一次最多粘贴 10000 个单元格')
+  // Reject an invalid range before allocating its matrix or changing any data.
+  if (start.row < 0 || start.col < 0 || start.row + rows > rowCount || start.col + columns > fields.length)
+    throw new Error('粘贴超出已有明细范围，请先添加对应物料行或缩小粘贴范围')
+  const height = matrix.length, width = matrix[0]?.length || 0
+  if (!height || !width || matrix.some(row => row.length !== width))
+    throw new Error('复制区域的列数不一致，请复制完整的矩形区域')
+  if (rows % height !== 0 || columns % width !== 0)
+    throw new Error(`目标选区为 ${rows} 行 × ${columns} 列，需为复制区域 ${height} 行 × ${width} 列的整倍数；也可只点目标左上角再粘贴`)
+  return sheetPasteEdits(Array.from({ length: rows }, (_, row) =>
+    Array.from({ length: columns }, (_, col) => matrix[row % height][col % width])), start, rowCount, fields)
+}
+
 const numbers = new Set(['kg', 'qty', 'price', 'cartons', 'weighing_qty',
   'material:length', 'material:width', 'material:height', 'material:weight_per_carton', 'material:net_per_pc'])
 const dates = new Set(['contract_date', 'invoice_date', 'po_date'])

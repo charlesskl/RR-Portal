@@ -4,14 +4,15 @@ import ts from 'typescript'
 import React, { cloneElement, isValidElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it, vi } from 'vitest'
-import { sheetFillDownEdits } from './shipmentSheet'
+import { parseSheetClipboard, sheetFillDownEdits, sheetPasteSelectionEdits } from './shipmentSheet'
 
 const source = readFileSync(new URL('../components/ShipmentSheetTable.tsx', import.meta.url), 'utf8')
 const tree = ts.createSourceFile('table.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-let columns = '', hasCell = '', copy = '', paste = '', layout = ''
+let columns = '', hasCell = '', copy = '', paste = '', layout = '', quoteSource = ''
 function collect(node: ts.Node) {
   if (ts.isVariableDeclaration(node) && node.name.getText(tree) === 'mapped') columns = node.initializer!.getText(tree)
   if (ts.isVariableDeclaration(node) && node.name.getText(tree) === 'hasCell') hasCell = node.initializer!.getText(tree)
+  if (ts.isVariableDeclaration(node) && node.name.getText(tree) === 'quote') quoteSource = node.initializer!.getText(tree)
   if (ts.isJsxAttribute(node) && node.name.getText(tree) === 'onCopyCapture') copy = ((node.initializer as ts.JsxExpression).expression!).getText(tree)
   if (ts.isJsxAttribute(node) && node.name.getText(tree) === 'onPasteCapture') paste = ((node.initializer as ts.JsxExpression).expression!).getText(tree)
   if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useLayoutEffect') layout = node.arguments[0].getText(tree)
@@ -27,6 +28,7 @@ it('68 x 47 cells mount no inactive inputs, and exactly one active editor', () =
   const fields = Array.from({ length: 47 }, (_, i) => `field${i}`)
   const state = {
     React, cloneElement, isValidElement, editingCell: null as { row: number; col: number } | null,
+    anchor: null, end: null,
     canEdit: () => true, displayAt: (row: number, col: number) => `R${row}C${col}`, widths: {},
     columns: fields.map((_, col) => ({ width: 120, title: col, render: () => React.createElement(Fillable, { onFill: () => {} }, React.createElement(Editor)) })),
     inSelection: () => false, editableAt: () => true, fields,
@@ -48,6 +50,23 @@ it('68 x 47 cells mount no inactive inputs, and exactly one active editor', () =
   for (let row = 0; row < 68; row++) for (let col = 0; col < 47; col++)
     renderToStaticMarkup(React.createElement('div', null, mapped[col].render(undefined, {}, row)))
   expect(mounted).toHaveBeenCalledTimes(1)
+})
+
+it('选择模式也仅保留当前格的真实输入框，第一次输入/中文合成无需重建编辑器', () => {
+  const input = React.createElement('textarea', { defaultValue: '1-2/1卡' })
+  const point = { row: 1, col: 0 }
+  const state = { React, cloneElement, isValidElement, editingCell: null,
+    anchor: point, end: point, canEdit: () => true, displayAt: () => 'preview', widths: {},
+    columns: [{ width: 120, render: () => input }], fields: ['pallet'],
+    inSelection: () => false, editableAt: () => true }
+  const context = createContext(state)
+  runInContext(transpile(`const mapped = ${columns}`), context)
+  const mapped = runInContext('mapped', context)
+  expect(mapped[0].render(undefined, {}, 0)).not.toBe(input)
+  expect(mapped[0].render(undefined, {}, 1)).toBe(input)
+  state.end = { row: 67, col: 0 }
+  // Shift multi-selection cannot remove the focused anchor input.
+  expect(mapped[0].render(undefined, {}, 1)).toBe(input)
 })
 
 it('logical navigation includes unmounted rows and skips merged-away cells', () => {
@@ -75,13 +94,40 @@ it('copy includes protected and editable data from all offscreen selected rows',
   expect(sheetFillDownEdits({ row: 0, col: 0 }, { row: 67, col: 0 }, 68, ['contract_no'], () => 'TOP')).toHaveLength(67)
 })
 
+it('真实多格复制到较大目标选区，行列、前导零、制表符、换行和引号完整往返', () => {
+  const sourceValues = [['00123', 'A\tB'], ['第一行\n第二行', 'say "Hi"']]
+  const fields = ['contract_no', 'invoice_no'], setData = vi.fn()
+  const context = createContext({ anchor: { row: 1, col: 1 }, end: { row: 0, col: 0 }, fields,
+    valueAt: (row: number, field: string) => sourceValues[row][fields.indexOf(field)],
+    displayAt: () => '', cellAt: () => null, cellText: () => '',
+    event: { target: { closest: () => null }, preventDefault: vi.fn(), clipboardData: { setData } } })
+  runInContext(transpile(`const quote = ${quoteSource}; const copy = ${copy}; copy(event)`), context)
+  const matrix = parseSheetClipboard(setData.mock.calls[0][1])
+  expect(matrix).toEqual(sourceValues)
+  const edits = sheetPasteSelectionEdits(matrix, { row: 2, col: 0 }, { row: 5, col: 1 }, 6, fields)
+  expect(Array.from({ length: 4 }, (_, i) => fields.map(field => edits.find(edit => edit.row === i + 2 && edit.field === field)?.value)))
+    .toEqual([...sourceValues, ...sourceValues])
+})
+
 it('single-cell paste on an inactive cell uses validated sheet edits instead of disappearing', () => {
-  const onEdits = vi.fn(), parseSheetClipboard = vi.fn(() => [['VALUE']]), sheetPasteEdits = vi.fn(() => [{ row: 67, field: 'contract_no', value: 'VALUE' }])
+  const onEdits = vi.fn()
   const context = createContext({ point: () => ({ row: 67, col: 0 }), anchor: null, fields: ['contract_no'], count: 68,
-    onEdits, parseSheetClipboard, sheetPasteEdits, message: { error: vi.fn() },
+    batchPending: { current: false }, runBatch: (build: () => unknown) => onEdits(build()),
+    parseSheetClipboard, sheetPasteSelectionEdits, message: { error: vi.fn() },
     event: { target: { closest: () => null }, preventDefault: vi.fn(), stopPropagation: vi.fn(), clipboardData: { getData: () => 'VALUE' } } })
   runInContext(transpile(`const paste = ${paste}; paste(event)`), context)
   expect(onEdits).toHaveBeenCalledWith([{ row: 67, field: 'contract_no', value: 'VALUE' }])
+})
+
+it('在仍挂载输入框的多行选区粘贴一个值，整区写入而非原生插入一个格子', () => {
+  const onEdits = vi.fn(), preventDefault = vi.fn()
+  const context = createContext({ point: () => ({ row: 0, col: 0 }), anchor: { row: 0, col: 0 }, end: { row: 2, col: 0 },
+    fields: ['contract_no'], count: 3, batchPending: { current: false }, runBatch: (build: () => unknown) => onEdits(build()),
+    parseSheetClipboard, sheetPasteSelectionEdits, message: { error: vi.fn() },
+    event: { target: { closest: () => ({}) }, preventDefault, stopPropagation: vi.fn(), clipboardData: { getData: () => 'NEW' } } })
+  runInContext(transpile(`const paste = ${paste}; paste(event)`), context)
+  expect(preventDefault).toHaveBeenCalledOnce()
+  expect(onEdits).toHaveBeenCalledExactlyOnceWith([0, 1, 2].map(row => ({ row, field: 'contract_no', value: 'NEW' })))
 })
 
 it('the real table enables native row virtualization with numeric viewport dimensions', () => {

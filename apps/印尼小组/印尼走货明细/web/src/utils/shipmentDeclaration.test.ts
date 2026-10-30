@@ -223,7 +223,7 @@ it('真实单位下拉接入同一粘贴业务链，空草稿选单位后填量�
   const state = {
     items, matMap: map, consolidatedItems: consolidateShipmentItems(items, map),
     applyMergedShipmentEdits, outRows: [], editing: { id: 9 }, customsOptions: [],
-    sheetRevision: { current: { rawItems: items, matMap: map, session: 1 } }, sheetConfirmOpen: { current: false },
+    sheetRevision: { current: { rawItems: items, matMap: map, session: 1 } }, sheetWritePending: { current: false },
     dirtyMatIds: new Set<number>(), setItems: vi.fn(), setMatMap: vi.fn(), setDirtyMatIds: vi.fn(),
     setEditorDirty: vi.fn(), setSheetEditing: vi.fn(), setOutRows: vi.fn(),
     api: { get: vi.fn(async () => ({ data: [] })), put: vi.fn(), post: vi.fn() },

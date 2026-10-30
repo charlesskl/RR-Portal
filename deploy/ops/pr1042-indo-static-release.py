@@ -3,7 +3,7 @@ Root must replace every blank reviewed/fresh-profile pin, review and activate on
 """
 import contextlib,datetime,hashlib,importlib.util,io,json,os,pathlib,re,shutil,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error,urllib.parse
 ROOT=pathlib.Path('/opt/rr-portal')
-ARCHIVE_ROOT=ROOT/'deploy/backups/pr1042-indo-static-r2-20261030'
+ARCHIVE_ROOT=ROOT/'deploy/backups/pr1042-indo-static-r3-20261030'
 OUT=None
 PREPARE_OUT=ARCHIVE_ROOT/'prepare'
 BASE='49c0f09167f4eedcc766d828ced36d29f94544be'
@@ -16,12 +16,12 @@ APP_TREE='fc63cee79ae886eb53ae44cc8986ea29ccd56aa1'
 TARGET='1e4366f2803bd5ea19b07b787a12a7d7b66c5ff4'
 TREE='c156f971326fde53daae0543bb64d8447100aef5'
 REVIEWED_PATHS=('web/src/components/ShipmentNumberCell.tsx', 'web/src/components/ShipmentSheetDraft.tsx', 'web/src/components/ShipmentSheetTable.tsx', 'web/src/components/ShipmentTextCell.tsx', 'web/src/pages/ShipmentsPage.css', 'web/src/pages/ShipmentsPage.tsx', 'web/src/utils/shipmentConsolidationSave.test.ts', 'web/src/utils/shipmentDeclaration.test.ts', 'web/src/utils/shipmentEditorLoading.test.ts', 'web/src/utils/shipmentImportedHs.test.ts', 'web/src/utils/shipmentNumberDraft.test.ts', 'web/src/utils/shipmentSheet.ts', 'web/src/utils/shipmentSheetBatch.test.ts', 'web/src/utils/shipmentSheetFlow.test.ts', 'web/src/utils/shipmentSheetNavigation.test.ts', 'web/src/utils/shipmentSheetSafety.test.ts', 'web/src/utils/shipmentSheetSelection.test.ts', 'web/src/utils/shipmentSheetViewport.test.ts', 'web/src/utils/shipmentTextCell.test.ts', 'web/tests/fixtures/shipments/README.md', 'web/tests/fixtures/shipments/performance.html', 'web/tests/fixtures/shipments/performance.tsx', 'web/tests/fixtures/shipments/vite.config.ts')
-EXPECTED_NEW_MANIFEST={'assets/CustomersPage-B_Im1Y-2.js': 'f24ce97f0313070ee8cd433837647f4780ab3f90ed877b949e9d94315c72a8a0', 'assets/DbAdminPage-s-h2A1Fm.js': 'b79f8741b0cfbfeac278df33f534ea807211b17a77f7a3dfe1c83dc95c6d2542', 'assets/DictionariesPage-DWJbzZWj.js': 'a8da23cae09f68e71e0ab22384575c74e5670fa80a4297f3eef1e8f7ecf77892', 'assets/EditOutlined-CHvjFvUY.js': 'f7028aefcc8ed192c4092e2ae4b545d86f3a50dc39e47767710b2614b4a56fc4', 'assets/LoginPage-DZ43Qcnd.js': '47c84249b4556818cd6ddd5154138c4e8e9c49f70e4ff111b097624ac0a80346', 'assets/MaterialAlertsPage-C1GjKlFK.js': 'c3810268e6cce30aa71758064070c5e26a20674588db78ebc71e04f0ed7bf7db', 'assets/MoldingPosPage-Do1lRGu1.js': '2e0fb6c24e460d925a0ab04e93c4827e18ee5a0aed23677d736b13542e9b387f', 'assets/OutboundPage-BQsxaIWx.css': 'b4f7372b122d76eebee9521327f40ab96530c2315df0b63ab49a74310fce55a5', 'assets/OutboundPage-CpqfNHeL.js': '998243b3b02d7ed0685d0ebd85f1b85b3f2a65f6d5cb85c9d1937359536c80fc', 'assets/PlusOutlined-D4EJWgTz.js': '4b840efe2b9acc0213d8e357f5c834807ee40a6d00a1080e330c7dbad119bde6', 'assets/ProductsPage-No1nTesQ.js': 'ea8ca5bc3f9214095220b41f9fe9db97206fdfef43d09d3867fcffd3e58c415a', 'assets/PurchasePage-B8YonOf3.css': 'd2ea560788ecb0057235649740060f8e6fbb0495b65017913d39193397cd3da3', 'assets/PurchasePage-BxVy_kHJ.js': 'da26fe21b6d46ab8b84015dc4e5fcb5e70b84360b946df8632da0c6234f557dd', 'assets/QuotesPage-DDVRdRl_.css': 'd9351cb3c2d4e8e5a76d947bf0e9731bac2260fb7b9abe8733daf9b3df4bbcbd', 'assets/QuotesPage-DLTn7YG6.js': '1e700228c5b3572938e167f1d2840f48945c15816e95c5f9c78669caf6dc767b', 'assets/ReloadOutlined-4dzqa3Ij.js': '3f070d4231f5d7ce5325bb8c90ce68a716c29f26f8e1e0398ad18a659c860fd8', 'assets/SchedulesPage-DKKn4xJL.js': '16010007ac69dfafca55ff449cfd736f448dfa4bc6b910d212fcf819fb238082', 'assets/ShipmentsPage-COssvjuP.css': 'f0913b15ddcbe7cba9c5265c636c4ad69d64ad59f22c002c8076dc29059a127b', 'assets/ShipmentsPage-Q6EIhx_5.js': '5a93f319b80d36a64d789654696d2b7b786992419c33259ba2f61b0d78919114', 'assets/SupplierProfileEditor-CkbV4NtT.js': '38ee798bdd0c84360c325fee621e64b0f19dea9cf54f3c41012a1a572dab8e0f', 'assets/SupplierSummaryPage-BirjdQYs.js': 'ee3c275ad85b2dc5c4c28810a89bad45d680ab6c503348d8fda3af1bbee40dc4', 'assets/ToolMaterialsPage-CjzUd56c.js': '7e65d924bfae88ae272aea64cfb89e97d15f55b7feca1d37bbd4d830a4e16116', 'assets/UsersPage-DKnyXq1I.js': '1da36923f3e369b18e02cfc03a01801f62b714ef712abd30e49394b69b365056', 'assets/auto-complete-OBX4jwDS.js': '7d27d675eaf3c63d4cb8a0f9a76075b921db35508c6a269f2f5abcc1d77939d3', 'assets/chunk-BVpWp9h4.js': 'd68000f91e617e39707775fbbf502ae057f963da84e1d06dd6129df60614fb8a', 'assets/client-S6mPGKVM.js': '0619bdac1ca199b0cd07d9d54bd7a4c7e2320ac4fd6e6db5fe8a413b8c02838a', 'assets/customsExport-Dbz8c6Lz.js': '84a1848a2d47e0dbb8dc450278cbf3fa3ee7ed539510adac3f1286076bbafbe3', 'assets/date-picker-Bx-rsx87.js': '1786041443f973b85cc43b5ff7a8e400c53c768ad5a639a2a5d9b721f2d1da76', 'assets/engineeringImport-BdBr4WS3.js': 'a3c38d8bae8417f8691f6b10c72aec1bf974356485d6ca5f702761988a2c0a1e', 'assets/form-CqOO38q0.js': '58f9d02cb754d0e22438b24b48bf8f3a944373ae1eba7c0690df5bb36b5d87a2', 'assets/grid-B48L62wM.js': '91abbc7ffc80abe5075ea2aae53d8bb4ea2d58403d22ba4d3df1beecd98a5031', 'assets/imageUpload-DgJ9GzqX.js': '2ae7e23008960198e74d812c83429f8845cc5a7fe0e509b9cf5248c9244f35fb', 'assets/index-CqDsGiiC.js': '2e71c6443a4733373fe674b0eebaed08a2734114089d3d65b443318286873fee', 'assets/index-Tu04tXLf.css': '52155b5185a7b6e40e4220a5ca913de309663c04263c268cdb46d630b2114f06', 'assets/input-CXl0CrxM.js': '25e158d41520991da9483332d71a6d82274b492b067cb61ae6e8b1db4ddc4e49', 'assets/input-number-CC_vC4xv.js': 'dd27ed0a354695df30ee6c95c3424f57cb580eccfb0e4a58c054478e93a57756', 'assets/jsx-runtime-CPIq3nuo.js': 'd2ea580ed7e6f97b65ce1f80560677bfcbab839e64ddeed93044accd603de09a', 'assets/modal-DMPi3kjn.js': '52dac29d718d8e913e2d40cf1a3554fa5b570e1982bfeed7266c24a70ea88e5f', 'assets/moldingPoExport-DskrH8Av.js': '94274fed5b9e9e6d8fe02791d57b282eb4f5939b44221055c93261901164bdc5', 'assets/pagination-LhGL_5kc.js': '2282ab0540887d8564f54ab3dc0ebbb2a071fa58a9fa22037b8e0ef4dd6a68e9', 'assets/popconfirm-16_CnxHi.js': 'f7638ea0d17c39b3b087d165ba6cf38453553e573b4cee230d6ebfc70ac5f914', 'assets/progress-CJwc4b9M.js': '8d31d7000dc848498c19bfaff18d76702f007d327b1b8f789f61dc687dd66bd1', 'assets/row-Dk9Kqh3x.js': '209b8965ca863b98d3fc16f93249fbf2cb7c75ee715a0a27b7cf07610d28420a', 'assets/scheduleImport-D1nq1GIV.js': 'b387f3b8ed16102b34ebb907197ecb0ebbe267974eb0cbca201b8a50bad55932', 'assets/scheduleLineStatus-DhsZTTpa.js': '9d27284a276d471be9a420d812a7f689bbaad3765a206c6c27dceeb594da42ad', 'assets/shipmentDates-8JdCyfYa.js': 'd681676cc7c80450824a7b40022c9f870dbde86a8378c5b69a72cf30aea027a4', 'assets/spin-N1N-gDTY.js': '59c0d5f6333af35f664aa80a2c951afad3984b62bc70dd6a5d035782ad49a310', 'assets/supplierProfiles-DdACjIXN.js': '52db3c57474848d19f0cbc130afb9628d268ce6903a35050d192041268f78870', 'assets/switch-cHCC8vmb.js': '5cce03714ee315742df2528ff937536851f8738e464718d27f6ff50de5cb1e2a', 'assets/table-B8V-lKm1.js': '648d147e443d3eb7d5fac34e6054f4a6f197c172785b5928489fe7cb256bcb0d', 'assets/toolImportDefaults-Ca36OLkA.js': 'a2e933bb3d5f2a90978c12084c5477de4697fe6fa224e7ab60c788cd78810a2d', 'assets/useForm-Bk0qN2Jh.js': '2f3fb45e485cbad0abb2b386f35134e59744d63fc7f7153abf809283ac2dfc56', 'assets/xlsx-CGtpuIau.js': '768312094736c47185e84a085235cff804c378eba126a425fa5153e221e78e5d', 'assets/xlsx.min-DqAMbf-a.js': 'e2c2a477cfde2c9a1301515a0e1b73b28f2f70ddeaf262042e24ef4292d1f275', 'favicon.svg': '61bc9a161de58248288e6905425d7180f0624c2865007b97d763fdac12043a66', 'icons.svg': 'b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a', 'index.html': 'fa2b7f555596f277c5d28b3c850ac7cd0f3848d52d377d8d3473b655266d65eb', 'template-customs-rri.xlsx': 'cb37324b0b4d659d55a8b2ddf012f0b6bbef8b1ee7f368448b3e0ad0fff23647', 'template-customs-rrm.xlsx': '21fa65679165883c8ed9f100af96c581d79a35da9644464548c765e10f1d2984', 'template-customs.xlsx': '24ea412592b3b656a872950c8a3985813fb3dd647c26df495bc882791e9bcaf6'}
+EXPECTED_NEW_MANIFEST={'assets/CustomersPage-BN7pBTrr.js': 'dea88e97b98388befc5aaf342d2304c21e3dff22319823035e82305020bce4d3', 'assets/DbAdminPage-CREdE5ol.js': 'ce4144bed6e8772639faccc4a4ab2e5838209891c6a3077b86d8370760c2123e', 'assets/DictionariesPage-OLDoZN_x.js': '68488f6582b6a1fad0cd24d6b5f517d74c352fb70b0657bd8b1d08ae80db6e2e', 'assets/EditOutlined-2eeznxXp.js': '3368b0ce5ea04d43448e7478d4aff9ca632bbaae2f7ce940677611a7f427a7a9', 'assets/LoginPage-BdTw01jq.js': 'a31e131b8460865aa657820fe542ba23be1a54ccffa5ea0a688f27cdd30d944f', 'assets/MaterialAlertsPage-CInTs3dj.js': '55c4736a9972b3fa4a78b72dd6732016880ac8a50385177cad1eee5e19ecafff', 'assets/MoldingPosPage-D2TNM_Px.js': 'b0c1d690c2736d2571a4adbec66a047c573e84a1b9ad7911bfdb2af4c9ded47a', 'assets/OutboundPage-BQsxaIWx.css': 'b4f7372b122d76eebee9521327f40ab96530c2315df0b63ab49a74310fce55a5', 'assets/OutboundPage-BnzMnLNk.js': 'e0f19abfed2dfd6e5371e0cc4389268ad5b6dfe1e7cecada0cdea56ca945ae2b', 'assets/PlusOutlined-CDxW2rzJ.js': '591db41d5e0bc0a1f2a9bf3e1fcea1b7d34a74517101409274ce74e2e95c979d', 'assets/ProductsPage-CBgQaSW8.js': 'af03c64c3a6f6c36b585e96f5657c8e1cde86fefc0ceb37bd661e427e8460909', 'assets/PurchasePage-B8YonOf3.css': 'd2ea560788ecb0057235649740060f8e6fbb0495b65017913d39193397cd3da3', 'assets/PurchasePage-Gjwy_thd.js': '73f1c5a5d0200fec5b48a5c9b8d0d97209682e8462520887ecbc3b1cac3fbb31', 'assets/QuotesPage-DDVRdRl_.css': 'd9351cb3c2d4e8e5a76d947bf0e9731bac2260fb7b9abe8733daf9b3df4bbcbd', 'assets/QuotesPage-Hq-c9fT7.js': 'f7a5f5fce2668a8ac7d8ed17b059ae4031c23e5fb3a56a39aa7d8124cb2e966e', 'assets/ReloadOutlined-yudkG6wu.js': '7a1921795b99742592e02f0a9c9a9b01e8fb1d13cec0a44ae9d954f2ac588480', 'assets/SchedulesPage-CzlLBU4O.js': '4ba511dd07c7106f00dcdeab3519edf21c64bc6dd8e915545d4ec50a235375e8', 'assets/ShipmentsPage-COssvjuP.css': 'f0913b15ddcbe7cba9c5265c636c4ad69d64ad59f22c002c8076dc29059a127b', 'assets/ShipmentsPage-CezIJ1TU.js': 'a10ed5093f329917ba246500b5a54d8b9e1c536c2ce448bb92aab51d05d1f41c', 'assets/SupplierProfileEditor-BjrYrQ3w.js': 'bba4ad89344401f7df3f3c58a164915861a584bf2966e58e8575c7245836c921', 'assets/SupplierSummaryPage-D0NSi996.js': 'be53832d7b7105dc3ce50dc657d2c80ada402111189a9c3b1fc2ac527c9f2918', 'assets/ToolMaterialsPage-BntV5hf0.js': 'f09ed2988cbca15f5c4a1190401e00f97b9ba32f53040e66074394899b8c87aa', 'assets/UsersPage-CFc2JO89.js': '3546b535c4c57fba5f5f9cc7ce2a6c9532706bd5794584ff99a3f26be3d72f0e', 'assets/auto-complete-OBX4jwDS.js': '7d27d675eaf3c63d4cb8a0f9a76075b921db35508c6a269f2f5abcc1d77939d3', 'assets/chunk-BVpWp9h4.js': 'd68000f91e617e39707775fbbf502ae057f963da84e1d06dd6129df60614fb8a', 'assets/client-S6mPGKVM.js': '0619bdac1ca199b0cd07d9d54bd7a4c7e2320ac4fd6e6db5fe8a413b8c02838a', 'assets/customsExport-DJjBq2M6.js': '849c8d61708d87b70d20e403b9fc3071928a784ba145b992eef49b6a71aebb6f', 'assets/date-picker-Bq1mna8E.js': 'a8f2086d292d78cba5daaba4571770caab210a8ae0c78253743cb2d59930f4df', 'assets/engineeringImport-Dj8BJ1cN.js': 'f30eb473aaf933cab43edb879d6c42294af44510745f14d382034d1ef2cd2213', 'assets/form-C6YLCBd5.js': '8af44033bf68a01927bf7a01670f6432cec5b13d8e89fe2d1654b80df23d0ff4', 'assets/grid-DbqjXEjg.js': 'f1eb606c5c3972503e62881b36430cc7cb3d9201646945d28df9c9a78037227a', 'assets/imageUpload-DgJ9GzqX.js': '2ae7e23008960198e74d812c83429f8845cc5a7fe0e509b9cf5248c9244f35fb', 'assets/index-BCX1IYMT.js': 'd07ff41d428de9a6fc0db4248dad0da1232eb3aaa416f97900bcb93033459030', 'assets/index-Tu04tXLf.css': '52155b5185a7b6e40e4220a5ca913de309663c04263c268cdb46d630b2114f06', 'assets/input-CXl0CrxM.js': '25e158d41520991da9483332d71a6d82274b492b067cb61ae6e8b1db4ddc4e49', 'assets/input-number-CC_vC4xv.js': 'dd27ed0a354695df30ee6c95c3424f57cb580eccfb0e4a58c054478e93a57756', 'assets/jsx-runtime-CPIq3nuo.js': 'd2ea580ed7e6f97b65ce1f80560677bfcbab839e64ddeed93044accd603de09a', 'assets/modal-CAjY54Rv.js': '28f8e0b69d5754ccde2dd18b5dedd560c377301ad4033c5e36bbadaa6018d1c4', 'assets/moldingPoExport-DskrH8Av.js': '94274fed5b9e9e6d8fe02791d57b282eb4f5939b44221055c93261901164bdc5', 'assets/pagination-LhGL_5kc.js': '2282ab0540887d8564f54ab3dc0ebbb2a071fa58a9fa22037b8e0ef4dd6a68e9', 'assets/popconfirm-O0qH1ulH.js': '1fe49f5bc7d0a71b7961a9dc3a5245fe5fa682e94c245be01efa3a5d7b1d3e8d', 'assets/progress-CJwc4b9M.js': '8d31d7000dc848498c19bfaff18d76702f007d327b1b8f789f61dc687dd66bd1', 'assets/row-qsQo5oQn.js': '41aa614b605c7b845e497c67af3efe9fbc67418bcd4d7c6de07e695910f71608', 'assets/scheduleImport-D1nq1GIV.js': 'b387f3b8ed16102b34ebb907197ecb0ebbe267974eb0cbca201b8a50bad55932', 'assets/scheduleLineStatus-DhsZTTpa.js': '9d27284a276d471be9a420d812a7f689bbaad3765a206c6c27dceeb594da42ad', 'assets/shipmentDates-BAx2CWJF.js': '559dfd5a49cdcc52f408c94a01fbe2de5ef9707d7daa89a75d72ba9e28ec8a8f', 'assets/spin-N1N-gDTY.js': '59c0d5f6333af35f664aa80a2c951afad3984b62bc70dd6a5d035782ad49a310', 'assets/supplierProfiles-DdACjIXN.js': '52db3c57474848d19f0cbc130afb9628d268ce6903a35050d192041268f78870', 'assets/switch-cHCC8vmb.js': '5cce03714ee315742df2528ff937536851f8738e464718d27f6ff50de5cb1e2a', 'assets/table-CNC9cMNQ.js': '767a79facebc965741e45cb1681fdf6f90a1f2ecdf8efbe96d83a0a2df406cb0', 'assets/toolImportDefaults-Bzh2z1__.js': 'c833c002a332aa28f3417a21c64ae3981b5f432c59a2bcf346e5211aa247de2e', 'assets/useForm-Bk0qN2Jh.js': '2f3fb45e485cbad0abb2b386f35134e59744d63fc7f7153abf809283ac2dfc56', 'assets/xlsx-CGtpuIau.js': '768312094736c47185e84a085235cff804c378eba126a425fa5153e221e78e5d', 'assets/xlsx.min-DqAMbf-a.js': 'e2c2a477cfde2c9a1301515a0e1b73b28f2f70ddeaf262042e24ef4292d1f275', 'favicon.svg': '61bc9a161de58248288e6905425d7180f0624c2865007b97d763fdac12043a66', 'icons.svg': 'b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a', 'index.html': '75dd8ce97c69dd87a9db42b39a021519dc82e3ea06197242373cccfa3f913e59', 'template-customs-rri.xlsx': 'cb37324b0b4d659d55a8b2ddf012f0b6bbef8b1ee7f368448b3e0ad0fff23647', 'template-customs-rrm.xlsx': '21fa65679165883c8ed9f100af96c581d79a35da9644464548c765e10f1d2984', 'template-customs.xlsx': '24ea412592b3b656a872950c8a3985813fb3dd647c26df495bc882791e9bcaf6'}
 EXPECTED_PROFILE_SHA256='1261bbfceb5788baed9a2f0ed070da966dbdedd7e9f061899abf72699c214999'
 EXPECTED_PROFILE_INNER_SHA256='835bc783665c8e92528f7216050e5613ee657f61a98ff13ffeae11b0af956074'
 EXPECTED_STATIC_INVENTORY_SHA256='422b75a907b52135f956bd617597a5605264efbc7ae6aee37d12237903c3df80'
 EXPECTED_DIRTY_SHA256='74b8a9c5caefdc5a220f12cd14972229312beef004e76129d0fb2bb691a0507e'
-EXECUTE=False
+EXECUTE=True
 PHASE='prepare'
 PREPARED_SHA256=''
 DEPLOY_SHA256=''
@@ -323,44 +323,14 @@ def source_check():
   need(git('rev-parse',BACKEND_REVISION+':'+APP+'/'+name)==git('rev-parse',TARGET+':'+APP+'/'+name),'unchanged-entire-backend-db-seed-build-and-dependencies')
 
 def ensure_build_space(label='before'):
- need(label in('before','after','preapply'),'fixed-capacity-observation')
- root=json.loads(P.command(['docker','info','--format','{{json .DockerRootDir}}']));need(type(root)is str and pathlib.Path(root).is_absolute(),'typed-local-docker-root');s=os.statvfs(root);v={'available':s.f_bavail*s.f_frsize,'free':s.f_bfree*s.f_frsize,'minimumOrdinaryAvailable':2*1024**3,'minimumPhysicalFree':10*1024**3};private(OUT/('docker-space-'+label+'.private.json'),v);need(v['available']>=v['minimumOrdinaryAvailable']and v['free']>=v['minimumPhysicalFree'],'frontend-two-gib-user-and-ten-gib-physical-free')
+ need(label in('before','after','preapply'),'fixed-adoption-capacity-observation')
+ root=json.loads(P.command(['docker','info','--format','{{json .DockerRootDir}}']));need(type(root)is str and pathlib.Path(root).is_absolute(),'typed-local-docker-root');s=os.statvfs(root);v={'available':s.f_bavail*s.f_frsize,'free':s.f_bfree*s.f_frsize,'minimumOrdinaryAvailable':1536*1024**2,'minimumPhysicalFree':9728*1024**2,'maximumObservedAdoptionGrowth':384*1024**2,'policy':'root-authorized-R3-adopt-only-thin-image-no-frontend-rebuild'}
+ if label!='before':
+  source=(OUT if label=='after'else PREPARE_OUT)/'docker-space-before.private.json';before=read(source);v['observedOrdinarySpaceDrop']=max(0,before['available']-v['available']);v['observedPhysicalSpaceDrop']=max(0,before['free']-v['free'])
+ private(OUT/('docker-space-'+label+'.private.json'),v);need(v['available']>=v['minimumOrdinaryAvailable']and v['free']>=v['minimumPhysicalFree'],'adopt-thin-layer-one-point-five-gib-user-and-nine-point-five-gib-physical-free')
+ if label!='before':need(v['observedOrdinarySpaceDrop']<=v['maximumObservedAdoptionGrowth']and v['observedPhysicalSpaceDrop']<=v['maximumObservedAdoptionGrowth'],'bounded-observed-adoption-space-drop-at-most384mib')
 
-def prepare():
- prof=profile();r,rows=inventory();need(rows==prof['allRuntime'],'same-fresh-profile-all-runtime');preserved=host_files();need(preserved=={k:prof[k]for k in('shared','unstaged','staged')},'same-fresh-shared-and-dirty-path-profile');protection=maintenance();ensure_build_space()
- need(image_id(COMPOSE_TAG)==STATIC_BASE_IMAGE and live_static(r)=={n:v['sha256']for n,v in prof['wwwroot']['files'].items()},'fresh-accepted-canonical-and-live-static-graph')
- original=backend_proof(r['Id']);accepted=backend_proof(STATIC_BASE_IMAGE,True);need(original==accepted,'actual-live-backend-and-canonical-backend-exact-705')
- old=copy_web(r['Id'],'old-wwwroot');old_manifest=files(old);need(old_manifest==live_static(r),'complete-old-public-static-backup');old_meta=index_metadata(r['Id']);status,headers,body=http();need(status==200 and sha(body)==old_manifest['index.html'],'fresh-public-index-equals-live-backup')
- src=OUT/'source';extract_source(src);build_tag='rrportal-indo-pr1042-frontend:'+TARGET;need(image_id(build_tag,optional=True)is None,'fresh-own-build-tag')
- run(['docker','build','--pull=false','--target','frontend','--build-arg','VITE_BASE_PATH=/indo-shipping/','-t',build_tag,str(src/APP)],timeout=1200)
- frontend=image_id(build_tag);scratch=scratch_create(frontend)
- try:
-  prepared=OUT/'prepared-wwwroot';prepared.mkdir(mode=0o700);run(['docker','cp',scratch+':/src/web/dist/.',str(prepared)])
- finally:scratch_remove(scratch,frontend)
- templates=preserve_templates(old,prepared,old_manifest);new_manifest=files(prepared);need(EXPECTED_NEW_MANIFEST and new_manifest==EXPECTED_NEW_MANIFEST,'actual-cloud-build-equals-root-reviewed-local-build-manifest');additions=static_plan(old_manifest,new_manifest);need((prepared/'index.html').stat().st_size==old_meta['size'],'equal-index-byte-length-before-hot-publication')
- context=OUT/'image-context';context.mkdir(mode=0o700);merged=context/'wwwroot';shutil.copytree(old,merged,copy_function=os.link)
- for src in prepared.rglob('*'):
-  dest=merged/src.relative_to(prepared)
-  if src.is_dir():dest.mkdir(exist_ok=True)
-  else:
-   if dest.exists():dest.unlink()
-   os.link(src,dest,follow_symlinks=False)
- base_alias='rrportal-indo-pr1042-backend:'+STATIC_BASE_IMAGE.split(':')[1];need(image_id(base_alias,optional=True)in(None,STATIC_BASE_IMAGE),'own-base-alias-never-reassigned');run(['docker','tag',STATIC_BASE_IMAGE,base_alias]);base_image=json.loads(P.command(['docker','image','inspect',STATIC_BASE_IMAGE]))[0]
- scratch=scratch_create(STATIC_BASE_IMAGE)
- try:base_manifest=scratch_static(scratch)
- finally:scratch_remove(scratch,STATIC_BASE_IMAGE)
- need(base_manifest==old_manifest,'live-static-union-equals-accepted-durable-base')
- dockerfile=('FROM '+base_alias+'\nCOPY --chown=app:app wwwroot/ /app/wwwroot/\nLABEL org.opencontainers.image.revision="'+TARGET+'" io.rr-portal.backend-image="'+LIVE_IMAGE+'" io.rr-portal.frontend-app-tree="'+APP_TREE+'"\n').encode();private(context/'Dockerfile',dockerfile)
- need(all(p==context/'Dockerfile'or p==merged or merged in p.parents for p in context.rglob('*')),'only-public-assets-in-derivative-context')
- tag='rrportal-indo-pr1042:'+TARGET;need(image_id(tag,optional=True)is None,'fresh-own-durable-tag');run(['docker','build','--pull=false','-t',tag,str(context)],timeout=300);derivative=json.loads(P.command(['docker','image','inspect',tag]))[0];iid=derivative['Id'];derivative_contract(base_image,derivative);need(image_id(base_alias)==STATIC_BASE_IMAGE,'frozen-base-alias-still-exact')
- scratch=scratch_create(iid)
- try:image_manifest=scratch_static(scratch)
- finally:scratch_remove(scratch,iid)
- need(image_manifest==dict(old_manifest,**new_manifest)and backend_proof(iid,True)==original,'candidate-entire-public-union-and-backend-proof-exact')
- _,after=inventory();target_unchanged(rows,after,r['Id']);need(host_files()==preserved and maintenance()==protection and image_id(COMPOSE_TAG)==STATIC_BASE_IMAGE,'prepare-host-gateway-maintenance-env-and-canonical-alias-unchanged')
- old_headers={k.lower():v for k,v in headers.items()if k.lower()in('etag','last-modified')};need(set(old_headers)=={'etag','last-modified'},'both-old-index-cache-validators')
- ensure_build_space('after');p={'base':BASE,'head':HEAD,'target':TARGET,'tree':TREE,'appTree':APP_TREE,'hostBase':HOST_BASE,'runtime':rows,'container':r['Id'],'hostFiles':preserved,'maintenance':protection,'oldManifest':old_manifest,'newManifest':new_manifest,'newAssets':additions,'oldHeaders':old_headers,'oldIndexMetadata':old_meta,'templateProofs':templates,'oldProof':original,'durableTag':tag,'durableImage':iid,'composeTagBefore':STATIC_BASE_IMAGE};private(OUT/'prepared.private.json',p)
- return {'durableImage':iid,'frontendImage':frontend,'newFileCount':len(new_manifest),'newAssetCount':len(additions),'databaseReadOrWritten':False,'runtimeNotRestarted':True,'hostSourceCheckoutPerformed':False}
+# R3 adopted preparation function follows below.
 
 def manifest(directory):
  values=sorted(directory.rglob('*'));need(len(values)<=100000 and all(not p.is_symlink()and(p.is_file()or p.is_dir())for p in values),'regular-bounded-own-private-evidence');return{str(p.relative_to(directory)):sha(p.read_bytes())for p in values if p.is_file()}
@@ -414,6 +384,91 @@ def wire(v):
  raw=enc(v);need(len(raw)<=4*1024**2,'bounded-numeric-phase-receipt');nib=lambda x:[int(c,16)for c in(format(x,'x')if type(x)is int else x)];parts=[raw[i:i+1024]for i in range(0,len(raw),1024)];digest=nib(sha(raw))
  for i,b in enumerate(parts):print(enc([0,nib(i+1),nib(len(parts)),nib(len(raw)),digest,nib(b.hex())]).decode(),flush=True)
  print(enc([1,nib(len(parts)),nib(len(raw)),digest]).decode(),flush=True)
+
+# R3 adopts only the already-completed, independently compared R2 frontend build.
+# These exact original failure records remain failures and are never replayed.
+R2_ROOT=ROOT/'deploy/backups/pr1042-indo-static-r2-20261030/prepare'
+R2_MANIFEST_SHA256='76dc0744821c46891e80d9a48a7d64420c6007e5a37086653364c8d874c178a7'
+R2_FAILED_RESULT_INNER_SHA256='640f8211268ae514ed65864a8d268216a1721bdb8b210ce8d68ea02388888dc0'
+R2_OPS_COMMIT='29b8ba2a17cbe0d29762e4a5ae195361d20095bb'
+R2_PUBLISHED_HELPER_SHA256='fc1671860409e8f98de283c888f9c01150ac736c38796350aa19e7aa92208362'
+ADOPTED_FRONTEND_IMAGE='sha256:61474ce3cacc2f22f98d7a42ec302e11e51b715acc8d2a8fdda354ee1d2777d0'
+ADOPTED_FRONTEND_TAG='rrportal-indo-pr1042-frontend:'+TARGET
+R2_PREPARED_PUBLIC_MANIFEST_SHA256='0cf99a792adfb496e366aaccb9f4e84f9e3d3965c74fc9d49ed767454c6fcce7'
+
+def r2_evidence():
+ need(R2_ROOT.is_dir()and not any(p.is_symlink()for p in(R2_ROOT,*R2_ROOT.parents)),'fixed-existing-r2-failed-archive')
+ manifest_path=R2_ROOT/'manifest.json';need(manifest_path.is_file()and not manifest_path.is_symlink()and sha(manifest_path.read_bytes())==R2_MANIFEST_SHA256,'original-r2-failed-manifest-exact');expected=read(manifest_path)
+ need(type(expected)is dict and 0<len(expected)<=100000 and all(safe_relative(n)and pin(v)for n,v in expected.items()),'bounded-safe-r2-original-manifest')
+ # Stream hashes without copying or disclosing original private command contents.
+ for name,digest in expected.items():
+  need(P.record(R2_ROOT/name,64*1024**2)['sha256']==digest,'every-original-r2-evidence-body-still-exact')
+ entries=list(R2_ROOT.rglob('*'));need(len(entries)<=100000 and all(not p.is_symlink()and(p.is_file()or p.is_dir())for p in entries),'only-regular-original-r2-evidence-entries');all_files={p.relative_to(R2_ROOT).as_posix()for p in entries if p.is_file()};need(all_files==set(expected)|{'manifest.json','result.private.json'},'no-missing-or-new-file-in-original-r2-archive')
+ r=read(R2_ROOT/'result.private.json');inner=dict(r);inner.pop('resultSHA256',None)
+ need(r['resultSHA256']==R2_FAILED_RESULT_INNER_SHA256==sha(enc(inner))and r['success']is False and r['phase']=='prepare'and r['stage']=='actual-cloud-build-equals-root-reviewed-local-build-manifest'and r['manifestSHA256']==R2_MANIFEST_SHA256,'only-the-known-root-reviewed-r2-build-graph-failure')
+ need(all(r[k]==v for k,v in[('base',BASE),('head',HEAD),('target',TARGET),('tree',TREE),('appTree',APP_TREE),('hostBase',HOST_BASE)]),'r2-failure-bound-to-final-reviewed-source')
+ need(not(R2_ROOT/'prepared.private.json').exists()and not(R2_ROOT/'prepared.private.json').is_symlink(),'do-not-pretend-failed-r2-prepare-succeeded')
+ public={n.removeprefix('prepared-wwwroot/'):{'bytes':(R2_ROOT/n).stat().st_size,'sha256':digest}for n,digest in expected.items()if n.startswith('prepared-wwwroot/')};need(sha(enc(public))==R2_PREPARED_PUBLIC_MANIFEST_SHA256,'exact-readonly-compared-sixty-file-r2-public-byte-and-size-graph')
+ raw=git('show',R2_OPS_COMMIT+':deploy/ops/pr1042-indo-static-release.py');need(sha(raw)==R2_PUBLISHED_HELPER_SHA256,'exact-published-original-r2-build-helper')
+ return expected
+
+def link_r2_public(source_name,destination_name,expected):
+ need(source_name in('old-wwwroot','prepared-wwwroot')and destination_name==source_name,'fixed-public-r2-adoption-tree')
+ source=R2_ROOT/source_name;source_manifest=files(source);needed={n.removeprefix(source_name+'/'):h for n,h in expected.items()if n.startswith(source_name+'/')};need(source_manifest==needed,'complete-r2-public-tree-byte-seal')
+ destination=OUT/destination_name;need(not destination.exists()and not destination.is_symlink(),'fresh-own-adopted-public-tree');destination.mkdir(mode=0o700)
+ for relative,digest in source_manifest.items():
+  src=source/relative;target=destination/relative;target.parent.mkdir(mode=0o700,parents=True,exist_ok=True);before=P.record(src);need(before['sha256']==digest,'sealed-public-r2-file-before-hardlink');os.link(src,target,follow_symlinks=False)
+  need(P.record(target)==before and(src.stat().st_dev,src.stat().st_ino)==(target.stat().st_dev,target.stat().st_ino),'adopted-public-body-owner-mode-mtime-and-inode-exact')
+ need(files(destination)==source_manifest,'whole-adopted-public-tree-exact');return destination
+
+def adopted_frontend_static(cid):
+ raw=P.command(['docker','cp',cid+':/src/web/dist/.','-'],limit=260*1024**2);result={};total=0;seen=set()
+ with tarfile.open(fileobj=io.BytesIO(raw),mode='r:')as archive:
+  for member in archive:
+   name=member.name.rstrip('/')
+   if name in('.','dist'):
+    need(member.isdir(),'frontend-public-root-directory-only');continue
+   if name.startswith('./'):name=name[2:]
+   if name.startswith('dist/'):name=name[len('dist/'):]
+   need(safe_relative(name)and name not in seen and(member.isdir()or member.isfile()),'regular-safe-adopted-frontend-public-member');seen.add(name)
+   if member.isdir():continue
+   total+=member.size;need(0<=member.size<=64*1024**2 and total<=256*1024**2 and len(result)<1000,'bounded-adopted-frontend-public-tar');body=archive.extractfile(member).read();need(len(body)==member.size,'complete-adopted-frontend-public-body');result[name]=sha(body)
+ need('index.html'in result,'adopted-frontend-index-present');return result
+
+def prepare():
+ prof=profile();expected=r2_evidence();need(type(ADOPTED_FRONTEND_IMAGE)is str and re.fullmatch('sha256:[a-f0-9]{64}',ADOPTED_FRONTEND_IMAGE)and EXPECTED_NEW_MANIFEST,'root-must-first-match-readonly-cloud-and-fresh-local-build-graphs')
+ r,rows=inventory();need(rows==prof['allRuntime'],'same-fresh-profile-all-original-runtime');preserved=host_files();need(preserved=={k:prof[k]for k in('shared','unstaged','staged')},'same-fresh-shared-and-dirty-path-profile');protection=maintenance();ensure_build_space()
+ need(image_id(COMPOSE_TAG)==STATIC_BASE_IMAGE and image_id(ADOPTED_FRONTEND_TAG)==ADOPTED_FRONTEND_IMAGE,'same-original-canonical-and-exact-readonly-observed-r2-frontend-image')
+ old=link_r2_public('old-wwwroot','old-wwwroot',expected);prepared=link_r2_public('prepared-wwwroot','prepared-wwwroot',expected);old_manifest=files(old);new_manifest=files(prepared)
+ need(new_manifest==EXPECTED_NEW_MANIFEST and live_static(r)==old_manifest=={n:v['sha256']for n,v in prof['wwwroot']['files'].items()},'actual-r2-build-equals-fresh-reviewed-local-graph-and-live-old-tree')
+ templates=preserve_templates(old,prepared,old_manifest);need(files(prepared)==new_manifest,'template-git-proof-cannot-change-sealed-adopted-tree');additions=static_plan(old_manifest,new_manifest)
+ old_meta=index_metadata(r['Id']);need((prepared/'index.html').stat().st_size==old_meta['size'],'equal-index-byte-length-before-hot-publication');status,headers,body=http();need(status==200 and sha(body)==old_manifest['index.html'],'current-public-old-index-exact')
+ scratch=scratch_create(ADOPTED_FRONTEND_IMAGE)
+ try:raw_frontend=adopted_frontend_static(scratch)
+ finally:scratch_remove(scratch,ADOPTED_FRONTEND_IMAGE)
+ missing=set(TEMPLATES)-set(raw_frontend);need(missing=={'template-customs-rri.xlsx','template-customs-rrm.xlsx'}and raw_frontend=={n:h for n,h in new_manifest.items()if n not in missing},'immutable-r2-frontend-image-dist-exact-except-two-git-proven-restored-templates')
+ original=backend_proof(r['Id']);need(backend_proof(STATIC_BASE_IMAGE,True)==original,'live-and-accepted-canonical-backend705-exact')
+ context=OUT/'image-context';context.mkdir(mode=0o700);merged=context/'wwwroot';shutil.copytree(old,merged,copy_function=os.link)
+ for src in prepared.rglob('*'):
+  dest=merged/src.relative_to(prepared)
+  if src.is_dir():dest.mkdir(exist_ok=True)
+  else:
+   if dest.exists():dest.unlink()
+   os.link(src,dest,follow_symlinks=False)
+ base_alias='rrportal-indo-pr1042-backend:'+STATIC_BASE_IMAGE.split(':')[1];need(image_id(base_alias,optional=True)in(None,STATIC_BASE_IMAGE),'own-base-alias-never-reassigned');run(['docker','tag',STATIC_BASE_IMAGE,base_alias]);base_image=json.loads(P.command(['docker','image','inspect',STATIC_BASE_IMAGE]))[0]
+ scratch=scratch_create(STATIC_BASE_IMAGE)
+ try:base_manifest=scratch_static(scratch)
+ finally:scratch_remove(scratch,STATIC_BASE_IMAGE)
+ need(base_manifest==old_manifest,'live-old-static-equals-accepted-durable-base')
+ dockerfile=('FROM '+base_alias+'\nCOPY --chown=app:app wwwroot/ /app/wwwroot/\nLABEL org.opencontainers.image.revision="'+TARGET+'" io.rr-portal.backend-image="'+LIVE_IMAGE+'" io.rr-portal.frontend-app-tree="'+APP_TREE+'"\n').encode();private(context/'Dockerfile',dockerfile);need(all(p==context/'Dockerfile'or p==merged or merged in p.parents for p in context.rglob('*')),'only-public-assets-in-thin-derivative-context')
+ tag='rrportal-indo-pr1042:'+TARGET;need(image_id(tag,optional=True)is None,'r2-never-built-durable-tag-and-new-thin-build-is-fresh');run(['docker','build','--pull=false','-t',tag,str(context)],timeout=300);derivative=json.loads(P.command(['docker','image','inspect',tag]))[0];iid=derivative['Id'];derivative_contract(base_image,derivative);need(image_id(base_alias)==STATIC_BASE_IMAGE,'frozen-base-alias-still-exact')
+ scratch=scratch_create(iid)
+ try:image_manifest=scratch_static(scratch)
+ finally:scratch_remove(scratch,iid)
+ need(image_manifest==dict(old_manifest,**new_manifest)and backend_proof(iid,True)==original,'one-thin-derivative-whole-static-union-and-backend-proof-exact');_,after=inventory();target_unchanged(rows,after,r['Id']);need(host_files()==preserved and maintenance()==protection and image_id(COMPOSE_TAG)==STATIC_BASE_IMAGE and image_id(ADOPTED_FRONTEND_TAG)==ADOPTED_FRONTEND_IMAGE,'adoption-host-env-maintenance-canonical-and-frontend-image-unchanged')
+ old_headers={k.lower():v for k,v in headers.items()if k.lower()in('etag','last-modified')};need(set(old_headers)=={'etag','last-modified'},'both-original-index-cache-validators');ensure_build_space('after');need(r2_evidence()==expected,'all-original-r2-failure-evidence-preserved-after-hardlink-adoption')
+ p={'base':BASE,'head':HEAD,'target':TARGET,'tree':TREE,'appTree':APP_TREE,'hostBase':HOST_BASE,'runtime':rows,'container':r['Id'],'hostFiles':preserved,'maintenance':protection,'oldManifest':old_manifest,'newManifest':new_manifest,'newAssets':additions,'oldHeaders':old_headers,'oldIndexMetadata':old_meta,'templateProofs':templates,'oldProof':original,'durableTag':tag,'durableImage':iid,'composeTagBefore':STATIC_BASE_IMAGE,'adoptedR2':{'success':False,'opsCommit':R2_OPS_COMMIT,'publishedHelperSHA256':R2_PUBLISHED_HELPER_SHA256,'manifestSHA256':R2_MANIFEST_SHA256,'failedResultInnerSHA256':R2_FAILED_RESULT_INNER_SHA256,'frontendImage':ADOPTED_FRONTEND_IMAGE,'frontendDistReadbackExactExceptRestoredTemplates':True,'frontendRebuilt':False,'sourceReextracted':False,'oldBackupRecopied':False,'thinDerivativeBuildCount':1}};private(OUT/'prepared.private.json',p)
+ return{'durableImage':iid,'frontendImage':ADOPTED_FRONTEND_IMAGE,'newFileCount':len(new_manifest),'newAssetCount':len(additions),'databaseReadOrWritten':False,'runtimeNotRestarted':True,'hostSourceCheckoutPerformed':False,'adoptedR2FailurePreserved':True,'frontendRebuilt':False,'sourceReextracted':False,'oldBackupRecopied':False,'thinDerivativeBuildCount':1}
 
 if __name__=='__main__':sys.exit(main())
 

@@ -30,7 +30,7 @@ export default defineConfig({ plugins: [react(), {
       if (url.pathname === '/api/shipments/12') return send({ error: '合成加载失败' }, 503, 300)
       if (url.pathname.startsWith('/api/shipments/')) {
         const id = Number(url.pathname.split('/').at(-1)), summary = summaries.find(row => row.id === id)
-        const detailItems = id === 11 ? items : id === 13 ? items.slice(0, 2).map(({ material_snapshot: _, ...row }) => row)
+        const detailItems = id === 11 ? items : id === 13 ? items.slice(0, 2).map(item => ({ ...item, material_snapshot: undefined }))
           : [
             { ...items[0], material_snapshot: undefined, outbound_id: 1, material_id: 1, po_no: 'PO-A', contract_no: 'GROUP-CONTRACT', carton_group: 'SHARED', cartons: 4 },
             { ...items[1], material_snapshot: undefined, outbound_id: 2, material_id: 1, po_no: 'PO-B', contract_no: 'GROUP-CONTRACT', carton_group: 'SHARED', cartons: 4 },

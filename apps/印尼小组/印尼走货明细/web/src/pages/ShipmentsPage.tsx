@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import {
   Alert, App, AutoComplete, Button, Card, Checkbox, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm,
@@ -259,9 +259,9 @@ export default function ShipmentsPage() {
   const items = useMemo(() => orderedItems(rawItems), [rawItems, matMap])
   const outCandidates = useMemo(() => outboundCandidates(outRows, items), [outRows, items])
   const selectedOutIds = outSel.filter(key => outCandidates.some(row => String(row.outbound_id) === String(key)))
-  const sheetRevision = useRef({ rawItems, matMap, session: editorSession.current })
+  const sheetRevision = useRef({ rawItems, matMap, session: 0 })
   const sheetWritePending = useRef(false)
-  sheetRevision.current = { rawItems, matMap, session: editorSession.current }
+  useLayoutEffect(() => { sheetRevision.current = { rawItems, matMap, session: editorSession.current } })
   const consolidatedItems = useMemo(() => withShipmentInvoicePrices(
     sortShipmentItems(consolidateShipmentItems(items, matMap), matMap), matMap,
   ), [items, matMap])
@@ -803,6 +803,7 @@ export default function ShipmentsPage() {
   }
 
   function requestCloseEditor() {
+    if (sheetWritePending.current) { message.info('数量正在校验，请完成后再关闭'); return }
     if (!editorDirty) { closeEditor(); return }
     Modal.confirm({
       title: '保存后退出？',
@@ -817,6 +818,7 @@ export default function ShipmentsPage() {
   }
 
   function requestDiscardChanges() {
+    if (sheetWritePending.current) { message.info('数量正在校验，请完成后再取消修改'); return }
     if (!editorDirty) {
       message.info('当前没有未保存的修改')
       return
@@ -1315,17 +1317,18 @@ export default function ShipmentsPage() {
         destroyOnClose
         extra={
           <Space size={8} wrap>
-            <Button onClick={runValidation} disabled={editorLoad !== 'ready'}>🔍 运行核对</Button>
-            <Button onClick={exportShipmentExcel} loading={exporting} disabled={editorLoad !== 'ready'}>📤 导出报关明细</Button>
+            <Button onClick={runValidation} disabled={editorLoad !== 'ready' || sheetEditing}>🔍 运行核对</Button>
+            <Button onClick={exportShipmentExcel} loading={exporting} disabled={editorLoad !== 'ready' || sheetEditing}>📤 导出报关明细</Button>
             <Button onClick={() => setDrawerFull(!drawerFull)}>{drawerFull ? '⤢ 退出全屏' : '⤡ 全屏'}</Button>
-            <Button onClick={requestDiscardChanges} disabled={!editorDirty}>↩ 取消修改</Button>
+            <Button onClick={requestDiscardChanges} disabled={!editorDirty || sheetEditing}>↩ 取消修改</Button>
             <Button type="primary" onClick={() => save()} loading={saving || sheetEditing} disabled={editorLoad !== 'ready'}>💾 保存</Button>
           </Space>
         }
       >
         {editorLoad === 'loading' && <div className="shipment-editor-loading" role="status"><Spin /><Typography.Text>正在加载走货明细和物料资料，请稍候…</Typography.Text></div>}
         {editorLoad === 'error' && <Alert type="error" showIcon message="走货资料加载失败，尚未修改原数据" description="请重试。详情和物料完整载入前不能编辑、保存或导出。" action={<Button onClick={() => editing && openEdit(editing)}>重新加载</Button>} />}
-        <div hidden={editorLoad !== 'ready'}>
+        {sheetEditing && <div role="status">正在校验数量，请稍候再继续编辑…</div>}
+        <div hidden={editorLoad !== 'ready'} inert={sheetEditing}>
         <Form form={form} layout="vertical" disabled={editorLoad !== 'ready'} onValuesChange={() => setEditorDirty(true)}>
           <Row gutter={12}>
             <Col span={5}>
@@ -1446,7 +1449,7 @@ export default function ShipmentsPage() {
             valueAt={mergedCellValue}
             displayAt={sheetDisplayValue}
             extraEditorAt={(row, col) => col === 3 ? !consolidatedItems[row]?.material_id && !consolidatedItems[row]?.material_snapshot
-              : col === 11 && !consolidatedItems[row]?.outbound_id && !!matMap.get(consolidatedItems[row]?.material_id!)}
+              : col === 11 && !consolidatedItems[row]?.outbound_id && consolidatedItems[row]?.material_id != null && matMap.has(consolidatedItems[row].material_id)}
             viewportOffset={drawerFull ? 350 : 400}
             rowKey={r => String(r._rowKey)}
             rowSelection={{ selectedRowKeys: cartonSelection.map(String), onChange: keys => setCartonSelection(keys.map(Number)), fixed: true }}

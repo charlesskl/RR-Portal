@@ -36,7 +36,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
   const drafts = useRef(new Set<ShipmentDraftCommit>())
   const batchPending = useRef(false)
   const latest = useRef({ onEdits, valueAt, rowOrder })
-  latest.current = { onEdits, valueAt, rowOrder }
+  useLayoutEffect(() => { latest.current = { onEdits, valueAt, rowOrder } })
   const registerDraft = useCallback((commit: ShipmentDraftCommit, pending: () => Promise<boolean> | null) => {
     drafts.current.add(commit)
     return () => {
@@ -220,6 +220,19 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
   }))
   const fixedWidth = mapped.reduce((total, col) => total + (col.fixed === 'left' ? Number(col.width) : 0), 64)
   return <ShipmentSheetDraftContext.Provider value={registerDraft}><ShipmentSheetFillContext.Provider value={fillFrom}><div className="shipment-sheet" ref={root} tabIndex={-1} style={{ '--sheet-fixed-width': `${fixedWidth}px` } as React.CSSProperties}
+    onScrollCapture={event => {
+      const holder = event.target as HTMLElement
+      if (!holder.matches('.ant-table-tbody-virtual-holder')) return
+      const active = document.activeElement as HTMLElement | null
+      if (!root.current?.contains(active) || !active?.matches('input,textarea') || active.closest('.ant-select,.ant-picker')) return
+      const cell = active.closest<HTMLElement>('[data-sheet-col]')
+      if (!cell) return
+      const box = cell.getBoundingClientRect(), viewport = holder.getBoundingClientRect()
+      // Scrollbars, touch and programmatic scrolls do not emit wheel. Commit
+      // before the virtual list removes the active row, without blurring a
+      // newly focused visible editor during keyboard navigation.
+      if (box.bottom <= viewport.top || box.top >= viewport.bottom) active.blur()
+    }}
     onWheelCapture={() => {
       // Flush drafts before wheel scrolling can unmount a virtual row.
       const active = document.activeElement as HTMLElement | null
@@ -322,7 +335,8 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       for (let row = Math.min(anchor.row, end.row); row <= Math.max(anchor.row, end.row); row++) {
         const cells: string[] = []
         for (let col = Math.min(anchor.col, end.col); col <= Math.max(anchor.col, end.col); col++) {
-          const input = cellAt({ row, col })?.querySelector<HTMLInputElement | HTMLTextAreaElement>('input:not([readonly]),textarea:not([readonly])')
+          const input = Array.from(cellAt({ row, col })?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input:not([readonly]),textarea:not([readonly])') || [])
+            .find(editor => !editor.closest('.ant-select,.ant-picker'))
           cells.push(quote(input?.value ?? (fields[col] ? String(valueAt(row, fields[col]) ?? '') : String(displayAt(row, col) ?? cellText(cellAt({ row, col }))))))
         }
         values.push(cells.join('\t'))

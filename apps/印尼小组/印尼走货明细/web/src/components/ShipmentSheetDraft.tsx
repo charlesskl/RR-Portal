@@ -8,6 +8,6 @@ export const ShipmentSheetFillContext = createContext<((source: number, target: 
 export function useShipmentSheetDraft(commit: ShipmentDraftCommit, pending: () => Promise<boolean> | null) {
   const register = useContext(ShipmentSheetDraftContext)
   const latest = useRef({ commit, pending })
-  latest.current = { commit, pending }
+  useLayoutEffect(() => { latest.current = { commit, pending } })
   useLayoutEffect(() => register?.(() => latest.current.commit(), () => latest.current.pending()), [register])
 }

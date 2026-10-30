@@ -121,9 +121,41 @@ it('switching shipments ignores an old master-data response and keeps the new fo
   expect(f.state.editorLoadState.current).toBe('ready')
 })
 
-it('loading/error explicitly disable save/export and offer status and retry controls', () => {
-  expect(source).toMatch(/onClick=\{\(\) => save\(\)\}[^\n]*disabled=\{editorLoad !== 'ready'\}/)
-  expect(source).toMatch(/onClick=\{exportShipmentExcel\}[^\n]*disabled=\{editorLoad !== 'ready'\}/)
+// These expressions are evaluated from the actual JSX, not a copied UI policy.
+const stateTree = tree
+const headerButtons = new Map<string, {disabled: string; loading?: string}>()
+let editorInert = ''
+function collectHeader(node: ts.Node) {
+  if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node))) {
+    const attrs = new Map(node.attributes.properties.filter(ts.isJsxAttribute).map(attribute => [attribute.name.getText(stateTree),
+      attribute.initializer && ts.isJsxExpression(attribute.initializer) ? attribute.initializer.expression?.getText(stateTree) : undefined]))
+    if (node.tagName.getText(stateTree) === 'Button' && ['runValidation', 'exportShipmentExcel', '() => save()', 'requestDiscardChanges'].includes(attrs.get('onClick') || ''))
+      headerButtons.set(attrs.get('onClick')!, { disabled: attrs.get('disabled') || 'false', loading: attrs.get('loading') })
+    if (node.tagName.getText(stateTree) === 'div' && attrs.has('hidden') && attrs.has('inert')) editorInert = attrs.get('inert')!
+  }
+  ts.forEachChild(node, collectHeader)
+}
+collectHeader(stateTree)
+it.each(['ready', 'loading', 'error'].flatMap(editorLoad => [false, true].map(sheetEditing => ({editorLoad, sheetEditing}))))('header actions follow actual loading and quantity-validation state: %j', state => {
+  const context = createContext({ ...state, editorDirty: true, saving: false, exporting: false })
+  const evaluate = (value: string) => runInContext(ts.transpileModule(`(${value})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context)
+  expect(headerButtons.size).toBe(4)
+  expect(evaluate(headerButtons.get('runValidation')!.disabled)).toBe(state.editorLoad !== 'ready' || state.sheetEditing)
+  expect(evaluate(headerButtons.get('exportShipmentExcel')!.disabled)).toBe(state.editorLoad !== 'ready' || state.sheetEditing)
+  expect(evaluate(headerButtons.get('requestDiscardChanges')!.disabled)).toBe(state.sheetEditing)
+  expect(evaluate(headerButtons.get('() => save()')!.disabled)).toBe(state.editorLoad !== 'ready')
+  expect(evaluate(headerButtons.get('() => save()')!.loading!)).toBe(state.sheetEditing)
+  expect(evaluate(editorInert)).toBe(state.sheetEditing)
+})
+
+it('pending quantity validation blocks save before form validation or persistence', async () => {
+  const f = setup()
+  f.state.sheetEditing = true
+  expect(await f.save()).toBe(false)
+  expect(f.state.form.validateFields).not.toHaveBeenCalled()
+  expect(f.state.api.put).not.toHaveBeenCalled(); expect(f.state.api.post).not.toHaveBeenCalled()
+})
+it('loading and failure states offer status and retry controls', () => {
   expect(source).toContain('role="status"')
   expect(source).toContain('重新加载')
 })

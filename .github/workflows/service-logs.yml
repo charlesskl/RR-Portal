@@ -10,10 +10,11 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'f187b51c03ee7a469a6c810a33d7e5dbf09c89733ff6927057d56758ec8167dd'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
+  SCOPED_RELEASE_HELPER_SHA256: '13a40013b1cb84d713e62a8179f9ec596bfc13da907ee63ffd6658a9d9ecd17e'
 jobs:
   fixed-indo-phase:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -27,7 +28,7 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = f187b51c03ee7a469a6c810a33d7e5dbf09c89733ff6927057d56758ec8167dd ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 13a40013b1cb84d713e62a8179f9ec596bfc13da907ee63ffd6658a9d9ecd17e ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1042-20261030-indo && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Run exact Indo verify helper
@@ -47,7 +48,7 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = f187b51c03ee7a469a6c810a33d7e5dbf09c89733ff6927057d56758ec8167dd ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 13a40013b1cb84d713e62a8179f9ec596bfc13da907ee63ffd6658a9d9ecd17e ]] || exit 1
             [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1042-20261030-indo && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = verify && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-pr-1042-20261030-indo:refs/remotes/origin/codex/ops-pr-1042-20261030-indo >/dev/null 2>&1 || exit 1
@@ -56,7 +57,7 @@ jobs:
             indo_tmp=$(mktemp -d /tmp/pr1042-indo.XXXXXX)
             trap 'rm -rf "$indo_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1042-indo-static-release.py" > "$indo_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$indo_tmp/run.py" | cut -d ' ' -f1)" = f187b51c03ee7a469a6c810a33d7e5dbf09c89733ff6927057d56758ec8167dd ]] || exit 1
+            [[ "$(sha256sum "$indo_tmp/run.py" | cut -d ' ' -f1)" = 13a40013b1cb84d713e62a8179f9ec596bfc13da907ee63ffd6658a9d9ecd17e ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1042-indo-preflight.py" > "$indo_tmp/pr1042-indo-preflight.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$indo_tmp/pr1042-indo-preflight.py" | cut -d ' ' -f1)" = 98700f59026d2e071fb7cc5d2487a41ded06ab95d311bccec3690cf7b44f25a4 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/portable-pdb-library.py" > "$indo_tmp/portable-pdb-library.py" 2>/dev/null || exit 1

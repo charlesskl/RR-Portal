@@ -1,5 +1,5 @@
 """Read only sealed failed prepare logs; no lifecycle, config or business writes."""
-import hashlib,json,os,pathlib,re,sys
+import hashlib,json,os,pathlib,re,subprocess,sys
 ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/pr1040-quote-20261030/prepare';MANIFEST='0615d54677a4f5bcb107a3fcdc24c8e2b7b9c54f66b5568176b1989cfe6b8fa1';BRANCH='refs/heads/ops/pr-1040-20261030-quote';EXECUTE=True
 enc=lambda v:json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).encode()
 sha=lambda b:hashlib.sha256(b).hexdigest()
@@ -26,5 +26,9 @@ def main():
  out=ARCHIVE/last.name.replace('stderr','stdout')if last else None
  if out and out.is_file():
   lines=out.read_text(errors='replace').splitlines();v['lastStdoutSelected']=safe_error('\n'.join(line for line in lines if re.search(r'(^not ok|^# (tests|pass|fail|skipped)|error:|Error:|ERR!|failed|ERROR|fatal:)',line)))
+ tag='rr-portal-internal-quote:pr1040-49c0f09167f4';image=json.loads(subprocess.check_output(['docker','image','inspect',tag],timeout=30))[0];assert re.fullmatch(r'sha256:[a-f0-9]{64}',image['Id']) and image['Config']['Labels']['org.opencontainers.image.revision']=='49c0f09167f4eedcc766d828ced36d29f94544be' and image['Config']['Labels']['io.rr-portal.quote-app-tree']=='cd895f5fe3dbbb33037f5e0c9a7ee60db2a53f1d'
+ probe="const fs=require('fs'),cp=require('child_process');const d=fs.mkdtempSync('/tmp/pr1040-native-start-');const r=cp.spawnSync(process.execPath,['backend/server.js'],{cwd:'/app',env:{...process.env,NODE_ENV:'test',DB_DRIVER:'sqlite',DB_FILE:d+'/test.db',DATABASE_URL:'',TEST_DATABASE_URL:'',SESSION_SECRET:'isolated-fixture-only',ADMIN_INITIAL_PASSWORD:'isolated-fixture-only',HOST:'127.0.0.1',PORT:'39104'},encoding:'utf8',timeout:5000,maxBuffer:16384});console.log(JSON.stringify({status:r.status,error:r.error?.code||null,stderr:r.stderr||''}));fs.rmSync(d,{recursive:true,force:true});"
+ observed=subprocess.run(['docker','run','--rm','--network','none','--read-only','--restart','no','--log-driver','none','--tmpfs','/tmp:rw,nosuid,nodev,size=128m','--entrypoint','node',image['Id'],'-e',probe],capture_output=True,timeout=30,check=True);assert len(observed.stdout)<32768
+ x=json.loads(observed.stdout);x['stderr']=safe_error(x['stderr']);v['isolatedCandidateStartProbe']={'candidate':image['Id'],'network':'none','rootReadOnly':True,'productionMountsOrCredentials':False,'result':x}
  v['resultSHA256']=sha(enc(v));wire(v)
 if __name__=='__main__':main()

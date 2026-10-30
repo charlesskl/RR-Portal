@@ -1092,11 +1092,14 @@ function copyMoldRow(molds, index) {
 }
 
 function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
+  container._moldNumberObserver?.disconnect();
+  container._moldNumberObserver = null;
+  const moldNumberInputs = new Map();
   container.innerHTML = '';
   const table = document.createElement('table'); table.className = 'wb-table mold-table';
   table.innerHTML = `<thead><tr>
     <th style="width:40px">序号</th>
-    <th style="width:70px">模号</th>
+    <th class="mold-number-cell">模号</th>
     <th style="width:160px">模具名称</th>
     <th style="width:120px">模胚类型</th>
     <th style="width:70px">材质</th>
@@ -1116,7 +1119,7 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
   const tbody = table.querySelector('tbody');
 
   const fields = [
-    ['mold_no', 'text'],
+    ['mold_no', 'textarea'],
     ['name', 'textarea'],
     ['mold_type', 'textarea'],
     ['material', 'text'], ['color', 'text'], ['cavity', 'text'], ['sets', 'number'],
@@ -1258,9 +1261,13 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
           td.className = 'ro'; td.style.whiteSpace = 'pre-wrap'; td.textContent = formatNum(get() ?? '');
         } else if (type === 'textarea') {
           const ta = document.createElement('textarea');
-          ta.rows = 3; ta.value = get() ?? '';
+          ta.rows = k === 'mold_no' ? 1 : 3; ta.value = get() ?? '';
           ta.style.resize = 'vertical';
           const autoSize = () => { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; };
+          if (k === 'mold_no') {
+            ta.setAttribute('aria-label', `第${idx + 1}行模号`);
+            moldNumberInputs.set(ta, { autoSize, width: 0 });
+          }
           ta.oninput = () => { set(ta.value); autoSize(); onChange(); };
           td.appendChild(ta);
           setTimeout(autoSize, 0);
@@ -1288,6 +1295,7 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
         addPart.onclick = () => { addMoldPart(m); renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd); onChange(); };
         td.appendChild(addPart);
       }
+      if (f && f[0] === 'mold_no') td.classList.add('mold-number-cell');
       tr.appendChild(td);
     });
 
@@ -1339,6 +1347,17 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
   tbody.appendChild(trSub);
 
   container.appendChild(table);
+  if (moldNumberInputs.size && typeof ResizeObserver === 'function') {
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const state = moldNumberInputs.get(entry.target);
+        const width = Math.round(entry.contentRect.width * 100);
+        if (state && state.width !== width) { state.width = width; state.autoSize(); }
+      }
+    });
+    for (const input of moldNumberInputs.keys()) observer.observe(input);
+    container._moldNumberObserver = observer;
+  }
   if (canEdit) {
     const add = document.createElement('button');
     add.textContent = '+ 新增模具行'; add.className = 'mini';

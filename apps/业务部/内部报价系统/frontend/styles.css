@@ -308,6 +308,7 @@ button.ghost:hover { background: var(--primary-soft); }
 .wb-bar .muted { font-size: 13px; }
 
 /* ========== 模具表格 ========== */
+.mold-table { min-width: 2050px; }
 .mold-table tbody tr { min-height: 70px; }
 .mold-table tbody td { vertical-align: top; padding-top: 10px; padding-bottom: 10px; }
 .mold-table textarea {
@@ -316,6 +317,25 @@ button.ghost:hover { background: var(--primary-soft); }
   font-size: 13px;
   line-height: 1.4;
   padding: 5px 8px;
+}
+
+/* 模号保留完整文本；编辑与只读状态均允许长编号换行。 */
+.mold-table .mold-number-cell {
+  width: 170px;
+  min-width: 170px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.mold-table .mold-number-cell textarea {
+  display: block;
+  box-sizing: border-box;
+  min-height: 34px;
+  overflow: hidden;
+  resize: none !important;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* ========== 模具图片单元 ========== */

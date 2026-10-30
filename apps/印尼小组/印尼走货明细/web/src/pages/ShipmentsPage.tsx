@@ -18,9 +18,10 @@ import ShipmentSheetTable from '../components/ShipmentSheetTable'
 import ShipmentNumberCell from '../components/ShipmentNumberCell'
 import ShipmentTextCell from '../components/ShipmentTextCell'
 import { ShipmentSheetFillContext } from '../components/ShipmentSheetDraft'
-import { isShipmentCountUnit } from '../utils/shipmentDeclaration'
+import { formatShipmentDeclaration, isShipmentCountUnit, roundedShipmentDeclaration, shipmentDeclarationPrecision } from '../utils/shipmentDeclaration'
 import { shipmentDeclarationSaveError } from '../utils/shipmentDeclarationSaveValidation'
-import { shipmentPurchaseDates } from '../utils/shipmentDates'
+import { shipmentDateOnly, shipmentPurchaseDates } from '../utils/shipmentDates'
+import { formatShipmentPallet, shipmentOptionalNumber } from '../utils/shipmentDisplay'
 import { applyMergedShipmentEdits, mergedReadOnlyFields, type MergedEditorRow } from '../utils/shipmentMergedEditor'
 import { shipmentSheetFields, type SheetEdit } from '../utils/shipmentSheet'
 import { linkShipmentOutbound, remainingOutboundQuantity } from '../utils/shipmentOutboundLink'
@@ -263,7 +264,8 @@ export default function ShipmentsPage() {
   const sheetWritePending = useRef(false)
   useLayoutEffect(() => { sheetRevision.current = { rawItems, matMap, session: editorSession.current } })
   const consolidatedItems = useMemo(() => withShipmentInvoicePrices(
-    sortShipmentItems(consolidateShipmentItems(items, matMap), matMap), matMap,
+    sortShipmentItems(consolidateShipmentItems(items, matMap), matMap)
+      .map(item => roundedShipmentDeclaration(item, matMap.get(item.material_id!))), matMap,
   ), [items, matMap])
   const showConsolidated = consolidatedItems.length < items.length
   const consolidatedCartons = useMemo(() => cartonLayout(consolidatedItems, matMap), [consolidatedItems, matMap])
@@ -1022,9 +1024,15 @@ export default function ShipmentsPage() {
     const material = item?.material_id != null ? matMap.get(item.material_id) : undefined
     if (field === 'currency') return item?.currency || '¥'
     if (field === 'material:unit_kg') return material?.unit_kg || 'KGM'
-    if (field === 'weighing_qty') return effectiveWeighingQty(item, material)
+    if (field === 'kg') return formatShipmentDeclaration(item?.kg, material?.unit_kg)
+    if (field === 'pallet') return formatShipmentPallet(item?.pallet)
+    if (field === 'weighing_qty') return shipmentOptionalNumber(effectiveWeighingQty(item, material))
+    if (['material:length', 'material:width', 'material:height', 'material:weight_per_carton'].includes(field))
+      return shipmentOptionalNumber(material?.[field.slice(9)])
     if (item?.sources.length > 1 && field === 'po_date')
       return shipmentPurchaseDates(item.sources).join(' / ')
+    if (field === 'po_date' || field === 'contract_date' || field === 'invoice_date')
+      return shipmentDateOnly(item?.[field])
     return field.startsWith('material:') || field.startsWith('snapshot:') ? material?.[field.slice(9)]
       : item?.[field as keyof ShipmentItem] as string | number | undefined
   }
@@ -1499,8 +1507,8 @@ export default function ShipmentsPage() {
               } },
               { title: '申报单位', width: 130, render: (_v, r, i) => fillableMaterial(i, 'unit_kg', <Select size="small" value={matMap.get(r.material_id!)?.unit_kg || 'KGM'} options={UNIT_LIST.map(u => ({ value: u, label: u }))} onChange={(v) => patchMatDim(r.material_id, 'unit_kg', v)} style={{ width: '100%' }} />) },
               { title: '申报数量', width: 120, onCell: r => ({ style: r.sources.length > 1 || isShipmentCountUnit(matMap.get(r.material_id!)?.unit_kg) ? GRAY : undefined }), render: (_v, r, i) => r.sources.length > 1 || isShipmentCountUnit(matMap.get(r.material_id!)?.unit_kg)
-                ? <span title="按申报单位自动对应；PCE/SET 请修改送货数量">{num(r.kg).toLocaleString('en-US', { maximumFractionDigits: 4 })}</span>
-                : fillable(i, 'kg', <ShipmentNumberCell value={r.kg} onCommit={v => patchItem(i, 'kg', v)} />) },
+                ? <span title="按申报单位自动对应；PCE/SET 请修改送货数量">{formatShipmentDeclaration(r.kg, matMap.get(r.material_id!)?.unit_kg)}</span>
+                : fillable(i, 'kg', <ShipmentNumberCell value={r.kg} precision={shipmentDeclarationPrecision(matMap.get(r.material_id!)?.unit_kg)} onCommit={v => patchItem(i, 'kg', v)} />) },
               { title: '送货数量', width: 120, onCell: r => ({ style: r.sources.length > 1 ? GRAY : undefined }), render: (_v, r, i) => r.sources.length > 1 ? num(r.qty).toLocaleString('en-US', { maximumFractionDigits: 4 }) : fillable(i, 'qty', <ShipmentNumberCell value={r.qty} onCommit={v => patchQtyOrPack(i, 'qty', v)} />) },
               { title: '数量单位', width: 80, align: 'center', render: (_v, r) => r.purchase_unit || (isPaperRope(matMap.get(r.material_id!)?.name_zh) ? '米' : '个') },
               { title: '毛重总重', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.grossTotal ? c.grossTotal.toFixed(2) : '' } },
@@ -1530,13 +1538,13 @@ export default function ShipmentsPage() {
                 {(consolidatedCartons[i]?.span || 0) > 1 && <Tag>同箱合并</Tag>}
               </div> },
               { title: '每箱数量', width: 190, render: (_v, r, i) => fillable(i, 'qty_per_carton', <ShipmentTextCell multiline value={r.qty_per_carton} placeholder={'3000 或 1-2/3000\n3/4000'} title="可填统一数量 3000，或按箱号分段：1-2/3000 3/4000" format={formatShipmentPackingLines} onCommit={value => patchQtyOrPack(i, 'qty_per_carton', value)} style={{ resize: 'none' }} />) },
-              { title: '卡板', width: 140, render: (_v, r, i) => fillable(i, 'pallet', <ShipmentTextCell multiline value={r.pallet} placeholder="1-22/2卡" onCommit={value => patchItem(i, 'pallet', value)} style={{ resize: 'none', overflowWrap: 'anywhere' }} />) },
+              { title: '卡板', width: 140, render: (_v, r, i) => fillable(i, 'pallet', <ShipmentTextCell multiline value={r.pallet} placeholder="1-3/4卡 8-9/9卡" title="用空格分隔卡板，显示和导出时自动换行" onCommit={value => patchItem(i, 'pallet', value)} style={{ resize: 'none', overflowWrap: 'anywhere' }} />) },
               { title: '箱号', width: 120, render: (_, r, i) => fillable(i, 'carton_no', <ShipmentTextCell value={r.carton_no} onCommit={value => patchItem(i, 'carton_no', value)} />) },
               { title: '长', width: 90, render: (_v, r, i) => fillableMaterial(i, 'length', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.length || null} onChange={(v) => patchMatDim(r.material_id, 'length', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '宽', width: 90, render: (_v, r, i) => fillableMaterial(i, 'width', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.width || null} onChange={(v) => patchMatDim(r.material_id, 'width', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '高', width: 90, render: (_v, r, i) => fillableMaterial(i, 'height', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.height || null} onChange={(v) => patchMatDim(r.material_id, 'height', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '每箱重量', width: 100, render: (_v, r, i) => fillableMaterial(i, 'weight_per_carton', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.weight_per_carton || null} onChange={(v) => patchMatDim(r.material_id, 'weight_per_carton', v ?? 0)} style={{ width: '100%' }} />) },
-              { title: '称重数量', width: 100, render: (_v, r, i) => { const m = matMap.get(r.material_id!); return fillable(i, 'weighing_qty', <InputNumber size="small" controls={false} min={0} step={1} value={effectiveWeighingQty(r, m)} onChange={(v) => patchItem(i, 'weighing_qty', v ?? 0)} style={{ width: '100%' }} />) } },
+              { title: '称重数量', width: 100, render: (_v, r, i) => { const m = matMap.get(r.material_id!); return fillable(i, 'weighing_qty', <InputNumber size="small" controls={false} min={0} step={1} value={shipmentOptionalNumber(effectiveWeighingQty(r, m)) ?? null} onChange={(v) => patchItem(i, 'weighing_qty', v ?? 0)} style={{ width: '100%' }} />) } },
               { title: '单个毛重', width: 100, onCell: () => ({ style: GRAY }), render: (_v, r) => { const m = matMap.get(r.material_id!); return <span title="单个毛重 = 每箱重量 ÷ 称重数量">{shipmentGrossPerPc(m?.weight_per_carton, effectiveWeighingQty(r, m)).toFixed(6)}</span> } },
               { title: '单个净重', width: 100, render: (_v, r, i) => fillableMaterial(i, 'net_per_pc', <InputNumber size="small" controls={false} min={0} step={0.000001} value={matMap.get(r.material_id!)?.net_per_pc} onChange={(v) => patchMatDim(r.material_id, 'net_per_pc', v ?? 0)} style={{ width: '100%' }} />) },
               {

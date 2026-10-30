@@ -212,7 +212,7 @@ it.each(['RRI', 'RRM'])('真实模板导出合并明细，公式引用合并后�
   const book = XLSX.read(await blob.arrayBuffer(), { type: 'array' })
   const sheet = book.Sheets['MERGED-BATCHES']
   expect(sheet.L4.v).toBe(8232)
-  expect(sheet.K4.v).toBe(745.8192)
+  expect(sheet.K4.v).toBe(745.82)
   expect(sheet.AT4.v).toBe(83)
   expect(sheet.AP4.f).toBe('AO4*K4')
   expect(sheet.P4.f).toBe('ROUND(BA4*L4,2)')

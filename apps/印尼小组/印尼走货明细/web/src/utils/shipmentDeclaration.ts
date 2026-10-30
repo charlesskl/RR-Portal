@@ -10,6 +10,34 @@ export function isShipmentCountUnit(unit: unknown) {
   return ['PCE', 'PCS', 'PC', '个', '件', 'SET', '套', 'MTR', 'M', '米'].includes(String(unit || '').trim().toUpperCase())
 }
 
+export function shipmentDeclarationPrecision(unit: unknown): number | undefined {
+  const code = String(unit || '').trim().toUpperCase()
+  if (['KGM', 'KG', '千克', '公斤'].includes(code)) return 2
+  if (['TNE', 'TON', '吨'].includes(code)) return 4
+  return undefined
+}
+
+export function formatShipmentDeclaration(quantity: unknown, unit: unknown) {
+  const precision = shipmentDeclarationPrecision(unit)
+  return (Number(quantity) || 0).toLocaleString('en-US', {
+    minimumFractionDigits: precision ?? 0, maximumFractionDigits: precision ?? 4,
+  })
+}
+
+/** Round only the final display/export row, after summing its original batches. */
+export function roundedShipmentDeclaration<T extends DeclarationItem>(item: T, material?: DeclarationMaterial): T {
+  const precision = shipmentDeclarationPrecision(material?.unit_kg)
+  if (precision == null || item.kg == null || !Number.isFinite(Number(item.kg))) return item
+  // Decimal exponent shifting avoids binary midpoint errors such as 1.005 -> 1.00.
+  const [coefficient, exponent = '0'] = String(Number(item.kg)).split('e')
+  const quantity = Number(`${Math.round(Number(`${coefficient}e${Number(exponent) + precision}`))}e-${precision}`)
+  // Do not erase a tiny paid import's amount in the editor. Export validates
+  // that its declaration quantity is representable at the required precision.
+  if (quantity === 0 && Number(item.kg) > 0) return item
+  // Rebase an unlinked imported unit price to keep its original amount intact.
+  return rebaseShipmentDeclaration(item, quantity)
+}
+
 /** Change the declaration basis, never the physical quantity or source PO price. */
 export function rebaseShipmentDeclaration<T extends DeclarationItem>(item: T, quantity: number, preserveImportedAmount = true): T {
   if (Number(item.kg) === quantity && item.kg != null) return item

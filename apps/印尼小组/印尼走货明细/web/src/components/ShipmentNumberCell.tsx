@@ -3,8 +3,8 @@ import { InputNumber } from 'antd'
 import { useShipmentSheetDraft } from './ShipmentSheetDraft'
 
 // Commit an entered total only once, not every intermediate digit/empty value.
-export default function ShipmentNumberCell({ value, onCommit, title, integer = false }: {
-  value?: number; onCommit: (value: number) => void | boolean | Promise<boolean>; title?: string; integer?: boolean
+export default function ShipmentNumberCell({ value, onCommit, title, integer = false, precision }: {
+  value?: number; onCommit: (value: number) => void | boolean | Promise<boolean>; title?: string; integer?: boolean; precision?: number
 }) {
   const [draft, setDraft] = useState<number | null>(value ?? null)
   const pending = useRef<Promise<boolean> | null>(null)
@@ -24,8 +24,8 @@ export default function ShipmentNumberCell({ value, onCommit, title, integer = f
     return task
   }
   useShipmentSheetDraft(commit, () => pending.current)
-  return <InputNumber size="small" controls={false} min={0} step={integer ? 1 : .0001}
-    precision={integer ? 0 : undefined} value={draft} title={title} style={{ width: '100%' }}
+  return <InputNumber size="small" controls={false} min={0} step={integer ? 1 : precision == null ? .0001 : 10 ** -precision}
+    precision={integer ? 0 : precision} value={draft} title={title} style={{ width: '100%' }}
     onChange={setDraft} onBlur={commit} onKeyDown={event => {
       if (event.key === 'Escape') setDraft(value ?? null)
     }} />

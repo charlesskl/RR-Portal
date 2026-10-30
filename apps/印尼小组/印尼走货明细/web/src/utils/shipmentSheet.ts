@@ -18,6 +18,26 @@ export const shipmentSheetFields = [
 export interface SheetEdit { row: number; field: string; value: string }
 export interface SheetPoint { row: number; col: number }
 
+/** Clear contents, not rows. Required units/currency and read-only cells survive. */
+export function sheetClearSelectionEdits(anchor: SheetPoint | null, end: SheetPoint | null, rowCount: number,
+  fields: readonly string[], editableAt?: (row: number, field: string) => boolean): SheetEdit[] {
+  if (!anchor || !end) throw new Error('请先选择要清空的单元格')
+  if ([anchor, end].some(p => !Number.isInteger(p.row) || !Number.isInteger(p.col)
+    || p.row < 0 || p.row >= rowCount || p.col < 0 || p.col >= fields.length))
+    throw new Error('明细已变化，请重新选择范围')
+  const rows = Math.abs(anchor.row - end.row) + 1, columns = Math.abs(anchor.col - end.col) + 1
+  if (rows * columns > 10000) throw new Error('一次最多清空 10000 个单元格')
+  const edits: SheetEdit[] = []
+  for (let row = Math.min(anchor.row, end.row); row <= Math.max(anchor.row, end.row); row++)
+    for (let col = Math.min(anchor.col, end.col); col <= Math.max(anchor.col, end.col); col++) {
+      const field = fields[col]
+      if (!field || field === 'material:unit_kg' || field === 'currency' || editableAt?.(row, field) === false) continue
+      edits.push({ row, field, value: '' })
+    }
+  if (!edits.length) throw new Error('选区没有可清空的单元格；只读列、申报单位和币种会保留')
+  return edits
+}
+
 /** Excel fill-down: a single row copies from the row above; a range uses its top row. */
 export function sheetFillDownEdits(anchor: SheetPoint | null, end: SheetPoint | null, rowCount: number,
   fields: readonly string[], valueAt: (row: number, field: string) => string | number | undefined): SheetEdit[] {

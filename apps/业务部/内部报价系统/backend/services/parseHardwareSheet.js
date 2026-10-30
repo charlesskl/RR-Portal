@@ -27,13 +27,17 @@ function identityNorm(v) {
   return toStr(v).normalize('NFKC').replace(/\s+/g, '').replace(/[x×＊*]/gi, 'X').toUpperCase();
 }
 
-function isHeader(row) {
+function isQuotationHeader(row) {
   const text = (row || []).map(norm).join('|');
   const legacy = /(零件名称|零件名稱|PARTNAME)/.test(text)
     && /(用量|数量|數量|QTY|QUANTITY)/.test(text);
   const supplier = /(产品名称|產品名稱|产品编号.*(?:产品|物料)名称|產品編號.*(?:產品|物料)名稱|物料名称|物料名稱|PRODUCT.*NAME|ITEM.*NAME|MATERIAL.*NAME)/.test(text)
     && /MOQ/.test(text);
-  return (legacy || supplier) && /(单价|單價|UNITPRICE)/.test(text);
+  return legacy || supplier;
+}
+
+function isHeader(row) {
+  return isQuotationHeader(row) && /(单价|單價|UNITPRICE)/.test((row || []).map(norm).join('|'));
 }
 
 function indexHeader(row) {
@@ -146,21 +150,21 @@ async function readSheets(buffer) {
 
 async function parseSheets(sheets, options = {}) {
   if (!sheets.length) return { error: '工作簿为空' };
-  if (options.allSheets && sheets.length > 1) {
-    const matched = sheets.filter(sheet => sheet.rows.some(isHeader));
+  if (options.allSheets) {
+    const matched = sheets.filter(sheet => sheet.rows.some(isQuotationHeader));
     if (!matched.length) return { error: '未找到供应商报价明细表头' };
-    const parsed = await Promise.all(matched.map(sheet => parseSheets([sheet], {...options, allSheets:false})));
+    const parsed = await Promise.all(matched.map(sheet => parseSheets([sheet], {...options, allSheets:false, _fullSupplierSnapshot:true})));
     const failed = parsed.find(result => result.error);
     if (failed) return failed;
     const items = parsed.flatMap((result,index) => result.items.map(item => ({...item, source_sheet:matched[index].name})));
     return {...parsed[0], items, count:items.length, sheet_used:matched.map(sheet=>sheet.name).join('、'),
-      sheets_used:matched.map(sheet=>sheet.name), unpriced_items:parsed.flatMap(result=>result.unpriced_items || [])};
+      sheets_used:matched.map(sheet=>sheet.name), complete_sheet_scan:true, unpriced_items:parsed.flatMap(result=>result.unpriced_items || [])};
   }
 
   let picked = null;
   let headerRow = -1;
   for (const sheet of sheets) {
-    const index = sheet.rows.findIndex(isHeader);
+    const index = sheet.rows.findIndex(options._fullSupplierSnapshot ? isQuotationHeader : isHeader);
     if (index >= 0) {
       picked = sheet;
       headerRow = index;
@@ -174,6 +178,15 @@ async function parseSheets(sheets, options = {}) {
     return { error: '表头字段不完整（需要 产品名称、MOQ 与单价，或旧版 零件名称 / 用量 / 单价RMB）' };
   }
 
+  const incompleteAfterStop = index => options._fullSupplierSnapshot && picked.rows.slice(index + 1).some(row => {
+    if (isQuotationHeader(row)) return true;
+    const name = toStr(row[cols.name]);
+    return [cols.unitPrice, cols.unitPriceUntaxed, cols.unitPriceTaxed, cols.unitPriceUsd]
+      .some(column => column != null && toNum(row[column]) != null)
+      || (name && cols.qty != null && toNum(row[cols.qty]) != null);
+  });
+  const repeatedHeaderError = index => ({error:`${picked.name} 第 ${index + 1} 行出现后续报价表头，不能确认为完整清单；请分为独立报价页后再同步`});
+
   if (cols.supplierTemplate) {
     const groups = [];
     let current = null;
@@ -181,7 +194,11 @@ async function parseSheets(sheets, options = {}) {
     for (let index = headerRow + 1; index < picked.rows.length; index += 1) {
       const row = picked.rows[index] || [];
       const rowText = row.map(toStr).join('|');
-      if (/备注说明|供应商签章|供應商簽章/.test(rowText)) break;
+      if (options._fullSupplierSnapshot && isQuotationHeader(row)) return repeatedHeaderError(index);
+      if (/备注说明|供应商签章|供應商簽章/.test(rowText)) {
+        if (incompleteAfterStop(index)) return {error:`${picked.name} 第 ${index + 1} 行附注后仍有可能的报价明细，不能确认为完整清单`};
+        break;
+      }
 
       const rawSerial = toStr(row[cols.serial == null ? 1 : cols.serial]);
       const rawProductCode = cols.productCode == null ? '' : toStr(row[cols.productCode]);
@@ -322,7 +339,15 @@ async function parseSheets(sheets, options = {}) {
     const row = picked.rows[index] || [];
     const name = toStr(row[cols.name]);
     const rowText = row.map(toStr).join('|');
-    if (/^(合计|合計|小计|小計|总计|總計)/.test(name) || /^附[:：]/.test(name)) break;
+    if (options._fullSupplierSnapshot && isQuotationHeader(row)) return repeatedHeaderError(index);
+    if (/^(合计|合計|小计|小計|总计|總計)/.test(name)) {
+      if (options._fullSupplierSnapshot) continue;
+      break;
+    }
+    if (/^附[:：]/.test(name)) {
+      if (incompleteAfterStop(index)) return {error:`${picked.name} 第 ${index + 1} 行附注后仍有可能的报价明细，不能确认为完整清单`};
+      break;
+    }
     if (!name) continue;
 
     const qty = toNum(row[cols.qty]);
@@ -335,7 +360,7 @@ async function parseSheets(sheets, options = {}) {
       name,
       spec: cols.spec == null ? '' : toStr(row[cols.spec]),
       qty: qty ?? 1,
-      unit_price_rmb: unitPrice ?? 0,
+      unit_price_rmb: unitPrice ?? (options._fullSupplierSnapshot ? null : 0),
       tax_pct: null,
       note: cols.note == null ? '' : toStr(row[cols.note]),
     });

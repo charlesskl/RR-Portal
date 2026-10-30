@@ -216,9 +216,13 @@ router.post('/hardware-sheet', requireAuth, memUpload.single('file'), async (req
     const targetCurrency = ['RMB', 'USD'].includes(String(req.body?.target_currency || '').toUpperCase())
       ? String(req.body.target_currency).toUpperCase() : null;
     const isPdf = /\.pdf$/i.test(req.file.originalname);
-    const result = await (isPdf ? parseSupplierPdf : parseHardwareWorkbook)(req.file.buffer, { targetQty, targetCurrency, allSheets:req.body?.full_supplier_snapshot === '1' });
+    const fullSupplierSnapshot = req.body?.full_supplier_snapshot === '1';
+    const result = await (isPdf ? parseSupplierPdf : parseHardwareWorkbook)(req.file.buffer, { targetQty, targetCurrency, allSheets:fullSupplierSnapshot });
     if (result.error) return res.status(422).json(result);
-    if (req.body?.full_supplier_snapshot === '1') result.supplier_snapshot_version = 1;
+    if (fullSupplierSnapshot) {
+      if (result.complete_sheet_scan !== true) return res.status(422).json({ error: '解析器未能完整核对全部报价页，不能用于供应商完整清单同步。' });
+      result.supplier_snapshot_version = 1;
+    }
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: '解析失败: ' + e.message });

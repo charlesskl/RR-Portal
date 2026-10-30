@@ -71,6 +71,10 @@ function moldingRateRefreshFixture(status) {
     },
   });
   vm.runInContext(source.slice(source.indexOf('const sectionDraftPayloads ='), source.indexOf('const shippingSummarySavers =')), context);
+  const cleanupStart = source.indexOf('function cleanupMoldNumberObservers(');
+  const cleanupEnd = source.indexOf('\nfunction renderMolds(', cleanupStart);
+  assert.ok(cleanupStart >= 0 && cleanupEnd > cleanupStart);
+  vm.runInContext(source.slice(cleanupStart, cleanupEnd), context);
   const start = source.indexOf("      const body = c.querySelector('.ro-body');");
   const end = source.indexOf('      host.appendChild(c);', start);
   assert.ok(start >= 0 && end > start, 'use the actual other-department rendering, rate-refresh and action callbacks');

@@ -26,7 +26,8 @@ router.get('/', async (req, res) => {
     rows = await db.prepare(`
       SELECT q.*, f.name_cn AS factory_name,
         (SELECT COUNT(*) FROM quote_sections s WHERE s.quote_id=q.id AND s.status='approved') AS approved_count,
-        COALESCE((SELECT c.status FROM quote_customer_confirmations c WHERE c.quote_id=q.id), 'pending') AS customer_confirmation_status
+        COALESCE((SELECT c.status FROM quote_customer_confirmations c WHERE c.quote_id=q.id), 'pending') AS customer_confirmation_status,
+        COALESCE((SELECT MAX(a.id) FROM audit_log a WHERE a.quote_id=q.id AND a.action IN ('customer_confirmation','customer_confirmation_revoke')), 0) AS confirmation_revision
       FROM quotes q JOIN factories f ON f.code = q.factory_code
       WHERE q.factory_code = ? AND q.deleted_at IS NULL
         ${HIDE_IMPORTED_VERIFICATIONS}
@@ -41,7 +42,8 @@ router.get('/', async (req, res) => {
     rows = await db.prepare(`
       SELECT q.*, f.name_cn AS factory_name,
         (SELECT COUNT(*) FROM quote_sections s WHERE s.quote_id=q.id AND s.status='approved') AS approved_count,
-        COALESCE((SELECT c.status FROM quote_customer_confirmations c WHERE c.quote_id=q.id), 'pending') AS customer_confirmation_status
+        COALESCE((SELECT c.status FROM quote_customer_confirmations c WHERE c.quote_id=q.id), 'pending') AS customer_confirmation_status,
+        COALESCE((SELECT MAX(a.id) FROM audit_log a WHERE a.quote_id=q.id AND a.action IN ('customer_confirmation','customer_confirmation_revoke')), 0) AS confirmation_revision
       FROM quotes q JOIN factories f ON f.code = q.factory_code
       WHERE q.factory_code = ? AND q.deleted_at IS NULL AND q.customer IN (${placeholders})
         ${HIDE_IMPORTED_VERIFICATIONS}

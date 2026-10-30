@@ -50,3 +50,10 @@ DATABASE_URL=postgresql://rrportal:password@localhost:5432/rrportal npm run dev
 ```
 
 自动化测试仍可显式设置 `DB_DRIVER=sqlite` 和临时 `DB_FILE`，不会改变生产环境使用 PostgreSQL 的规则。
+
+### 撤销误确认
+
+- 报价列表中，业务或管理员可将“已确认”改回“待确认”，填写撤销原因后保存。仅尚未生成核价版本、未填写核价记录的报价可撤销。
+- 使用专用 `POST /api/quote-summary/:id/revoke-confirmation`，按列表确认修订号校验；普通保存接口不能撤销，避免旧页面自动保存解锁。
+- 撤销与确认、原报价写入、首次核价初始化共用报价行锁。保留原部门资料及客价/数量草稿，清除确认人/时间；未启用的自动核价快照完整写入审计后移除。重新确认时生成最新快照。
+- 已有核价版本的报价禁止直接撤销，不删除核价明细或附件。`tests/quote-freeze-api.test.js` 覆盖误确认撤销、并发、旧请求与重新确认。

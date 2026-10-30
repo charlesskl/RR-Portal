@@ -1,6 +1,6 @@
 """Read only sealed failed prepare logs; no lifecycle, config or business writes."""
 import hashlib,json,os,pathlib,re,subprocess,sys
-ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/pr1040-quote-20261030/prepare';MANIFEST='0615d54677a4f5bcb107a3fcdc24c8e2b7b9c54f66b5568176b1989cfe6b8fa1';BRANCH='refs/heads/ops/pr-1040-20261030-quote';EXECUTE=True
+ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/pr1040-quote-20261030/prepare';MANIFEST='0615d54677a4f5bcb107a3fcdc24c8e2b7b9c54f66b5568176b1989cfe6b8fa1';BRANCH='refs/heads/ops/pr-1040-20261030-quote';EXECUTE=False
 enc=lambda v:json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).encode()
 sha=lambda b:hashlib.sha256(b).hexdigest()
 def file_hash(p):

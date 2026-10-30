@@ -3,7 +3,7 @@ Root must replace every blank reviewed/fresh-profile pin, review and activate on
 """
 import contextlib,datetime,hashlib,importlib.util,io,json,os,pathlib,re,shutil,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error,urllib.parse
 ROOT=pathlib.Path('/opt/rr-portal')
-ARCHIVE_ROOT=ROOT/'deploy/backups/pr1042-indo-static-20261030'
+ARCHIVE_ROOT=ROOT/'deploy/backups/pr1042-indo-static-r2-20261030'
 OUT=None
 PREPARE_OUT=ARCHIVE_ROOT/'prepare'
 BASE='49c0f09167f4eedcc766d828ced36d29f94544be'
@@ -21,7 +21,7 @@ EXPECTED_PROFILE_SHA256='1261bbfceb5788baed9a2f0ed070da966dbdedd7e9f061899abf726
 EXPECTED_PROFILE_INNER_SHA256='835bc783665c8e92528f7216050e5613ee657f61a98ff13ffeae11b0af956074'
 EXPECTED_STATIC_INVENTORY_SHA256='422b75a907b52135f956bd617597a5605264efbc7ae6aee37d12237903c3df80'
 EXPECTED_DIRTY_SHA256='74b8a9c5caefdc5a220f12cd14972229312beef004e76129d0fb2bb691a0507e'
-EXECUTE=False
+EXECUTE=True
 PHASE='prepare'
 PREPARED_SHA256=''
 DEPLOY_SHA256=''
@@ -312,6 +312,8 @@ def source_check():
  need(all(pin(v,40)for v in(BASE,BACKEND_REVISION,PREVIOUS_FRONTEND,HOST_BASE,HEAD,TARGET,TREE,APP_TREE)),'all-final-reviewed-source-pins')
  need(git('rev-parse','HEAD').decode().strip()==HOST_BASE,'observed-host-source-never-checkout')
  git('fetch','--no-write-fetch-head','origin','+refs/heads/main:refs/remotes/origin/main')
+ git('fetch','--no-write-fetch-head','origin','+refs/pull/1042/head:refs/remotes/origin/pr1042-reviewed-head')
+ need(git('rev-parse','refs/remotes/origin/pr1042-reviewed-head').decode().strip()==HEAD,'fetched-pr1042-head-equals-reviewed-commit')
  need(git('rev-parse','origin/main').decode().strip()==TARGET and git('rev-parse',TARGET+'^{tree}').decode().strip()==TREE,'exact-protected-main-target-and-tree')
  need(git('rev-parse',BASE+':'+APP).decode().strip()==git('rev-parse',PREVIOUS_FRONTEND+':'+APP).decode().strip()==SOURCE_APP_TREE,'logical-base-app-equals-last-accepted-frontend')
  need(git('rev-parse',TARGET+':'+APP).decode().strip()==git('rev-parse',HEAD+':'+APP).decode().strip()==APP_TREE,'exact-independently-reviewed-and-merged-app-tree')

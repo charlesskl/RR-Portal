@@ -1,8 +1,8 @@
 """INERT fresh Quote profile; no lifecycle, business writes or old-phase replay."""
 import hashlib,importlib.util,json,os,pathlib,re,stat,subprocess,sys
-ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1040-quote-preflight-1'
+ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1040-quote-preflight-2'
 APP='apps/业务部/内部报价系统';SERVICE='internal-quote';ALIAS='rr-portal-internal-quote:latest'
-BRANCH='refs/heads/ops/pr-1040-20261030-quote';SOURCE_BASE='80e027a75f306f1fff50033672c52201dc4ab0bf';EXECUTE=False
+BRANCH='refs/heads/ops/pr-1040-20261030-quote';SOURCE_BASE='80e027a75f306f1fff50033672c52201dc4ab0bf';EXECUTE=True
 COMMON_NAME='pr1035-quote-preflight.py';COMMON_SHA256='2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5'
 AFFECTED=('backend/routes/quotes.js','backend/routes/summary.js','backend/routes/verifications.js','frontend/main.js')
 STAGE='entry'

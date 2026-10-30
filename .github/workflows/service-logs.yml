@@ -1,40 +1,62 @@
-name: PR 1040 Read-only Connection Diagnostic
+name: PR 1040 Scoped Quote Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [network]}
+      mode: {type: choice, required: true, options: [diagnose]}
 permissions:
   contents: read
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+env:
+  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
+  SCOPED_RELEASE_HELPER_SHA256: 'e18c00f1b3862e02eb9b6160b1cd16962f016ba13ee748949ce018a9a6e8a381'
 jobs:
-  external-read-only-network:
-    if: ${{ false }}
+  fixed-quote-phase:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 25
     steps:
-      - name: Observe TCP and unauthenticated health without SSH login
+      - name: Validate exact reviewed phase and SSH host fingerprint
+        shell: bash
         env:
-          CLOUD_HOST: ${{ secrets.CLOUD_HOST }}
+          RELEASE_BRANCH: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
-          python3 - <<'PYCODE'
-          import os,socket,json,time,re
-          host=os.environ['CLOUD_HOST']
-          assert re.fullmatch(r'[A-Za-z0-9.-]{1,253}',host)
-          output={'readOnly':True,'sshLoginAttempted':False,'serverScriptExecuted':False,'ports':{}}
-          for port in (22,80):
-              start=time.monotonic()
-              try:
-                  with socket.create_connection((host,port),timeout=5)as s:
-                      row={'tcpConnected':True};s.settimeout(5)
-                      if port==22:
-                          s.sendall(b'SSH-2.0-RRReadOnlyProbe\r\n')
-                          try:row['sshBannerPresent']=s.recv(512).startswith(b'SSH-')
-                          except Exception as e:row['responseErrorType']=type(e).__name__
-                      else:
-                          s.sendall(('GET /internal-quote/health HTTP/1.1\r\nHost: '+host+'\r\nConnection: close\r\n\r\n').encode())
-                          try:
-                              body=s.recv(512);first=body.split(b'\r\n',1)[0].decode('ascii','replace');row['httpStatus']=int(first.split()[1])if first.startswith('HTTP/')else None
-                          except Exception as e:row['responseErrorType']=type(e).__name__
-              except Exception as e:row={'tcpConnected':False,'errorType':type(e).__name__}
-              row['seconds']=round(time.monotonic()-start,3);output['ports'][port]=row
-          print('NETWORK_RESULT='+json.dumps(output,sort_keys=True))
-          PYCODE
+          set -euo pipefail
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = e18c00f1b3862e02eb9b6160b1cd16962f016ba13ee748949ce018a9a6e8a381 ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1040-20261030-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+      - name: Run exact Quote diagnose helper
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        env:
+          RELEASE_BRANCH: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 24m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
+          script: |
+            set -euo pipefail
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = e18c00f1b3862e02eb9b6160b1cd16962f016ba13ee748949ce018a9a6e8a381 ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/ops/pr-1040-20261030-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            cd /opt/rr-portal
+            timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/ops/pr-1040-20261030-quote:refs/remotes/origin/ops/pr-1040-20261030-quote >/dev/null 2>&1 || exit 1
+            [[ "$(git rev-parse refs/remotes/origin/ops/pr-1040-20261030-quote)" = "$RELEASE_SHA" ]] || exit 1
+            umask 077
+            quote_tmp=$(mktemp -d /tmp/pr1040-quote.XXXXXX)
+            trap 'rm -rf "$quote_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/pr1040-quote-preflight.py" > "$quote_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$quote_tmp/run.py" | cut -d ' ' -f1)" = e18c00f1b3862e02eb9b6160b1cd16962f016ba13ee748949ce018a9a6e8a381 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1035-quote-preflight.py" > "$quote_tmp/pr1035-quote-preflight.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$quote_tmp/pr1035-quote-preflight.py" | cut -d ' ' -f1)" = 2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5 ]] || exit 1
+            timeout --signal=TERM --kill-after=30s 22m python3 -B "$quote_tmp/run.py" diagnose

@@ -3,7 +3,7 @@ Root must replace every blank reviewed/fresh-profile pin, review and activate on
 """
 import contextlib,datetime,hashlib,importlib.util,io,json,os,pathlib,re,shutil,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error,urllib.parse
 ROOT=pathlib.Path('/opt/rr-portal')
-ARCHIVE_ROOT=ROOT/'deploy/backups/pr1042-indo-static-r3-20261030'
+ARCHIVE_ROOT=ROOT/'deploy/backups/pr1042-indo-static-r4-20261030'
 OUT=None
 PREPARE_OUT=ARCHIVE_ROOT/'prepare'
 BASE='49c0f09167f4eedcc766d828ced36d29f94544be'
@@ -446,7 +446,8 @@ def prepare():
  scratch=scratch_create(ADOPTED_FRONTEND_IMAGE)
  try:raw_frontend=adopted_frontend_static(scratch)
  finally:scratch_remove(scratch,ADOPTED_FRONTEND_IMAGE)
- missing=set(TEMPLATES)-set(raw_frontend);need(missing=={'template-customs-rri.xlsx','template-customs-rrm.xlsx'}and raw_frontend=={n:h for n,h in new_manifest.items()if n not in missing},'immutable-r2-frontend-image-dist-exact-except-two-git-proven-restored-templates')
+ missing=set(TEMPLATES)-set(raw_frontend);private(OUT/'adopted-frontend-readback.private.json',{'files':raw_frontend,'missingGitProvenTemplates':sorted(missing)})
+ need(missing<={'template-customs-rri.xlsx','template-customs-rrm.xlsx'}and raw_frontend=={n:h for n,h in new_manifest.items()if n not in missing},'immutable-r2-frontend-image-dist-exact-with-only-git-proven-missing-templates')
  original=backend_proof(r['Id']);need(backend_proof(STATIC_BASE_IMAGE,True)==original,'live-and-accepted-canonical-backend705-exact')
  context=OUT/'image-context';context.mkdir(mode=0o700);merged=context/'wwwroot';shutil.copytree(old,merged,copy_function=os.link)
  for src in prepared.rglob('*'):
@@ -468,7 +469,7 @@ def prepare():
  need(image_manifest==dict(old_manifest,**new_manifest)and backend_proof(iid,True)==original,'one-thin-derivative-whole-static-union-and-backend-proof-exact');_,after=inventory();target_unchanged(rows,after,r['Id']);need(host_files()==preserved and maintenance()==protection and image_id(COMPOSE_TAG)==STATIC_BASE_IMAGE and image_id(ADOPTED_FRONTEND_TAG)==ADOPTED_FRONTEND_IMAGE,'adoption-host-env-maintenance-canonical-and-frontend-image-unchanged')
  old_headers={k.lower():v for k,v in headers.items()if k.lower()in('etag','last-modified')};need(set(old_headers)=={'etag','last-modified'},'both-original-index-cache-validators');ensure_build_space('after');need(r2_evidence()==expected,'all-original-r2-failure-evidence-preserved-after-hardlink-adoption')
  p={'base':BASE,'head':HEAD,'target':TARGET,'tree':TREE,'appTree':APP_TREE,'hostBase':HOST_BASE,'runtime':rows,'container':r['Id'],'hostFiles':preserved,'maintenance':protection,'oldManifest':old_manifest,'newManifest':new_manifest,'newAssets':additions,'oldHeaders':old_headers,'oldIndexMetadata':old_meta,'templateProofs':templates,'oldProof':original,'durableTag':tag,'durableImage':iid,'composeTagBefore':STATIC_BASE_IMAGE,'adoptedR2':{'success':False,'opsCommit':R2_OPS_COMMIT,'publishedHelperSHA256':R2_PUBLISHED_HELPER_SHA256,'manifestSHA256':R2_MANIFEST_SHA256,'failedResultInnerSHA256':R2_FAILED_RESULT_INNER_SHA256,'frontendImage':ADOPTED_FRONTEND_IMAGE,'frontendDistReadbackExactExceptRestoredTemplates':True,'frontendRebuilt':False,'sourceReextracted':False,'oldBackupRecopied':False,'thinDerivativeBuildCount':1}};private(OUT/'prepared.private.json',p)
- return{'durableImage':iid,'frontendImage':ADOPTED_FRONTEND_IMAGE,'newFileCount':len(new_manifest),'newAssetCount':len(additions),'databaseReadOrWritten':False,'runtimeNotRestarted':True,'hostSourceCheckoutPerformed':False,'adoptedR2FailurePreserved':True,'frontendRebuilt':False,'sourceReextracted':False,'oldBackupRecopied':False,'thinDerivativeBuildCount':1}
+ return{'durableImage':iid,'frontendImage':ADOPTED_FRONTEND_IMAGE,'newFileCount':len(new_manifest),'newAssetCount':len(additions),'databaseReadOrWritten':False,'runtimeNotRestarted':True,'hostSourceCheckoutPerformed':False,'adoptedR2FailurePreserved':True,'frontendRebuilt':False,'sourceReextracted':False,'oldBackupRecopied':False,'thinDerivativeBuildCount':1,'frontendRawFileCount':len(raw_frontend),'missingGitProvenTemplates':sorted(missing)}
 
 if __name__=='__main__':sys.exit(main())
 

@@ -5,7 +5,7 @@ Final reviewed source hashes are intentionally unbound until root review.
 import calendar,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error
 ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/pr1040-quote-20261030-r2'
 APP='apps/业务部/内部报价系统';HOST_BASE='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c';BASE='80e027a75f306f1fff50033672c52201dc4ab0bf'
-TARGET='49c0f09167f4eedcc766d828ced36d29f94544be';TREE='46681593ca33261f9e11366fc182b23566b18740';HEAD='c3721fd0e24ec018ee5c9e50a2e62f16d6778d90';APP_TREE='cd895f5fe3dbbb33037f5e0c9a7ee60db2a53f1d';PHASE='verify';PREPARED_SHA256='a7e11d919832c14c6738d1a7dd7f5f768542df7c5b2e86e9d9fd60add1a81eed';DEPLOY_SHA256='a1b66704e0aec399e9745200221c06eed18360f01d0cca80206c3378263f0bd5';EXECUTE=True
+TARGET='49c0f09167f4eedcc766d828ced36d29f94544be';TREE='46681593ca33261f9e11366fc182b23566b18740';HEAD='c3721fd0e24ec018ee5c9e50a2e62f16d6778d90';APP_TREE='cd895f5fe3dbbb33037f5e0c9a7ee60db2a53f1d';PHASE='verify';PREPARED_SHA256='a7e11d919832c14c6738d1a7dd7f5f768542df7c5b2e86e9d9fd60add1a81eed';DEPLOY_SHA256='a1b66704e0aec399e9745200221c06eed18360f01d0cca80206c3378263f0bd5';EXECUTE=False
 BRANCH='refs/heads/ops/pr-1040-20261030-quote';ALIAS='rr-portal-internal-quote:latest'
 CID='0cfa8edaff44bbc74b4443b6dec444c90e2f115833ff9913abf8c9b6c462ef7a'
 LIVE_IMAGE='sha256:adf5b723ca5f8edae60a0a0f12a3828b8cd488a99eeee6405b61092805620294'

@@ -3,7 +3,7 @@ Root must replace every blank reviewed/fresh-profile pin, review and activate on
 """
 import contextlib,datetime,hashlib,importlib.util,io,json,os,pathlib,re,shutil,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error,urllib.parse
 ROOT=pathlib.Path('/opt/rr-portal')
-ARCHIVE_ROOT=ROOT/'deploy/backups/pr1044-indo-static-1-20261031'
+ARCHIVE_ROOT=ROOT/'deploy/backups/pr1044-indo-static-r2-20261031'
 OUT=None
 PREPARE_OUT=ARCHIVE_ROOT/'prepare'
 BASE='65e20c72c61d8a8dff6263f903dc5f9b6b3e52c9'
@@ -24,7 +24,7 @@ EXPECTED_PROFILE_SHA256='ef3e8e8c37d062c0b4d5e3fb0fb1a9ba849f6495bb621ddce9c9c90
 EXPECTED_PROFILE_INNER_SHA256='6cba0924b449143c364ea03562dcdc27adec3a61fad678d32c687b6739dc131c'
 EXPECTED_STATIC_INVENTORY_SHA256='feec565ca36163a4935005159589a33363243861efe2876752d496ad51fc6df3'
 EXPECTED_DIRTY_SHA256='74b8a9c5caefdc5a220f12cd14972229312beef004e76129d0fb2bb691a0507e'
-EXECUTE=False
+EXECUTE=True
 PHASE='prepare'
 PREPARED_SHA256=''
 DEPLOY_SHA256=''
@@ -48,6 +48,24 @@ PDB=None
 SERIAL=0
 STAGE='entry'
 RECOVERY={}
+FAILED_ROOT=ROOT/'deploy/backups/pr1044-indo-static-1-20261031/prepare'
+FAILED_MANIFEST_SHA256='064c7010013d1de91715667243e56006e9e3afc3f11adc54398dc540e47a8e5f'
+FAILED_RESULT_INNER_SHA256='9522942e5d48291541fd8ee554dcc90f5234bd9b10ba8dd1c473cf28e3df9d48'
+DIAGNOSIS_PATH=ROOT/'deploy/backups/pr1044-prepare-failure-readonly-1/result.private.json'
+DIAGNOSIS_RAW_SHA256='67c82bcc86730e04ac33cf721890e450d4467f38c4adf7ee645c692659d2d18f'
+DIAGNOSIS_INNER_SHA256='7a7e39253f25d1be1e6805aaa0cd9c8df79adff2ba4ec766678d5345871bd06b'
+RAW_FRONTEND_RECORD_SHA256='74ef92388668d23a08b8aa698cd2b4619c1b603a170f9487fe07a17402642a70'
+ADOPTED_FRONTEND_IMAGE='sha256:959c93d938343526e04c83c9cbf6604bcc9499462e08e70b640383d9a6dec601'
+ADOPTED_CANDIDATE_IMAGE='sha256:805586529a8575ef0dc5f9161d619dd4fb62f67b0b6b68ae5995ac922b860503'
+ADOPTED_FRONTEND_TAG='rrportal-indo-pr1044-frontend:'+TARGET
+ADOPTED_CANDIDATE_TAG='rrportal-indo-pr1044:'+TARGET
+EVIDENCE_BUDGET=33554432
+ORDINARY_RESERVE=134217728
+DELTA_BYTES=1980800
+DELTA_FILE_ALLOCATED=2060288
+DELTA_ALLOCATED_BOUND=2125824
+ORDINARY_REQUIRED=172023808
+PHYSICAL_REQUIRED=8627740672
 
 def need(v,label):
  global STAGE
@@ -59,25 +77,16 @@ def enc(v):return json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=
 def sha(v):return hashlib.sha256(v).hexdigest()
 
 def private(p,v):
+ raw=v if type(v)is bytes else enc(v);usage=evidence_usage();limit=EVIDENCE_BUDGET if p.name in('manifest.json','result.private.json')else EVIDENCE_BUDGET-2*1024**2
+ need(p.parent==OUT and len(raw)<=4*1024**2 and usage['allocatedBytes']+((len(raw)+4095)//4096)*4096+4096<=limit,'bounded-own-evidence-write-before-open')
  fd=os.open(p,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
- with os.fdopen(fd,'wb')as f:f.write(v if type(v)is bytes else enc(v));f.flush();os.fsync(f.fileno())
+ with os.fdopen(fd,'wb')as f:f.write(raw);f.flush();os.fsync(f.fileno())
+ need(evidence_usage()['allocatedBytes']<=EVIDENCE_BUDGET,'own-evidence-actual-allocation-cap')
 
 def run(args,data=None,timeout=180):
  global SERIAL,STAGE
- SERIAL+=1;STAGE='command-'+pathlib.Path(args[0]).name
- need(OUT is not None,'private-command-archive-required-before-execution')
- base=OUT/('%03d'%SERIAL)
- private(base.with_suffix('.command.private.json'),{'program':pathlib.Path(args[0]).name,'timeout':timeout})
- # Direct child output is retained even when subprocess.run times out or fails.
- # No argv or environment is written to command metadata or public receipts.
- with contextlib.ExitStack()as stack:
-  stdout=stack.enter_context(os.fdopen(os.open(base.with_suffix('.stdout.private'),os.O_CREAT|os.O_EXCL|os.O_RDWR|os.O_NOFOLLOW,0o600),'w+b'))
-  stderr=stack.enter_context(os.fdopen(os.open(base.with_suffix('.stderr.private'),os.O_CREAT|os.O_EXCL|os.O_RDWR|os.O_NOFOLLOW,0o600),'w+b'))
-  try:p=subprocess.run(args,input=data,stdout=stdout,stderr=stderr,cwd=ROOT,timeout=timeout)
-  finally:
-   for stream in(stdout,stderr):stream.flush();os.fsync(stream.fileno())
-  need(p.returncode==0,'command-'+pathlib.Path(args[0]).name)
-  stdout.seek(0);return stdout.read()
+ need(OUT is not None and type(args)is list and args and type(args[0])is str and len(pathlib.Path(args[0]).name)<=64,'bounded-fixed-command-before-reservation');usage=evidence_usage();need(usage['allocatedBytes']+8192<=EVIDENCE_BUDGET-2*1024**2,'post-command-digest-eight-kib-reserved-before-child')
+ SERIAL+=1;STAGE='command-'+pathlib.Path(args[0]).name;result=subprocess.run(args,input=data,capture_output=True,cwd=ROOT,timeout=timeout);need(len(result.stdout)<=16*1024**2 and len(result.stderr)<=1024**2,'bounded-command-streams-memory-only');record={'program':pathlib.Path(args[0]).name,'exitCode':result.returncode,'stdoutBytes':len(result.stdout),'stdoutSHA256':sha(result.stdout),'stderrBytes':len(result.stderr),'stderrSHA256':sha(result.stderr)};need(len(enc(record))<=4096,'command-digest-within-reserved-one-block');private(OUT/('%06d-command.private.json'%SERIAL),record);need(result.returncode==0,'command-'+pathlib.Path(args[0]).name);return result.stdout
 
 def metadata(path):
     need(not path.is_symlink() and (path.is_file() or path.is_dir()), 'regular-metadata')
@@ -138,11 +147,6 @@ def files(folder):
     need('index.html' in result and len(result) < 1000, 'bounded-static-manifest')
     return result
 
-def copy_web(cid, name):
-    dest = OUT / name; dest.mkdir(mode=0o700)
-    run(['docker', 'cp', cid + ':/app/wwwroot/.', str(dest)])
-    files(dest)
-    return dest
 
 def preserve_templates(old, prepared, old_manifest):
     # Dockerignore excludes the two factory templates. Restore only absent files
@@ -170,10 +174,7 @@ def preserve_templates(old, prepared, old_manifest):
             need(dest.is_file() and dest.stat().st_size == expected_size and sha(dest.read_bytes()) == expected_sha, 'fresh-dist-template-cannot-conflict')
         else: missing.append(name)
         proofs[name] = {'blob': blobs[0], 'size': expected_size, 'sha256': expected_sha, 'restoredMissingDistFile': not dest.exists()}
-    # All proofs precede any copy; never replace a Vite output or an existing asset.
-    for name in missing:
-        dest = prepared / name; os.link(old / name,dest,follow_symlinks=False)
-        need(sha(dest.read_bytes()) == TEMPLATE_PROOFS[name][1], 'restored-template-copy-exact')
+    need(not missing,'adoption-never-restores-or-writes-original-templates')
     return proofs
 
 def http(path='', headers=None):
@@ -202,18 +203,6 @@ def verify_public(p):
     code, _, _ = http('api/purchase'); need(code == 401, 'anonymous-purchase-protected')
     return {'index200': True, 'allOldAndNewAssets200AndExact': True, 'allThreeTemplates200AndExact': True, 'oldConditionalRequests200': True, 'spaFallback200': True, 'health200': True, 'anonymousPurchase401': True}
 
-def extract_source(dest):
- dest.mkdir(mode=0o700);total=0;seen=set()
- with tarfile.open(fileobj=io.BytesIO(git('archive',TARGET,APP)))as t:
-  for m in t.getmembers():
-   n=m.name.rstrip('/');need(safe_relative(n)and n not in seen and(m.isdir()or m.isfile()),'safe-regular-source-archive');seen.add(n);total+=m.size
-   need(total<=512*1024**2 and m.size<=128*1024**2 and(n==APP or n.startswith(APP+'/')or m.isdir()and APP.startswith(n+'/')),'bounded-app-only-source')
-   need(m.isdir()or not pathlib.PurePosixPath(n).name.startswith('.env')or pathlib.PurePosixPath(n).name.endswith(('.example','.sample')),'no-environment-file-in-context')
-   relative=n[len(APP)+1:]if n.startswith(APP+'/')else''
-   need(m.isdir()or not any(relative.startswith(x+'/')for x in('data','data-test','storage','storage-test'))or relative.endswith('/.gitkeep'),'no-runtime-data-in-context')
-   p=dest/n
-   if m.isdir():p.mkdir(mode=0o755,parents=True,exist_ok=True)
-   else:p.parent.mkdir(mode=0o755,parents=True,exist_ok=True);private(p,t.extractfile(m).read());p.chmod(m.mode&0o755)
 
 def derivative_contract(base_image,derivative):
  need(derivative['Architecture']==base_image['Architecture']and derivative['Os']==base_image['Os']and derivative['RootFS']['Layers'][:len(base_image['RootFS']['Layers'])]==base_image['RootFS']['Layers'],'derivative-retains-whole-base-layers-and-platform')
@@ -225,7 +214,9 @@ def pin(value,width=64):return type(value)is str and re.fullmatch('[a-f0-9]{%d}'
 def read(path):
  need(path.is_file()and not path.is_symlink(),'regular-private-evidence');return json.loads(path.read_bytes())
 
-def git(*args):return run(['git','-C',str(ROOT),'-c','core.hooksPath=/dev/null',*args])
+def git(*args):
+ global SERIAL
+ SERIAL+=1;body=P.command(['git','-C',str(ROOT),'-c','core.hooksPath=/dev/null',*args],timeout=180,limit=64*1024**2);private(OUT/('%06d-git-memory.private.json'%SERIAL),{'operation':args[0],'bytes':len(body),'sha256':sha(body)});return body
 
 def initialize():
  global P,PDB
@@ -314,8 +305,8 @@ def backend_proof(identity,candidate=False):
 def source_check():
  need(all(pin(v,40)for v in(BASE,BACKEND_REVISION,PREVIOUS_FRONTEND,SOURCE_APP_TREE,HOST_BASE,HEAD,TARGET,TREE,APP_TREE)),'all-final-reviewed-source-pins')
  need(git('rev-parse','HEAD').decode().strip()==HOST_BASE,'observed-host-source-never-checkout')
- git('fetch','--no-write-fetch-head','origin','+refs/heads/main:refs/remotes/origin/main')
- git('fetch','--no-write-fetch-head','origin','+refs/pull/1044/head:refs/remotes/origin/pr1044-reviewed-head')
+ remote=git('ls-remote','--exit-code','origin','refs/heads/main','refs/pull/1044/head').decode('ascii').splitlines();need(len(remote)==2 and all(re.fullmatch('[a-f0-9]{40}\trefs/(?:heads/main|pull/1044/head)',line)for line in remote),'exact-two-remote-public-source-refs');refs={ref:revision for revision,ref in(line.split('\t')for line in remote)};need(refs=={'refs/heads/main':TARGET,'refs/pull/1044/head':HEAD},'remote-main-and-pr-head-still-exact-without-fetch')
+ git('cat-file','-e',HEAD+'^{commit}');git('cat-file','-e',TARGET+'^{commit}')
  need(git('rev-parse','refs/remotes/origin/pr1044-reviewed-head').decode().strip()==HEAD,'fetched-pr1044-head-equals-reviewed-commit')
  need(git('rev-parse','origin/main').decode().strip()==TARGET and git('rev-parse',TARGET+'^{tree}').decode().strip()==TREE,'exact-protected-main-target-and-tree')
  need(git('rev-parse',BASE+':'+APP).decode().strip()==git('rev-parse',PREVIOUS_FRONTEND+':'+APP).decode().strip()==SOURCE_APP_TREE,'logical-base-app-equals-last-accepted-frontend')
@@ -325,14 +316,6 @@ def source_check():
  for name in('src','db','seed','Dockerfile','.dockerignore','web/package.json','web/package-lock.json'):
   need(git('rev-parse',BACKEND_REVISION+':'+APP+'/'+name)==git('rev-parse',TARGET+':'+APP+'/'+name),'unchanged-entire-backend-db-seed-build-and-dependencies')
 
-def ensure_build_space(label='before'):
- need(label in('before','after','preapply'),'fixed-capacity-observation')
- root=json.loads(P.command(['docker','info','--format','{{json .DockerRootDir}}']));need(type(root)is str and pathlib.Path(root).is_absolute(),'typed-local-docker-root');s=os.statvfs(root)
- v={'available':s.f_bavail*s.f_frsize,'free':s.f_bfree*s.f_frsize,'minimumOrdinaryAvailable':1536*1024**2 if label=='before'else 512*1024**2,'minimumPhysicalFree':9216*1024**2 if label=='before'else 8192*1024**2,'maximumObservedPreparationGrowth':1024*1024**2,'policy':'fresh-no-cache-frontend-and-one-thin-image-no-prune-or-retry'}
- if label!='before':
-  before=read((OUT if label=='after'else PREPARE_OUT)/'docker-space-before.private.json');v['observedOrdinarySpaceDrop']=max(0,before['available']-v['available']);v['observedPhysicalSpaceDrop']=max(0,before['free']-v['free'])
- private(OUT/('docker-space-'+label+'.private.json'),v);need(v['available']>=v['minimumOrdinaryAvailable']and v['free']>=v['minimumPhysicalFree'],'reviewed-realistic-capacity-floor')
- if label!='before':need(v['observedOrdinarySpaceDrop']<=v['maximumObservedPreparationGrowth']and v['observedPhysicalSpaceDrop']<=v['maximumObservedPreparationGrowth'],'bounded-preparation-growth-at-most-one-gib')
 
 def local_build_contract():
  path=pathlib.Path(__file__).with_name(LOCAL_BUILD_PROVENANCE_NAME)
@@ -343,40 +326,24 @@ def local_build_contract():
  return value
 
 def prepare():
- prof=profile();local_provenance=local_build_contract();r,rows=inventory();need(rows==prof['allRuntime'],'same-fresh-profile-all-runtime');preserved=host_files();need(preserved=={k:prof[k]for k in('shared','unstaged','staged')},'same-fresh-shared-and-dirty-path-profile');protection=maintenance();ensure_build_space()
- need(image_id(COMPOSE_TAG)==STATIC_BASE_IMAGE and live_static(r)=={n:v['sha256']for n,v in prof['wwwroot']['files'].items()},'fresh-accepted-canonical-and-live-static-graph')
- original=backend_proof(r['Id']);accepted=backend_proof(STATIC_BASE_IMAGE,True);need(original==accepted,'actual-live-backend-and-canonical-backend-exact-705');need(all(original['fileSHA256'][n]==prof['backendFiles'][n]['sha256']for n in original['fileSHA256']),'live-code-equals-fresh-readonly-profile')
- old=copy_web(r['Id'],'old-wwwroot');old_manifest=files(old);need(old_manifest==live_static(r),'complete-old-public-static-backup');old_meta=index_metadata(r['Id']);status,headers,body=http();need(status==200 and sha(body)==old_manifest['index.html'],'fresh-public-index-equals-live-backup')
- src=OUT/'source';extract_source(src);build_tag='rrportal-indo-pr1044-frontend:'+TARGET;need(image_id(build_tag,optional=True)is None,'fresh-own-build-tag')
- run(['docker','build','--pull=false','--no-cache','--progress=plain','--target','frontend','--build-arg','VITE_BASE_PATH=/indo-shipping/','-t',build_tag,str(src/APP)],timeout=1200)
- frontend=image_id(build_tag);scratch=scratch_create(frontend)
- try:
-  prepared=OUT/'prepared-wwwroot';prepared.mkdir(mode=0o700);run(['docker','cp',scratch+':/src/web/dist/.',str(prepared)])
- finally:scratch_remove(scratch,frontend)
- raw_frontend=files(prepared);missing=set(TEMPLATES)-set(raw_frontend);need(missing<={'template-customs-rri.xlsx','template-customs-rrm.xlsx'},'raw-frontend-only-known-template-omission-subset');private(OUT/'frontend-raw-dist.private.json',{'image':frontend,'files':raw_frontend,'missingGitProvenTemplates':sorted(missing),'actualFreshNpmCiRequired':True,'noCacheFrontendBuild':True});templates=preserve_templates(old,prepared,old_manifest);new_manifest=files(prepared);need(raw_frontend=={n:h for n,h in new_manifest.items()if n not in missing},'complete-raw-frontend-graph-matches-restored-public-graph');need(pin(EXPECTED_NEW_MANIFEST_SHA256)and pin(EXPECTED_LOCAL_BUILD_PROVENANCE_SHA256)and EXPECTED_NEW_MANIFEST and sha(enc(EXPECTED_NEW_MANIFEST))==EXPECTED_NEW_MANIFEST_SHA256 and new_manifest==EXPECTED_NEW_MANIFEST,'actual-cloud-build-equals-root-reviewed-fresh-npm-ci-local-build-manifest');additions=static_plan(old_manifest,new_manifest);need((prepared/'index.html').stat().st_size==old_meta['size'],'equal-index-byte-length-before-hot-publication')
- context=OUT/'image-context';context.mkdir(mode=0o700);merged=context/'wwwroot';shutil.copytree(old,merged,copy_function=os.link)
- for src in prepared.rglob('*'):
-  dest=merged/src.relative_to(prepared)
-  if src.is_dir():dest.mkdir(exist_ok=True)
-  else:
-   if dest.exists():dest.unlink()
-   os.link(src,dest,follow_symlinks=False)
- base_alias='rrportal-indo-pr1044-backend:'+STATIC_BASE_IMAGE.split(':')[1];need(image_id(base_alias,optional=True)in(None,STATIC_BASE_IMAGE),'own-base-alias-never-reassigned');run(['docker','tag',STATIC_BASE_IMAGE,base_alias]);base_image=json.loads(P.command(['docker','image','inspect',STATIC_BASE_IMAGE]))[0]
- scratch=scratch_create(STATIC_BASE_IMAGE)
- try:base_manifest=scratch_static(scratch)
- finally:scratch_remove(scratch,STATIC_BASE_IMAGE)
- need(base_manifest==old_manifest,'live-static-union-equals-accepted-durable-base')
- dockerfile=('FROM '+base_alias+'\nCOPY --chown=app:app wwwroot/ /app/wwwroot/\nLABEL org.opencontainers.image.revision="'+TARGET+'" io.rr-portal.backend-image="'+LIVE_IMAGE+'" io.rr-portal.frontend-app-tree="'+APP_TREE+'"\n').encode();private(context/'Dockerfile',dockerfile)
- need(all(p==context/'Dockerfile'or p==merged or merged in p.parents for p in context.rglob('*')),'only-public-assets-in-derivative-context')
- tag='rrportal-indo-pr1044:'+TARGET;need(image_id(tag,optional=True)is None,'fresh-own-durable-tag');run(['docker','build','--pull=false','-t',tag,str(context)],timeout=300);derivative=json.loads(P.command(['docker','image','inspect',tag]))[0];iid=derivative['Id'];derivative_contract(base_image,derivative);need(image_id(base_alias)==STATIC_BASE_IMAGE,'frozen-base-alias-still-exact')
- scratch=scratch_create(iid)
- try:image_manifest=scratch_static(scratch)
- finally:scratch_remove(scratch,iid)
- need(image_manifest==dict(old_manifest,**new_manifest)and backend_proof(iid,True)==original,'candidate-entire-public-union-and-backend-proof-exact')
- _,after=inventory();target_unchanged(rows,after,r['Id']);need(host_files()==preserved and maintenance()==protection and image_id(COMPOSE_TAG)==STATIC_BASE_IMAGE,'prepare-host-gateway-maintenance-env-and-canonical-alias-unchanged')
- old_headers={k.lower():v for k,v in headers.items()if k.lower()in('etag','last-modified')};need(set(old_headers)=={'etag','last-modified'},'both-old-index-cache-validators')
- ensure_build_space('after');p={'base':BASE,'head':HEAD,'target':TARGET,'tree':TREE,'appTree':APP_TREE,'hostBase':HOST_BASE,'runtime':rows,'container':r['Id'],'hostFiles':preserved,'maintenance':protection,'oldManifest':old_manifest,'newManifest':new_manifest,'newAssets':additions,'oldHeaders':old_headers,'oldIndexMetadata':old_meta,'templateProofs':templates,'oldProof':original,'durableTag':tag,'durableImage':iid,'composeTagBefore':STATIC_BASE_IMAGE,'freshLocalBuildProvenanceSHA256':EXPECTED_LOCAL_BUILD_PROVENANCE_SHA256,'freshLocalBuildProvenance':local_provenance,'newManifestSHA256':EXPECTED_NEW_MANIFEST_SHA256,'frontendImage':frontend,'rawFrontendManifest':raw_frontend,'missingGitProvenTemplates':sorted(missing),'frontendNoCacheBuild':True};private(OUT/'prepared.private.json',p)
- return {'durableImage':iid,'frontendImage':frontend,'newFileCount':len(new_manifest),'newAssetCount':len(additions),'databaseReadOrWritten':False,'runtimeNotRestarted':True,'hostSourceCheckoutPerformed':False}
+ prof=profile();provenance=local_build_contract();m,diagnosis=failure_artifacts();r,rows=inventory();need(rows==prof['allRuntime']==diagnosis['allRuntime'],'unchanged-all-forty-six-runtime-baseline');preserved=host_files();need(preserved=={k:prof[k]for k in('shared','unstaged','staged')},'same-host-shared-and-unknown-dirty-inventory');protection=maintenance();ensure_small_capacity('prepare-before')
+ need(image_id(COMPOSE_TAG)==STATIC_BASE_IMAGE and image_id(ADOPTED_FRONTEND_TAG)==ADOPTED_FRONTEND_IMAGE and image_id(ADOPTED_CANDIDATE_TAG)==ADOPTED_CANDIDATE_IMAGE,'exact-alias-and-two-existing-adopted-images')
+ old,old_records=public_tree('old-wwwroot',m);new,new_records=public_tree('prepared-wwwroot',m);need(len(old)==372 and len(new)==60 and new==EXPECTED_NEW_MANIFEST and live_static(r)==old=={n:v['sha256']for n,v in prof['wwwroot']['files'].items()},'complete-old372-new60-and-live-old-public-byte-graphs');templates=preserve_templates(FAILED_ROOT/'old-wwwroot',FAILED_ROOT/'prepared-wwwroot',old);additions=static_plan(old,new)
+ base_image=json.loads(P.command(['docker','image','inspect',STATIC_BASE_IMAGE]))[0];candidate=json.loads(P.command(['docker','image','inspect',ADOPTED_CANDIDATE_IMAGE]))[0];front=json.loads(P.command(['docker','image','inspect',ADOPTED_FRONTEND_IMAGE]))[0];need(sha(enc(candidate['Config']))==diagnosis['candidateImages'][ADOPTED_CANDIDATE_TAG]['configSHA256']and sha(enc(front['Config']))==diagnosis['candidateImages'][ADOPTED_FRONTEND_TAG]['configSHA256'],'both-adopted-image-full-configs-exact-readonly-observation');derivative_contract(base_image,candidate)
+ scratch=scratch_create(ADOPTED_FRONTEND_IMAGE)
+ try:raw_graph=frontend_static(scratch)
+ finally:scratch_remove(scratch,ADOPTED_FRONTEND_IMAGE)
+ need(raw_graph==new,'actual-never-started-frontend-image-full-sixty-file-graph')
+ for image,expected in((STATIC_BASE_IMAGE,old),(ADOPTED_CANDIDATE_IMAGE,dict(old,**new))):
+  scratch=scratch_create(image)
+  try:actual=scratch_static(scratch)
+  finally:scratch_remove(scratch,image)
+  need(actual==expected,'actual-durable-image-complete-static-byte-graph')
+ original=backend_proof(r['Id']);need(all(original['fileSHA256'][n]==prof['backendFiles'][n]['sha256']for n in original['fileSHA256'])and backend_proof(STATIC_BASE_IMAGE,True)==original and backend_proof(ADOPTED_CANDIDATE_IMAGE,True)==original,'actual-live-base-and-candidate-dll-pdb-705-schema-seed-proofs')
+ old_meta=index_metadata(r['Id']);need(new_records['index.html']['bytes']==old_meta['size']==882,'equal-entry-length-for-original-cache-contract');status,headers,body=http();need(status==200 and sha(body)==old['index.html'],'old-public-index-still-exact');old_headers={k.lower():v for k,v in headers.items()if k.lower()in('etag','last-modified')};need(set(old_headers)=={'etag','last-modified'},'both-old-cache-validators')
+ p={'base':BASE,'head':HEAD,'target':TARGET,'tree':TREE,'appTree':APP_TREE,'hostBase':HOST_BASE,'runtime':rows,'container':r['Id'],'hostFiles':preserved,'maintenance':protection,'oldManifest':old,'newManifest':new,'newAssets':additions,'oldHeaders':old_headers,'oldIndexMetadata':old_meta,'templateProofs':templates,'oldProof':original,'durableTag':ADOPTED_CANDIDATE_TAG,'durableImage':ADOPTED_CANDIDATE_IMAGE,'composeTagBefore':STATIC_BASE_IMAGE,'oldSourceRecords':old_records,'newSourceRecords':new_records,'artifactRoot':str(FAILED_ROOT),'originalFailurePreserved':True,'failedManifestSHA256':FAILED_MANIFEST_SHA256,'diagnosisRawSHA256':DIAGNOSIS_RAW_SHA256,'frontendRawGraph':raw_graph,'localBuildProvenance':provenance,'frontendRebuilt':False,'largePublicTreesCopied':False};delta_records(p)
+ _,after=inventory();target_unchanged(rows,after,r['Id']);need(host_files()==preserved and maintenance()==protection and image_id(COMPOSE_TAG)==STATIC_BASE_IMAGE and image_id(ADOPTED_CANDIDATE_TAG)==ADOPTED_CANDIDATE_IMAGE,'prepare-runtime-host-maintenance-and-alias-unchanged');need(public_tree('old-wwwroot',m)==(old,old_records)and public_tree('prepared-wwwroot',m)==(new,new_records),'original-public-artifacts-remain-byte-and-metadata-exact');failure_artifacts();ensure_small_capacity('prepare-after');private(OUT/'prepared.private.json',p)
+ return{'durableImage':ADOPTED_CANDIDATE_IMAGE,'frontendImage':ADOPTED_FRONTEND_IMAGE,'runtimeNotRestarted':True,'databaseReadOrWritten':False,'frontendRebuilt':False,'largePublicTreesCopied':False,'originalFailedPrepareStillFailed':True,'newIndependentPrepare':True,'deltaBytes':DELTA_BYTES,'deltaAllocatedBound':DELTA_ALLOCATED_BOUND}
 
 def manifest(directory):
  values=sorted(directory.rglob('*'));need(len(values)<=100000 and all(not p.is_symlink()and(p.is_file()or p.is_dir())for p in values),'regular-bounded-own-private-evidence');return{str(p.relative_to(directory)):sha(p.read_bytes())for p in values if p.is_file()}
@@ -385,44 +352,43 @@ def sealed(phase,digest):
  directory=ARCHIVE_ROOT/phase;need(pin(digest)and sha((directory/'manifest.json').read_bytes())==digest,'sealed-successful-prior-phase-manifest');actual=manifest(directory);actual.pop('manifest.json',None);actual.pop('result.private.json',None);need(actual==read(directory/'manifest.json'),'every-prior-private-evidence-byte-seal');r=read(directory/'result.private.json');inner=dict(r);inner.pop('resultSHA256',None);need(r['resultSHA256']==sha(enc(inner)),'prior-result-self-seal');need(r['success']is True and r['phase']==phase and r['base']==BASE and r['head']==HEAD and r['target']==TARGET and r['tree']==TREE and r['appTree']==APP_TREE and r['manifestSHA256']==digest,'exact-source-bound-prior-success');return directory,r
 
 def load_prepared():
- directory,_=sealed('prepare',PREPARED_SHA256);p=read(directory/'prepared.private.json');need(all(p[k]==v for k,v in[('base',BASE),('head',HEAD),('target',TARGET),('tree',TREE),('appTree',APP_TREE),('hostBase',HOST_BASE)]),'prepared-final-source-pins');return p
+ directory,_=sealed('prepare',PREPARED_SHA256);p=read(directory/'prepared.private.json');need(all(p[k]==v for k,v in[('base',BASE),('head',HEAD),('target',TARGET),('tree',TREE),('appTree',APP_TREE),('hostBase',HOST_BASE),('artifactRoot',str(FAILED_ROOT)),('durableImage',ADOPTED_CANDIDATE_IMAGE),('failedManifestSHA256',FAILED_MANIFEST_SHA256),('diagnosisRawSHA256',DIAGNOSIS_RAW_SHA256)]),'new-independent-prepared-source-and-old-artifact-bindings');m,_=failure_artifacts();need(public_tree('old-wwwroot',m)==(p['oldManifest'],p['oldSourceRecords'])and public_tree('prepared-wwwroot',m)==(p['newManifest'],p['newSourceRecords']),'all-original-referenced-public-artifacts-still-exact');delta_records(p);return p
+
+def stage_layout(cid,stage,p):
+ rows=run(['docker','exec','--user','0',cid,'find',stage,'-xdev','-printf','%y|%P|%b\n']).decode().splitlines();directories={};files_seen={}
+ for line in rows:
+  fields=line.split('|');need(len(fields)==3 and fields[0]in('d','f')and fields[2].isdigit(),'regular-fixed-stage-layout-record');kind,name,blocks=fields;target=directories if kind=='d'else files_seen;need(name not in target,'unique-fixed-stage-entry');target[name]=int(blocks)*512
+ expected={'old-index','new/index.html',*('new/'+n for n in p['newAssets'])};need(set(directories)=={'','new','new/assets'}and set(files_seen)==expected and len(files_seen)==33,'exact-three-directories-and-thirty-three-delta-files');need(sum(directories.values())<=16*4096 and sum(files_seen.values())<=DELTA_FILE_ALLOCATED,'actual-stage-directory-and-file-allocation-within-explicit-bound');return{'fileCount':33,'directoryCount':3,'fileAllocatedBytes':sum(files_seen.values()),'directoryAllocatedBytes':sum(directories.values())}
 
 def deploy():
  global RECOVERY
- p=load_prepared();r,rows=inventory();target_unchanged(p['runtime'],rows,r['Id']);need(host_files()==p['hostFiles']and maintenance()==p['maintenance']and image_id(COMPOSE_TAG)==p['composeTagBefore']and image_id(p['durableTag'])==p['durableImage'],'all-prepared-config-maintenance-and-alias-pins')
- need(files(PREPARE_OUT/'old-wwwroot')==p['oldManifest']and files(PREPARE_OUT/'prepared-wwwroot')==p['newManifest']and static_plan(p['oldManifest'],p['newManifest'])==p['newAssets'],'sealed-add-only-static-plan')
- need(live_static(r)==p['oldManifest']and backend_proof(r['Id'])==p['oldProof']and index_metadata(r['Id'])==p['oldIndexMetadata'],'no-live-code-or-static-drift-before-publication');ensure_build_space('preapply')
- index_time=max(int(time.time()),p['oldIndexMetadata']['mtime']+2);need(index_time<=int(time.time())+3,'bounded-new-index-cache-time')
- while int(time.time())<index_time:time.sleep(.1)
- stage='/app/.pr1044-static-'+TARGET;next_index=stage+'/new/index.html';old_index=stage+'/old-index';index_attempted=False;tag_attempted=False
- private(OUT/'deploy.reservation',{'target':TARGET,'utc':datetime.datetime.now(datetime.timezone.utc).isoformat()})
+ p=load_prepared();r,rows=inventory();target_unchanged(p['runtime'],rows,r['Id']);need(host_files()==p['hostFiles']and maintenance()==p['maintenance']and image_id(COMPOSE_TAG)==p['composeTagBefore']and image_id(p['durableTag'])==p['durableImage'],'prepared-host-maintenance-and-alias-cas');need(live_static(r)==p['oldManifest']and backend_proof(r['Id'])==p['oldProof']and index_metadata(r['Id'])==p['oldIndexMetadata'],'actual-live-old-static-and-code-exact');records,old_record=delta_records(p);ensure_small_capacity('deploy-before')
+ stage='/app/.pr1044-static-r2-'+TARGET;next_index=stage+'/new/index.html';old_index=stage+'/old-index';index_attempted=tag_attempted=False;private(OUT/'deploy.reservation',{'target':TARGET,'deltaFiles':33,'deltaBytes':DELTA_BYTES})
  try:
-  run(['docker','exec','--user','0',r['Id'],'sh','-c','set -eu; test ! -e "$1"; test ! -L "$1"; mkdir -m 700 "$1"; mkdir -m 700 "$1/new"','_',stage]);run(['docker','cp',str(PREPARE_OUT/'prepared-wwwroot')+'/.',r['Id']+':'+stage+'/new']);run(['docker','cp',str(PREPARE_OUT/'old-wwwroot/index.html'),r['Id']+':'+old_index])
-  paths=[stage+'/new/'+n for n in sorted(p['newManifest'])]+[old_index];run(['docker','exec','--user','0',r['Id'],'sh','-c','set -eu; owner=$1; shift; for f do test -f "$f"; test ! -L "$f"; chown "$owner" "$f"; chmod 644 "$f"; done','_','%d:%d'%(p['oldIndexMetadata']['uid'],p['oldIndexMetadata']['gid']),*paths]);sums=run(['docker','exec','--user','0',r['Id'],'sha256sum','--',*paths]).decode().splitlines();expected={stage+'/new/'+n:h for n,h in p['newManifest'].items()};expected[old_index]=p['oldManifest']['index.html'];need(len(sums)==len(expected)and{v.split('  ',1)[1]:v.split('  ',1)[0]for v in sums}==expected,'all-staged-static-and-rollback-byte-seals')
-  for name in p['newAssets']:
-   run(['docker','exec','--user','0',r['Id'],'sh','-c','set -eu; test -d /app/wwwroot/assets; test ! -L /app/wwwroot/assets; ln -- "$1" "$2"','_',stage+'/new/'+name,'/app/wwwroot/'+name])
-  need(remote_index(r['Id'])==p['oldManifest']['index.html'],'old-index-cas-immediately-before-atomic-publication');run(['docker','exec','--user','0',r['Id'],'touch','-d','@'+str(index_time),next_index]);index_attempted=True;run(['docker','exec','--user','0',r['Id'],'mv','-fT',next_index,'/app/wwwroot/index.html'])
-  checks=verify_public(p);_,after=inventory();target_unchanged(rows,after,r['Id']);need(live_static(r)==dict(p['oldManifest'],**p['newManifest'])and backend_proof(r['Id'])==p['oldProof']and host_files()==p['hostFiles']and maintenance()==p['maintenance'],'actual-static-union-backend-env-and-all-runtime-exact')
-  need(image_id(COMPOSE_TAG)==p['composeTagBefore'],'canonical-alias-cas-immediately-before-commit');tag_attempted=True;run(['docker','tag',p['durableImage'],COMPOSE_TAG]);need(image_id(COMPOSE_TAG)==p['durableImage'],'durable-canonical-static-image-committed')
-  private(OUT/'deployed.private.json',{'target':TARGET,'runtime':after,'checks':checks,'durableImage':p['durableImage'],'retainedPublicRollbackStage':stage,'utc':datetime.datetime.now(datetime.timezone.utc).isoformat()})
-  return{'frontendVersion':TARGET,'liveBackendImage':LIVE_IMAGE,'durableImage':p['durableImage'],'runtimeNotRestarted':True,'databaseReadOrWritten':False,'hostSourceCheckoutPerformed':False,'checks':checks}
+  run(['docker','exec','--user','0',r['Id'],'sh','-c','set -eu; test ! -e "$1"; test ! -L "$1"; mkdir -m 700 "$1"; mkdir -m 700 "$1/new"; mkdir -m 700 "$1/new/assets"','_',stage])
+  for name in[*p['newAssets'],'index.html']:run(['docker','cp',str(FAILED_ROOT/'prepared-wwwroot'/name),r['Id']+':'+stage+'/new/'+name])
+  run(['docker','cp',str(FAILED_ROOT/'old-wwwroot/index.html'),r['Id']+':'+old_index]);paths=[stage+'/new/'+n for n in[*p['newAssets'],'index.html']]+[old_index];need(len(paths)==33 and all(not any(t in path for t in TEMPLATES)for path in paths),'only-fixed-thirty-three-delta-stage-files-no-templates')
+  run(['docker','exec','--user','0',r['Id'],'sh','-c','set -eu; owner=$1; shift; for f do test -f "$f"; test ! -L "$f"; chown "$owner" "$f"; chmod 644 "$f"; done','_','%d:%d'%(p['oldIndexMetadata']['uid'],p['oldIndexMetadata']['gid']),*paths]);expected={stage+'/new/'+n:p['newManifest'][n]for n in records};expected[old_index]=p['oldManifest']['index.html'];sums=run(['docker','exec','--user','0',r['Id'],'sha256sum','--',*paths]).decode().splitlines();need(len(sums)==33 and{v.split('  ',1)[1]:v.split('  ',1)[0]for v in sums}==expected,'every-staged-delta-and-old-index-byte-hash')
+  stat_expected={stage+'/new/'+n:{'uid':p['oldIndexMetadata']['uid'],'gid':p['oldIndexMetadata']['gid'],'mode':0o644,'size':v['bytes'],'mtime':v['mtimeNS']//1000000000}for n,v in records.items()};stat_expected[old_index]={'uid':p['oldIndexMetadata']['uid'],'gid':p['oldIndexMetadata']['gid'],'mode':0o644,'size':old_record['bytes'],'mtime':old_record['mtimeNS']//1000000000};stage_metadata(r['Id'],paths,stat_expected);stage_layout(r['Id'],stage,p);ensure_small_capacity('all-staged');delta_records(p)
+  for name in p['newAssets']:run(['docker','exec','--user','0',r['Id'],'sh','-c','set -eu; test -d /app/wwwroot/assets; test ! -L /app/wwwroot/assets; ln -- "$1" "$2"','_',stage+'/new/'+name,'/app/wwwroot/'+name])
+  index_time=max(int(time.time()),p['oldIndexMetadata']['mtime']+2);need(index_time<=int(time.time())+3,'bounded-new-index-cache-time')
+  while int(time.time())<index_time:time.sleep(.1)
+  run(['docker','exec','--user','0',r['Id'],'touch','-d','@'+str(index_time),next_index]);stat_expected[next_index]['mtime']=index_time;stage_metadata(r['Id'],paths,stat_expected);stage_layout(r['Id'],stage,p);ensure_small_capacity('index-cas');need(remote_index(r['Id'])==p['oldManifest']['index.html']and host_files()==p['hostFiles']and maintenance()==p['maintenance']and image_id(COMPOSE_TAG)==p['composeTagBefore'],'old-index-host-and-alias-cas-before-atomic-publish');index_attempted=True;run(['docker','exec','--user','0',r['Id'],'mv','-fT',next_index,'/app/wwwroot/index.html'])
+  checks=verify_public(p);_,after=inventory();target_unchanged(rows,after,r['Id']);need(live_static(r)==dict(p['oldManifest'],**p['newManifest'])and backend_proof(r['Id'])==p['oldProof']and host_files()==p['hostFiles']and maintenance()==p['maintenance'],'entire-old-new-public-union-and-code-runtime-exact');need(image_id(COMPOSE_TAG)==p['composeTagBefore'],'canonical-alias-cas-before-tag');tag_attempted=True;run(['docker','tag',p['durableImage'],COMPOSE_TAG]);need(image_id(COMPOSE_TAG)==p['durableImage'],'durable-adopted-candidate-alias-committed');ensure_small_capacity('complete');private(OUT/'deployed.private.json',{'target':TARGET,'runtime':after,'checks':checks,'durableImage':p['durableImage'],'retainedPublicRollbackStage':stage,'deltaFiles':33,'deltaBytes':DELTA_BYTES});return{'frontendVersion':TARGET,'durableImage':p['durableImage'],'runtimeNotRestarted':True,'databaseReadOrWritten':False,'frontendRebuilt':False,'deltaFiles':33,'checks':checks}
  except BaseException:
-  # Do not replay a partially applied phase or blindly overwrite a changed index.
-  # Add-only assets remain safe for old/in-flight clients. A failed index/tag
-  # commit requires independently reviewed reconciliation of these exact bytes.
   failure=STAGE;RECOVERY={'indexCommitAttempted':index_attempted,'tagCommitAttempted':tag_attempted,'automaticRetryOrRollbackPerformed':False,'newAssetsRetainedForInFlightClients':True}
-  try:RECOVERY.update(observedIndexSHA256=remote_index(r['Id']),observedCanonicalImage=image_id(COMPOSE_TAG),observedHostHead=git('rev-parse','HEAD').decode().strip())
+  try:RECOVERY.update(observedIndexSHA256=remote_index(r['Id']),observedCanonicalImage=image_id(COMPOSE_TAG))
   except BaseException as e:RECOVERY.update(observationErrorType=type(e).__name__)
   private(OUT/'failed-deploy-observation.private.json',RECOVERY);globals()['STAGE']=failure;raise
 
 def verify():
- p=load_prepared();directory,_=sealed('deploy',DEPLOY_SHA256);receipt=read(directory/'deployed.private.json');r,rows=inventory();need(rows==receipt['runtime']and host_files()==p['hostFiles']and maintenance()==p['maintenance']and image_id(COMPOSE_TAG)==p['durableImage'],'final-runtime-config-maintenance-and-durable-image-exact');need(live_static(r)==dict(p['oldManifest'],**p['newManifest'])and backend_proof(r['Id'])==p['oldProof'],'final-whole-static-union-and-backend705-proof');return{'frontendVersion':TARGET,'durableImage':p['durableImage'],'liveBackendImage':LIVE_IMAGE,'runtimeNotRestarted':True,'databaseReadOrWritten':False,'verificationReadOnly':True,'checks':verify_public(p)}
+ p=load_prepared();directory,_=sealed('deploy',DEPLOY_SHA256);receipt=read(directory/'deployed.private.json');r,rows=inventory();need(rows==receipt['runtime']and host_files()==p['hostFiles']and maintenance()==p['maintenance']and image_id(COMPOSE_TAG)==p['durableImage'],'final-runtime-host-maintenance-and-durable-alias-exact');need(live_static(r)==dict(p['oldManifest'],**p['newManifest'])and backend_proof(r['Id'])==p['oldProof'],'final-whole-public-union-and-code-proof');checks=verify_public(p);ensure_small_capacity('verify-complete');return{'frontendVersion':TARGET,'durableImage':p['durableImage'],'runtimeNotRestarted':True,'databaseReadOrWritten':False,'verificationReadOnly':True,'checks':checks}
 
 def main():
  global OUT
  need(EXECUTE is True and PHASE in('prepare','deploy','verify')and sys.argv[1:]==[PHASE]and os.environ.get('RELEASE_BRANCH')==BRANCH and os.environ.get('RELEASE_MODE')==PHASE and os.environ.get('RELEASE_ATTEMPT')=='1','inert-first-scoped-frontend-release');need(all(pin(v,40)for v in(BASE,BACKEND_REVISION,PREVIOUS_FRONTEND,SOURCE_APP_TREE,HOST_BASE,HEAD,TARGET,TREE,APP_TREE))and all(pin(v)for v in(EXPECTED_PROFILE_SHA256,EXPECTED_PROFILE_INNER_SHA256,EXPECTED_STATIC_INVENTORY_SHA256,EXPECTED_DIRTY_SHA256,EXPECTED_NEW_MANIFEST_SHA256,EXPECTED_LOCAL_BUILD_PROVENANCE_SHA256,EXPECTED_LIVE_CID))and type(LIVE_IMAGE)is str and re.fullmatch('sha256:[a-f0-9]{64}',LIVE_IMAGE)and type(STATIC_BASE_IMAGE)is str and re.fullmatch('sha256:[a-f0-9]{64}',STATIC_BASE_IMAGE)and REVIEWED_PATHS and EXPECTED_NEW_MANIFEST and sha(enc(EXPECTED_NEW_MANIFEST))==EXPECTED_NEW_MANIFEST_SHA256 and(PHASE=='prepare'or pin(PREPARED_SHA256))and(PHASE!='verify'or pin(DEPLOY_SHA256)),'all-source-profile-build-and-prior-phase-bindings-before-any-side-effect');os.umask(0o077);need(ARCHIVE_ROOT.parent.is_dir()and not any(p.is_symlink()for p in(ARCHIVE_ROOT.parent,*ARCHIVE_ROOT.parent.parents)),'fixed-real-backup-parent');ARCHIVE_ROOT.mkdir(mode=0o700,exist_ok=True);need(not ARCHIVE_ROOT.is_symlink()and stat.S_IMODE(ARCHIVE_ROOT.stat().st_mode)==0o700,'own-private-release-archive');OUT=ARCHIVE_ROOT/PHASE;need(not OUT.exists()and not OUT.is_symlink(),'one-phase-attempt-only');OUT.mkdir(mode=0o700)
  result={'phase':PHASE,'mode':PHASE,'service':SERVICE,'base':BASE,'head':HEAD,'target':TARGET,'tree':TREE,'appTree':APP_TREE,'hostBase':HOST_BASE,'success':False,'hostSourceCheckoutPerformed':False,'databaseReadOrWritten':False}
- try:initialize();source_check();result.update({'prepare':prepare,'deploy':deploy,'verify':verify}[PHASE]());result['success']=True
+ try:initialize();ensure_small_capacity('phase-entry');source_check();result.update({'prepare':prepare,'deploy':deploy,'verify':verify}[PHASE]());result['success']=True
  except Exception as e:result.update(errorType=type(e).__name__,stage=STAGE,noAutomaticRetry=True,recovery=RECOVERY)
  result['utc']=datetime.datetime.now(datetime.timezone.utc).isoformat();private(OUT/'manifest.json',manifest(OUT));result['manifestSHA256']=sha((OUT/'manifest.json').read_bytes());result['resultSHA256']=sha(enc(result));private(OUT/'result.private.json',result);wire(result);return 0 if result['success']else 1
 
@@ -430,6 +396,66 @@ def wire(v):
  raw=enc(v);need(len(raw)<=4*1024**2,'bounded-numeric-phase-receipt');nib=lambda x:[int(c,16)for c in(format(x,'x')if type(x)is int else x)];parts=[raw[i:i+1024]for i in range(0,len(raw),1024)];digest=nib(sha(raw))
  for i,b in enumerate(parts):print(enc([0,nib(i+1),nib(len(parts)),nib(len(raw)),digest,nib(b.hex())]).decode(),flush=True)
  print(enc([1,nib(len(parts)),nib(len(raw)),digest]).decode(),flush=True)
+
+def evidence_usage():
+ total=allocated=entries=0
+ for path in [OUT,*sorted(OUT.rglob('*'))]:
+  need(not path.is_symlink()and(path.is_file()or path.is_dir()),'only-regular-own-small-evidence');entries+=1;need(entries<=10000,'bounded-own-evidence-entry-count');s=path.stat();allocated+=s.st_blocks*512
+  if path.is_file():total+=s.st_size
+ return{'bytes':total,'allocatedBytes':allocated,'entries':entries}
+
+
+def ensure_small_capacity(label):
+ global SERIAL
+ need(label in('phase-entry','prepare-before','prepare-after','deploy-before','all-staged','index-cas','complete','verify-complete'),'fixed-small-write-capacity-boundary');docker_root=json.loads(P.command(['docker','info','--format','{{json .DockerRootDir}}']));need(type(docker_root)is str and pathlib.Path(docker_root).is_absolute(),'actual-docker-root');docker_root=pathlib.Path(docker_root);values={}
+ for name,path in(('archive',OUT),('docker',docker_root)):
+  s=os.statvfs(path);unit=s.f_frsize;need(type(unit)is int and 0<unit<=4096 and 4096%unit==0,'actual-allocation-unit-covered-by-four-kib-bound');values[name]={'available':s.f_bavail*unit,'free':s.f_bfree*unit,'fragmentSize':unit,'device':path.stat().st_dev};need(values[name]['available']>=ORDINARY_REQUIRED and values[name]['free']>=PHYSICAL_REQUIRED,'explicit-no-build-small-write-byte-budget')
+ usage=evidence_usage();need(usage['allocatedBytes']<=EVIDENCE_BUDGET,'actual-small-evidence-budget');SERIAL+=1;v={'boundary':label,'filesystems':values,'sameDevice':values['archive']['device']==values['docker']['device'],'eachFilesystemIndependentlyBudgeted':True,'ordinaryRequired':ORDINARY_REQUIRED,'physicalRequired':PHYSICAL_REQUIRED,'evidenceBudget':EVIDENCE_BUDGET,'ordinaryReserve':ORDINARY_RESERVE,'twoDeltaAllocatedBound':2*DELTA_ALLOCATED_BOUND,'evidenceActual':usage};private(OUT/('%06d-small-capacity.private.json'%SERIAL),v);return v
+
+
+def sealed_artifact(path,digest,limit=4*1024**2):
+ need(path.is_file()and not any(p.is_symlink()for p in(path,*path.parents)),'fixed-selected-artifact-no-symlink');meta=P.record(path,limit);need(meta['sha256']==digest,'selected-original-artifact-sha256');body=path.read_bytes();need(len(body)==meta['bytes']and sha(body)==digest and P.record(path,limit)==meta,'stable-selected-original-artifact');return body
+
+
+def failure_artifacts():
+ manifest_body=sealed_artifact(FAILED_ROOT/'manifest.json',FAILED_MANIFEST_SHA256,16*1024**2);m=json.loads(manifest_body);need(type(m)is dict and 0<len(m)<=100000 and all(safe_relative(n)and pin(h)for n,h in m.items()),'bounded-original-failed-manifest')
+ result=read(FAILED_ROOT/'result.private.json');inner=dict(result);inner.pop('resultSHA256',None);need(result['resultSHA256']==FAILED_RESULT_INNER_SHA256==sha(enc(inner))and result['success']is False and result['phase']=='prepare'and result['stage']=='reviewed-realistic-capacity-floor'and all(result[k]==v for k,v in[('base',BASE),('head',HEAD),('target',TARGET),('tree',TREE),('appTree',APP_TREE),('hostBase',HOST_BASE),('manifestSHA256',FAILED_MANIFEST_SHA256)]),'original-failed-prepare-remains-failed-not-replayed')
+ diagnosis=json.loads(sealed_artifact(DIAGNOSIS_PATH,DIAGNOSIS_RAW_SHA256));inner=dict(diagnosis);inner.pop('resultSHA256',None);need(diagnosis['resultSHA256']==DIAGNOSIS_INNER_SHA256==sha(enc(inner))and diagnosis['success']is True and diagnosis['phase']==diagnosis['mode']=='diagnose'and diagnosis['archive']['manifestSHA256']==FAILED_MANIFEST_SHA256 and diagnosis['archive']['capacityFailureLocation']=='after'and all(diagnosis['baselineComparison'][k]is True for k in('all46RuntimeExact','canonicalImageExact','liveIndexExact','publicIndexExact')),'exact-successful-readonly-after-floor-diagnosis')
+ raw=json.loads(sealed_artifact(FAILED_ROOT/'frontend-raw-dist.private.json',RAW_FRONTEND_RECORD_SHA256));need(m.get('frontend-raw-dist.private.json')==RAW_FRONTEND_RECORD_SHA256 and raw['image']==ADOPTED_FRONTEND_IMAGE and raw['files']==EXPECTED_NEW_MANIFEST and sha(enc(raw['files']))==EXPECTED_NEW_MANIFEST_SHA256 and raw['missingGitProvenTemplates']==[]and raw['noCacheFrontendBuild']is True,'complete-original-fresh-sixty-file-frontend-graph')
+ for name in('docker-space-before.private.json','docker-space-after.private.json','image-context/Dockerfile'):
+  need(name in m,'selected-original-structure-present');sealed_artifact(FAILED_ROOT/name,m[name])
+ after=json.loads(sealed_artifact(FAILED_ROOT/'docker-space-after.private.json',m['docker-space-after.private.json']));need(after['available']==164048896 and after['free']==8965345280 and after['observedOrdinarySpaceDrop']==1509920768,'exact-original-after-floor-and-growth-still-failed')
+ need(not(FAILED_ROOT/'prepared.private.json').exists()and 'prepared.private.json'not in m,'failed-phase-has-no-fabricated-prepared-success')
+ return m,diagnosis
+
+
+def public_tree(name,m):
+ need(name in('old-wwwroot','prepared-wwwroot'),'only-two-original-public-trees');root=FAILED_ROOT/name;need(root.is_dir()and not any(p.is_symlink()for p in(root,*root.parents)),'fixed-original-public-tree');actual=files(root);expected={n[len(name)+1:]:h for n,h in m.items()if n.startswith(name+'/')};need(actual==expected,'every-selected-public-artifact-seal-and-no-extra-files');records={n:P.record(root/n)for n in actual};need(all(records[n]['sha256']==h for n,h in actual.items()),'all-public-source-file-hash-size-owner-mode-mtime-stable');return actual,records
+
+
+def frontend_static(cid):
+ raw=P.command(['docker','cp',cid+':/src/web/dist/.','-'],limit=260*1024**2);result={};total=0;seen=set()
+ with tarfile.open(fileobj=io.BytesIO(raw),mode='r:')as archive:
+  for member in archive:
+   name=member.name.rstrip('/')
+   if name in('.','dist'):need(member.isdir(),'frontend-public-root-directory');continue
+   if name.startswith('./'):name=name[2:]
+   if name.startswith('dist/'):name=name[5:]
+   need(safe_relative(name)and name not in seen and(member.isdir()or member.isfile()),'safe-regular-frontend-image-public-tar');seen.add(name)
+   if member.isdir():continue
+   total+=member.size;need(0<=member.size<=64*1024**2 and total<=256*1024**2 and len(result)<1000,'bounded-memory-only-frontend-tar');body=archive.extractfile(member).read();need(len(body)==member.size,'complete-memory-frontend-file');result[name]=sha(body)
+ need('index.html'in result,'frontend-image-index-present');return result
+
+
+def delta_records(p):
+ names=[*p['newAssets'],'index.html'];need(len(p['newAssets'])==31 and len(names)==32 and len(set(names))==32 and all(n.startswith('assets/')and pathlib.PurePosixPath(n).parent.as_posix()=='assets'for n in p['newAssets']),'exact-thirty-one-flat-new-assets-and-new-index')
+ records={n:P.record(FAILED_ROOT/'prepared-wwwroot'/n)for n in names};need(all(records[n]==p['newSourceRecords'][n]and records[n]['sha256']==p['newManifest'][n]for n in names),'every-delta-source-size-owner-mode-mtime-and-hash-before-copy');old=P.record(FAILED_ROOT/'old-wwwroot/index.html');need(old==p['oldSourceRecords']['index.html'],'old-index-source-exact-before-copy');total=sum(v['bytes']for v in records.values())+old['bytes'];blocks=sum(((v['bytes']+4095)//4096)*4096 for v in[*records.values(),old]);need(total==DELTA_BYTES and blocks==DELTA_FILE_ALLOCATED and blocks+16*4096==DELTA_ALLOCATED_BOUND,'exact-thirty-three-file-byte-and-sixteen-directory-block-budget');return records,old
+
+
+def stage_metadata(cid,paths,expected):
+ raw=run(['docker','exec','--user','0',cid,'stat','-c','%u|%g|%a|%s|%Y','--',*paths]).decode().splitlines();need(len(raw)==len(paths),'all-thirty-three-stage-stat-rows')
+ for path,line in zip(paths,raw):
+  need(re.fullmatch('[0-9]+[|][0-9]+[|][0-7]+[|][0-9]+[|][0-9]+',line),'typed-stage-owner-mode-size-mtime');uid,gid,mode,size,mtime=line.split('|');wanted=expected[path];need({'uid':int(uid),'gid':int(gid),'mode':int(mode,8),'size':int(size),'mtime':int(mtime)}==wanted,'each-staged-file-exact-size-owner-mode-and-mtime')
 
 if __name__=='__main__':sys.exit(main())
 

@@ -178,6 +178,28 @@ test('a mixed allowed-create and forbidden-edit batch is atomic', async () => {
   assert.equal(r.status, 403); assert.equal(snapshot(), before);
 });
 
+test('bulk review and delete retain server attribution, atomic permission checks and deletion tombstones', async () => {
+  const reviewer = await login('manager');
+  let r = await request('/api/records', { method: 'POST', session: reviewer,
+    body: { records: [changed(2, { status: 'approved', reviewBy: 'forged' }), changed(3, { status: 'approved', reviewBy: 'forged' })] } });
+  assert.equal(r.status, 200, r.text);
+  const reviewed = sql(A, db => db.prepare('SELECT id,status,productNo,reviewBy,reviewAt,rejectReason FROM records ORDER BY id').all());
+  assert.deepEqual(reviewed.map(row => [row.id,row.status,row.productNo]), [[1,'approved','P1'],[2,'approved','P2'],[3,'approved','P3']]);
+  for (const row of reviewed.slice(1)) {
+    assert.equal(row.reviewBy, 'manager display'); assert.ok(Number.isFinite(Date.parse(row.reviewAt))); assert.equal(row.rejectReason, '');
+  }
+  const unchanged = snapshot();
+  r = await request('/api/records', { method: 'POST', session: reviewer, body: { records: [], deletedIds: [2,3] } });
+  assert.equal(r.status, 403); assert.equal(snapshot(), unchanged);
+  const admin = await login('jc');
+  r = await request('/api/records', { method: 'POST', session: admin, body: { records: [], deletedIds: [2,3] } });
+  assert.equal(r.status, 200, r.text);
+  assert.deepEqual(sql(A, db => db.prepare('SELECT id FROM records ORDER BY id').all()).map(row => row.id), [1]);
+  assert.deepEqual(sql(A, db => db.prepare('SELECT id FROM record_tombstones ORDER BY id').all()).map(row => row.id), [2,3]);
+  r = await request('/api/records', { method: 'POST', session: admin, body: { records: [fresh(2, { updatedAt: '2099-01-01T00:00:00Z' })] } });
+  assert.equal(r.status, 200); assert.equal(sql(A, db => db.prepare('SELECT COUNT(*) AS n FROM records').get().n), 1);
+});
+
 test('manager edits, reviews with server attribution, resubmits, maintains lists and imports', async () => {
   const session = await login('manager');
   assert.equal((await request('/api/records', { method: 'POST', session, body: { records: [changed(2, { productNo: 'edited' })] } })).status, 200);

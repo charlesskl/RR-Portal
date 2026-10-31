@@ -4,7 +4,7 @@ import hashlib,json,os,pathlib,re,stat,subprocess,sys,urllib.request,urllib.erro
 ROOT=pathlib.Path('/opt/rr-portal')
 OUT=ROOT/'deploy/backups/pr1044-indo-preflight-1'
 BRANCH='refs/heads/codex/ops-pr-1044-20261031-indo'
-SOURCE_HINT='89824de76c8b81758b5b26cf5ba81b109de2c4f3'
+SOURCE_HINT=''
 APP='apps/印尼小组/印尼走货明细'
 BASELINE_FRONTEND='1e4366f2803bd5ea19b07b787a12a7d7b66c5ff4'
 BASELINE_APP_TREE='fc63cee79ae886eb53ae44cc8986ea29ccd56aa1'
@@ -15,7 +15,7 @@ SERVICE='indo-shipping'
 ALIAS='rr-portal-indo-shipping:latest'
 SHARED=('docker-compose.cloud.yml','frontend/index.cloud.html','nginx/nginx.cloud.conf','deploy/update-server.sh','deploy/service-maintenance.sh')
 KNOWN_DIRTY=set(SHARED)|{'.env.cloud.production','.github/workflows/deploy.yml'}
-EXECUTE=True
+EXECUTE=False
 STAGE='entry'
 
 def need(v,label):

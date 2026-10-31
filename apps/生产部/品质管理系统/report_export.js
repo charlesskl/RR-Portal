@@ -1941,7 +1941,7 @@ function _buildIQCCanvas(r) {
           const f=(arr||[]).filter(v=>v!=='');
           const n=f.map(Number).filter(x=>!isNaN(x));
           return (n.length>0&&n.length===f.length)
-            ?(n.reduce((a,b)=>a+b,0)/n.length).toFixed(1):null;
+            ?(n.reduce((a,b)=>a+b,0)/n.length).toFixed(2):null;   /* 平均值保留两位小数 */
         }
         function _stdTol(std,tol) {
           const s=(std||'').trim(),t=(tol||'').trim();

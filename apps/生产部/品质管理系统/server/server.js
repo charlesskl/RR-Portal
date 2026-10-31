@@ -196,7 +196,7 @@ function parseDeliveryNote(text) {
   }
   /* 无标签日期兜底：开头区域独立出现的「2026年10月5日」 */
   if (!fields.date) {
-    m = lines.slice(0, 15).join('\n').match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+    m = lines.slice(0, 15).join('\n').match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?/);
     if (m) fields.date = m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
   }
 
@@ -253,14 +253,18 @@ function parseDeliveryNote(text) {
       if (cName === -1) { cName = head.findIndex((h, i) => /^(貨|货)$/.test(h) && head[i + 1] === '名'); splitNameHdr = cName !== -1; }   /* 「貨|名」分两列的表头（华登） */
       let   cQty   = head.findIndex(h => /^(数|數)\s*量$/.test(h));
       if (cQty === -1) cQty = find(/交货数量|交貨數量|到货数量|到貨數量|送货数量|送貨數量|实送数量|實送數量/);
+      if (cQty === -1) cQty = head.findIndex(h => /^(送货数|送貨數)\s*[/／]/.test(h));   /* 广大：「送货数/总单数」即数量列，取斜杠前 */
       if (cQty === -1) cQty = find(/送货|送貨|实送|實送/, /欠|总|總/);
       if (cQty === -1) cQty = find(/数量|數量/, /欠|总|總/);
       if (cQty === -1) cQty = find(/备品|備品/);   /* 台聚：模型偶发丢「数量」表头，数量值落在备品数列 */
       const cUnit  = find(/单位|單位/, /数量|數量/);
-      let lastNo = '';
+      let lastNo = '', lastOrder = '', emptyRun = 0;
       const seenFull = new Set();   /* 已出现的完整明细（货号|品名），用于复读残行识别 */
       for (const row of tbl.slice(hi + 1)) {
         const cells = splitRow(row);
+        /* 连续两个全空行视为表格结束（后面通常是胶箱/卡板/签收区，不是明细） */
+        if (cells.every(c => !c)) { if (++emptyRun >= 2) break; continue; }
+        emptyRun = 0;
         const raw = i => (i >= 0 && i < cells.length ? cells[i] : '');
         const numeric = v => /^\d[\d,.]*(?:\s*\/.*)?$/.test(v);
         /* 合并品名格会令后续所有列左移；短一格时即便下一列金额也是数字，也应按行宽校正。 */
@@ -286,6 +290,7 @@ function parseDeliveryNote(text) {
         if (/^(合计|总计|合計|總計)/.test(no) || /^(合计|总计|合計|總計)/.test(name)) continue;   /* 合计行 */
         if (/^[-—–=]+$/.test(no) || /^[-—–=]+$/.test(name)) continue;   /* 分隔线碎片行 */
         if (/^[\d\/.]+$/.test(name) && !no && !/^\d+(?:\.\d+)?$/.test(qty)) continue;   /* 仅丢弃无货号、无可靠数量的数字碎片 */
+        if (/^(胶箱|膠箱|钙箱|鈣箱|胶袋|膠袋|纸箱|紙箱|平卡|大平卡|卡板|胶卡板|膠卡板|木卡板|吸塑|周转箱|送货人|送貨人|收货人|收貨人|开单人|開單人|制单|审核|審核)/.test(name)) continue;   /* 包装统计/签字区 */
         if (/^(数量|數量|单位|單位|备注|備注|箱数|箱數|总数|總數|完成)$/.test(name)) continue;   /* 表头/备注单词碎片 */
         if (/送货数|送貨数/.test(name) && /箱数|箱數|总单|總單|总数|總數/.test(name)) continue;   /* 表头混合碎片（已送货数/总箱数/总数） */
         if (!qty && !/\s\d{2,}$/.test(name) && /查验|签收|收妥|逾期|差错|通知|不负责|拒不退换/.test(name)) continue;   /* 无货品数量依据的表尾说明；签收贴纸等正常货品保留 */
@@ -318,8 +323,13 @@ function parseDeliveryNote(text) {
         if (!unit && cQty >= 0 && nextCell && !/\d/.test(nextCell) && nextCell.length <= 4) unit = nextCell;
         /* 单位词表外的内容是错列数据（如把 960/960 读进单位列） */
         if (unit && !/^(个|個|PCS|件|套|卷|张|張|桶|KG|米|箱|包|条|條|颗|顆|千克|克|G)$/i.test(unit)) unit = '';
-        if (!fields.orderNo) { const o = get(cOrder).replace(/\s+/g, ''); if (o && o !== no && o.length >= 6) fields.orderNo = o; }
-        fields.items.push({ productNo: no, productName: name, qty, unit });
+        /* 每条明细自己的订单号（多 PO 单）；合并单元格则继承上一行 */
+        const _oCell = cOrder >= 0 ? get(cOrder).replace(/\s+/g, '') : '';
+        if (!qty && !/\d/.test(_oCell)) continue;   /* 无数量且订单号格也不是 PO：表尾签字/杂行 */
+        const rowOrder = (/\d/.test(_oCell) ? _oCell : '') || lastOrder;
+        if (rowOrder) lastOrder = rowOrder;
+        if (!fields.orderNo && rowOrder && rowOrder !== no && rowOrder.length >= 6) fields.orderNo = rowOrder;
+        fields.items.push({ productNo: no, productName: name, qty, unit, orderNo: rowOrder !== no ? rowOrder : '' });
       }
     }
   }

@@ -4,6 +4,7 @@ import ts from 'typescript'
 import { expect, it, vi } from 'vitest'
 import { formatShipmentPallet, shipmentOptionalNumber } from './shipmentDisplay'
 import { parseSheetClipboard, shipmentSheetFields } from './shipmentSheet'
+import { formatShipmentDeclaration } from './shipmentDeclaration'
 
 it.each([undefined, null, '', 0, '0', NaN])('可选尺寸/称重数量 %s 显示空白', value => {
   expect(shipmentOptionalNumber(value)).toBeUndefined()
@@ -21,10 +22,10 @@ function walk(node: ts.Node) {
 walk(tree)
 const compile = (code: string) => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 function setup() {
-  const item = { material_id: 1, weighing_qty: 0, pallet: '1-3/4卡 8-9/9卡', sources: [] }
+  const item = { material_id: 1, kg: 0, qty: 0, weighing_qty: 0, pallet: '1-3/4卡 8-9/9卡', sources: [] }
   const material = { length: 0, width: 0, height: 0, weight_per_carton: 0 }
   const context = createContext({ consolidatedItems: [item], matMap: new Map([[1, material]]),
-    shipmentSheetFields, formatShipmentPallet, shipmentOptionalNumber,
+    shipmentSheetFields, formatShipmentPallet, shipmentOptionalNumber, formatShipmentDeclaration,
     effectiveWeighingQty: (row: typeof item) => row.weighing_qty,
   })
   runInContext(compile(handlers.join('\n')), context)
@@ -50,6 +51,33 @@ it('实际页面卡板空格分组显示换行，编辑中的原输入不被修�
   expect(runInContext("mergedCellValue(0, 'pallet')", context)).toBe('1-3/4卡\n8-9/9卡')
   expect(runInContext('sheetDisplayValue(0, col)', context)).toBe('1-3/4卡\n8-9/9卡')
   expect(item.pallet).toBe('1-3/4卡 8-9/9卡')
+})
+
+it.each(['kg', 'qty'] as const)('实际页面 %s 缺失或为零时预览及复制留空，不改原始数量', field => {
+  const { context, item } = setup()
+  context.field = field; context.col = shipmentSheetFields.indexOf(field)
+  expect(runInContext('mergedCellValue(0, field)', context)).toBeUndefined()
+  expect(runInContext('sheetDisplayValue(0, col)', context)).toBeUndefined()
+  expect(item[field]).toBe(0)
+  for (const value of [undefined, null, '0.0000']) {
+    Object.assign(item, { [field]: value })
+    expect(runInContext('sheetDisplayValue(0, col)', context)).toBeUndefined()
+  }
+  item[field] = 9
+  expect(String(runInContext('sheetDisplayValue(0, col)', context))).toBe('9')
+})
+
+it('非零公斤、吨和件数的精度保持不变，已激活的数量输入框同样隐藏占位零', () => {
+  const { context, item, material } = setup()
+  item.kg = 1.2345
+  Object.assign(material, { unit_kg: 'KGM' })
+  expect(runInContext("mergedCellValue(0, 'kg')", context)).toBe('1.23')
+  Object.assign(material, { unit_kg: 'TNE' })
+  expect(runInContext("mergedCellValue(0, 'kg')", context)).toBe('1.2345')
+  Object.assign(material, { unit_kg: 'PCE' }); item.kg = 9
+  expect(runInContext("mergedCellValue(0, 'kg')", context)).toBe('9')
+  expect(tree.text).toContain('value={shipmentOptionalNumber(r.kg)}')
+  expect(tree.text).toContain('value={shipmentOptionalNumber(r.qty)}')
 })
 
 it('实际多格复制包括已挂载的卡板输入框，也按分行复制而非泄漏原始空格', () => {

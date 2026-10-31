@@ -38,6 +38,16 @@ export function roundedShipmentDeclaration<T extends DeclarationItem>(item: T, m
   return rebaseShipmentDeclaration(item, quantity)
 }
 
+/** Convert an explicitly entered display-unit price back to the retained source quantity. */
+export function shipmentStoredDeclarationPrice(item: DeclarationItem, price: number, material?: DeclarationMaterial): number {
+  if (!item.material_snapshot || Number(item.outbound_id) > 0 || !(Number(item.kg) > 0)) return price
+  const metadata = material || (typeof item.material_snapshot === 'object' ? item.material_snapshot as DeclarationMaterial : undefined)
+  const quantity = Number(roundedShipmentDeclaration(item, metadata).kg)
+  const stored = price * quantity / Number(item.kg)
+  if (!Number.isFinite(stored)) throw new Error('申报单价换算超出有效范围，请核对数量和单价')
+  return stored
+}
+
 /** Change the declaration basis, never the physical quantity or source PO price. */
 export function rebaseShipmentDeclaration<T extends DeclarationItem>(item: T, quantity: number, preserveImportedAmount = true): T {
   if (Number(item.kg) === quantity && item.kg != null) return item

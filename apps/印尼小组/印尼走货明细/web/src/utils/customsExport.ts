@@ -58,7 +58,7 @@ export function customsFormulaName(item: CustomsItem, material?: Material, custo
 import { customsInvoicePrice, customsInvoiceFormula, invoiceCustomsCompany } from './shipmentInvoice'
 import { shipmentDeclarationPrice, shipmentPurchaseAmount } from './shipmentPurchase'
 import { formatShipmentDeclaration, normalizeShipmentDeclarations, roundedShipmentDeclaration, shipmentDeclarationPrecision } from './shipmentDeclaration'
-import { shipmentPurchaseDates } from './shipmentDates'
+import { shipmentDateOnly, shipmentPurchaseDates } from './shipmentDates'
 import { formatShipmentPallet } from './shipmentDisplay'
 export { customsInvoicePrice } from './shipmentInvoice'
 
@@ -324,7 +324,8 @@ function compactMainColumns(sheet: XLSX.WorkSheet) {
 
 function excelDate(d: any): number | string {
   if (!d) return ''
-  const dt = (d instanceof Date) ? d : new Date(d)
+  const businessDate = typeof d === 'string' ? shipmentDateOnly(d) : ''
+  const dt = businessDate ? new Date(businessDate + 'T00:00:00Z') : (d instanceof Date) ? d : new Date(d)
   if (isNaN(dt.getTime())) return d
   return Math.floor((dt.getTime() - Date.UTC(1899, 11, 30)) / 86400000)
 }

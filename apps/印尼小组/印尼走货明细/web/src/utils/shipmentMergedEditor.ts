@@ -1,10 +1,11 @@
 import { applyShipmentSheetEdits, parseShipmentSheetValue, type SheetEdit } from './shipmentSheet'
 import { parseShipmentPacking } from './shipmentWeight'
 import { cartonGroupKey, shipmentScope } from './shipmentOrder'
+import { shipmentStoredDeclarationPrice } from './shipmentDeclaration'
 
 interface EditorItem {
   _rowKey?: number; material_id?: number; outbound_id?: number
-  qty?: number; kg?: number; cartons?: number; purchase_unit?: string
+  qty?: number; kg?: number; cartons?: number; purchase_unit?: string; price?: number; material_snapshot?: unknown
   carton_group?: string; supplier?: string; customs_company?: string
   qty_per_carton?: string
 }
@@ -117,6 +118,12 @@ export function applyMergedShipmentEdits<T extends EditorItem>(
     // shared propagation and conflicting-total checks cover all its materials.
     result.items = applyShipmentSheetEdits(result.items, result.materials,
       [...expanded.values()].filter(edit => edit.field === 'cartons')).items
+  }
+  // Resolve the whole paste first: a simultaneous kg/unit edit determines the
+  // visible declaration basis. Only explicit price edits change the source price.
+  for (const edit of parsed.filter(edit => edit.field === 'price')) for (const index of edit.indices) {
+    const item = result.items[index]
+    item.price = shipmentStoredDeclarationPrice(item, Number(edit.value), result.materials.get(item.material_id!))
   }
   const changedOutbound = new Set(result.items.flatMap((item, index) =>
     item.outbound_id && Number(item.qty) > Number(items[index].qty || 0) ? [item.outbound_id] : []))

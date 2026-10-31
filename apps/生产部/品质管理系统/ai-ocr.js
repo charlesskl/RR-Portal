@@ -206,7 +206,7 @@
     setV('f_date', c.date || '');
     setV('f_supplier', c.supplier || '');
     setV('f_deliveryNo', c.deliveryNo || '');
-    setV('f_orderNo', c.orderNo || '');
+    setV('f_orderNo', it.orderNo || c.orderNo || '');   /* 多 PO 单：用本条自己的 PO 号 */
     if (c.type) setV('f_type', c.type);
     setV('f_productNo', it.productNo || '');
     setV('f_productName', it.productName || '');

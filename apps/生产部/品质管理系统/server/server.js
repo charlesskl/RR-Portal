@@ -196,7 +196,7 @@ function parseDeliveryNote(text) {
   }
   /* 无标签日期兜底：开头区域独立出现的「2026年10月5日」 */
   if (!fields.date) {
-    m = lines.slice(0, 15).join('\n').match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+    m = lines.slice(0, 15).join('\n').match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?/);
     if (m) fields.date = m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
   }
 
@@ -253,14 +253,16 @@ function parseDeliveryNote(text) {
       if (cName === -1) { cName = head.findIndex((h, i) => /^(貨|货)$/.test(h) && head[i + 1] === '名'); splitNameHdr = cName !== -1; }   /* 「貨|名」分两列的表头（华登） */
       let   cQty   = head.findIndex(h => /^(数|數)\s*量$/.test(h));
       if (cQty === -1) cQty = find(/交货数量|交貨數量|到货数量|到貨數量|送货数量|送貨數量|实送数量|實送數量/);
+      if (cQty === -1) cQty = head.findIndex(h => /^(送货数|送貨數)\s*[/／]/.test(h));   /* 广大：「送货数/总单数」即数量列，取斜杠前 */
       if (cQty === -1) cQty = find(/送货|送貨|实送|實送/, /欠|总|總/);
       if (cQty === -1) cQty = find(/数量|數量/, /欠|总|總/);
       if (cQty === -1) cQty = find(/备品|備品/);   /* 台聚：模型偶发丢「数量」表头，数量值落在备品数列 */
       const cUnit  = find(/单位|單位/, /数量|數量/);
-      let lastNo = '';
+      let lastNo = '', lastOrder = '';
       const seenFull = new Set();   /* 已出现的完整明细（货号|品名），用于复读残行识别 */
       for (const row of tbl.slice(hi + 1)) {
         const cells = splitRow(row);
+        if (cells.every(c => !c)) continue;   /* 空白可能是分页间隔，不能截断后续真实明细 */
         const raw = i => (i >= 0 && i < cells.length ? cells[i] : '');
         const numeric = v => /^\d[\d,.]*(?:\s*\/.*)?$/.test(v);
         /* 合并品名格会令后续所有列左移；短一格时即便下一列金额也是数字，也应按行宽校正。 */
@@ -270,7 +272,7 @@ function parseDeliveryNote(text) {
         let no = get(cNo), name = get(cName);
         const mappedName = name;
         const qtyCell = get(cQty);
-        let qty = qtyCell.split('/')[0].replace(/[^\d.]/g, '');
+        let qty = qtyCell.split(/[/／]/)[0].replace(/[^\d.]/g, '');
         if (qty && (qty === no || qty === name)) qty = '';   /* 模型把货号/品名复制进数量列：清空待人工补 */
         if (!name) {   /* 品名被 OCR 错放到别的列：找第一个像品名的格子 */
           for (const c of cells) {
@@ -318,8 +320,13 @@ function parseDeliveryNote(text) {
         if (!unit && cQty >= 0 && nextCell && !/\d/.test(nextCell) && nextCell.length <= 4) unit = nextCell;
         /* 单位词表外的内容是错列数据（如把 960/960 读进单位列） */
         if (unit && !/^(个|個|PCS|件|套|卷|张|張|桶|KG|米|箱|包|条|條|颗|顆|千克|克|G)$/i.test(unit)) unit = '';
-        if (!fields.orderNo) { const o = get(cOrder).replace(/\s+/g, ''); if (o && o !== no && o.length >= 6) fields.orderNo = o; }
-        fields.items.push({ productNo: no, productName: name, qty, unit });
+        /* 每条明细自己的订单号（多 PO 单）；合并单元格则继承上一行 */
+        const _oCell = cOrder >= 0 ? get(cOrder).replace(/\s+/g, '') : '';
+        const rowOrder = (_oCell && _oCell !== no ? _oCell : '') || lastOrder;
+        if (rowOrder) lastOrder = rowOrder;
+        if (!fields.orderNo && rowOrder && rowOrder !== no && rowOrder.length >= 6) fields.orderNo = rowOrder;
+        fields.items.push({ productNo: no, productName: name, qty, unit,
+          ...(rowOrder && rowOrder !== no ? { orderNo: rowOrder } : {}) });
       }
     }
   }
@@ -403,7 +410,7 @@ function parseDeliveryNote(text) {
   if (fields.items.length > 1) {
     const seen = new Set();
     fields.items = fields.items.filter(it => {
-      const k = [it.productNo, it.productName, it.qty, it.unit].join('|');
+      const k = [it.orderNo || '', it.productNo, it.productName, it.qty, it.unit].join('|');
       if (seen.has(k)) return false;
       seen.add(k); return true;
     });
@@ -413,7 +420,7 @@ function parseDeliveryNote(text) {
     const seenLoose = new Set();
     fields.items = fields.items.filter(it => {
       if (!it.productName || !it.qty) return true;   /* 信息不全的行不参与合并 */
-      const k = [normName(it.productName), it.qty, it.unit].join('|');
+      const k = [it.orderNo || '', normName(it.productName), it.qty, it.unit].join('|');
       if (seenLoose.has(k)) return false;
       seenLoose.add(k); return true;
     });
@@ -422,7 +429,7 @@ function parseDeliveryNote(text) {
     const seenStrict = new Set();
     fields.items = fields.items.filter(it => {
       if (!it.productNo || !it.productName || !it.qty) return true;
-      const k = [it.productNo, normName(it.productName), it.qty, normUnit(it.unit)].join('|');
+      const k = [it.orderNo || '', it.productNo, normName(it.productName), it.qty, normUnit(it.unit)].join('|');
       if (seenStrict.has(k)) return false;
       seenStrict.add(k); return true;
     });

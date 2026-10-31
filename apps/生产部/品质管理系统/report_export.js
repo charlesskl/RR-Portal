@@ -1941,7 +1941,7 @@ function _buildIQCCanvas(r) {
           const f=(arr||[]).filter(v=>v!=='');
           const n=f.map(Number).filter(x=>!isNaN(x));
           return (n.length>0&&n.length===f.length)
-            ?(n.reduce((a,b)=>a+b,0)/n.length).toFixed(1):null;
+            ?(n.reduce((a,b)=>a+b,0)/n.length).toFixed(2):null;   /* 平均值保留两位小数 */
         }
         function _stdTol(std,tol) {
           const s=(std||'').trim(),t=(tol||'').trim();
@@ -1997,11 +1997,11 @@ function _buildIQCCanvas(r) {
           }
           /* single */
           const vs=[...(m.values||[]),...Array(8).fill('')].slice(0,8).map(v=>v?_fmt(v):'');
-          const rawAvg=m.avg||_ra(m.values||[])||'—';
+          const rawAvg=_ra(m.values||[])||m.avg||'—';
           return {
             stdLines: _lines(_stdTol(m.standard,m.tolerance)||m.standard||''),
             valLines: vs.map(v=>v?`<div style="line-height:11px;font-size:9px">${v}</div>`:'&nbsp;'),
-            avgLines: _lines(rawAvg==='—'?'—':_fmt(rawAvg)),
+            avgLines: _lines(rawAvg==='—'?'—':Number.isFinite(Number(rawAvg))?Number(rawAvg).toFixed(2):rawAvg),
           };
         }
 

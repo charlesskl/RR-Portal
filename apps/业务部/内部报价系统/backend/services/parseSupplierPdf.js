@@ -1,6 +1,7 @@
 'use strict';
 
 const { parseSheets } = require('./parseHardwareSheet');
+const { supplierMetadata } = require('./supplierMetadata');
 
 const normalize = value => String(value || '').replace(/\s+/g, '').toUpperCase();
 
@@ -120,7 +121,16 @@ async function parsePdf(buffer, options = {}) {
     }
     const result = await parseSheets(sheets, options);
     if (result.error) return result;
-    return { ...result, source_format: 'pdf' };
+    // rowsFromPage deliberately projects just the quotation table. Read explicit
+    // supplier labels from the original text too, before that projection drops
+    // upper-margin headers or later supplier section captions.
+    const supplierRows = pages.flatMap(items => {
+      const lines = groupByY(items);
+      if (options.allSheets) return lines.map(line => line.items.map(item => item.text));
+      const header = lines.findIndex(line => line.items.some(item => /MOQ/.test(normalize(item.text))));
+      return lines.slice(0, header < 0 ? 30 : header).map(line => line.items.map(item => item.text));
+    });
+    return { ...result, ...supplierMetadata(supplierRows, { joinFragments: true }), source_format: 'pdf' };
   } catch (error) {
     return { error: `PDF 解析失败：${error.message}` };
   }

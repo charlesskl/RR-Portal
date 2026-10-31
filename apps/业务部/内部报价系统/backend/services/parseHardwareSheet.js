@@ -3,6 +3,7 @@
 //（产品编号&产品名称 / 规格描述 / MOQ / 人民币或 USD 阶梯价）。
 const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
+const { supplierMetadata: metadataFromRows } = require('./supplierMetadata');
 
 function toStr(v) {
   if (v == null) return '';
@@ -127,6 +128,16 @@ function sheetjsRows(sheet) {
   });
 }
 
+// Ordinary imports retain their header-only lookup. A destructive full snapshot
+// must also notice a later supplier section instead of assigning it to the first.
+function supplierMetadata(sheets, fullScan = false) {
+  return metadataFromRows(sheets.flatMap(sheet => {
+    if (fullScan) return sheet.rows;
+    const header = sheet.rows.findIndex(isQuotationHeader);
+    return sheet.rows.slice(0, header < 0 ? 30 : header);
+  }));
+}
+
 async function readSheets(buffer) {
   const sheets = [];
   try {
@@ -157,7 +168,7 @@ async function parseSheets(sheets, options = {}) {
     const failed = parsed.find(result => result.error);
     if (failed) return failed;
     const items = parsed.flatMap((result,index) => result.items.map(item => ({...item, source_sheet:matched[index].name})));
-    return {...parsed[0], items, count:items.length, sheet_used:matched.map(sheet=>sheet.name).join('、'),
+    return {...parsed[0], ...supplierMetadata(sheets, true), items, count:items.length, sheet_used:matched.map(sheet=>sheet.name).join('、'),
       sheets_used:matched.map(sheet=>sheet.name), complete_sheet_scan:true, unpriced_items:parsed.flatMap(result=>result.unpriced_items || [])};
   }
 
@@ -174,6 +185,7 @@ async function parseSheets(sheets, options = {}) {
   if (!picked) return { error: '未找到五金表头（零件名称 / 用量 / 单价RMB）' };
 
   const cols = indexHeader(picked.rows[headerRow]);
+  const supplier = supplierMetadata(sheets, options._fullSupplierSnapshot);
   if (cols.name == null || (!cols.supplierTemplate && (cols.qty == null || cols.unitPrice == null))) {
     return { error: '表头字段不完整（需要 产品名称、MOQ 与单价，或旧版 零件名称 / 用量 / 单价RMB）' };
   }
@@ -323,6 +335,7 @@ async function parseSheets(sheets, options = {}) {
 
     if (!items.length) return { error: '未解析到带价格的供应商报价明细' };
     return {
+      ...supplier,
       items,
       count: items.length,
       sheet_used: picked.name,
@@ -367,7 +380,7 @@ async function parseSheets(sheets, options = {}) {
   }
 
   if (!items.length) return { error: '未解析到五金明细行' };
-  return { items, count: items.length, sheet_used: picked.name, header_row: headerRow + 1, unpriced_items:unpricedItems };
+  return { ...supplier, items, count: items.length, sheet_used: picked.name, header_row: headerRow + 1, unpriced_items:unpricedItems };
 }
 
 async function parseWorkbook(buffer, options = {}) {

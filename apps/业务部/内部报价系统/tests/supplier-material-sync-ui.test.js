@@ -2,7 +2,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const S=require('../frontend/supplier-material-sync'),MixedSku=require('../frontend/mixed-sku');
 const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const unescape=value=>value.replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
-async function setup({targetKey='packaging_materials',items=[],root={mixed_products:{},mixed_shared:{}},payload={},single=false,selected='__overall__',canEdit=true,confirmed=true,unpricedItems=[],snapshotVersion=1}={}){
+async function setup({targetKey='packaging_materials',items=[],root={mixed_products:{},mixed_shared:{}},payload={},single=false,selected='__overall__',canEdit=true,confirmed=true,unpricedItems=[],snapshotVersion=1,supplierName='',supplierNames=[]}={}){
  const nodes=new Map();let changes=0;const confirmations=[];
  const host={querySelector(key){
   if(!nodes.has(key))nodes.set(key,{innerHTML:'',value:'',dataset:{},querySelector:k=>host.querySelector(k),querySelectorAll(selector){
@@ -13,7 +13,7 @@ async function setup({targetKey='packaging_materials',items=[],root={mixed_produ
   }});return nodes.get(key);
  }};
  const window={MixedSku,SupplierMaterialSync:S};
- const context={window,FormData:class{append(){}},fetch:async()=>({ok:true,json:async()=>({items,sheet_used:'完整报价',unpriced_items:unpricedItems,supplier_snapshot_version:snapshotVersion})}),escapeHtml,formatNum:String,
+ const context={window,FormData:class{append(){}},fetch:async()=>({ok:true,json:async()=>({items,supplier_name:supplierName,supplier_names:supplierNames,sheet_used:'完整报价',unpriced_items:unpricedItems,supplier_snapshot_version:snapshotVersion})}),escapeHtml,formatNum:String,
   freeUnitHkd:r=>Number(r.unit_price_rmb||0)/.85,confirm:text=>{confirmations.push(text);return confirmed;},renderEngineering(){}};
  vm.createContext(context);
  const source=fs.readFileSync(require.resolve('../frontend/workbench.js'),'utf8');
@@ -91,4 +91,69 @@ test('旧解析服务未确认完整清单能力时禁止同步删除',async()=>
  const s=await setup({root,items:[{product_code:'A',name:'新物料'}],snapshotVersion:null});
  s.select('A');assert.match(s.host.querySelector('preview').innerHTML,/解析服务尚未加载/);s.apply();
  assert.equal(s.changes(),0);assert.equal(root.mixed_products.a.packaging_materials[0].name,'旧物料');
+});
+
+test('识别文件抬头后自动匹配已有供应商，整份清单增改删且保留乙方',async()=>{
+ const other=row('乙方保留','B');
+ const root={mixed_products:{a:{packaging_materials:[row('纸袋'),row('旧彩盒'),other]},b:{packaging_materials:[row('整款删减')]}},mixed_shared:{}};
+ const s=await setup({root,supplierName:'甲供应商',supplierNames:['甲供应商'],items:[{product_code:'A',name:'纸袋',spec:'小',qty:2},{product_code:'A',name:'新纸袋',qty:1}]});
+ assert.match(s.host.querySelector('preview').innerHTML,/文件识别供应商：<b>甲供应商/);
+ assert.match(s.host.querySelector('preview').innerHTML,/更新 1 条、新增 1 条、删除 2 条/);
+ s.apply();assert.equal(s.changes(),1);assert.equal(root.mixed_products.a.packaging_materials.length,3);
+ assert.equal(root.mixed_products.a.packaging_materials[1],other);assert.equal(root.mixed_products.a.packaging_materials[0].supplier_id,'A');
+ assert.equal(root.mixed_products.b.packaging_materials.length,0);
+});
+
+test('首次识别新供应商，确认匹配旧物料后更新无重复，未确认及其他供应商保留',async()=>{
+ const other=row('纸袋','B');
+ const root={mixed_products:{a:{packaging_materials:[{name:'纸袋',spec:'小',qty:1},{name:'收缩膜'},other]}},mixed_shared:{}};
+ const s=await setup({root,supplierName:'新供应商',supplierNames:['新供应商'],items:[{product_code:'A',name:'纸袋',spec:'小',qty:2}]});
+ assert.match(s.host.querySelector('preview').innerHTML,/value="新供应商"/);
+ s.host.querySelector('[data-claim-matching]').onclick();
+ assert.equal(s.changes(),0);assert.equal(root.mixed_products.a.packaging_materials[0].qty,1);
+ assert.match(s.host.querySelector('preview').innerHTML,/更新 1 条、新增 0 条、删除 0 条/);
+ s.apply();const rows=root.mixed_products.a.packaging_materials;
+ assert.equal(rows.length,3);assert.equal(rows[0].qty,2);assert.equal(rows[0].supplier_name,'新供应商');
+ assert.equal(rows[1].name,'收缩膜');assert.equal(rows[1].supplier_name,undefined);assert.equal(rows[2],other);
+ assert.match(s.confirmations[0],/均属于“新供应商”/);
+});
+
+test('拒绝历史归属确认或多供应商混合文件时不误认领、不写入',async()=>{
+ const root={mixed_products:{a:{packaging_materials:[{name:'纸袋',spec:'小',qty:1}]}},mixed_shared:{}};
+ const s=await setup({root,confirmed:false,supplierName:'新供应商',items:[{product_code:'A',name:'纸袋',spec:'小',qty:2}]});
+ s.host.querySelector('[data-claim-matching]').onclick();
+ assert.match(s.host.querySelector('preview').innerHTML,/更新 0 条、新增 1 条/);
+ s.apply();assert.equal(s.changes(),0);
+ const mixed=await setup({root,supplierNames:['甲','乙'],items:[{product_code:'A',name:'纸袋',spec:'小',qty:2}]});
+ mixed.select('__new__');mixed.name('甲');
+ assert.match(mixed.host.querySelector('preview').innerHTML,/多个供应商/);mixed.apply();assert.equal(mixed.changes(),0);
+});
+
+test('供应商英文词边界不合并，自动新增不删除名称相近的已有供应商',async()=>{
+ const old=row('原有物料','A',{supplier_name:'A B Limited'});
+ const root={mixed_products:{a:{packaging_materials:[old]}},mixed_shared:{}};
+ const s=await setup({root,supplierName:'AB Limited',supplierNames:['AB Limited'],items:[{product_code:'A',name:'新物料',qty:1}]});
+ assert.match(s.host.querySelector('preview').innerHTML,/value="AB Limited"/);
+ s.apply();
+ const rows=root.mixed_products.a.packaging_materials;
+ assert.equal(s.changes(),1);assert.equal(rows.length,2);assert.equal(rows[0],old);
+ assert.equal(rows[1].supplier_name,'AB Limited');assert.notEqual(rows[1].supplier_id,'A');
+ assert.equal(s.confirmations.length,1);
+});
+
+test('手选名称只差内部空格的供应商仍需不一致确认，取消时保留原物料',async()=>{
+ const old=row('原有物料','A',{supplier_name:'A B Limited'});
+ const root={mixed_products:{a:{packaging_materials:[old]}},mixed_shared:{}};
+ const s=await setup({root,confirmed:false,supplierName:'AB Limited',supplierNames:['AB Limited'],items:[{product_code:'A',name:'新物料',qty:1}]});
+ s.select('A');s.apply();
+ assert.equal(s.confirmations.length,1);assert.match(s.confirmations[0],/当前选择为“A B Limited”/);
+ assert.equal(s.changes(),0);assert.deepEqual(root.mixed_products.a.packaging_materials,[old]);
+});
+
+test('供应商名称仍可按大小写、首尾及连续空白匹配',async()=>{
+ const root={mixed_products:{a:{packaging_materials:[row('原有物料','A',{supplier_name:'A B Limited'})]}},mixed_shared:{}};
+ const s=await setup({root,supplierName:'  a   b LIMITED  ',supplierNames:['a b LIMITED'],items:[{product_code:'A',name:'新物料',qty:1}]});
+ s.apply();
+ assert.equal(s.changes(),1);assert.equal(root.mixed_products.a.packaging_materials.length,1);
+ assert.equal(root.mixed_products.a.packaging_materials[0].supplier_id,'A');assert.equal(s.confirmations.length,1);
 });

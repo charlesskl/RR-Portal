@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'bf4d15f33e3337c893a8a9cc6418cdab6ff98da00f030649df6215108ed8e6d0'
+  SCOPED_RELEASE_HELPER_SHA256: '74b4d1081bcbe519baa438e502a6baf7ddebb165e6cb6c45d93ac5764d19edd2'
 jobs:
   fixed-quote-phase:
     runs-on: ubuntu-latest
@@ -27,7 +27,7 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = bf4d15f33e3337c893a8a9cc6418cdab6ff98da00f030649df6215108ed8e6d0 ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 74b4d1081bcbe519baa438e502a6baf7ddebb165e6cb6c45d93ac5764d19edd2 ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1045-20261031-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = maintain && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Run exact Quote maintain helper
@@ -47,7 +47,7 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = bf4d15f33e3337c893a8a9cc6418cdab6ff98da00f030649df6215108ed8e6d0 ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 74b4d1081bcbe519baa438e502a6baf7ddebb165e6cb6c45d93ac5764d19edd2 ]] || exit 1
             [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1045-20261031-quote && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = maintain && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-pr-1045-20261031-quote:refs/remotes/origin/codex/ops-pr-1045-20261031-quote >/dev/null 2>&1 || exit 1
@@ -55,8 +55,8 @@ jobs:
             umask 077
             quote_tmp=$(mktemp -d /tmp/pr1045-quote.XXXXXX)
             trap 'rm -rf "$quote_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1045-cache-maintenance-r2.py" > "$quote_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$quote_tmp/run.py" | cut -d ' ' -f1)" = bf4d15f33e3337c893a8a9cc6418cdab6ff98da00f030649df6215108ed8e6d0 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1045-cache-maintenance-r3.py" > "$quote_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$quote_tmp/run.py" | cut -d ' ' -f1)" = 74b4d1081bcbe519baa438e502a6baf7ddebb165e6cb6c45d93ac5764d19edd2 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1045-cache-help-preflight.py" > "$quote_tmp/pr1045-cache-help-preflight.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$quote_tmp/pr1045-cache-help-preflight.py" | cut -d ' ' -f1)" = 6a1916349121ca78f3600ecd0a56b951b4a7f043c2f8dc5bfca4a4a3ae200be6 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1035-quote-preflight.py" > "$quote_tmp/pr1035-quote-preflight.py" 2>/dev/null || exit 1

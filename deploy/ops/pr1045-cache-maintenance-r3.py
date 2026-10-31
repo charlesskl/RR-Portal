@@ -4,7 +4,7 @@ Requires actual CLI/version/help evidence and separately reviewed ID-filter sema
 """
 import calendar,datetime,hashlib,importlib.util,json,os,pathlib,re,stat,subprocess,sys,time
 ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1045-cache-maintenance-3'
-BRANCH='refs/heads/codex/ops-pr-1045-20261031-quote';EXECUTE=True
+BRANCH='refs/heads/codex/ops-pr-1045-20261031-quote';EXECUTE=False
 HELPER='pr1045-cache-help-preflight.py';HELPER_SHA256='6a1916349121ca78f3600ecd0a56b951b4a7f043c2f8dc5bfca4a4a3ae200be6'
 PROFILE_PATH='/opt/rr-portal/deploy/backups/pr1045-quote-preflight-2/result.private.json';PROFILE_FILE_SHA256='e68d2c58444ce06978385719bf3e4abea82930ba3ce4bbcaf51d8e13910b2249';PLAN={'approved': True, 'profileFileSHA256': 'e68d2c58444ce06978385719bf3e4abea82930ba3ce4bbcaf51d8e13910b2249', 'engineID': 'bc9f32e6-298a-45f8-92c7-b755d1b61818', 'clientVersion': '29.2.1', 'serverVersion': '29.2.1', 'builderName': 'default', 'pruneHelpSHA256': '98e664404f2a4be365a5f1c6615b2bbf62d9ede0235784f17d9bfac142cd7db1', 'reviewedRecordIDs': ['dffp2znok9t2q0bzpfrytguxk', 'nhge2ev4tp7n11trp6cxgt93d', 'pmxbytwvlxa8nzhvp9h8q17mu', 'pnz75pe7lyx9k77mis6q147s3', 'qjiyizc7qoyp3q33ymejou7en', 'qsllsiwz72jrsw12pkomte3m8'], 'idFilterSemanticsReviewed': True, 'idFilterPrimarySource': 'https://docs.docker.com/reference/cli/docker/buildx/prune/', 'reservedSpaceBytes': 12884901888, 'cacheScope': 'exact-six-cache-ids-immutable-private-unused-at-least-168h', 'automaticRetry': False, 'noExactDeletionDryRun': True};PLAN_SHA256='375c0d881c619431add9d8fe8576ab6446f18c05737a40566047d81f4e6af8e5'
 MIN_ORDINARY=172023808;MIN_PHYSICAL=8627740672

@@ -3,7 +3,7 @@ Raw image Config/Env stays in memory. No prune, build, lifecycle or data operati
 """
 import hashlib,importlib.util,json,os,pathlib,re,subprocess,sys
 ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1045-image-response-inspect-1'
-EXECUTE=True;BRANCH='refs/heads/codex/ops-pr-1045-20261031-quote';MAX_READS=8
+EXECUTE=False;BRANCH='refs/heads/codex/ops-pr-1045-20261031-quote';MAX_READS=8
 HELPER='pr1045-cache-help-preflight.py';HELPER_SHA256='6a1916349121ca78f3600ecd0a56b951b4a7f043c2f8dc5bfca4a4a3ae200be6'
 PROFILE5=ROOT/'deploy/backups/pr1045-quote-preflight-5/result.private.json';PROFILE5_SHA256='a23b017f933a3568ed26ca63556de642cecdbbb1379718dd370fa7dbe7729665'
 R3_MANIFEST_SHA256='64f37c12a42116e129cbf9e5a9866ab421bab8a3fefc7a0ed883ea339c76eb86'

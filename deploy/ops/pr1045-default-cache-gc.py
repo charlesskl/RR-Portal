@@ -5,7 +5,7 @@ No image/system/volume/container prune, service lifecycle, checkout or DB operat
 """
 import copy,hashlib,importlib.util,json,os,pathlib,re,subprocess,sys,time
 ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1045-cache-maintenance-4'
-BRANCH='refs/heads/codex/ops-pr-1045-20261031-quote';EXECUTE=True
+BRANCH='refs/heads/codex/ops-pr-1045-20261031-quote';EXECUTE=False
 INSPECT_HELPER='pr1045-image-response-inspect.py';INSPECT_HELPER_SHA256='782bb86556c4e9c7a63458ef69d31b570cd0c64e5b1e9494cb8727551db24646'
 METADATA_HELPER='pr1045-cache-maintenance-r3.py';METADATA_HELPER_SHA256='74b4d1081bcbe519baa438e502a6baf7ddebb165e6cb6c45d93ac5764d19edd2'
 PLAN={'approved': True, 'profile5SHA256': 'a23b017f933a3568ed26ca63556de642cecdbbb1379718dd370fa7dbe7729665', 'r3ManifestSHA256': '64f37c12a42116e129cbf9e5a9866ab421bab8a3fefc7a0ed883ea339c76eb86', 'command': ['docker', 'buildx', '--builder', 'default', 'prune', '--force', '--filter', 'until=24h', '--reserved-space=17179869184'], 'engineID': 'bc9f32e6-298a-45f8-92c7-b755d1b61818', 'builder': 'default', 'clientVersion': '29.2.1', 'serverVersion': '29.2.1', 'reservedSpaceBytes': 17179869184, 'unusedForHours': 24, 'singleAttempt': True, 'automaticRetry': False, 'rawOpaqueMetadataEqualityNotClaimed': True, 'contractHelperSHA256': '782bb86556c4e9c7a63458ef69d31b570cd0c64e5b1e9494cb8727551db24646', 'readOnlyInspectManifestSHA256': 'f32012e87fbb7967708c08790dff82e9a3b500e514903479b05df932d4fd5148'};PLAN_SHA256='0da7f56b0c03751c4530596e61d2ee3e58eb754467e301d859bf8eea619e07da';MIN_ORDINARY=172023808;MIN_PHYSICAL=8627740672

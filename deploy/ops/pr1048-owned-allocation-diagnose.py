@@ -3,7 +3,7 @@ Only own new result/manifest are written. No cache/image deletion, build, tag,
 lifecycle, application execution, business body reads or failed-evidence edits.
 """
 import decimal,hashlib,json,os,pathlib,re,stat,subprocess,sys
-ROOT=pathlib.Path('/opt/rr-portal');FAILED=ROOT/'deploy/backups/pr1048-indo-static-1-20261031/prepare';OUT=ROOT/'deploy/backups/pr1048-owned-allocation-diagnose-1';SEAL='27d03a6145d34c84a7c1f76c4b14ac3882fa92daa7f4ec27e27cb3621e3ca54f';TARGET='38a35585770e0e837229d50f20ee4a9a759037ad';EXECUTE=True;BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';STAGE='entry';DETAILS={}
+ROOT=pathlib.Path('/opt/rr-portal');FAILED=ROOT/'deploy/backups/pr1048-indo-static-1-20261031/prepare';OUT=ROOT/'deploy/backups/pr1048-owned-allocation-diagnose-1';SEAL='27d03a6145d34c84a7c1f76c4b14ac3882fa92daa7f4ec27e27cb3621e3ca54f';TARGET='38a35585770e0e837229d50f20ee4a9a759037ad';EXECUTE=False;BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';STAGE='entry';DETAILS={}
 IMAGES={'frontend':'sha256:0b97df42c7e86c0937172435be1ccb4d05ebc2c5617a50a106fe392b7b26472c','candidate':'sha256:60d7deef2fe58c1c6ca66977b43392c570f11e31cc7f6d38f12fad2f2d201cee','canonical':'sha256:805586529a8575ef0dc5f9161d619dd4fb62f67b0b6b68ae5995ac922b860503'}
 def need(v,label):
  global STAGE

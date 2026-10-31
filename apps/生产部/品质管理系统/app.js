@@ -4966,6 +4966,7 @@ const REVIEW_STATUS_META = {
   approved: { label: '已审核', cls: 'rs-approved' },
 };
 let _reviewTab   = 'pending';
+let _reviewSelected = new Set();   /* 审核中心批量操作选中集 */
 let _rejectingId = null;
 
 function _esc(s) {
@@ -4976,6 +4977,7 @@ function _esc(s) {
 
 function setReviewTab(tab) {
   _reviewTab = tab;
+  _reviewSelected.clear();
   renderReviewPage();
 }
 
@@ -5028,7 +5030,9 @@ function renderReviewPage() {
     if (canReview && st !== 'approved') ops.push(`<button class="action-btn" onclick="approveRecord(${r.id})">✓ 通过</button>`);
     if (canReview)                      ops.push(`<button class="action-btn" onclick="openRejectModal(${r.id})">反审核</button>`);
     if (canEdit && st !== 'approved')   ops.push(`<button class="action-btn" onclick="openEditModal(${r.id})">编辑</button>`);
+    const checked = _reviewSelected.has(r.id) ? 'checked' : '';
     return `<tr>
+      <td style="text-align:center"><input type="checkbox" ${checked} onchange="toggleReviewSelect(${r.id})"></td>
       <td style="text-align:right;color:#3a4858">${r.id}</td>
       <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${_esc(r.date)}</td>
       <td style="font-weight:500;white-space:nowrap">${_esc(r.supplier)}</td>
@@ -5048,8 +5052,16 @@ function renderReviewPage() {
     </tr>`;
   }).join('');
 
-  wrap.innerHTML = `<table class="data-table" style="min-width:1368px">
+  const allChecked = list.length > 0 && list.every(r => _reviewSelected.has(r.id));
+  const batchBar = `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 4px;position:sticky;top:0;background:var(--bg);z-index:5">
+      <span style="font-size:12px;color:var(--text-dim)">已选 <b id="reviewSelCount">${_reviewSelected.size}</b> 条</span>
+      <button class="action-btn" onclick="batchApproveSelected()" ${_reviewSelected.size ? '' : 'disabled'}>✓ 批量通过</button>
+      <button class="action-btn del" onclick="batchDeleteSelected()" ${_reviewSelected.size ? '' : 'disabled'}>🗑 批量删除</button>
+    </div>`;
+  wrap.innerHTML = batchBar + `<table class="data-table" style="min-width:1368px">
     <thead><tr>
+      <th style="text-align:center"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleReviewSelectAll(this.checked)"></th>
       <th style="text-align:right">#</th>
       <th>来料日期</th><th>供应商</th><th>客户</th><th>加工类型</th><th>送货单号</th><th>货号</th><th>款式名称</th>
       <th style="text-align:center">类型</th>
@@ -5059,6 +5071,55 @@ function renderReviewPage() {
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
+}
+
+function toggleReviewSelect(id) {
+  if (_reviewSelected.has(id)) _reviewSelected.delete(id); else _reviewSelected.add(id);
+  renderReviewPage();
+}
+function toggleReviewSelectAll(on) {
+  _reviewSelected.clear();
+  if (on) state.records.filter(r => recStatus(r) === _reviewTab).forEach(r => _reviewSelected.add(r.id));
+  renderReviewPage();
+}
+
+/* 批量通过审核 */
+function batchApproveSelected() {
+  if (!can('reviewRecord')) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  if (!_reviewSelected.size) { showToast('请先勾选记录', 'info'); return; }
+  const targets = state.records.filter(r => _reviewSelected.has(r.id) && recStatus(r) !== 'approved');
+  if (!targets.length) { showToast('所选记录均已审核', 'info'); return; }
+  if (!confirm(`确认批量通过 ${targets.length} 条记录的审核？`)) return;
+  const u = _liveUser(), now = nowIso(), name = (u && (u.name || u.username)) || '';
+  targets.forEach(r => {
+    r.status = 'approved'; r.reviewBy = name; r.reviewAt = now; r.updatedAt = now;
+    r.rejectReason = ''; r.rejectBy = ''; r.rejectAt = '';
+    delete r.resubmitted;
+  });
+  _reviewSelected.clear();
+  persist();
+  showToast(`✓ 已批量通过 ${targets.length} 条审核`, 'success');
+  renderReviewPage();
+  updateTopKpis();
+}
+
+/* 批量删除（已审核记录需审核权限，未审核任何账号可删规则同单条删除） */
+function batchDeleteSelected() {
+  if (!can('deleteRecord')) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  if (!_reviewSelected.size) { showToast('请先勾选记录', 'info'); return; }
+  const locked = state.records.filter(r => _reviewSelected.has(r.id) && recStatus(r) === 'approved');
+  if (locked.length && !can('reviewRecord')) {
+    showToast(`所选含 ${locked.length} 条已审核记录，需先反审核退回后才能删除`, 'error'); return;
+  }
+  if (!confirm(`确认批量删除所选 ${_reviewSelected.size} 条记录？此操作不可撤销。`)) return;
+  const ids = [..._reviewSelected];
+  if (window.__QC_MARK_DELETED) window.__QC_MARK_DELETED(ids);
+  state.records = state.records.filter(r => !_reviewSelected.has(r.id));
+  _reviewSelected.clear();
+  persist();
+  showToast(`✓ 已批量删除 ${ids.length} 条记录`, 'success');
+  renderReviewPage();
+  updateTopKpis();
 }
 
 function approveRecord(id) {

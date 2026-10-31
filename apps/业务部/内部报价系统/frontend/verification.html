@@ -18,7 +18,7 @@
     @media(min-width:761px){#verification-list:not(.hidden):has(#workshop-assignment:not([hidden])){grid-template-rows:auto auto auto minmax(0,1fr)}}
   </style>
   <link rel="stylesheet" href="./excel-grid.css?v=20261020-delivery">
-  <link rel="stylesheet" href="./verification-compact.css?v=20261022-sticky-header">
+  <link rel="stylesheet" href="./verification-compact.css?v=20261031-summary-button">
 </head>
 <body>
   <div class="topbar module-topbar">
@@ -39,7 +39,7 @@
         </div>
         <div class="verification-center-actions">
           <button id="verification-create" type="button" hidden>＋ 新建核价</button>
-          <a class="mini" href="./verification-summary.html">核价汇总 / 导出</a>
+          <a class="verification-summary-button" href="./verification-summary.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 16v-5m5 5V8m5 8v-6"/></svg><span>核价汇总 / 导出</span></a>
           <button id="verification-records" class="mini">已完成记录</button>
           <button id="verification-export" class="mini">导出任务清单</button>
         </div>

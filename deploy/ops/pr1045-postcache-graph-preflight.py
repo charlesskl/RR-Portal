@@ -219,7 +219,7 @@ def complete_cache_graph():
  all_raw=command(['docker','buildx','--builder','default','du','--format=json'],90,16*1024**2);rows=safe_cache_records(all_raw);private('cache-du-all.private.json',rows)
  # Exactly one full metadata GET. Boolean/type eligibility is calculated locally.
  # Display LastUsedAt is retained as evidence and never treated as exact age.
- summary=cache_graph_summary(rows);summary.update(allSafeMetadataFile='cache-du-all.private.json',allSafeMetadataSHA256=sha(enc(rows)),allRawStdoutSHA256=sha(all_raw),descriptionFieldsPersisted=False,cleanupPerformed=False,pruneOutputBodyUnavailable=True,reclaimedByteAmountNotInferred=True);return summary
+ summary=cache_graph_summary(rows);summary.update(allSafeMetadataRows=rows,allSafeMetadataFile='cache-du-all.private.json',allSafeMetadataSHA256=sha(enc(rows)),allRawStdoutSHA256=sha(all_raw),descriptionFieldsPersisted=False,cleanupPerformed=False,pruneOutputBodyUnavailable=True,reclaimedByteAmountNotInferred=True);return summary
 
 
 def capacity_profile(P,docker_root):

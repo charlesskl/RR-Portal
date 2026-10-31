@@ -19,16 +19,24 @@ export function consolidateShipmentItems<T extends BatchItem>(
   // determines which contract owns a company's final-line surcharge.
   sortShipmentItems(items, materials, fallback).forEach((item, index) => {
     const material = materials.get(item.material_id!)
+    const snapshot = item.material_snapshot as Material | undefined
+    const identity = snapshot ? snapshot.id : item.material_id
+    const confirmedSnapshot = !!snapshot && Number(snapshot.id) > 0 && snapshot.id === material?.id
+      && !!text(snapshot.name_zh) && text(snapshot.name_zh) === text(material?.name_zh)
     const packing = parseShipmentPacking(item.qty_per_carton)
-    // Imported/unidentified materials and per-box packing schedules cannot
+    // Unlinked/unconfirmed imports and per-box packing schedules cannot
     // safely be collapsed. Carton number labels, however, identify batches,
     // not different goods: retain all labels on the consolidated display row.
-    const eligible = !!material && Number(item.material_id) > 0 && Number(item.outbound_id) > 0
+    const eligible = !!material && Number(identity) > 0 && Number(item.outbound_id) > 0
       && Number.isFinite(Number(item.kg)) && Number(item.kg) > 0
       && Number.isFinite(Number(item.qty)) && Number(item.qty) > 0
-      && !item.material_snapshot && ['uniform', 'empty'].includes(packing.mode)
+      && (!snapshot || confirmedSnapshot) && ['uniform', 'empty'].includes(packing.mode)
     const key = eligible ? JSON.stringify([
-      item.material_id, text(item.supplier || material?.supplier),
+      identity, text(item.supplier || material?.supplier),
+      // Confirmed local snapshots may use different negative editor keys. Merge
+      // only when their actual declaration/packing attributes are identical.
+      ...['name_zh', 'name_en', 'product_code', 'related_product_code', 'spec', 'category', 'hs_cn', 'hs_id',
+        'length', 'width', 'height', 'weight_per_carton', 'gross_per_pc', 'net_per_pc'].map(field => material?.[field as keyof Material] ?? ''),
       effectiveCustomsCompany(item, material, fallback), invoiceCustomsCompany(item, material),
       text(material?.unit_kg || 'KGM'), text(item.purchase_unit || (isPaperRope(material?.name_zh) ? '米' : '个')),
       text(item.currency || '¥'),

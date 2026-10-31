@@ -16,8 +16,9 @@ export interface ShipmentImportItem {
 }
 export interface ShipmentImportRow { key: string; sheet: string; row: number; imageCol: number; selected: boolean; warnings: string[]; item: ShipmentImportItem }
 export interface ShipmentImportResult { rows: ShipmentImportRow[]; warnings: string[] }
-export interface ExistingShipmentImportRow {
-  material_snapshot?: Material; supplier?: string; customs_company?: string; po_no?: string; outbound_id?: number
+export interface ExistingShipmentImportRow extends Omit<Partial<ShipmentImportItem>, 'material_snapshot'> {
+  material_snapshot?: Material; outbound_id?: number; material_id?: number
+  _rowKey?: number; id?: number; seq?: number; purchase_charge_ratio?: number; invoice_price?: number
 }
 export function planShipmentImport(imported: ShipmentImportItem[], existing: ExistingShipmentImportRow[]) {
   const targets = imported.map(item => {
@@ -28,11 +29,11 @@ export function planShipmentImport(imported: ShipmentImportItem[], existing: Exi
       if (norm(m.product_code || m.related_product_code) !== norm(source.product_code || source.related_product_code)) return []
       if (norm(m.spec) !== norm(source.spec)) return []
       if (norm(row.supplier || m.supplier) !== norm(item.supplier || source.supplier)) return []
-      if (item.customs_company && norm(row.customs_company || m.customs_company) !== norm(item.customs_company)) return []
+      if (!row.outbound_id && item.customs_company && norm(row.customs_company || m.customs_company) !== norm(item.customs_company)) return []
       if (item.po_no && norm(row.po_no) !== norm(item.po_no)) return []
       return [index]
     })
-    return matches.length > 1 ? -2 : matches.length === 1 ? (existing[matches[0]].outbound_id ? -3 : matches[0]) : -1
+    return matches.length > 1 ? -2 : matches.length === 1 ? matches[0] : -1
   })
   return targets.map(target => target >= 0 && targets.filter(t => t === target).length > 1 ? -2 : target)
 }

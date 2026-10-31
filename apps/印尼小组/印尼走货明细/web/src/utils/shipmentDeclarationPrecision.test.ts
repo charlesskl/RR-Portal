@@ -7,6 +7,7 @@ import { expect, it, vi } from 'vitest'
 import { formatShipmentDeclaration, roundedShipmentDeclaration, shipmentDeclarationPrecision } from './shipmentDeclaration'
 import { consolidateShipmentItems } from './shipmentConsolidation'
 import { shipmentPurchaseAmount } from './shipmentPurchase'
+import { shipmentOptionalNumber } from './shipmentDisplay'
 import { withShipmentInvoicePrices } from './shipmentInvoice'
 import { buildCustomsWorkbook } from './customsExport'
 
@@ -62,7 +63,7 @@ it('实际页面的文字预览、复制及填充读取固定精度，数字编�
     ts.forEachChild(node, walk)
   }
   walk(tree)
-  const context = createContext({ formatShipmentDeclaration, consolidatedItems: [{ kg: 1250.582, material_id: 1 }], matMap: new Map([[1, { unit_kg: 'KGM' }]]) })
+  const context = createContext({ formatShipmentDeclaration, shipmentOptionalNumber, consolidatedItems: [{ kg: 1250.582, material_id: 1 }], matMap: new Map([[1, { unit_kg: 'KGM' }]]) })
   runInContext(ts.transpileModule(handler, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context)
   expect(runInContext("mergedCellValue(0, 'kg')", context)).toBe('1,250.58')
   context.matMap.set(1, { unit_kg: 'TNE' })

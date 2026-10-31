@@ -12,7 +12,7 @@ export default function ShipmentNumberCell({ value, onCommit, title, integer = f
   const commit = (): Promise<boolean> => {
     if (pending.current) return pending.current
     if (draft == null) { setDraft(value ?? null); return Promise.resolve(true) }
-    if (draft === (value ?? 0)) return Promise.resolve(true)
+    if (draft === (value ?? 0)) { setDraft(value ?? null); return Promise.resolve(true) }
     const task = Promise.resolve(onCommit(draft)).then(result => {
       const accepted = result !== false
       if (!accepted) setDraft(value ?? null)

@@ -9,13 +9,13 @@ function book(rows: unknown[][]) {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), '明细')
   return wb
 }
-it('相同明细唯一匹配更新，新增追加，重复和出库关联需核对', () => {
+it('相同明细唯一匹配更新，已关联出库行也可匹配；重复需核对，未匹配追加', () => {
   const item = { material_snapshot: { name_zh: '螺丝', product_code: 'A', spec: '3MM', supplier: '供应商' }, qty: 2 }
   expect(planShipmentImport([item], [item])).toEqual([0])
   expect(planShipmentImport([item], [])).toEqual([-1])
   expect(planShipmentImport([item], [item, item])).toEqual([-2])
   expect(planShipmentImport([item, item], [item])).toEqual([-2, -2])
-  expect(planShipmentImport([item], [{ ...item, outbound_id: 1 }])).toEqual([-3])
+  expect(planShipmentImport([item], [{ ...item, outbound_id: 1 }])).toEqual([0])
   expect(planShipmentImport([{ ...item, po_no: 'PO2' }], [{ ...item, po_no: 'PO1' }])).toEqual([-1])
   expect(planShipmentImport([{ ...item, qty: 0 }], [item])).toEqual([0])
 })

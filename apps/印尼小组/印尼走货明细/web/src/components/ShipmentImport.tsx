@@ -9,12 +9,19 @@ import { shipmentGrossPerPc, shipmentWeightQuantity } from '../utils/shipmentWei
 import { isShipmentCountUnit } from '../utils/shipmentDeclaration'
 
 const currencies = ['¥', 'US$', 'HK$', 'IDR'].map(value => ({ value, label: value }))
-export default function ShipmentImport({ existing, onImport }: { existing: ExistingShipmentImportRow[]; onImport: (rows: ShipmentImportItem[], targets: number[]) => void }) {
+export default function ShipmentImport({ existing, onImport }: { existing: ExistingShipmentImportRow[]; onImport: (rows: ShipmentImportItem[], targets: number[]) => void | boolean }) {
   const { message } = App.useApp()
   const [busy, setBusy] = useState(false)
   const [rows, setRows] = useState<ShipmentImportRow[] | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [fileName, setFileName] = useState('')
+  const selected = (rows || []).filter(row => row.selected)
+  const targets = planShipmentImport(selected.map(row => row.item), existing)
+  const targetByKey = new Map(selected.map((row, index) => [row.key, targets[index]]))
+  const linkedTarget = (row: ShipmentImportRow) => {
+    const target = targetByKey.get(row.key)
+    return target != null && target >= 0 && existing[target]?.outbound_id ? existing[target] : undefined
+  }
   const change = (key: string, fields: Partial<ShipmentImportItem>) => setRows(current => current!.map(r => {
     if (r.key !== key) return r
     const item = { ...r.item, ...fields }
@@ -64,12 +71,11 @@ export default function ShipmentImport({ existing, onImport }: { existing: Exist
     return false
   }
   function confirm() {
-    const selected = (rows || []).filter(row => row.selected)
     if (!selected.length) return
-    if (selected.some(r => r.item.price != null && !r.item.currency)) { message.warning('请补充采购币种后导入'); return }
-    const targets = planShipmentImport(selected.map(r => r.item), existing)
-    if (targets.some(t => t < -1)) { message.warning('请取消勾选待核对行：重复匹配无法确定覆盖对象，已关联出库的行需在原明细中修改'); return }
-    onImport(selected.map(r => r.item), targets); setRows(null)
+    if (targets.some(t => t < -1)) { message.warning('请取消勾选待核对行：重复匹配无法确定覆盖对象，请核对原明细后重试'); return }
+    if (selected.some(r => !linkedTarget(r) && r.item.price != null && !r.item.currency)) { message.warning('请补充采购币种后导入'); return }
+    if (onImport(selected.map(r => r.item), targets) === false) return
+    setRows(null)
     message.success(`已更新 ${targets.filter(t => t >= 0).length} 行，新增 ${targets.filter(t => t === -1).length} 行，请点击走货单“保存”`)
   }
   return <>
@@ -78,7 +84,7 @@ export default function ShipmentImport({ existing, onImport }: { existing: Exist
     </Upload>
     <Modal title={`导入走货资料 — ${fileName}`} open={rows !== null} width="95vw" onCancel={() => setRows(null)}
       onOk={confirm} okText="确认导入（相同更新，新增追加）" okButtonProps={{ disabled: !(rows || []).some(r => r.selected) }}>
-      <Alert type="info" showIcon message="支持新版清溪表：按列名识别，不依赖固定位置。主明细所有字段及公式缓存值保存在“原表资料”，合同、发票、汇总等配套表不重复导成物料。按货号、中文名、规格、供应商匹配当前明细；唯一匹配更新有值字段，空白保留原值，无匹配则追加。重复匹配及已关联出库的行需核对。不改资料库或整柜设置，发票价格按系统规则重算。" />
+      <Alert type="info" showIcon message="支持新版清溪表：按列名识别，不依赖固定位置。主明细所有字段及公式缓存值保存在“原表资料”，合同、发票、汇总等配套表不重复导成物料。按货号、中文名、规格、供应商匹配当前明细；唯一匹配更新有值字段，空白保留原值，无匹配则追加。已关联出库行仅更新装箱和报关资料，原出库关联、数量重量、申报单位及采购来源/单价保持不变。重复匹配仍需核对。不改资料库或整柜设置，发票价格按系统规则重算。" />
       {warnings.length > 0 && <Alert type="warning" message={warnings.join('；')} />}
       <Space style={{ margin: '12px 0' }} wrap>
         <span>识别 {(rows || []).length} 行，已选 {(rows || []).filter(r => r.selected).length} 行</span>
@@ -110,21 +116,19 @@ export default function ShipmentImport({ existing, onImport }: { existing: Exist
         ]} />{r.warnings.map((w, i) => <div key={i}>{w}</div>)}</> }}
         columns={[
           { title: '导入方式', width: 150, render: (_, r) => {
-            const selected = (rows || []).filter(row => row.selected)
-            const index = selected.findIndex(row => row.key === r.key)
-            if (index < 0) return '未勾选'
-            const target = planShipmentImport(selected.map(row => row.item), existing)[index]
-            return target === -1 ? '新增' : target === -2 ? '待核对：重复匹配' : target === -3 ? '待核对：已关联出库' : `更新已有第 ${target + 1} 行`
+            const target = targetByKey.get(r.key)
+            if (target == null) return '未勾选'
+            return target === -1 ? '新增' : target === -2 ? '待核对：重复匹配' : `更新已有第 ${target + 1} 行${linkedTarget(r) ? '（保留出库）' : ''}`
           } },
           { title: '来源', render: (_, r) => `${r.sheet} 第${r.row}行`, width: 180 },
           { title: '图片', width: 60, render: (_, r) => r.item.material_snapshot.image ? <Image width={40} src={r.item.material_snapshot.image} /> : '—' },
           { title: '货号 / 物料', width: 230, render: (_, r) => <>{r.item.material_snapshot.product_code}<br />{r.item.material_snapshot.name_zh}</> },
           { title: '供应商 / 报关公司', width: 220, render: (_, r) => <>{r.item.supplier}<br />{r.item.customs_company || '未填'}</> },
-          { title: '送货数量', width: 110, render: (_, r) => <InputNumber min={0} value={r.item.qty} onChange={v => change(r.key, { qty: v ?? undefined })} style={{ width: '100%' }} /> },
-          { title: '申报数量 / 单位', width: 130, render: (_, r) => <><InputNumber min={0} readOnly={isShipmentCountUnit(r.item.material_snapshot.unit_kg)} value={r.item.kg} onChange={v => change(r.key, { kg: v ?? undefined })} style={{ width: '100%' }} />{r.item.material_snapshot.unit_kg}</> },
+          { title: '送货数量', width: 110, render: (_, r) => <InputNumber min={0} readOnly={!!linkedTarget(r)} title={linkedTarget(r) ? '保留原出库分配数量' : undefined} value={linkedTarget(r) ? linkedTarget(r)!.qty : r.item.qty} onChange={v => change(r.key, { qty: v ?? undefined })} style={{ width: '100%' }} /> },
+          { title: '申报数量 / 单位', width: 130, render: (_, r) => <><InputNumber min={0} readOnly={!!linkedTarget(r) || isShipmentCountUnit(r.item.material_snapshot.unit_kg)} title={linkedTarget(r) ? '保留原申报数量及单位' : undefined} value={linkedTarget(r) ? linkedTarget(r)!.kg : r.item.kg} onChange={v => change(r.key, { kg: v ?? undefined })} style={{ width: '100%' }} />{linkedTarget(r) ? linkedTarget(r)!.material_snapshot?.unit_kg : r.item.material_snapshot.unit_kg}</> },
           { title: '箱数', width: 90, render: (_, r) => <>{r.item.cartons ?? '—'}{r.item.carton_group ? '（共箱）' : ''}</> },
-          { title: '采购单价 / 币种', width: 140, render: (_, r) => <>{r.item.price ?? '—'}<Select style={{ width: '100%' }} value={r.item.currency} options={currencies} onChange={currency => change(r.key, { currency })} /></> },
-          { title: '采购单号', width: 150, render: (_, r) => r.item.po_no || '—' },
+          { title: '采购单价 / 币种', width: 140, render: (_, r) => <>{(linkedTarget(r) ? linkedTarget(r)!.price : r.item.price) ?? '—'}<Select style={{ width: '100%' }} disabled={!!linkedTarget(r)} value={linkedTarget(r) ? linkedTarget(r)!.currency : r.item.currency} options={currencies} onChange={currency => change(r.key, { currency })} /></> },
+          { title: '采购单号', width: 150, render: (_, r) => (linkedTarget(r) ? linkedTarget(r)!.po_no : r.item.po_no) || '—' },
           { title: '核对提示', width: 230, render: (_, r) => r.warnings.join('；') },
         ]} />
     </Modal>

@@ -5,6 +5,7 @@ import { expect, it, vi } from 'vitest'
 import * as XLSX from 'xlsx'
 import { DOMParser } from '@xmldom/xmldom'
 import * as shipmentImport from './shipmentImport'
+import { applyShipmentImport } from './shipmentImportApply'
 import { toolImportDefaults } from './toolImportDefaults'
 import { buildCustomsWorkbook } from './customsExport'
 
@@ -35,8 +36,9 @@ function enriched(item: ReturnType<typeof parsed>, withMaster = true) {
 }
 function update(current: any[], incoming: ReturnType<typeof parsed>[]) {
   const state: any = { items: current, matMap: new Map(current.map(row => [row.material_id, row.material_snapshot])),
-    ...shipmentImport, setEditorDirty: vi.fn() }
-  state.setItems = (fn: any) => { state.items = fn(state.items) }
+    ...shipmentImport, applyShipmentImport, setEditorDirty: vi.fn(), sheetWritePending: { current: false },
+    editorLoadState: { current: 'ready' }, message: { info: vi.fn(), error: vi.fn() } }
+  state.setItems = (value: any) => { state.items = typeof value === 'function' ? value(state.items) : value }
   state.setMatMap = (fn: any) => { state.matMap = fn(state.matMap) }
   const context = createContext(state)
   runInContext(handler, context)

@@ -6584,6 +6584,7 @@ function _buildImportPlan(mode) {
       confirmBy:   confCol  ? String(row[confCol]  ?? '').trim() : '',
       remark:      remCol   ? String(row[remCol]   ?? '').trim() : '',
       updatedAt:   nowIso(),
+      status:      'pending',   /* 导入与手工录入一致：先进入待审核（此前不写状态时本地默认已审核、服务端默认待审核，刷新后位置跳变） */
     });
   });
 

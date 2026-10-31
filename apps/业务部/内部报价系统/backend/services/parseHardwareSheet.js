@@ -127,6 +127,36 @@ function sheetjsRows(sheet) {
   });
 }
 
+// Read explicit supplier labels above the detail header, never infer ownership
+// from a file name or from a material's name/remarks.
+function supplierMetadata(sheets) {
+  const names = new Map();
+  for (const sheet of sheets) {
+    const header = sheet.rows.findIndex(isQuotationHeader);
+    const rows = sheet.rows.slice(0, header < 0 ? 30 : header);
+    for (const row of rows) {
+      for (let index = 0; index < row.length; index++) {
+        const text = toStr(row[index]);
+        const match = text.match(/^(?:供应商(?:名称|名)?|供應商(?:名稱|名)?|SUPPLIER(?:\s*NAME)?)(?:\s*[:：]\s*(.*))?\s*$/i);
+        if (!match) continue;
+        let name = (match[1] || '').trim();
+        if (!name) {
+          for (let next = index + 1; next < row.length; next++) {
+            const candidate = toStr(row[next]);
+            if (!candidate || candidate === text) continue; // merged label cells
+            if (/[:：]$/.test(candidate)) break;
+            name = candidate;
+            break;
+          }
+        }
+        if (name && name.length <= 100) names.set(norm(name.normalize('NFKC')), name);
+      }
+    }
+  }
+  const supplier_names = [...names.values()];
+  return { supplier_names, supplier_name: supplier_names.length === 1 ? supplier_names[0] : '' };
+}
+
 async function readSheets(buffer) {
   const sheets = [];
   try {
@@ -157,7 +187,7 @@ async function parseSheets(sheets, options = {}) {
     const failed = parsed.find(result => result.error);
     if (failed) return failed;
     const items = parsed.flatMap((result,index) => result.items.map(item => ({...item, source_sheet:matched[index].name})));
-    return {...parsed[0], items, count:items.length, sheet_used:matched.map(sheet=>sheet.name).join('、'),
+    return {...parsed[0], ...supplierMetadata(sheets), items, count:items.length, sheet_used:matched.map(sheet=>sheet.name).join('、'),
       sheets_used:matched.map(sheet=>sheet.name), complete_sheet_scan:true, unpriced_items:parsed.flatMap(result=>result.unpriced_items || [])};
   }
 
@@ -174,6 +204,7 @@ async function parseSheets(sheets, options = {}) {
   if (!picked) return { error: '未找到五金表头（零件名称 / 用量 / 单价RMB）' };
 
   const cols = indexHeader(picked.rows[headerRow]);
+  const supplier = supplierMetadata(sheets);
   if (cols.name == null || (!cols.supplierTemplate && (cols.qty == null || cols.unitPrice == null))) {
     return { error: '表头字段不完整（需要 产品名称、MOQ 与单价，或旧版 零件名称 / 用量 / 单价RMB）' };
   }
@@ -323,6 +354,7 @@ async function parseSheets(sheets, options = {}) {
 
     if (!items.length) return { error: '未解析到带价格的供应商报价明细' };
     return {
+      ...supplier,
       items,
       count: items.length,
       sheet_used: picked.name,
@@ -367,7 +399,7 @@ async function parseSheets(sheets, options = {}) {
   }
 
   if (!items.length) return { error: '未解析到五金明细行' };
-  return { items, count: items.length, sheet_used: picked.name, header_row: headerRow + 1, unpriced_items:unpricedItems };
+  return { ...supplier, items, count: items.length, sheet_used: picked.name, header_row: headerRow + 1, unpriced_items:unpricedItems };
 }
 
 async function parseWorkbook(buffer, options = {}) {

@@ -7,7 +7,7 @@ No stale cache-GC evidence is used; fresh successful three-service profile is th
 import calendar,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error
 ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/pr1047-quote-20261031-1'
 APP='apps/业务部/内部报价系统';HOST_BASE='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c';BASE='d0bb564d85bc0b39a91e6d9c23658d97356c9253'
-TARGET='0d7599859e5e01e90e4bbcbe71a9bd4a0a77b417';TREE='a5912e0a207e421221bfbb596fcfae6089c4c5ca';HEAD='d22187495aad9edd253d8c70a882cb13e3ea861b';APP_TREE='d2638baa161dd130fc481d0eba3739183b288454';PHASE='prepare';PREPARED_SHA256='';DEPLOY_SHA256='';EXECUTE=True
+TARGET='0d7599859e5e01e90e4bbcbe71a9bd4a0a77b417';TREE='a5912e0a207e421221bfbb596fcfae6089c4c5ca';HEAD='d22187495aad9edd253d8c70a882cb13e3ea861b';APP_TREE='d2638baa161dd130fc481d0eba3739183b288454';PHASE='deploy';PREPARED_SHA256='0dcfe174784060bc4d9fb817cafba4ba4d070bd7703b1d467e9993702e03971a';DEPLOY_SHA256='';EXECUTE=True
 BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';ALIAS='rr-portal-internal-quote:latest'
 CID='0cfa8edaff44bbc74b4443b6dec444c90e2f115833ff9913abf8c9b6c462ef7a'
 LIVE_IMAGE='sha256:adf5b723ca5f8edae60a0a0f12a3828b8cd488a99eeee6405b61092805620294'

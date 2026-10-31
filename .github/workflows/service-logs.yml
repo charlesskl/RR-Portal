@@ -2,7 +2,7 @@ name: PR 1046-1049 Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [prepare]}
+      mode: {type: choice, required: true, options: [deploy]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'defb4981394add0b6d2ffef153aae332df0ccfe0c011a7656b6e670ec6892913'
+  SCOPED_RELEASE_HELPER_SHA256: '8564920562dab5cac00ec2720da650bb710acad68aafc4808833f141655a82f1'
 jobs:
   fixed-scoped-phase:
     runs-on: ubuntu-latest
@@ -27,10 +27,10 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = defb4981394add0b6d2ffef153aae332df0ccfe0c011a7656b6e670ec6892913 ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1046-1049-20261031 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 8564920562dab5cac00ec2720da650bb710acad68aafc4808833f141655a82f1 ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1046-1049-20261031 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
-      - name: Run exact Indo prepare helper
+      - name: Run exact Indo deploy helper
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           RELEASE_BRANCH: ${{ github.ref }}
@@ -47,8 +47,8 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = defb4981394add0b6d2ffef153aae332df0ccfe0c011a7656b6e670ec6892913 ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1046-1049-20261031 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 8564920562dab5cac00ec2720da650bb710acad68aafc4808833f141655a82f1 ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1046-1049-20261031 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-pr-1046-1049-20261031:refs/remotes/origin/codex/ops-pr-1046-1049-20261031 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/codex/ops-pr-1046-1049-20261031)" = "$RELEASE_SHA" ]] || exit 1
@@ -56,7 +56,7 @@ jobs:
             indo_tmp=$(mktemp -d /tmp/batch1046-1049.XXXXXX)
             trap 'rm -rf "$indo_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1047-quote-release.py" > "$indo_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$indo_tmp/run.py" | cut -d ' ' -f1)" = defb4981394add0b6d2ffef153aae332df0ccfe0c011a7656b6e670ec6892913 ]] || exit 1
+            [[ "$(sha256sum "$indo_tmp/run.py" | cut -d ' ' -f1)" = 8564920562dab5cac00ec2720da650bb710acad68aafc4808833f141655a82f1 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1035-quote-preflight.py" > "$indo_tmp/pr1035-quote-preflight.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$indo_tmp/pr1035-quote-preflight.py" | cut -d ' ' -f1)" = 2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$indo_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
@@ -65,4 +65,4 @@ jobs:
             [[ "$(sha256sum "$indo_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1030-engineering-preflight.py" > "$indo_tmp/pr1030-engineering-preflight.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$indo_tmp/pr1030-engineering-preflight.py" | cut -d ' ' -f1)" = 3d06b2aef715f75740826ff75f91c1cb78e0927e030717795ef2733f0595a4d0 ]] || exit 1
-            timeout --signal=TERM --kill-after=30s 22m python3 -B "$indo_tmp/run.py" prepare
+            timeout --signal=TERM --kill-after=30s 22m python3 -B "$indo_tmp/run.py" deploy

@@ -9,7 +9,7 @@ import calendar,contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathl
 ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/pr1046-1049-qc-20261031-1'
 APP='apps/生产部/品质管理系统';DATA_ROOT=ROOT/APP/'data';HOST_BASE='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c'
 BASE='0d7599859e5e01e90e4bbcbe71a9bd4a0a77b417';TARGET='ab44450518d6943af0cf7b4f1a72324d3f5076f8';TREE='6eb26e5b46630ecbe0cf1f64724490bad0a7d80f';APP_TREE='876962156a329155aaa1dd1b6624efcc808acd71';REVIEWED_HEADS={'1046': '907660d27f41521ed28ddcbd5e459bd1091ebffb', '1049': '4a9951492e72b4d8ba01a695dbeaa39f5c009217'}
-PHASE='prepare';PREPARED_SHA256='';DEPLOY_SHA256='';EXECUTE=True;BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031'
+PHASE='prepare';PREPARED_SHA256='';DEPLOY_SHA256='';EXECUTE=False;BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031'
 ALIAS='rr-portal-qc:latest';CID='712466bf56a8537eb914ac8c835f0315dee1d33ad4faae3665af71ed803988f9'
 LIVE_IMAGE='sha256:f4ae6aa9dd4ffec6e7dcca66eaae748a4e69cdc160eced9b10b4e2ab9a019494'
 BASE_IMAGE='sha256:65c56b6f8f59b8df5420912057023172b3fdd402297163b31342ee04561ac2f8'

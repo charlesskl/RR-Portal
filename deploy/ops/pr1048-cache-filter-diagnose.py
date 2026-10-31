@@ -1,6 +1,6 @@
 """INERT fixed read-only Buildx du filter matrix; absolutely no prune path."""
 import hashlib,json,os,pathlib,re,subprocess,sys
-ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1048-cache-filter-diagnose-1';EXECUTE=True;BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';STAGE='entry';IDS=('8qzomgd3axoasvusjy9gn2iin','s6lzlgvw18svpmfa55xnoksu1');PATTERN='^('+'|'.join(IDS)+')$';DETAILS={}
+ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1048-cache-filter-diagnose-1';EXECUTE=False;BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';STAGE='entry';IDS=('8qzomgd3axoasvusjy9gn2iin','s6lzlgvw18svpmfa55xnoksu1');PATTERN='^('+'|'.join(IDS)+')$';DETAILS={}
 def need(v,label):
  global STAGE
  STAGE=label

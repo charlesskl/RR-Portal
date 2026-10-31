@@ -182,5 +182,38 @@ test('LaTeX wrappers, two-digit years and unit-before-quantity text keep their n
 });
 test('delivered quantity still outranks order balance and price columns', () => {
   const fields = parse('| 客户订单号 | 货号 | 品名 | 订单数量 | 交货数量 | 欠货数量 | 单位 | 单价 |\n| PO-123456 | P001 | 塑胶零件 | 3000 | 1000 | 2000 | 个 | 2.5 |');
-  assert.equal(fields.orderNo, 'PO-123456'); assert.deepEqual(fields.items, [item('P001', '塑胶零件', '1000')]);
+  assert.equal(fields.orderNo, 'PO-123456'); assert.deepEqual(fields.items, [{ ...item('P001', '塑胶零件', '1000'), orderNo: 'PO-123456' }]);
+});
+
+test('different POs retain identical goods and quantities while repeated rows in one PO still deduplicate', () => {
+  const fields = parse('| 订单号 | 货号 | 品名 | 数量 | 单位 |\n' +
+    '| PO-100001 | P001 | 塑胶零件 | 100 | PCS |\n' +
+    '| PO-100002 | P001 | 塑胶零件 | 100 | pcs |\n' +
+    '| PO-100002 | P001 | 塑胶零件 | 100 | PCS |');
+  assert.deepEqual(fields.items, [
+    { ...item('P001', '塑胶零件', '100', 'PCS'), orderNo: 'PO-100001' },
+    { ...item('P001', '塑胶零件', '100', 'pcs'), orderNo: 'PO-100002' },
+  ]);
+});
+test('PO inheritance keeps merged cells and alphabetic identifiers, including across blank page rows', () => {
+  const fields = parse('| 订单号 | 货号 | 品名 | 送货数/总单数 | 单位 |\n' +
+    '| PO-ALPHA | P001 | 塑胶零件 | 100/500 | 个 |\n| | | | | |\n| | | | | |\n' +
+    '| | P002 | 胶袋 | 200/600 | 个 |\n| PO-BETA | P003 | 纸箱 | 300/700 | 箱 |');
+  assert.equal(fields.orderNo, 'PO-ALPHA');
+  assert.deepEqual(fields.items.map(r => [r.productNo, r.qty, r.orderNo]), [
+    ['P001', '100', 'PO-ALPHA'], ['P002', '200', 'PO-ALPHA'], ['P003', '300', 'PO-BETA'],
+  ]);
+});
+test('full-width delivered/ordered separators do not concatenate both quantities', () => {
+  const fields = parse('| 订单号 | 货号 | 品名 | 送貨數／總單數 | 單位 |\n| PO-100001 | P001 | 塑胶零件 | 100／500 | 個 |');
+  assert.equal(fields.items[0].qty, '100'); assert.equal(fields.items[0].orderNo, 'PO-100001');
+});
+test('explicit Chinese and full-width PO values retain their own identity instead of inheriting another order', () => {
+  const fields = parse('| 订单号 | 货号 | 品名 | 数量 | 单位 |\n' +
+    '| PO-100001 | P001 | 塑胶零件 | 100 | 个 |\n| 兴信-100001 | P001 | 塑胶零件 | 100 | 个 |\n| ＰＯ－１００００２ | P001 | 塑胶零件 | 100 | 个 |');
+  assert.deepEqual(fields.items.map(r => r.orderNo), ['PO-100001','兴信-100001','ＰＯ－１００００２']);
+});
+test('an anchored goods row with unreadable quantity remains available for manual correction', () => {
+  assert.deepEqual(parse(table([['P001', '塑胶零件', '', '个']])).items,
+    [item('P001', '塑胶零件', '', '个')]);
 });

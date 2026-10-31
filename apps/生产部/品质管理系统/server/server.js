@@ -258,13 +258,11 @@ function parseDeliveryNote(text) {
       if (cQty === -1) cQty = find(/数量|數量/, /欠|总|總/);
       if (cQty === -1) cQty = find(/备品|備品/);   /* 台聚：模型偶发丢「数量」表头，数量值落在备品数列 */
       const cUnit  = find(/单位|單位/, /数量|數量/);
-      let lastNo = '', lastOrder = '', emptyRun = 0;
+      let lastNo = '', lastOrder = '';
       const seenFull = new Set();   /* 已出现的完整明细（货号|品名），用于复读残行识别 */
       for (const row of tbl.slice(hi + 1)) {
         const cells = splitRow(row);
-        /* 连续两个全空行视为表格结束（后面通常是胶箱/卡板/签收区，不是明细） */
-        if (cells.every(c => !c)) { if (++emptyRun >= 2) break; continue; }
-        emptyRun = 0;
+        if (cells.every(c => !c)) continue;   /* 空白可能是分页间隔，不能截断后续真实明细 */
         const raw = i => (i >= 0 && i < cells.length ? cells[i] : '');
         const numeric = v => /^\d[\d,.]*(?:\s*\/.*)?$/.test(v);
         /* 合并品名格会令后续所有列左移；短一格时即便下一列金额也是数字，也应按行宽校正。 */
@@ -274,7 +272,7 @@ function parseDeliveryNote(text) {
         let no = get(cNo), name = get(cName);
         const mappedName = name;
         const qtyCell = get(cQty);
-        let qty = qtyCell.split('/')[0].replace(/[^\d.]/g, '');
+        let qty = qtyCell.split(/[/／]/)[0].replace(/[^\d.]/g, '');
         if (qty && (qty === no || qty === name)) qty = '';   /* 模型把货号/品名复制进数量列：清空待人工补 */
         if (!name) {   /* 品名被 OCR 错放到别的列：找第一个像品名的格子 */
           for (const c of cells) {
@@ -290,7 +288,6 @@ function parseDeliveryNote(text) {
         if (/^(合计|总计|合計|總計)/.test(no) || /^(合计|总计|合計|總計)/.test(name)) continue;   /* 合计行 */
         if (/^[-—–=]+$/.test(no) || /^[-—–=]+$/.test(name)) continue;   /* 分隔线碎片行 */
         if (/^[\d\/.]+$/.test(name) && !no && !/^\d+(?:\.\d+)?$/.test(qty)) continue;   /* 仅丢弃无货号、无可靠数量的数字碎片 */
-        if (/^(胶箱|膠箱|钙箱|鈣箱|胶袋|膠袋|纸箱|紙箱|平卡|大平卡|卡板|胶卡板|膠卡板|木卡板|吸塑|周转箱|送货人|送貨人|收货人|收貨人|开单人|開單人|制单|审核|審核)/.test(name)) continue;   /* 包装统计/签字区 */
         if (/^(数量|數量|单位|單位|备注|備注|箱数|箱數|总数|總數|完成)$/.test(name)) continue;   /* 表头/备注单词碎片 */
         if (/送货数|送貨数/.test(name) && /箱数|箱數|总单|總單|总数|總數/.test(name)) continue;   /* 表头混合碎片（已送货数/总箱数/总数） */
         if (!qty && !/\s\d{2,}$/.test(name) && /查验|签收|收妥|逾期|差错|通知|不负责|拒不退换/.test(name)) continue;   /* 无货品数量依据的表尾说明；签收贴纸等正常货品保留 */
@@ -325,11 +322,11 @@ function parseDeliveryNote(text) {
         if (unit && !/^(个|個|PCS|件|套|卷|张|張|桶|KG|米|箱|包|条|條|颗|顆|千克|克|G)$/i.test(unit)) unit = '';
         /* 每条明细自己的订单号（多 PO 单）；合并单元格则继承上一行 */
         const _oCell = cOrder >= 0 ? get(cOrder).replace(/\s+/g, '') : '';
-        if (!qty && !/\d/.test(_oCell)) continue;   /* 无数量且订单号格也不是 PO：表尾签字/杂行 */
-        const rowOrder = (/\d/.test(_oCell) ? _oCell : '') || lastOrder;
+        const rowOrder = (_oCell && _oCell !== no ? _oCell : '') || lastOrder;
         if (rowOrder) lastOrder = rowOrder;
         if (!fields.orderNo && rowOrder && rowOrder !== no && rowOrder.length >= 6) fields.orderNo = rowOrder;
-        fields.items.push({ productNo: no, productName: name, qty, unit, orderNo: rowOrder !== no ? rowOrder : '' });
+        fields.items.push({ productNo: no, productName: name, qty, unit,
+          ...(rowOrder && rowOrder !== no ? { orderNo: rowOrder } : {}) });
       }
     }
   }
@@ -413,7 +410,7 @@ function parseDeliveryNote(text) {
   if (fields.items.length > 1) {
     const seen = new Set();
     fields.items = fields.items.filter(it => {
-      const k = [it.productNo, it.productName, it.qty, it.unit].join('|');
+      const k = [it.orderNo || '', it.productNo, it.productName, it.qty, it.unit].join('|');
       if (seen.has(k)) return false;
       seen.add(k); return true;
     });
@@ -423,7 +420,7 @@ function parseDeliveryNote(text) {
     const seenLoose = new Set();
     fields.items = fields.items.filter(it => {
       if (!it.productName || !it.qty) return true;   /* 信息不全的行不参与合并 */
-      const k = [normName(it.productName), it.qty, it.unit].join('|');
+      const k = [it.orderNo || '', normName(it.productName), it.qty, it.unit].join('|');
       if (seenLoose.has(k)) return false;
       seenLoose.add(k); return true;
     });
@@ -432,7 +429,7 @@ function parseDeliveryNote(text) {
     const seenStrict = new Set();
     fields.items = fields.items.filter(it => {
       if (!it.productNo || !it.productName || !it.qty) return true;
-      const k = [it.productNo, normName(it.productName), it.qty, normUnit(it.unit)].join('|');
+      const k = [it.orderNo || '', it.productNo, normName(it.productName), it.qty, normUnit(it.unit)].join('|');
       if (seenStrict.has(k)) return false;
       seenStrict.add(k); return true;
     });

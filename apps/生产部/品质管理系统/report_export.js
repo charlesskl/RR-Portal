@@ -1997,11 +1997,11 @@ function _buildIQCCanvas(r) {
           }
           /* single */
           const vs=[...(m.values||[]),...Array(8).fill('')].slice(0,8).map(v=>v?_fmt(v):'');
-          const rawAvg=m.avg||_ra(m.values||[])||'—';
+          const rawAvg=_ra(m.values||[])||m.avg||'—';
           return {
             stdLines: _lines(_stdTol(m.standard,m.tolerance)||m.standard||''),
             valLines: vs.map(v=>v?`<div style="line-height:11px;font-size:9px">${v}</div>`:'&nbsp;'),
-            avgLines: _lines(rawAvg==='—'?'—':_fmt(rawAvg)),
+            avgLines: _lines(rawAvg==='—'?'—':Number.isFinite(Number(rawAvg))?Number(rawAvg).toFixed(2):rawAvg),
           };
         }
 

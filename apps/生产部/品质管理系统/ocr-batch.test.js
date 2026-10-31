@@ -41,7 +41,7 @@ test('simplified and aligned traditional documents keep their original mappings'
     ['華登製品廠\nDATE: 2026.10.20\nDGHD.2673728\n| 訂單 | 貨號 | 貨 | 名 | 數量 | 單位 |\n| PO-123456 | 15784 | 玩具 | | 1,000 | 個 |', '華登製品廠', '個'],
   ]) {
     const fields = plain(parse(fixture[0])); assert.equal(fields.supplier, fixture[1]); assert.equal(fields.date, '2026-10-20');
-    assert.equal(fields.orderNo, 'PO-123456'); assert.deepEqual(fields.items, [{ productNo: '15784', productName: '玩具', qty: '1000', unit: fixture[2] }]);
+    assert.equal(fields.orderNo, 'PO-123456'); assert.deepEqual(fields.items, [{ productNo: '15784', productName: '玩具', qty: '1000', unit: fixture[2], orderNo: 'PO-123456' }]);
   }
 });
 
@@ -85,6 +85,20 @@ test('mixed continue and save buttons persist every queued item once and finish 
   b.ctx.saveRecord(); assert.equal(b.ctx.__qcQueue.idx, 2); assert.equal(b.elements.get('f_productNo').value, 'P3');
   b.ctx.saveRecord(); assert.equal(b.ctx.__qcQueue, null); assert.equal(b.elements.get('modalOverlay').classList.contains('show'), false);
   assert.deepEqual(b.json('state.records.map(r=>[r.productNo,r.qty,r.deliveryNo,r.orderNo,r.aqlLevel])'), [1,2,3].map(i => ['P'+i,i*100,'DN-123','PO-123','MAJ 1.0,MIN 2.5']));
+});
+test('the OCR queue saves each actual item PO and retains the document fallback for legacy items', () => {
+  const b = browser();
+  b.ctx.__qcAiResult = { common: { date: '2026-10-20', supplier: 'Test Supplier', orderNo: 'PO-DOCUMENT', type: '来料' },
+    items: [{ productNo: 'P1', productName: 'Item 1', qty: 100, orderNo: 'PO-FIRST' },
+      { productNo: 'P2', productName: 'Item 2', qty: 200, orderNo: 'PO-SECOND' },
+      { productNo: 'P3', productName: 'Item 3', qty: 300 }] };
+  b.ctx.applyOcrToForm();
+  for (const expected of ['PO-FIRST', 'PO-SECOND', 'PO-DOCUMENT']) {
+    assert.equal(b.elements.get('f_orderNo').value, expected);
+    b.ctx.saveRecord();
+  }
+  assert.deepEqual(b.json('state.records.map(r=>[r.productNo,r.orderNo,r.status])'),
+    [['P1','PO-FIRST','pending'],['P2','PO-SECOND','pending'],['P3','PO-DOCUMENT','pending']]);
 });
 test('validation and cancelled sample confirmation leave the current queued item available', () => {
   const b = browser(); b.start(); b.elements.get('f_supplier').value = 'Unlisted'; b.ctx.saveRecord({ continueEntry: true });

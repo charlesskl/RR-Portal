@@ -206,6 +206,25 @@ test('IQC report renders the PO label and value', () => {
   assert.match(canvas.innerHTML, /PO-IQC-001/);
 });
 
+test('IQC report means retain two decimal places for single and multi-dimensional samples without changing the record', () => {
+  const aqlRow = { range: '1-50', sample: 20, cr: 0, maj065: 0, maj10: 1, min25: 1, func_sample: 20, m065: 0 };
+  const build = loadFunction(reportSource, '_buildIQCCanvas', {
+    document: { createElement: () => ({ id: '', innerHTML: '' }) },
+    _todayStr: () => '2026-10-31', _iqcGetRow: () => aqlRow, IQC_AQL_TABLE: [aqlRow],
+  });
+  for (const [measurement, expected] of [
+    [{ item: 'single', values: ['1.20','1.30'], avg: '1.3' }, '>1.25</div>'],
+    [{ item: 'zero', values: ['0','0'], avg: '9' }, '>0.00</div>'],
+    [{ item: 'legacy', values: [], avg: '1.2' }, '>1.20</div>'],
+    [{ item: 'LW', measureType: 'LW', lValues: ['1.20','1.30'], wValues: ['2','2'] }, '>1.25*2.00</span>'],
+    [{ item: 'LWH', measureType: 'LWH', lValues: ['1.20','1.30'], wValues: ['2','2'], hValues: ['3','3'] }, '>1.25*2.00*3.00</span>'],
+  ]) {
+    const record = { id: 1, qty: 100, sampleQty: 20, measurements: [measurement] }, before = JSON.stringify(record);
+    assert.ok(build(record).innerHTML.includes(expected), expected);
+    assert.equal(JSON.stringify(record), before);
+  }
+});
+
 test('basic record entry does not grant defect-library management', () => {
   const checkedActions = [];
   const context = {

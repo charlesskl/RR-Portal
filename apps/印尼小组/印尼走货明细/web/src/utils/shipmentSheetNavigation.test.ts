@@ -72,9 +72,9 @@ function setup(key: string, at = { row: 1, col: 1 }) {
     cellAt: () => ({ querySelector: () => null }), hasCell: () => true,
     canEdit: (p: { row: number; col: number }): boolean => p.col === 0 ? !!state.editorAt() : state.editableAt(),
     editorAt: vi.fn(() => ({} as HTMLElement | null)), focus: vi.fn(),
-    setAnchor: vi.fn(), setEnd: vi.fn(), fillDown: vi.fn(),
+    setAnchor: vi.fn(), setEnd: vi.fn(), fillDown: vi.fn(), clearSelection: vi.fn(),
     editingCell: null as { row: number; col: number } | null, setEditingCell: vi.fn(),
-    batchPending: { current: false }, anchor: at,
+    batchPending: { current: false }, anchor: at, end: at,
     event: { key, target: input, nativeEvent: { isComposing: false },
       ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false,
       preventDefault: vi.fn(), stopPropagation: vi.fn() },
@@ -164,13 +164,35 @@ it.each(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'])('F2或开始打字�
   expect(state.focus).not.toHaveBeenCalled()
   expect(state.event.preventDefault).not.toHaveBeenCalled()
 })
-it.each(['k', '卡', 'Backspace', 'Delete'])('选择模式的首个 %s 按键原生进入编辑，不吞键或转发伪造输入', key => {
+it.each(['k', '卡'])('选择模式的首个 %s 按键原生进入编辑，不吞键或转发伪造输入', key => {
   const { state, run } = setup(key)
   state.event.target = target({ tagName: 'TEXTAREA' })
   run()
   expect(state.setEditingCell).toHaveBeenCalledWith({ row: 1, col: 1 })
   expect(state.focus).not.toHaveBeenCalled()
   expect(state.event.preventDefault).not.toHaveBeenCalled()
+})
+it.each(['Delete', 'Backspace'])('选格模式的%s清空选区，文字编辑模式仍原生删除字符', key => {
+  const { state, run } = setup(key)
+  state.event.target = target({ tagName: 'TEXTAREA' })
+  run()
+  expect(state.clearSelection).toHaveBeenCalledOnce()
+  expect(state.event.preventDefault).toHaveBeenCalledOnce()
+  expect(state.setEditingCell).not.toHaveBeenCalled()
+  state.clearSelection.mockClear(); state.event.preventDefault.mockClear()
+  state.editingCell = { row: 1, col: 1 }
+  run()
+  expect(state.clearSelection).not.toHaveBeenCalled()
+  expect(state.event.preventDefault).not.toHaveBeenCalled()
+})
+it.each(['isComposing', 'ctrlKey', 'metaKey', 'altKey', 'expanded', 'repeat', 'pending'])('清空选区保留输入法/控件及系统快捷键，不重复清空：%s', modifier => {
+  const { state, run } = setup('Backspace')
+  if (modifier === 'isComposing') state.event.nativeEvent.isComposing = true
+  else if (modifier === 'expanded') state.event.target.getAttribute = () => 'true'
+  else if (modifier === 'pending') state.batchPending.current = true
+  else Object.assign(state.event, { [modifier]: true })
+  run()
+  expect(state.clearSelection).not.toHaveBeenCalled()
 })
 it.each(['a', '卡', 'Process'])('开始编辑后连续 %s 不再逐字更新表格选择状态', key => {
   const { state, run } = setup(key)
@@ -223,6 +245,33 @@ it('F2可进入编辑，Tab/Enter/向下填充继续使用原有逻辑', () => {
   expect(enter.state.focus).toHaveBeenCalledWith({ row: 2, col: 1 })
   const fill = setup('d'); fill.state.event.metaKey = true; fill.run()
   expect(fill.state.fillDown).toHaveBeenCalledOnce()
+})
+
+it.each([false, true])('卡板用空格分组，Enter 保持原来的跳格操作；Tab 仍切换下一格（Shift=%s）', shiftKey => {
+  const { state, run } = setup('Enter')
+  state.fields[1] = 'pallet'
+  state.editingCell = { row: 1, col: 1 }
+  state.event.target.closest = ((selector: string) => selector === 'textarea' || selector === 'input,textarea'
+    ? { tagName: 'TEXTAREA' } : null) as any
+  state.event.shiftKey = shiftKey
+  run()
+  expect(state.event.preventDefault).toHaveBeenCalled()
+  expect(state.focus).toHaveBeenCalledWith({ row: shiftKey ? 0 : 2, col: 1 })
+  state.event.key = 'Tab'; state.event.shiftKey = false
+  run()
+  expect(state.focus).toHaveBeenCalledWith({ row: 1, col: 2 })
+})
+
+it('只选中卡板未编辑时，Enter 仍下一行，不影响其他多行列', () => {
+  const { state, run } = setup('Enter')
+  state.fields[1] = 'pallet'
+  run()
+  expect(state.focus).toHaveBeenCalledWith({ row: 2, col: 1 })
+  state.focus.mockClear()
+  state.fields[1] = 'qty_per_carton'; state.editingCell = { row: 1, col: 1 }
+  state.event.target.closest = ((selector: string) => selector === 'textarea' ? {} : null) as any
+  run()
+  expect(state.focus).toHaveBeenCalledWith({ row: 2, col: 1 })
 })
 
 it('F2可进入批量保护列中的已有选择器，禁止进入合并只读格及无编辑器的显示格', () => {

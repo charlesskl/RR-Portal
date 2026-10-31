@@ -1,8 +1,9 @@
 import { cloneElement, isValidElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { App, Button, Space, Table, Typography } from 'antd'
 import type { GetRef, TableProps } from 'antd'
-import { parseSheetClipboard, sheetFillDownEdits, sheetPasteSelectionEdits, type SheetEdit, type SheetPoint } from '../utils/shipmentSheet'
+import { parseSheetClipboard, sheetClearSelectionEdits, sheetFillDownEdits, sheetPasteSelectionEdits, type SheetEdit, type SheetPoint } from '../utils/shipmentSheet'
 import { sheetArrowKeys, sheetArrowPoint, sheetArrowUsesEditor } from '../utils/shipmentSheetNavigation'
+import { formatShipmentPallet } from '../utils/shipmentDisplay'
 import { ShipmentSheetDraftContext, ShipmentSheetFillContext, type ShipmentDraftCommit } from './ShipmentSheetDraft'
 
 type Props<T extends object> = TableProps<T> & {
@@ -35,8 +36,8 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
   const table = useRef<GetRef<typeof Table>>(null)
   const drafts = useRef(new Set<ShipmentDraftCommit>())
   const batchPending = useRef(false)
-  const latest = useRef({ onEdits, valueAt, rowOrder })
-  useLayoutEffect(() => { latest.current = { onEdits, valueAt, rowOrder } })
+  const latest = useRef({ onEdits, valueAt, rowOrder, editableAt })
+  useLayoutEffect(() => { latest.current = { onEdits, valueAt, rowOrder, editableAt } })
   const registerDraft = useCallback((commit: ShipmentDraftCommit, pending: () => Promise<boolean> | null) => {
     drafts.current.add(commit)
     return () => {
@@ -179,6 +180,8 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     finally { batchPending.current = false }
   }
   const fillDown = () => { void runBatch(values => sheetFillDownEdits(anchor, end, count, fields, values.valueAt)) }
+  const clearSelection = () => { void runBatch(values => sheetClearSelectionEdits(anchor, end, count, fields,
+    (row, field) => values.editableAt?.(row, field) !== false && hasCell({ row, col: fields.indexOf(field) }))) }
   const fillFrom = (source: number, target: number, field: string) => { void runBatch(values => {
     if (target <= source) throw new Error('请把复制点向下拖动到目标行')
     const col = fields.indexOf(field)
@@ -337,7 +340,8 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
         for (let col = Math.min(anchor.col, end.col); col <= Math.max(anchor.col, end.col); col++) {
           const input = Array.from(cellAt({ row, col })?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input:not([readonly]),textarea:not([readonly])') || [])
             .find(editor => !editor.closest('.ant-select,.ant-picker'))
-          cells.push(quote(input?.value ?? (fields[col] ? String(valueAt(row, fields[col]) ?? '') : String(displayAt(row, col) ?? cellText(cellAt({ row, col }))))))
+          const text = input?.value ?? (fields[col] ? String(valueAt(row, fields[col]) ?? '') : String(displayAt(row, col) ?? cellText(cellAt({ row, col }))))
+          cells.push(quote(fields[col] === 'pallet' ? formatShipmentPallet(text) : text))
         }
         values.push(cells.join('\t'))
       }
@@ -363,7 +367,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       // A selected input stays mounted: native typing/selection, including the
       // very first character, starts editing without forwarding synthetic keys.
       if (!isEditing && !event.ctrlKey && !event.metaKey && !event.altKey
-        && (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') && canEdit(p))
+        && event.key.length === 1 && canEdit(p))
         setEditingCell(p)
       // Existing pickers in protected columns (new-row material selection,
       // category selection) keep their own keyboard behaviour.
@@ -378,6 +382,13 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       }
       if (target.getAttribute('aria-expanded') === 'true' || target.closest('[aria-expanded="true"]')
         || cellAt(p)?.querySelector('[aria-expanded="true"]')) return
+      if ((event.key === 'Delete' || event.key === 'Backspace') && !event.ctrlKey && !event.metaKey && !event.altKey
+        && (!isEditing || (anchor && end && (anchor.row !== end.row || anchor.col !== end.col)))
+        && !target.closest('button,a,select,[contenteditable="true"]')) {
+        event.preventDefault(); event.stopPropagation()
+        if (!event.repeat) clearSelection()
+        return
+      }
       // Batch-protected columns can still contain their own material/category
       // picker. F2 may focus that enabled control without opening batch edits.
       if (event.key === 'F2' && canEdit(p)) {
@@ -415,6 +426,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
         ? `已选 ${Math.abs(anchor.row - end.row) + 1} 行 × ${Math.abs(anchor.col - end.col) + 1} 列（${(Math.abs(anchor.row - end.row) + 1) * (Math.abs(anchor.col - end.col) + 1)} 格）`
         : '尚未选择单元格'}</Typography.Text>
       <Button size="small" onClick={fillDown} title="Ctrl/⌘D：单选复制上一行；多行选区按首行向下填充">向下填充选区</Button>
+      <Button size="small" onClick={clearSelection} disabled={!anchor || !end} title="Delete / Backspace：清空所选可编辑单元格，不删除明细行">清空选区</Button>
     </Space>
     <Table<T> {...props} ref={table} virtual bordered columns={mapped}
       scroll={{ ...props.scroll, y: viewportHeight, x: mapped.reduce((total, col) => total + Number(col.width), 40) }} />

@@ -57,8 +57,9 @@ export function customsFormulaName(item: CustomsItem, material?: Material, custo
 
 import { customsInvoicePrice, customsInvoiceFormula, invoiceCustomsCompany } from './shipmentInvoice'
 import { shipmentDeclarationPrice, shipmentPurchaseAmount } from './shipmentPurchase'
-import { normalizeShipmentDeclarations } from './shipmentDeclaration'
-import { shipmentPurchaseDates } from './shipmentDates'
+import { formatShipmentDeclaration, normalizeShipmentDeclarations, roundedShipmentDeclaration, shipmentDeclarationPrecision } from './shipmentDeclaration'
+import { shipmentDateOnly, shipmentPurchaseDates } from './shipmentDates'
+import { formatShipmentPallet } from './shipmentDisplay'
 export { customsInvoicePrice } from './shipmentInvoice'
 
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
@@ -323,7 +324,8 @@ function compactMainColumns(sheet: XLSX.WorkSheet) {
 
 function excelDate(d: any): number | string {
   if (!d) return ''
-  const dt = (d instanceof Date) ? d : new Date(d)
+  const businessDate = typeof d === 'string' ? shipmentDateOnly(d) : ''
+  const dt = businessDate ? new Date(businessDate + 'T00:00:00Z') : (d instanceof Date) ? d : new Date(d)
   if (isNaN(dt.getTime())) return d
   return Math.floor((dt.getTime() - Date.UTC(1899, 11, 30)) / 86400000)
 }
@@ -1154,9 +1156,13 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     return effectiveCustomsCompany(it, m, tf.exportCompany)
   }
   const sorted = sortShipmentItems(consolidateShipmentItems(normalizeShipmentDeclarations(items, materials), materials, tf.exportCompany), materials, tf.exportCompany)
+    .map(item => roundedShipmentDeclaration(item, matOf(item) || (item.material_snapshot as Material | undefined)))
   sorted.forEach((item, index) => {
     if (shipmentPurchaseAmount(item) !== 0 && !(Number(item.kg) > 0))
       throw new Error(`第 ${index + 1} 行（${matOf(item)?.name_zh || '未命名物料'}）有采购金额但送货重量/申报数量为零，请补齐后导出`)
+    const unit = matOf(item)?.unit_kg || (item.material_snapshot as Material | undefined)?.unit_kg
+    if (Number(item.kg) > 0 && Number(formatShipmentDeclaration(item.kg, unit).replaceAll(',', '')) === 0)
+      throw new Error(`第 ${index + 1} 行申报数量按单位精度取舍后为零，请调整申报单位后导出`)
   })
   const cartonRows = cartonLayout(sorted, materials, tf.exportCompany)
   const supplierOf = (it: CustomsItem) => (it.supplier || matOf(it)?.supplier || '').trim()
@@ -1314,7 +1320,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 52, grossPerPc, 'n')
     ws[XLSX.utils.encode_cell({ r: ri, c: 52 })].f = `IFERROR(IF(AZ${ri + 1}>0,AZ${ri + 1}/${Number(weighingQty) || 0},0),0)`
     setCell(ws, ri, 53, m?.net_per_pc || 0, 'n')
-    setCell(ws, ri, 54, it.pallet || '', 's')
+    setCell(ws, ri, 54, formatShipmentPallet(it.pallet), 's')
     // File readers and import previews use cached values before Excel/WPS
     // recalculates. Keep the actual weights alongside their live formulas.
     const weightQty = shipmentWeightQuantity(m?.name_zh, it.qty)
@@ -1501,6 +1507,9 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       const cell: any = (ws as any)[XLSX.utils.encode_cell({ r: i + 3, c: Number(column) })]
       if (cell) cell.z = format
     }
+    const declaration = ws[XLSX.utils.encode_cell({ r: i + 3, c: 10 })]
+    const precision = shipmentDeclarationPrecision(matOf(sorted[i])?.unit_kg || (sorted[i].material_snapshot as Material | undefined)?.unit_kg)
+    if (declaration && precision != null) declaration.z = `0.${'0'.repeat(precision)}`
   }
 
   // 列宽、隐藏列和明细行高沿用模板；缩短顶部两行空白区域。
@@ -1534,7 +1543,8 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     documentPlans = await resizeLinkedDocumentTables(outZip, newName, sorted)
   } else {
     outZip = generatedZip
-    await restoreTemplateDocumentStyles(templateBuffer, outZip, oldName, newName, sorted.map(effCustoms), sorted.map(item => item.currency || '¥'))
+    await restoreTemplateDocumentStyles(templateBuffer, outZip, oldName, newName, sorted.map(effCustoms), sorted.map(item => item.currency || '¥'),
+      sorted.map(item => matOf(item)?.unit_kg || (item.material_snapshot as Material | undefined)?.unit_kg))
     if (!embeddedIndonesiaDocuments && input.indonesiaTemplateBuffer && sorted.some(item => isIndonesiaBlHead(item.bl_head))) {
       await restoreIndonesiaDocumentStyles(input.indonesiaTemplateBuffer, outZip)
     }
@@ -1554,6 +1564,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     await injectOoxmlImages(outZip, mainSheetIdx, floatImages)
   }
   // Apply after every template merge: SheetJS does not retain native pane state.
+  await wrapMainPalletCells(outZip, newName)
   await freezeMainWorksheet(outZip, newName)
   // Force Excel/WPS to calculate preserved formulas, not display old template caches.
   const calculationDoc = new DOMParser().parseFromString(await outZip.file('xl/workbook.xml')!.async('string'), 'application/xml')
@@ -1565,6 +1576,44 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   for (const [key, value] of Object.entries({ calcMode: 'auto', fullCalcOnLoad: '1', forceFullCalc: '1' })) calc.setAttribute(key, value)
   outZip.file('xl/workbook.xml', new XMLSerializer().serializeToString(calculationDoc))
   return await outZip.generateAsync({ type: 'blob' })
+}
+
+/** Template style restoration must not hide the pallet's explicit line breaks. */
+async function wrapMainPalletCells(zip: JSZip, mainName: string) {
+  const path = (await workbookSheetParts(zip)).get(mainName)
+  const sheetFile = path ? zip.file(path) : null, stylesFile = zip.file('xl/styles.xml')
+  if (!path || !sheetFile || !stylesFile) throw new Error('导出卡板列样式不完整')
+  const parser = new DOMParser(), serializer = new XMLSerializer()
+  const sheet = parser.parseFromString(await sheetFile.async('string'), 'application/xml')
+  const styles = parser.parseFromString(await stylesFile.async('string'), 'application/xml')
+  const xfs = styleCollection(styles.documentElement as XmlElement, 'cellXfs')
+  if (!xfs) throw new Error('导出卡板列样式不完整')
+  const originals = directChildren(xfs, 'xf'), wrapped = new Map<string, string>()
+  for (const cell of Array.from(sheet.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as XmlElement[]) {
+    const row = /^BC(\d+)$/.exec(cell.getAttribute('r') || '')
+    if (!row || Number(row[1]) < 4) continue
+    const baseId = cell.getAttribute('s') || '0', base = originals[Number(baseId)]
+    if (!base) continue
+    if (directChild(base, 'alignment')?.getAttribute('wrapText') === '1') continue
+    let id = wrapped.get(baseId)
+    if (!id) {
+      const copy = base.cloneNode(true) as XmlElement
+      let alignment = directChild(copy, 'alignment')
+      if (!alignment) {
+        alignment = styles.createElementNS(SPREADSHEET_NS, 'alignment') as XmlElement
+        copy.insertBefore(alignment, directChild(copy, 'protection') || directChild(copy, 'extLst') || null)
+      }
+      alignment.setAttribute('wrapText', '1')
+      copy.setAttribute('applyAlignment', '1')
+      id = String(directChildren(xfs, 'xf').length)
+      xfs.appendChild(copy)
+      wrapped.set(baseId, id)
+    }
+    cell.setAttribute('s', id)
+  }
+  xfs.setAttribute('count', String(directChildren(xfs, 'xf').length))
+  zip.file('xl/styles.xml', serializer.serializeToString(styles))
+  zip.file(path, serializer.serializeToString(sheet))
 }
 
 /** Freeze rows 1:3 and columns A:M on the final main detail worksheet only. */
@@ -2212,6 +2261,7 @@ async function restoreTemplateDocumentStyles(
   newMainName: string,
   outputCompanies: string[],
   outputCurrencies: string[],
+  outputUnits: (string | undefined)[],
 ) {
   const templateZip = await JSZip.loadAsync(templateBuffer)
   const parser = new DOMParser()
@@ -2242,6 +2292,34 @@ async function restoreTemplateDocumentStyles(
     }
   }
   const derivedFonts = new Map<string, string>()
+  const styleForDeclaration = (baseStyle: string, unit?: string) => {
+    const precision = shipmentDeclarationPrecision(unit)
+    if (precision == null) return baseStyle
+    const key = `${baseStyle}|declaration:${precision}`
+    const cached = derivedStyles.get(key)
+    if (cached) return cached
+    const formats = rawStyles.getElementsByTagName('numFmts')[0]
+    if (!formats) return baseStyle
+    const code = `0.${'0'.repeat(precision)}`
+    let numFmtId = precision === 2 ? '2' : Array.from(formats.getElementsByTagName('numFmt'))
+      .find(node => node.getAttribute('formatCode') === code)?.getAttribute('numFmtId')
+    if (!numFmtId) {
+      numFmtId = String(Math.max(163, ...Array.from(formats.getElementsByTagName('numFmt')).map(node => Number(node.getAttribute('numFmtId')) || 0)) + 1)
+      const format = rawStyles.createElementNS(formats.namespaceURI, 'numFmt')
+      format.setAttribute('numFmtId', numFmtId)
+      format.setAttribute('formatCode', code)
+      formats.appendChild(format)
+      formats.setAttribute('count', String(formats.getElementsByTagName('numFmt').length))
+    }
+    const base = rawXfs.getElementsByTagName('xf')[Number(baseStyle)] || xfNodes[0]
+    const copy = rawStyles.importNode(base, true) as typeof base
+    copy.setAttribute('numFmtId', numFmtId)
+    copy.setAttribute('applyNumberFormat', '1')
+    const styleId = String(xfNodes.length + derivedStyles.size)
+    rawXfs.appendChild(copy)
+    derivedStyles.set(key, styleId)
+    return styleId
+  }
   const styleForCurrency = (baseStyle: string, currency: string) => {
     const numFmtId = currencyNumFmt.get(currency)
     if (!numFmtId) return baseStyle
@@ -2353,6 +2431,7 @@ async function restoreTemplateDocumentStyles(
           rawStyle = rawMainStyles.get(`${sourceColumn}4`)
           if (rawStyle) rawStyle = styleWithFill(rawStyle,
             rawMainStyles.get(sourceColumn === 'E' ? 'E3' : `A${sourceRow}`) || rawStyle)
+          if (rawStyle && sourceColumn === 'K') rawStyle = styleForDeclaration(rawStyle, outputUnits[Number(match[2]) - 4])
           if (rawStyle && ['Z', 'AA', 'AB'].includes(match[1])) rawStyle = styleForCurrency(rawStyle, 'US$')
           if (rawStyle && ['AO', 'AP', 'AQ'].includes(match[1])) {
             rawStyle = styleForCurrency(rawStyle, outputCurrencies[Number(match[2]) - 4] || '¥')

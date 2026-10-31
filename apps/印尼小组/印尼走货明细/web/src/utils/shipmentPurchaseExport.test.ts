@@ -7,7 +7,7 @@ import { shipmentPurchaseAmount } from './shipmentPurchase'
 import { withShipmentInvoicePrices } from './shipmentInvoice'
 import { consolidateShipmentItems } from './shipmentConsolidation'
 
-it.each(['RRI', 'RRM'])('免费备品：真实模板数量重量不减、采购/发票金额及再导入金额不含备品（%s）', async customer => {
+it.each(['RRI', 'RRM'])('免费备品：数量不减、申报公斤取2位、采购/发票金额及再导入金额不含备品（%s）', async customer => {
   const materials = new Map([
     [979, { id: 979, name_zh: '阿奇密封盒', product_code: '97282/1099235/6077462', unit_kg: 'KGM' }],
     [983, { id: 983, name_zh: '阿奇CDU', product_code: '94704/1101147/6079033', unit_kg: 'KGM' }],
@@ -34,9 +34,11 @@ it.each(['RRI', 'RRM'])('免费备品：真实模板数量重量不减、采购/
     expect(sheet['AO' + r].v * sheet['K' + r].v).toBeCloseTo(amount, 9)
   })
   expect(sheet.L4.v).toBe(3667)
-  expect(sheet.K4.v).toBeCloseTo(502.379, 9)
+  expect(sheet.K4.v).toBe(502.38)
+  expect(sheet.K4.z?.replaceAll('_ ', '')).toBe('0.00')
   expect(sheet.L5.v).toBe(15251)
-  expect(sheet.K5.v).toBeCloseTo(1250.582, 9)
+  expect(sheet.K5.v).toBe(1250.58)
+  expect(sheet.K5.z?.replaceAll('_ ', '')).toBe('0.00')
   const imported = parseShipmentWorkbook(workbook).rows.filter(row => row.sheet === 'FREE-SPARES')
   expect(imported).toHaveLength(2)
   imported.forEach((row, i) => expect(shipmentPurchaseAmount(row.item)).toBeCloseTo(expected[i], 9))

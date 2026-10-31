@@ -28,6 +28,7 @@ async function fixture(t){
   };}};
   const ddl=`CREATE TABLE quotes(id INTEGER PRIMARY KEY,customer TEXT,quote_no TEXT,product_name TEXT,version TEXT,deleted_at TEXT,factory_code TEXT);
     CREATE TABLE user_customers(user_id INTEGER,customer TEXT);
+    CREATE TABLE quote_verifications(quote_id INTEGER,origin TEXT,created_at TEXT);
     CREATE TABLE departments(code TEXT);
     CREATE TABLE quote_customer_confirmations(quote_id INTEGER,status TEXT,confirmed_price REAL,confirmed_qty INTEGER,confirmed_at TEXT);
     CREATE TABLE quote_verification_versions(id INTEGER PRIMARY KEY,quote_id INTEGER,version_no INTEGER,label TEXT,category TEXT,status TEXT,updated_at TEXT);
@@ -64,15 +65,15 @@ test('summary and tasks expose the same raw-payload revision and latest non-canc
   assert.equal(report.status,200);assert.deepEqual(report.body.rows.map(r=>r.id),[1]);
   assert.equal(report.body.rows[0].quantity_revision,await f.token(1));
   assert.equal(tasks.body.rows[0].current_version_id,1);assert.equal(tasks.body.rows[0].workshop_revision,await f.token(1));
-  assert.equal((await f.workshops([1],'河源')).status,200);
+  assert.equal((await f.workshops([1],'兴信B')).status,200);
   assert.deepEqual((await f.api('/summary',null,{'x-admin':'1'})).body.rows.map(r=>r.id),[1,2]);
 });
 
 test('a cancelled newer version does not block assignment of the current active version',async t=>{
   const f=await fixture(t);
   await f.query("INSERT INTO quote_verification_versions VALUES(4,1,2,'V2',NULL,'cancelled','unchanged')");
-  assert.equal((await f.workshops([1],'河源')).status,200);
-  assert.equal(JSON.parse((await f.read(1)).payload_json).workshop_assignment.name,'河源');
+  assert.equal((await f.workshops([1],'兴信B')).status,200);
+  assert.equal(JSON.parse((await f.read(1)).payload_json).workshop_assignment.name,'兴信B');
 });
 
 test('new metadata writes enforce customer, factory, role, input and loaded-revision permissions',async t=>{
@@ -96,7 +97,7 @@ test('quantity zero, blank and workshop changes preserve costing, approval and p
     const section=await f.read(1),p=JSON.parse(section.payload_json);assert.equal(p.summary_order_quantity.value,quantity);assert.equal(p.amount,12);assert.equal(p.formula,'=A1');
     for(const key of ['status','filled_at','reviewed_at'])assert.equal(section[key],before[key]);
   }
-  const w=await f.workshops([1,1],'河源');assert.equal(w.status,200);assert.equal(w.body.count,1);assert.equal(w.body.revisions[1],await f.token(1));
+  const w=await f.workshops([1,1],'兴信B');assert.equal(w.status,200);assert.equal(w.body.count,1);assert.equal(w.body.revisions[1],await f.token(1));
   assert.deepEqual(await f.query('SELECT * FROM quote_verification_versions WHERE id=1',[],'get'),v);
   assert.equal((await f.workshops([1],'待分配车间')).status,200);
   assert.equal(JSON.parse((await f.read(1)).payload_json).workshop_assignment.name,'待分配车间');
@@ -109,17 +110,17 @@ test('two loaded pages cannot silently overwrite quantity or workshop edits',asy
   const f=await fixture(t),stale=await f.token(1);
   assert.equal((await f.qty(1,8)).status,200);
   assert.equal((await f.api('/summary/quantity',{version_id:1,quantity:99,expected_revision:stale})).status,409);
-  assert.equal((await f.api('/tasks/workshops',{version_ids:[1],workshop:'河源',expected_revisions:{1:stale}})).status,409);
+  assert.equal((await f.api('/tasks/workshops',{version_ids:[1],workshop:'兴信B',expected_revisions:{1:stale}})).status,409);
   assert.equal(JSON.parse((await f.read(1)).payload_json).summary_order_quantity.value,8);
   assert.equal(Number((await f.query('SELECT count(*) n FROM audit_log',[],'get')).n),1);
 });
 
 test('a batch with a denied or stale later item rolls back every earlier assignment and audit',async t=>{
   const f=await fixture(t),before=await f.read(1);
-  assert.equal((await f.workshops([1,2],'河源')).status,403);assert.deepEqual(await f.read(1),before);
+  assert.equal((await f.workshops([1,2],'兴信B')).status,403);assert.deepEqual(await f.read(1),before);
   const expected={1:await f.token(1),2:await f.token(2)};
   await f.qty(2,10,{'x-admin':'1'});
-  assert.equal((await f.api('/tasks/workshops',{version_ids:[2,1],workshop:'河源',expected_revisions:expected},{'x-admin':'1'})).status,409);
+  assert.equal((await f.api('/tasks/workshops',{version_ids:[2,1],workshop:'兴信B',expected_revisions:expected},{'x-admin':'1'})).status,409);
   assert.deepEqual(await f.read(1),before);assert.equal(Number((await f.query('SELECT count(*) n FROM audit_log',[],'get')).n),1);
 });
 
@@ -127,7 +128,7 @@ test('metadata update and audit failures roll back together',async t=>{
   const f=await fixture(t),before=await f.read(1);
   f.setBefore(async sql=>{if(sql.startsWith('INSERT INTO audit_log'))throw Error('fixture failed audit');});
   assert.equal((await f.qty(1,4)).status,500);assert.deepEqual(await f.read(1),before);
-  assert.equal((await f.workshops([1],'河源')).status,500);assert.deepEqual(await f.read(1),before);
+  assert.equal((await f.workshops([1],'兴信B')).status,500);assert.deepEqual(await f.read(1),before);
   assert.equal(Number((await f.query('SELECT count(*) n FROM audit_log',[],'get')).n),0);
 });
 
@@ -137,7 +138,7 @@ test('simultaneous quantity and workshop editors share one exact sales-payload c
   f.setBefore(async sql=>{if(!sql.startsWith('UPDATE quote_verification_sections SET payload_json'))return;if(++count===2)release();await gate;});
   const results=await Promise.all([
     f.api('/summary/quantity',{version_id:1,quantity:33,expected_revision:revision}),
-    f.api('/tasks/workshops',{version_ids:[1],workshop:'河源',expected_revisions:{1:revision}}),
+    f.api('/tasks/workshops',{version_ids:[1],workshop:'兴信B',expected_revisions:{1:revision}}),
   ]);
   assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
   const p=JSON.parse((await f.read(1)).payload_json);
@@ -154,7 +155,7 @@ for(const mode of ['quantity','workshop'])for(const change of ['new version','ca
     else if(change==='cancelled')await f.outside("UPDATE quote_verification_versions SET status='cancelled' WHERE id=1");
     else await f.outside('UPDATE quote_verification_sections SET payload_json=? WHERE id=1',[' {"concurrent":true} ']);
   });
-  const result=mode==='quantity'?await f.qty(1,33):await f.workshops([1],'河源');
+  const result=mode==='quantity'?await f.qty(1,33):await f.workshops([1],'兴信B');
   assert.equal(result.status,409);assert.equal(injected,true);
   assert.equal((await f.read(1)).payload_json,change==='payload'?' {"concurrent":true} ':before.payload_json);
   assert.equal(Number((await f.query('SELECT count(*) n FROM audit_log',[],'get')).n),0);
@@ -163,7 +164,7 @@ for(const mode of ['quantity','workshop'])for(const change of ['new version','ca
 for(const mode of ['quantity','workshop'])test(`${mode} returns a conflict when cancellation leaves no active version`,{skip:!process.env.TEST_DATABASE_URL},async t=>{
   const f=await fixture(t),before=await f.read(1);let injected=false;
   f.setBefore(async sql=>{if(injected||!sql.startsWith('SELECT id FROM quote_verification_versions WHERE quote_id='))return;injected=true;await f.outside("UPDATE quote_verification_versions SET status='cancelled' WHERE id=1");});
-  const result=mode==='quantity'?await f.qty(1,33):await f.workshops([1],'河源');
+  const result=mode==='quantity'?await f.qty(1,33):await f.workshops([1],'兴信B');
   assert.equal(result.status,409);assert.equal(injected,true);assert.deepEqual(await f.read(1),before);
   assert.equal(Number((await f.query('SELECT count(*) n FROM audit_log',[],'get')).n),0);
 });

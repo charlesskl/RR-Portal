@@ -6,8 +6,10 @@ function setup(){
  const db=new DatabaseSync(':memory:');
  db.exec(`CREATE TABLE quotes(id INTEGER PRIMARY KEY,quote_no TEXT,customer TEXT,factory_code TEXT,deleted_at TEXT);
  CREATE TABLE quote_sections(quote_id INTEGER,dept TEXT,payload_json TEXT);
+ CREATE TABLE quote_verifications(quote_id INTEGER,origin TEXT);
  CREATE TABLE user_customers(user_id INTEGER,customer TEXT);
- INSERT INTO quotes VALUES (1,'ORDINARY-A','A','qingxi',NULL),(2,'HISTORY-A','A','qingxi',NULL),(3,'ORDINARY-B','B','qingxi',NULL);
+ INSERT INTO quotes VALUES (1,'ORDINARY-A','A','qingxi',NULL),(2,'HISTORY-A','A','qingxi',NULL),(3,'ORDINARY-B','B','qingxi',NULL),(4,'DIRECT-A','A','qingxi',NULL);
+ INSERT INTO quote_verifications VALUES(4,'direct');
  INSERT INTO quote_sections VALUES (1,'sales','{}'),(2,'sales','{"legacy_import":{"summary_only":true}}'),(3,'sales','{}');
  INSERT INTO user_customers VALUES (1,'A');`);
  const ctx=vm.createContext({db});

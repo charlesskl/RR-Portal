@@ -115,6 +115,8 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_quotes_factory ON quotes(factory_code)')
 const _softDeleteCols = db.prepare('PRAGMA table_info(quotes)').all().map(c => c.name);
 if (!_softDeleteCols.includes('deleted_at')) db.exec('ALTER TABLE quotes ADD COLUMN deleted_at TEXT');
 if (!_softDeleteCols.includes('deleted_by')) db.exec('ALTER TABLE quotes ADD COLUMN deleted_by TEXT');
+const _verificationOriginCols = db.prepare('PRAGMA table_info(quote_verifications)').all().map(c => c.name);
+if (!_verificationOriginCols.includes('origin')) db.exec("ALTER TABLE quote_verifications ADD COLUMN origin TEXT NOT NULL DEFAULT 'quote'");
 const _verificationVersionCols = db.prepare('PRAGMA table_info(quote_verification_versions)').all().map(c => c.name);
 if (!_verificationVersionCols.includes('category')) {
   db.exec('ALTER TABLE quote_verification_versions ADD COLUMN category TEXT');

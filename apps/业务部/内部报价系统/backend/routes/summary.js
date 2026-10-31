@@ -8,6 +8,9 @@ const router = express.Router();
 router.use(requireAuth);
 
 const HIDE_IMPORTED_VERIFICATIONS = `AND NOT EXISTS (
+  SELECT 1 FROM quote_verifications direct_case
+  WHERE direct_case.quote_id = q.id AND direct_case.origin = 'direct'
+) AND NOT EXISTS (
   SELECT 1 FROM quote_sections imported_section
   WHERE imported_section.quote_id = q.id
     AND imported_section.dept = 'sales'

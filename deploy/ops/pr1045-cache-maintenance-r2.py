@@ -6,7 +6,7 @@ import calendar,datetime,hashlib,importlib.util,json,os,pathlib,re,stat,subproce
 ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1045-cache-maintenance-2'
 BRANCH='refs/heads/codex/ops-pr-1045-20261031-quote';EXECUTE=True
 HELPER='pr1045-cache-help-preflight.py';HELPER_SHA256='6a1916349121ca78f3600ecd0a56b951b4a7f043c2f8dc5bfca4a4a3ae200be6'
-PROFILE_PATH='/opt/rr-portal/deploy/backups/pr1045-quote-preflight-2/result.private.json';PROFILE_FILE_SHA256='e68d2c58444ce06978385719bf3e4abea82930ba3ce4bbcaf51d8e13910b2249';PLAN={'approved': True, 'profileFileSHA256': 'e68d2c58444ce06978385719bf3e4abea82930ba3ce4bbcaf51d8e13910b2249', 'engineID': 'bc9f32e6-298a-45f8-92c7-b755d1b61818', 'clientVersion': '29.2.1', 'serverVersion': '29.2.1', 'builderName': 'default', 'pruneHelpSHA256': '98e664404f2a4be365a5f1c6615b2bbf62d9ede0235784f17d9bfac142cd7db1', 'reviewedRecordIDs': ['dffp2znok9t2q0bzpfrytguxk', 'nhge2ev4tp7n11trp6cxgt93d', 'pmxbytwvlxa8nzhvp9h8q17mu', 'pnz75pe7lyx9k77mis6q147s3', 'qjiyizc7qoyp3q33ymejou7en', 'qsllsiwz72jrsw12pkomte3m8'], 'idFilterSemanticsReviewed': True, 'idFilterPrimarySource': 'https://docs.docker.com/reference/cli/docker/buildx/prune/', 'reservedSpaceBytes': 30064771072, 'cacheScope': 'exact-six-cache-ids-immutable-private-unused-at-least-168h', 'automaticRetry': False, 'noExactDeletionDryRun': True};PLAN_SHA256='e6f77aa285f96505852cc75627c632f89a937a93671da56f0587a9ad0bf2c7e2'
+PROFILE_PATH='/opt/rr-portal/deploy/backups/pr1045-quote-preflight-2/result.private.json';PROFILE_FILE_SHA256='e68d2c58444ce06978385719bf3e4abea82930ba3ce4bbcaf51d8e13910b2249';PLAN={'approved': True, 'profileFileSHA256': 'e68d2c58444ce06978385719bf3e4abea82930ba3ce4bbcaf51d8e13910b2249', 'engineID': 'bc9f32e6-298a-45f8-92c7-b755d1b61818', 'clientVersion': '29.2.1', 'serverVersion': '29.2.1', 'builderName': 'default', 'pruneHelpSHA256': '98e664404f2a4be365a5f1c6615b2bbf62d9ede0235784f17d9bfac142cd7db1', 'reviewedRecordIDs': ['dffp2znok9t2q0bzpfrytguxk', 'nhge2ev4tp7n11trp6cxgt93d', 'pmxbytwvlxa8nzhvp9h8q17mu', 'pnz75pe7lyx9k77mis6q147s3', 'qjiyizc7qoyp3q33ymejou7en', 'qsllsiwz72jrsw12pkomte3m8'], 'idFilterSemanticsReviewed': True, 'idFilterPrimarySource': 'https://docs.docker.com/reference/cli/docker/buildx/prune/', 'reservedSpaceBytes': 12884901888, 'cacheScope': 'exact-six-cache-ids-immutable-private-unused-at-least-168h', 'automaticRetry': False, 'noExactDeletionDryRun': True};PLAN_SHA256='375c0d881c619431add9d8fe8576ab6446f18c05737a40566047d81f4e6af8e5'
 MIN_ORDINARY=172023808;MIN_PHYSICAL=8627740672
 ALLOWED_IDS=tuple(sorted(('nhge2ev4tp7n11trp6cxgt93d','pnz75pe7lyx9k77mis6q147s3','qsllsiwz72jrsw12pkomte3m8','dffp2znok9t2q0bzpfrytguxk','pmxbytwvlxa8nzhvp9h8q17mu','qjiyizc7qoyp3q33ymejou7en')))
 ID_SELECTOR='id~=^('+'|'.join(ALLOWED_IDS)+')$'
@@ -40,12 +40,12 @@ def plan_check(profile):
  info=profile['capacityMetadata']['cacheHelpAndEngineLinkage'];help=info['builderPruneHelp'];need(profile['success']is True and profile['readOnly']is True and info['duAndEngineDefaultBuilderLinkageObserved']is True and help['returncode']==0 and all(help['flags'][n]is True for n in('filter','force','all'))and help['flags']['keep-storage']is False and '--reserved-space' in help['text'] and 'docker buildx prune' in help['text'],'actual-help-and-default-docker-engine-evidence')
  need(PLAN['engineID']==info['engine']['ID']and PLAN['builderName']==info['selectedBuilder']['Name']and PLAN['clientVersion']==info['versions']['Client']['Version']and PLAN['serverVersion']==info['versions']['Server']['Version']and PLAN['pruneHelpSHA256']==help['stdoutSHA256'],'plan-binds-actual-engine-builder-cli-server-and-help')
  need(PLAN['idFilterSemanticsReviewed']is True and type(PLAN['idFilterPrimarySource'])is str and PLAN['idFilterPrimarySource']=='https://docs.docker.com/reference/cli/docker/buildx/prune/','id-regex-and-all-and-selectors-reviewed-in-official-buildx-primary-docs')
- need(PLAN['reservedSpaceBytes']==30064771072 and PLAN['cacheScope']=='exact-six-cache-ids-immutable-private-unused-at-least-168h'and PLAN['automaticRetry']is False and PLAN['noExactDeletionDryRun']is True,'fixed-conservative-scope-and-no-replay')
+ need(PLAN['reservedSpaceBytes']==12884901888 and PLAN['cacheScope']=='exact-six-cache-ids-immutable-private-unused-at-least-168h'and PLAN['automaticRetry']is False and PLAN['noExactDeletionDryRun']is True,'fixed-conservative-scope-and-no-replay')
  ids=PLAN['reviewedRecordIDs'];need(type(ids)is list and 1<=len(ids)<=2000 and ids==list(ALLOWED_IDS)and all(type(i)is str and re.fullmatch('[a-z0-9]{12,128}',i)for i in ids),'explicit-unique-safe-cache-id-allowlist')
  observed={r['ID']:r for r in profile['capacityMetadata']['builderCacheMetadata']['records']if'ID'in r}
  old=re.compile(r'(?:[2-9]|[1-9][0-9]+) weeks? ago|[1-9][0-9]* months? ago|[1-9][0-9]* years? ago')
  need(set(ids)<=set(observed)and all(observed[i].get('Reclaimable')=='true'and observed[i].get('Mutable')=='false'and observed[i].get('Shared')=='false'and old.fullmatch(observed[i].get('Last used',''))for i in ids),'only-observed-old-immutable-private-reclaimable-records')
- need(PLAN['engineID']=='bc9f32e6-298a-45f8-92c7-b755d1b61818' and PLAN['builderName']=='default' and PLAN['clientVersion']==PLAN['serverVersion']=='29.2.1','exact-observed-29-2-1-default-engine');return ['docker','buildx','--builder','default','prune','--force','--filter',ID_SELECTOR,'--filter','until=168h','--filter','shared=false','--filter','mutable=false','--filter','inuse=false','--reserved-space=30064771072']
+ need(PLAN['engineID']=='bc9f32e6-298a-45f8-92c7-b755d1b61818' and PLAN['builderName']=='default' and PLAN['clientVersion']==PLAN['serverVersion']=='29.2.1','exact-observed-29-2-1-default-engine');return ['docker','buildx','--builder','default','prune','--force','--filter',ID_SELECTOR,'--filter','until=168h','--filter','shared=false','--filter','mutable=false','--filter','inuse=false','--reserved-space=12884901888']
 
 def failed_stage_guard():
  # Verify the failed archive only; never add/overwrite files or replay its mode.
@@ -61,9 +61,9 @@ def failed_stage_guard():
  return {'archive':str(FAILED_ARCHIVE),'manifestSHA256':FAILED_MANIFEST_SHA256,'intentAbsent':True,'singleCommandReceiptAbsent':True,'oldFailedStageNotReplayed':True,'allOldEvidenceSealsExact':True}
 
 def cache_records():
- # This installed buildx renders JSON times/sizes for people. Let the same
- # engine filters used by prune prove age/eligibility; never infer a date from
- # "3 weeks ago", or assume display Size is a raw byte count.
+ # This buildx renders JSON times/sizes for people. DU verifies identities and
+ # unused/private/type metadata; do not treat its display time as an exact age.
+ # The mutating prune command enforces until=168h inside the engine itself.
  args=['docker','buildx','--builder','default','du','--format=json','--filter',ID_SELECTOR,'--filter','until=168h','--filter','shared=false','--filter','mutable=false','--filter','inuse=false']
  raw=H.command(args,90,4*1024**2);rows=[]
  for line in raw.splitlines():
@@ -74,7 +74,7 @@ def cache_records():
   need(all(type(row[k])is str and 0<len(row[k])<=256 for k in('CreatedAt','LastUsedAt')),'bounded-cache-display-time-evidence')
   need((type(row['Size'])is str and len(row['Size'])<=64 and re.fullmatch(r'[0-9]+(?:[.][0-9]+)?(?:[kMGTPE]?B)?',row['Size'],re.I)is not None)or(type(row['Size'])is int and row['Size']>=0),'bounded-cache-display-size-evidence')
   rows.append(row)
- need(len(rows)==6 and {r['ID']for r in rows}==set(ALLOWED_IDS),'all-six-records-pass-engine-age-and-eligibility-filters')
+ need(len(rows)==6 and {r['ID']for r in rows}==set(ALLOWED_IDS),'all-six-records-have-current-engine-eligibility-metadata')
  return sorted(rows,key=lambda r:r['ID'])
 
 def metadata_tree(root):

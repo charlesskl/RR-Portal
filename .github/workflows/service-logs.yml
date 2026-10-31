@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'd08c183fe0fcc4d64f47518aa7616133307b4190b3935abcc1132e0e62e8505b'
+  SCOPED_RELEASE_HELPER_SHA256: 'a31c965961e2584419733ba1eadb7dc6ae9fdf5b2aaf3c94366b828187fa0b0e'
 jobs:
   fixed-scoped-phase:
     runs-on: ubuntu-latest
@@ -27,7 +27,7 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = d08c183fe0fcc4d64f47518aa7616133307b4190b3935abcc1132e0e62e8505b ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = a31c965961e2584419733ba1eadb7dc6ae9fdf5b2aaf3c94366b828187fa0b0e ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1046-1049-20261031 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Run exact scoped diagnose helper
@@ -47,7 +47,7 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = d08c183fe0fcc4d64f47518aa7616133307b4190b3935abcc1132e0e62e8505b ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = a31c965961e2584419733ba1eadb7dc6ae9fdf5b2aaf3c94366b828187fa0b0e ]] || exit 1
             [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1046-1049-20261031 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-pr-1046-1049-20261031:refs/remotes/origin/codex/ops-pr-1046-1049-20261031 >/dev/null 2>&1 || exit 1
@@ -55,6 +55,6 @@ jobs:
             umask 077
             indo_tmp=$(mktemp -d /tmp/batch1046-1049.XXXXXX)
             trap 'rm -rf "$indo_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1048-indo-capacity-diagnose.py" > "$indo_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$indo_tmp/run.py" | cut -d ' ' -f1)" = d08c183fe0fcc4d64f47518aa7616133307b4190b3935abcc1132e0e62e8505b ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1048-owned-allocation-diagnose.py" > "$indo_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$indo_tmp/run.py" | cut -d ' ' -f1)" = a31c965961e2584419733ba1eadb7dc6ae9fdf5b2aaf3c94366b828187fa0b0e ]] || exit 1
             timeout --signal=TERM --kill-after=30s 22m python3 -B "$indo_tmp/run.py" diagnose

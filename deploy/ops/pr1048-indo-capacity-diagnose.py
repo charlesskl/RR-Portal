@@ -2,7 +2,7 @@
 import hashlib,json,os,pathlib,stat,subprocess,sys
 ROOT=pathlib.Path('/opt/rr-portal');FAILED=ROOT/'deploy/backups/pr1048-indo-static-1-20261031/prepare';OUT=ROOT/'deploy/backups/pr1048-indo-capacity-diagnose-1'
 FAILED_SEAL='27d03a6145d34c84a7c1f76c4b14ac3882fa92daa7f4ec27e27cb3621e3ca54f'
-TARGET='38a35585770e0e837229d50f20ee4a9a759037ad';BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';EXECUTE=True;STAGE='entry'
+TARGET='38a35585770e0e837229d50f20ee4a9a759037ad';BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';EXECUTE=False;STAGE='entry'
 def need(v,label):
  global STAGE
  STAGE=label

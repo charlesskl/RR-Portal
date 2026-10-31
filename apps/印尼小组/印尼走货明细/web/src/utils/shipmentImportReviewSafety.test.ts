@@ -69,3 +69,9 @@ it('inherited and ordinary rows can consolidate only when their actual code and 
   map.set(-1, explicit.material_snapshot)
   expect(consolidateShipmentItems([explicit, ordinary], map)).toHaveLength(2)
 })
+
+it('matching explicit HS codes do not prevent a confirmed snapshot and ordinary batch from consolidating', () => {
+  const coded = { ...material, hs_cn: '0012345678', hs_id: '00123456' }
+  const snapshot = { ...old, _rowKey: 2, material_id: -2, outbound_id: 71, material_snapshot: coded }
+  expect(consolidateShipmentItems([old, snapshot], new Map([[137, coded], [-2, coded]]))).toHaveLength(1)
+})

@@ -39,8 +39,8 @@ export function consolidateShipmentItems<T extends BatchItem>(
         'tool_kind', 'length', 'width', 'height', 'weight_per_carton', 'gross_per_pc', 'net_per_pc'].map(field => material?.[field as keyof Material] ?? ''),
       // Blank imported HS is an explicit declaration, while ordinary rows can
       // inherit product HS. Those different semantics must never collapse.
-      ...(['hs_cn', 'hs_id'] as const).map(field => !snapshot
-        || material?.shipment_hs_product_fallback === true && material[field] == null),
+      ...(['hs_cn', 'hs_id'] as const).map(field => snapshot
+        ? material?.shipment_hs_product_fallback === true && material[field] == null : !material?.[field]),
       effectiveCustomsCompany(item, material, fallback), invoiceCustomsCompany(item, material),
       text(material?.unit_kg || 'KGM'), text(item.purchase_unit || (isPaperRope(material?.name_zh) ? '米' : '个')),
       text(item.currency || '¥'),

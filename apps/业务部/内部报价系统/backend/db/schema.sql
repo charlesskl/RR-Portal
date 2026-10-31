@@ -162,6 +162,7 @@ CREATE TABLE IF NOT EXISTS factory_material_price_managers (
   PRIMARY KEY (factory_code, user_id)
 );
 CREATE TABLE IF NOT EXISTS quote_verifications (
+  origin TEXT NOT NULL DEFAULT 'quote', -- quote / direct
   quote_id               INTEGER PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,
   baseline_json          TEXT NOT NULL,
   verified_values_json   TEXT NOT NULL DEFAULT '{}',

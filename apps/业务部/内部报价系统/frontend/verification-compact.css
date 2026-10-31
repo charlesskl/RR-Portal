@@ -56,3 +56,11 @@
 }
 
 .verification-tools .verification-basis-kpis span{padding:0;border:0;border-radius:0;background:transparent}
+
+.verification-create-form{display:grid;gap:10px;max-height:90vh;overflow:auto;width:min(480px,calc(100vw - 48px));box-sizing:border-box}
+.verification-create-form h3,.verification-create-form p{margin:0}
+.verification-create-form label{display:grid;gap:4px}
+.verification-create-form input,.verification-create-form select{box-sizing:border-box;width:100%;min-width:0}
+.verification-create-form [data-create-error]{color:#b91c1c}
+.verification-create-form>div{display:flex;gap:8px;justify-content:flex-end}
+#verification-create[hidden]{display:none!important}

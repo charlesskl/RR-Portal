@@ -6,7 +6,14 @@ const customer=v=>({'ZANZOON(嘉苏)':'ZANZOON'}[norm(v)]||norm(v));
 const sku=v=>norm(v).replace(/\(+汇率[\d.]+\)*$/,'');
 const names={A:'兴信A',B:'兴信B',C:'华登',XINGXIN_A:'兴信A',XINGXIN_B:'兴信B',HUADENG:'华登',HEYUAN:'河源',兴信A:'兴信A',兴信B:'兴信B',华登:'华登',河源:'河源',待分配车间:'待分配车间'};
 const workshopName=v=>names[norm(v)]||names[norm(v).replace(/车间$/,'')]||null;
+const fixedWorkshop=quote=>customer(quote?.customer)==='TOYMONSTER'?'华登':null;
 function resolveWorkshop(quote,sections,records=template.records){
+  const fixed=fixedWorkshop(quote);
+  if(fixed)return {workshop:fixed,workshop_source:'ToyMonster 核价统一分配华登'};
+  const result=resolveOriginalWorkshop(quote,sections,records);
+  return result.workshop==='河源'?{workshop:'待分配车间',workshop_source:'已取消河源分配；'+result.workshop_source}:result;
+}
+function resolveOriginalWorkshop(quote,sections,records=template.records){
   const p=JSON.parse(sections.find(s=>s.dept==='sales')?.payload_json||'{}'),legacy=p.legacy_import||{};
   // Only explicit current verification fields override the historical mapping.
   // Importer's blanket confirmation default (huadeng) is not an assignment.
@@ -43,4 +50,4 @@ function resolveWorkshop(quote,sections,records=template.records){
   return ws.length===1?{workshop:ws[0],workshop_source:`${template.source} / ${matches.map(r=>r.source).join('、')}`}:
     {workshop:'待分配车间',workshop_source:ws.length?'原附件同货号存在多个车间，需明确分配':'原附件未匹配到客户＋货号的车间'};
 }
-module.exports={resolveWorkshop,workshopName};
+module.exports={resolveWorkshop,workshopName,fixedWorkshop};

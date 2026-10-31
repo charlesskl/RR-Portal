@@ -9,7 +9,7 @@ router.use(requireAuth);
 router.use(require('./mixedQuotes'));
 
 const DEPT_CODES = ['sales', 'engineering', 'electronic', 'molding', 'painting', 'slush', 'sewing', 'assembly'];
-const HIDE_IMPORTED_VERIFICATIONS = `AND NOT EXISTS (
+const HIDE_IMPORTED_VERIFICATIONS = `AND NOT EXISTS (SELECT 1 FROM quote_verifications k WHERE k.quote_id=q.id AND k.origin='direct') AND NOT EXISTS (
   SELECT 1 FROM quote_sections imported_section
   WHERE imported_section.quote_id = q.id
     AND imported_section.dept = 'sales'

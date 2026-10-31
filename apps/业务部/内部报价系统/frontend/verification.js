@@ -49,6 +49,55 @@ function requestText(title, initialValue = '') {
 const SECTION_STATUS = {
   empty: '草稿', filled: '待审核', approved: '已审核', rejected: '已驳回',
 };
+
+async function openCreateVerification() {
+  const button = $('verification-create');
+  button.disabled = true;
+  try {
+    const {customers} = await api('/quotes/customers');
+    const overlay = document.createElement('div');
+    overlay.className = 'verification-dialog-overlay';
+    overlay.innerHTML = `<form class="verification-dialog verification-create-form" role="dialog" aria-modal="true" aria-labelledby="verification-create-title">
+      <h3 id="verification-create-title">新建核价</h3><p>直接进入各部门核价，按当前核价基准初始化。</p>
+      <label>货号 <input name="quote_no" required maxlength="200" autocomplete="off"></label>
+      <label>产品名称 <input name="product_name" required maxlength="200"></label>
+      <label>客户 <select name="customer" required><option value="">请选择授权客户</option>${(customers || []).map(customer=>`<option value="${esc(customer)}">${esc(customer)}</option>`).join('')}</select></label>
+      <label>核价数量 <input name="qty" type="number" min="0" max="2147483647" step="1" placeholder="可留空"></label>
+      <label>资料版本 <input name="version" maxlength="200" placeholder="V1"></label>
+      <label>核价类型 <select name="quote_type"><option value="single">单品核价</option><option value="mixed">混装核价</option></select></label>
+      <p data-create-error role="status"></p><div><button type="button" class="mini" data-create-cancel>取消</button><button type="submit">创建并进入核价</button></div>
+    </form>`;
+    const form = overlay.querySelector('form');
+    let pending = false;
+    const close = () => { if (!pending) { overlay.remove(); button.focus(); } };
+    overlay.querySelector('[data-create-cancel]').onclick = close;
+    overlay.onclick = event => { if(event.target===overlay)close(); };
+    overlay.onkeydown = event => { if(event.key==='Escape')close(); };
+    form.onsubmit = async event => {
+      event.preventDefault();
+      if(pending || !form.reportValidity())return;
+      pending = true;
+      const submit = form.querySelector('[type="submit"]'); submit.disabled = true;
+      const status = form.querySelector('[data-create-error]');status.textContent='正在创建…';
+      let created;
+      try {
+        created = await api('/verifications',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(form)))});
+      } catch(error) {
+        status.textContent=error.message;pending=false;submit.disabled=false;return;
+      }
+      // Creation already committed. Do not offer a second create if refreshing
+      // the task list fails afterwards.
+      overlay.remove();versionCache.clear();selectedQuoteId=created.id;
+      try {
+        await loadList({refreshSelection:false});await selectTask(created.id);openDetail('workflow');
+      } catch(error) {
+        window.location.href=`./verification.html?quote_id=${encodeURIComponent(created.id)}`;
+      }
+    };
+    document.body.appendChild(overlay);form.querySelector('[name="quote_no"]').focus();
+  } catch(error) { alert(error.message); }
+  finally { button.disabled=false; }
+}
 const VERSION_STATUS = {
   not_started: '待创建', drafting: '填写中', in_review: '审核中',
   ready: '待锁定', completed: '已完成', cancelled: '已取消',
@@ -446,6 +495,7 @@ async function loadList({refreshSelection=true}={}) {
   const [user, result, basis] = await Promise.all([api('/auth/me'), api('/verifications'), api('/refs/costing_basis').catch(() => null)]);
   if(sequence!==listRequestSequence)return;
   me = user; listState = result.rows;
+  if ($('verification-create')) $('verification-create').hidden = !result.can_create;
   costingBasisState = basis?.data || null;
   costingBasisMeta = basis || {};
   window.__costingBasis = costingBasisState;
@@ -519,6 +569,8 @@ async function selectTask(quoteId) {
   renderPreview();
 }
 
+function baselineTitle(data = taskState) { return data.quote.verification_origin === 'direct' ? '新建核价资料' : '原报价'; }
+
 function createVersionSelector(data, idPrefix) {
   if (!data.can_create_version) return '';
   const completed = data.versions.filter(version => version.status === 'completed');
@@ -526,7 +578,7 @@ function createVersionSelector(data, idPrefix) {
   return `<div class="verification-create-version">
     <label>新版本复制来源
       <select id="${idPrefix}-source">
-        <option value="quote">原报价</option>
+        <option value="quote">${baselineTitle(data)}</option>
         ${completed.map(version => `<option value="${version.id}" ${version.id === latestCompleted?.id ? 'selected' : ''}>${esc(versionTitle(version))}（已完成）</option>`).join('')}
       </select>
     </label>
@@ -662,7 +714,7 @@ function normalizedBaseline() {
   return {
     key: 'quote',
     type: 'quote',
-    label: `原报价 ${taskState.quote.version || ''}`.trim(),
+    label: `${baselineTitle()} ${taskState.quote.version || ''}`.trim(),
     status: 'frozen',
     sections: (taskState.baseline.sections || []).map(section => ({
       dept: section.dept,
@@ -702,13 +754,13 @@ function renderPreview() {
     <dl class="verification-preview-meta">
       <div><dt>产品</dt><dd>${esc(quote.product_name)}</dd></div>
       <div><dt>客户 / 报价版本</dt><dd>${esc(quote.customer || '—')} · ${esc(quote.version || 'V1')}</dd></div>
-      <div><dt>客户确认价</dt><dd>US$ ${num(quote.confirmed_price).toFixed(2)}</dd></div>
+      ${quote.verification_origin==='direct'?'<div><dt>核价来源</dt><dd>直接新建</dd></div>':`<div><dt>客户确认价</dt><dd>US$ ${num(quote.confirmed_price).toFixed(2)}</dd></div>`}
     </dl>
     <div class="verification-version-strip">
       ${taskState.versions.map(item => `<span class="${item.id === version.id ? 'active' : ''}">${esc(versionTitle(item))} · ${VERSION_STATUS[item.status]}</span>`).join('')}
     </div>
     ${versionCategoryEditor(taskState, 'preview-version')}
-    <div class="verification-baseline-note"><strong>报价基准已冻结</strong><span>核价版本按部门填写和审核，不允许直接填写最终价格</span></div>
+    <div class="verification-baseline-note"><strong>${quote.verification_origin==='direct'?'直接核价 · 当前基准初始化':'报价基准已冻结'}</strong><span>核价版本按部门填写和审核，不允许直接填写最终价格</span></div>
     <div class="verification-preview-kpis">
       <div><span>当前版本</span><strong>${esc(versionTitle(version))}</strong></div>
       <div><span>部门进度</span><strong>${num(version.approved_count)} / ${num(version.total_count)}</strong></div>
@@ -769,7 +821,7 @@ function renderDetail() {
   $('verification-detail').innerHTML = `<header class="verification-detail-head">
       <button id="verification-back" class="mini">← 返回核价任务</button>
       <div><span class="eyebrow">核价明细</span><h1>${esc(quote.quote_no)} · ${esc(quote.product_name)}</h1>
-        <p>${esc(quote.customer || '—')} · 报价快照冻结于 ${esc(formatDate(taskState.baseline.frozen_at))}</p></div>
+        <p>${esc(quote.customer || '—')} · ${baselineTitle()}建立于 ${esc(formatDate(taskState.baseline.frozen_at))}</p></div>
       <span class="verification-status status-${esc(version.status)}">${esc(versionTitle(version))} · ${VERSION_STATUS[version.status]}</span>
     </header>
     <div class="verification-version-toolbar">
@@ -787,7 +839,7 @@ function renderDetail() {
       <nav class="verification-mode-tabs" aria-label="核价工作模式">
         <button data-detail-mode="workflow" class="${detailMode === 'workflow' ? 'active' : ''}">部门核价流程</button>
         ${hasOriginalWorkbook() ? `<button data-detail-mode="workbook" class="${detailMode === 'workbook' ? 'active' : ''}">原核价表</button>` : ''}
-        <button data-detail-mode="compare" class="${detailMode === 'compare' ? 'active' : ''}">报价 / 核价版本对比</button>
+        <button data-detail-mode="compare" class="${detailMode === 'compare' ? 'active' : ''}">${quote.verification_origin==='direct'?'核价版本对比':'报价 / 核价版本对比'}</button>
       </nav>
       <div id="verification-workflow-navigation"></div>
     </div>
@@ -973,7 +1025,7 @@ function renderDepartmentWorkbench() {
           <p>填写材料、用量、人工和加工费等明细；最终核价由系统汇总计算</p></div>
         <span class="badge status-${esc(section.status)}">${SECTION_STATUS[section.status]}</span>
       </header>
-      <div class="verification-quote-reference">报价数据已作为该版本初始参考，原报价保持只读；详细差异请到“报价 / 核价版本对比”查看。</div>
+      <div class="verification-quote-reference">${taskState.quote.verification_origin==='direct'?'直接新建核价，按当前基准初始化；各部门填写完成后提交审核。':'报价数据已作为该版本初始参考，原报价保持只读；详细差异请到“报价 / 核价版本对比”查看。'}</div>
       <div id="verification-workbench-body"></div>
       <div class="verification-workbench-actions">
         ${editable ? '<button id="verification-save-draft" class="mini">保存草稿</button><button id="verification-submit">提交审核</button>' : ''}
@@ -1125,14 +1177,14 @@ function renderVersionSummary(host) {
 }
 
 function comparisonOptions(selected) {
-  const options = [{ key: 'quote', label: `原报价 ${taskState.quote.version || ''}`.trim(), status: '已冻结' }]
+  const options = [{ key: 'quote', label: `${baselineTitle()} ${taskState.quote.version || ''}`.trim(), status: '已冻结' }]
     .concat(taskState.versions.map(version => ({ key: String(version.id), label: versionTitle(version), status: VERSION_STATUS[version.status] })));
   return options.map(option => `<option value="${esc(option.key)}" ${String(selected) === String(option.key) ? 'selected' : ''}>${esc(option.label)} · ${esc(option.status)}</option>`).join('');
 }
 
 function comparisonTargetOptions(selected, baseline) {
   const selectedKeys = new Set((selected || []).map(String));
-  const options = [{ key: 'quote', label: `原报价 ${taskState.quote.version || ''}`.trim(), status: '已冻结' }]
+  const options = [{ key: 'quote', label: `${baselineTitle()} ${taskState.quote.version || ''}`.trim(), status: '已冻结' }]
     .concat(taskState.versions.map(version => ({ key: String(version.id), label: versionTitle(version), status: VERSION_STATUS[version.status] })));
   return options.filter(option => option.key !== String(baseline)).map(option => `<label class="verification-target-option">
     <input type="checkbox" data-compare-target value="${esc(option.key)}" ${selectedKeys.has(option.key) ? 'checked' : ''}>
@@ -1315,7 +1367,7 @@ function renderTaxComparison(sources, summaries) {
     const rows = summary.taxRows.filter(row => row.base || row.deduction);
     return `<section class="verification-tax-card">
       <div class="verification-section-head"><div><span class="eyebrow">仅显示核价</span><h3>${esc(source.label)} 减税</h3>
-        <p>原报价不展示减税，只显示所选核价版本的减税结果</p></div></div>
+        <p>${baselineTitle()}不展示减税，只显示所选核价版本的减税结果</p></div></div>
       <div class="verification-tax-kpis"><div><span>核价总成本</span><strong>${amount(summary.totalCost)}</strong></div>
         <div><span>合计减税</span><strong>${amount(summary.totalDeduction)}</strong></div>
         <div><span>减税后成本</span><strong>${amount(summary.afterDeduction)}</strong></div></div>
@@ -1328,7 +1380,7 @@ function renderTaxComparison(sources, summaries) {
     .filter(key => taxMaps.some(rows => num(rows.get(key)?.base) || num(rows.get(key)?.deduction)));
   return `<section class="verification-tax-card">
     <div class="verification-section-head"><div><span class="eyebrow">多核价版本对比</span><h3>减税汇总</h3>
-      <p>原报价不计算减税；所有已选核价版本在同一张表内并列显示</p></div></div>
+      <p>${baselineTitle()}不计算减税；所有已选核价版本在同一张表内并列显示</p></div></div>
     <div class="verification-table-scroll"><table class="verification-tax-table"><thead><tr><th>减税项目</th>${verificationSources.map(item => `<th>${esc(item.source.label)}</th>`).join('')}</tr></thead>
       <tbody><tr><td><strong>核价总成本</strong></td>${verificationSources.map(item => `<td>${amount(item.summary.totalCost)}</td>`).join('')}</tr>
       <tr><td><strong>合计减税</strong></td>${verificationSources.map(item => `<td>${amount(item.summary.totalDeduction)}</td>`).join('')}</tr>
@@ -1381,3 +1433,5 @@ window.addEventListener('beforeunload', event => {
   event.preventDefault();
   event.returnValue = '';
 });
+
+$('verification-create').onclick = openCreateVerification;

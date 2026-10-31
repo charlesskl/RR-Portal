@@ -6,7 +6,7 @@ const {columns}=require('../backend/services/verificationSummary');
 test('historical customer + SKU mappings, FX variants and unknowns',()=>{
   const w=(customer,quote_no)=>resolveWorkshop({customer,quote_no},[]).workshop;
   assert.equal(w('ZURU','92125'),'兴信B');assert.equal(w('Cepia','G1002'),'兴信B');
-  assert.equal(w('Cepia','Z1000'),'兴信A');assert.equal(w('Cepia','D1026'),'河源');
+  assert.equal(w('Cepia','Z1000'),'兴信A');assert.equal(w('Cepia','D1026'),G.pending);
   assert.equal(w('Sky Castle','JC100'),'华登');assert.equal(w('Sky Castle','JS100CDU-12'),G.pending);
   assert.equal(w('ZANZOON','1125155（新款五角星）'),'兴信B');
   assert.equal(w('ZURU','not-in-file'),G.pending);

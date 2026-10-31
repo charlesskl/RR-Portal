@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const source = name => fs.readFileSync(path.join(__dirname, name), 'utf8');
 
 function browser({ fail = false, permissions = ['reviewRecord', 'deleteRecord'] } = {}) {
-  const messages = [], writes = [], store = new Map(), wrap = { innerHTML: '' };
+  const messages = [], writes = [], store = new Map(), wrap = { innerHTML: '', querySelector: () => null };
   const ctx = { console, setTimeout() {}, clearTimeout() {}, setInterval() {}, addEventListener() {},
     location: { pathname: '/qc/' }, navigator: {}, confirm: () => true,
     document: { addEventListener() {}, querySelectorAll: () => [], querySelector: () => null,

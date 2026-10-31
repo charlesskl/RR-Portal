@@ -183,7 +183,7 @@ function entryFixture(b) {
     f_sampleQty: '20', f_result: 'PASS', f_type: '成品', f_aqlLevel: 'MAJ 0.65' })) {
     b.elements.set(id, { value, dataset: {}, style: {} });
   }
-  b.elements.set('reviewTableWrap', { innerHTML: '' });
+  b.elements.set('reviewTableWrap', { innerHTML: '', querySelector: () => null });
   b.elements.set('recordsTableWrap', { innerHTML: '' });
   b.run(`getSupplierOptions=()=>['Fixture Supplier']; getCustomerOptions=()=>[]; getProcessTypeOptions=()=>[];
     renderSupplierDatalist=()=>{}; renderCustomerDatalist=()=>{}; renderProcessTypeDatalist=()=>{};

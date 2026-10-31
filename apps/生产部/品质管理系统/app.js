@@ -4967,6 +4967,7 @@ const REVIEW_STATUS_META = {
 };
 let _reviewTab   = 'pending';
 let _reviewSelected = new Set();   /* 审核中心批量操作选中集 */
+let _reviewBatchObserver = null;
 let _rejectingId = null;
 
 function _esc(s) {
@@ -4990,6 +4991,7 @@ function _reviewCounts() {
 function renderReviewPage() {
   const wrap = document.getElementById('reviewTableWrap');
   if (!wrap) return;
+  if (_reviewBatchObserver) { _reviewBatchObserver.disconnect(); _reviewBatchObserver = null; }
   const counts = _reviewCounts();
   setText('reviewCountPending',  counts.pending);
   setText('reviewCountRejected', counts.rejected);
@@ -5057,11 +5059,15 @@ function renderReviewPage() {
   const allChecked = list.length > 0 && list.every(r => _reviewSelected.has(r.id));
   const batchBar = `
     <style>
-      #reviewTableWrap .review-batch-bar { position: sticky; top: 0; z-index: 6; }
-      #reviewTableWrap thead th { position: sticky; top: 36px; z-index: 5; background: var(--bg-card, #1b2430); box-shadow: 0 1px 0 var(--border, #2a3442); }
+      #page-review .page-inner { height: 100%; min-height: 0; }
+      #reviewTableWrap { flex: 1; min-height: 0; }
+      #reviewTableWrap .review-batch-bar { position: sticky; top: 0; left: 0; z-index: 6; }
+      #reviewTableWrap .review-batch-bar .action-btn:not(:disabled) { color: var(--text-main); }
+      #reviewTableWrap thead tr { position: static; }
+      #reviewTableWrap thead th { position: sticky; top: var(--review-batch-height, 0px); z-index: 5; background: var(--bg-card, #1b2430); box-shadow: 0 1px 0 var(--border, #2a3442); }
     </style>
-    <div class="review-batch-bar" style="display:flex;align-items:center;gap:10px;padding:8px 4px;background:var(--bg);">
-      <span style="font-size:12px;color:var(--text-dim)">已选 <b id="reviewSelCount">${_reviewSelected.size}</b> 条</span>
+    <div class="review-batch-bar" style="display:flex;align-items:center;gap:10px;padding:8px 4px;background:var(--bg-card, #1b2430);">
+      <span style="font-size:12px;color:var(--text-main)">已选 <b id="reviewSelCount">${_reviewSelected.size}</b> 条</span>
       ${canReview ? `<button class="action-btn" onclick="batchApproveSelected()" ${_reviewSelected.size && _reviewTab !== 'approved' ? '' : 'disabled'}>✓ 批量通过</button>` : ''}
       ${can('deleteRecord') ? `<button class="action-btn del" onclick="batchDeleteSelected()" ${_reviewSelected.size ? '' : 'disabled'}>🗑 批量删除</button>` : ''}
     </div>`;
@@ -5077,6 +5083,15 @@ function renderReviewPage() {
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
+  const batchBarNode = wrap.querySelector('.review-batch-bar');
+  if (batchBarNode) {
+    const measureBatchBar = () => wrap.style.setProperty('--review-batch-height', batchBarNode.offsetHeight + 'px');
+    measureBatchBar();
+    if (typeof ResizeObserver === 'function') {
+      _reviewBatchObserver = new ResizeObserver(measureBatchBar);
+      _reviewBatchObserver.observe(batchBarNode);
+    }
+  }
 }
 
 function toggleReviewSelect(id) {

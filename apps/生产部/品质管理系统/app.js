@@ -5054,7 +5054,11 @@ function renderReviewPage() {
 
   const allChecked = list.length > 0 && list.every(r => _reviewSelected.has(r.id));
   const batchBar = `
-    <div style="display:flex;align-items:center;gap:10px;padding:8px 4px;position:sticky;top:0;background:var(--bg);z-index:5">
+    <style>
+      #reviewTableWrap .review-batch-bar { position: sticky; top: 0; z-index: 6; }
+      #reviewTableWrap thead th { position: sticky; top: 36px; z-index: 5; background: var(--bg-card, #1b2430); box-shadow: 0 1px 0 var(--border, #2a3442); }
+    </style>
+    <div class="review-batch-bar" style="display:flex;align-items:center;gap:10px;padding:8px 4px;background:var(--bg);">
       <span style="font-size:12px;color:var(--text-dim)">已选 <b id="reviewSelCount">${_reviewSelected.size}</b> 条</span>
       <button class="action-btn" onclick="batchApproveSelected()" ${_reviewSelected.size ? '' : 'disabled'}>✓ 批量通过</button>
       <button class="action-btn del" onclick="batchDeleteSelected()" ${_reviewSelected.size ? '' : 'disabled'}>🗑 批量删除</button>

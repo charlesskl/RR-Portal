@@ -4,7 +4,7 @@ this new helper compares complete sorted mount records to fresh profile4 instead
 No build/tag/lifecycle/volume/host checkout/business operation or automatic retry.
 """
 import hashlib,importlib.util,json,os,pathlib,re,subprocess,sys,time
-ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1048-selected-cache-cleanup-1';EXECUTE=True;BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';STAGE='entry';A=None
+ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1048-selected-cache-cleanup-1';EXECUTE=False;BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';STAGE='entry';A=None
 ALLOC_HELPER='pr1048-owned-allocation-diagnose.py';ALLOC_HELPER_SHA256='23dbbb93db30922dbc7ac922293a246bcb8340574b3850c6c5b508a86d5d6658'
 PROFILE=ROOT/'deploy/backups/pr1046-1049-preflight-4/result.private.json';PROFILE_SHA256='4a55587a861e5d3acbc1c4f1382ae4ad820225363ec290e1c7b9816781fa5742';PROFILE_INNER='fca612ea5320281ceb37da546ddd7b0d34fe52fa81f3b426968bc3999ee4b45d'
 DIAG=ROOT/'deploy/backups/pr1048-owned-allocation-diagnose-1';DIAG_MANIFEST='56e1a8de1c44a03fb6f882616ba0b8ed76318851a46001b3abf79b7f02d2f120';DIAG_RESULT='31723f9e9cf189c8d57766e50ec8d81e48db2c73b88a8b6f22729df00db9b817'

@@ -59,3 +59,13 @@ test('Sky Castle任务只能分配华登，列表同步显示且拒绝其他车�
  const allowed=await f.call('PUT /workshops',{body:{version_ids:[created.body.version_id],workshop:'华登',expected_revisions:{[created.body.version_id]:rev}}});
  assert.equal(allowed.statusCode,200);assert.equal((await f.call('GET /')).body.rows[0].workshop,'华登');
 });
+
+test('JAZWARES核价不能改分其他车间，可明确分配华登',async t=>{
+ const f=fixture(t),created=await f.call('POST /',{body:{...f.input,customer:'JAZWARES'}});assert.equal(created.statusCode,201);
+ const section=f.native.prepare("SELECT * FROM quote_verification_sections WHERE version_id=? AND dept='sales'").get(created.body.version_id);
+ const rev=require('../backend/services/verificationMetadata').payloadRevision(section);
+ for(const workshop of ['兴信A','兴信B','河源'])assert.equal((await f.call('PUT /workshops',{body:{version_ids:[created.body.version_id],workshop,expected_revisions:{[created.body.version_id]:rev}}})).statusCode,400);
+ assert.deepEqual(f.native.prepare('SELECT * FROM quote_verification_sections WHERE id=?').get(section.id),section);
+ assert.equal((await f.call('PUT /workshops',{body:{version_ids:[created.body.version_id],workshop:'华登',expected_revisions:{[created.body.version_id]:rev}}})).statusCode,200);
+ assert.equal((await f.call('GET /')).body.rows[0].workshop,'华登');
+});

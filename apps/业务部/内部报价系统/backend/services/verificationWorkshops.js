@@ -6,7 +6,7 @@ const customer=v=>({'ZANZOON(嘉苏)':'ZANZOON'}[norm(v)]||norm(v));
 const sku=v=>norm(v).replace(/\(+汇率[\d.]+\)*$/,'');
 const names={A:'兴信A',B:'兴信B',C:'华登',XINGXIN_A:'兴信A',XINGXIN_B:'兴信B',HUADENG:'华登',HEYUAN:'河源',兴信A:'兴信A',兴信B:'兴信B',华登:'华登',河源:'河源',待分配车间:'待分配车间'};
 const workshopName=v=>names[norm(v)]||names[norm(v).replace(/车间$/,'')]||null;
-const fixedWorkshop=quote=>['TOYMONSTER','SKYCASTLE'].includes(customer(quote?.customer))?'华登':null;
+const fixedWorkshop=quote=>['TOYMONSTER','SKYCASTLE','JAZWARE','JAZWARES'].includes(customer(quote?.customer))?'华登':null;
 function resolveWorkshop(quote,sections,records=template.records){
   const fixed=fixedWorkshop(quote);
   if(fixed)return {workshop:fixed,workshop_source:`${quote.customer} 核价统一分配华登`};

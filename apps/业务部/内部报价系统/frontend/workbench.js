@@ -3644,10 +3644,17 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
             existing:mixedRoot.mixed_products?.[product.id]?.[targetKey] || [],items:grouped.get(product.id) || []})),
             {id:'__shared__',label:'每包装共有费用',byCode:true,existing:mixedRoot.mixed_shared?.[targetKey] || [],items:allocation.sharedItems}];
         };
+        const detectedSupplier = String(result.supplier_name || '').trim();
+        const supplierNameKey = value => supplierSync.normalize(value);
+        if (supplierSync && detectedSupplier) {
+          const matches = supplierSync.suppliers(scopeBatches([])).filter(supplier=>supplierNameKey(supplier.name)===supplierNameKey(detectedSupplier));
+          if (matches.length === 1) supplierChoice = matches[0].id;
+          else if (!matches.length) { supplierChoice = '__new__'; newSupplierName = detectedSupplier; }
+        }
         const signature = batches => JSON.stringify(batches.map(batch=>[batch.id,batch.label,batch.byCode,batch.existing]));
         const selectedSupplier = batches => {
           if (supplierChoice !== '__new__') return supplierSync.suppliers(batches).find(supplier=>supplier.id===supplierChoice);
-          if (supplierSync.suppliers(batches).some(supplier=>supplierSync.normalize(supplier.name)===supplierSync.normalize(newSupplierName))) throw Error('该供应商已存在，请从列表选择');
+          if (supplierSync.suppliers(batches).some(supplier=>supplierNameKey(supplier.name)===supplierNameKey(newSupplierName))) throw Error('该供应商已存在，请从列表选择');
           return {name:newSupplierName};
         };
         const hasTrackedSuppliers = () => {
@@ -3663,6 +3670,7 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
             if(snapshotSignature!==null && snapshotSignature!==state)throw Error('物料资料已变更，请重新选择文件并核对变更明细');
             snapshotSignature=state;
             if (result.supplier_snapshot_version !== 1) throw Error('解析服务尚未加载供应商同步，请更新或重启本地服务后再试');
+            if (result.supplier_names?.length > 1) throw Error('文件中识别到多个供应商，请按供应商分开上传完整清单');
             if (resultSheetIncomplete()) throw Error('有物料缺少可识别报价，不能作为完整清单同步；请补齐后重新导入');
             syncResult=supplierSync.plan({supplier:selectedSupplier(batches),batches,legacyClaims:[...legacyClaims],sourceFile:file.name || '',sourceSheet:resultSheet()});
           } catch(e) {error=e.message;}
@@ -3674,15 +3682,16 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
           const beforeAfter=(row,field)=>row ? escapeHtml(row[field] ?? '—') : '—';
           const price=row=>row ? escapeHtml((row.source_currency || (row.unit_price_rmb!=null?'RMB':'HKD')) + ' ' + (row.source_currency==='USD' ? row.unit_price_usd ?? '—' : row.unit_price_rmb ?? row.unit_price ?? '—')) : '—';
           const c=syncResult?.counts;
-          return `<section class="mixed-config" data-supplier-sync><h4>按供应商同步完整最新清单</h4>
+          return `<section class="mixed-config" data-supplier-sync><h4>整份供应商报价单同步</h4>
             <p>同步范围：${escapeHtml(label)} · ${mixedConfig && !sharedImport ? '当前报价的全部小产品及共有费用' : sharedImport ? '当前每包装共有费用' : '当前产品'}。只更新所选供应商；其他供应商及其他物料类别保留。</p>
+            <p>${detectedSupplier?`文件识别供应商：<b>${escapeHtml(detectedSupplier)}</b>，已按名称匹配，请核对下方选择。`:result.supplier_names?.length>1?`文件含多个供应商：${result.supplier_names.map(escapeHtml).join('、')}`:'文件未识别到供应商名称，请手动选择或新增。'}整份文件中的新增、改价和删减会一起同步。</p>
             <label>本次供应商 <select data-sync-supplier aria-label="本次供应商"><option value="">请选择供应商</option>${known.map(supplier=>`<option value="${escapeHtml(supplier.id)}" ${supplierChoice===supplier.id?'selected':''}>${escapeHtml(supplier.name)}</option>`).join('')}<option value="__new__" ${supplierChoice==='__new__'?'selected':''}>＋ 新增供应商</option></select></label>
             ${supplierChoice==='__new__'?`<label>供应商名称 <input data-new-supplier aria-label="供应商名称" maxlength="100" value="${escapeHtml(newSupplierName)}" placeholder="填写实际供应商名称"></label>`:''}
-            ${legacy.length?`<details data-legacy-suppliers><summary>确认历史物料归属（${legacy.length} 条未标供应商）</summary><p>仅勾选确属本次供应商的旧物料。勾选后会按新清单更新或删除；未勾选的旧资料保留。</p><div style="max-height:260px;overflow:auto"><table class="wb-table"><thead><tr><th>属于本次供应商</th><th>产品归属</th><th>货号</th><th>旧物料</th><th>规格</th><th>用量</th></tr></thead><tbody>${legacy.map(({batch,row,token})=>`<tr><td><input type="checkbox" data-claim-supplier="${escapeHtml(token)}" ${legacyClaims.has(token)?'checked':''} ${supplierChoice?'':'disabled'} aria-label="归属本次供应商：${escapeHtml(batch.label)} ${escapeHtml(row.name)}"></td><td>${escapeHtml(batch.label)}</td><td>${escapeHtml(row.product_code || '')}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.spec)}</td><td>${escapeHtml(row.qty)}</td></tr>`).join('')}</tbody></table></div></details>`:''}
+            ${legacy.length?`<details data-legacy-suppliers><summary>确认历史物料归属（${legacy.length} 条未标供应商）</summary><p>仅勾选确属本次供应商的旧物料。勾选后会按新清单更新或删除；未勾选的旧资料保留。新表已删减的旧物料也须手动勾选归属，才能同步删除。</p><button type="button" data-claim-matching ${supplierChoice && batches?'':'disabled'}>勾选与本次文件匹配的历史物料</button><div style="max-height:260px;overflow:auto"><table class="wb-table"><thead><tr><th>属于本次供应商</th><th>产品归属</th><th>货号</th><th>旧物料</th><th>规格</th><th>用量</th></tr></thead><tbody>${legacy.map(({batch,row,token})=>`<tr><td><input type="checkbox" data-claim-supplier="${escapeHtml(token)}" ${legacyClaims.has(token)?'checked':''} ${supplierChoice?'':'disabled'} aria-label="归属本次供应商：${escapeHtml(batch.label)} ${escapeHtml(row.name)}"></td><td>${escapeHtml(batch.label)}</td><td>${escapeHtml(row.product_code || '')}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.spec)}</td><td>${escapeHtml(row.qty)}</td></tr>`).join('')}</tbody></table></div></details>`:''}
             <p data-supplier-sync-status role="status">${error?escapeHtml(error):`预计更新 ${c.updated} 条、新增 ${c.added} 条、删除 ${c.deleted} 条；保留其他供应商 ${c.otherKept} 条、未归属历史物料 ${c.legacyKept} 条。`}</p>
             ${c?.legacyConflicts?`<p class="mixed-error">另有 ${c.legacyConflicts} 条同名历史物料未确认供应商，仍会保留；请先核对归属，避免重复报价。</p>`:''}
             ${syncResult?`<div style="max-height:320px;overflow:auto"><table class="wb-table"><thead><tr><th>变更</th><th>产品归属</th><th>物料</th><th>规格（旧 → 新）</th><th>用量（旧 → 新）</th><th>原币单价（旧 → 新）</th></tr></thead><tbody>${syncResult.changes.map(change=>`<tr><td>${change.type}</td><td>${escapeHtml(change.batchLabel)}</td><td>${beforeAfter(change.before,'name')} → ${beforeAfter(change.after,'name')}</td><td>${beforeAfter(change.before,'spec')} → ${beforeAfter(change.after,'spec')}</td><td>${beforeAfter(change.before,'qty')} → ${beforeAfter(change.after,'qty')}</td><td>${price(change.before)} → ${price(change.after)}</td></tr>`).join('')}</tbody></table></div>`:''}
-            <button type="button" data-action="supplier-sync" ${error?'disabled':''}>按此供应商同步最新清单</button> <button type="button" class="mini" data-action="supplier-cancel">取消</button><p class="muted">确认后更新当前草稿，保存工程/业务草稿后生效。本次文件中未出现的该供应商旧物料将删除。</p></section>`;
+            <button type="button" data-action="supplier-sync" ${error?'disabled':''}>同步整份供应商报价单（新增、更新、删除）</button> <button type="button" class="mini" data-action="supplier-cancel">取消</button><p class="muted">确认后更新当前草稿，保存工程/业务草稿后生效。本次文件中未出现的该供应商旧物料将删除。</p></section>`;
         };
         const resultSheet=()=>result.sheet_used || '';
         const resultSheetIncomplete=()=>!!result.unpriced_items?.length;
@@ -3738,6 +3747,22 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
           if(supplierNameInput)supplierNameInput.onchange=event=>{
             newSupplierName=event.target.value;legacyClaims.clear();renderPreview();
           };
+          const claimMatching=preview.querySelector('[data-claim-matching]');
+          if(claimMatching)claimMatching.onclick=()=>{
+            if(!active() || !supplierChoice || !canEdit)return;
+            try {
+              const batches=scopeBatches(result.items.map(selectedItem));
+              if(signature(batches)!==snapshotSignature)throw Error('物料资料已变更，请重新选择文件并核对变更明细');
+              const tokens=batches.flatMap(batch=>{
+                const incoming=new Set(batch.items.map(row=>supplierSync.key(row,batch.byCode)));
+                return batch.existing.flatMap((row,index)=>!supplierSync.supplierId(row) && supplierSync.isDetail(row) && incoming.has(supplierSync.key(row,batch.byCode)) ? [supplierSync.legacyToken(batch.id,index)] : []);
+              });
+              if(!tokens.length)return;
+              if(!confirm(`找到 ${tokens.length} 条产品归属、物料名称和规格匹配的未标供应商旧物料。请确认它们均属于“${selectedSupplier(batches).name}”；确认后勾选归属，最终同步前仍可逐项核对。`))return;
+              tokens.forEach(token=>legacyClaims.add(token));renderPreview();
+              const details=preview.querySelector('[data-legacy-suppliers]');if(details)details.open=true;
+            }catch(error){preview.querySelector('[data-supplier-sync-status]').textContent=error.message;}
+          };
           preview.querySelectorAll('[data-claim-supplier]').forEach(box=>box.onchange=()=>{
             if(box.checked)legacyClaims.add(box.dataset.claimSupplier);else legacyClaims.delete(box.dataset.claimSupplier);
             renderPreview();const details=preview.querySelector('[data-legacy-suppliers]');if(details)details.open=true;
@@ -3763,6 +3788,7 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
                 if(signature(batches)!==syncPreview.signature)throw Error('物料资料已变更，请重新选择文件并核对变更明细');
                 const plan=supplierSync.plan({supplier:selectedSupplier(batches),batches,legacyClaims:[...legacyClaims],sourceFile:file.name || '',sourceSheet:resultSheet()});
                 const c=plan.counts;
+                if(detectedSupplier && supplierNameKey(detectedSupplier)!==supplierNameKey(plan.supplier.name) && !confirm(`文件供应商为“${detectedSupplier}”，当前选择为“${plan.supplier.name}”。确认将整份文件同步到所选供应商？`))return;
                 if(!confirm(`供应商：${plan.supplier.name}\n类别：${label}\n将更新 ${c.updated} 条、新增 ${c.added} 条、删除 ${c.deleted} 条。其他供应商资料保留。${c.legacyConflicts?`\n另有 ${c.legacyConflicts} 条未归属同名旧物料保留，请确认它们属于其他供应商。`:''}\n确认同步完整最新清单？`))return;
                 ++importSequence;
                 for(const batch of plan.batches){

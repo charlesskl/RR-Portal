@@ -6,7 +6,7 @@ import contextlib,hashlib,io,json,os,pathlib,re,stat,subprocess,sys,tarfile
 ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1046-1049-qc-copy-probe-1'
 FAILED=ROOT/'deploy/backups/pr1046-1049-qc-20261031-2/prepare';FAILED_MANIFEST='d5817fb052c9d0a4417bf0fcac0eaec8f90cfec8155c0f0005a629d6b3b4de87'
 CANDIDATE='sha256:8f0dee9f9428dc2908dd3cff8e13ec849bc58db2f9ebce7db7e02d1cac063019';ALIAS='rr-portal-qc:latest';CANONICAL='sha256:65c56b6f8f59b8df5420912057023172b3fdd402297163b31342ee04561ac2f8'
-EXPERIMENT='pr1046-1049-qc-copy-probe-1';EXECUTE=True;BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';STAGE='entry';DETAILS={}
+EXPERIMENT='pr1046-1049-qc-copy-probe-1';EXECUTE=False;BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';STAGE='entry';DETAILS={}
 FILES={'ai-ocr.js':'8a57edd412f32fffe2660a695b3e4789968352d584692d8da38f752d11e029ef','app.js':'913ac9becab4eb2f47dfa472167b240c4057766213548d98625ad1180ede5208','qc-backend.js':'cb9d7845c8c59dad84eda56ca9860381852db3e58ff2eb4f829a406c87a5b759','report_export.js':'4938b11d8d27ebd4511aa82ad21b330fa134cc082ae15e4c76838a0a603e0e15','server/server.js':'f1aa9941380c8e4d32ea15d2eef463474b6522e0c36caa19f1b4f2a542827305'}
 OWNERS={n:(100,101)if n in('qc-backend.js','server/server.js')else(0,0)for n in FILES}
 def need(v,label):

@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'ac44590038a9f9be747018c5d5d122203b3cb6a5b340151e77229c7a9b2d094e'
+  SCOPED_RELEASE_HELPER_SHA256: '73205a0cf15dd45ec77060643b1d591ebba6a02655b5e78e83766114f128826c'
 jobs:
   fixed-scoped-phase:
     runs-on: ubuntu-latest
@@ -27,7 +27,7 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = ac44590038a9f9be747018c5d5d122203b3cb6a5b340151e77229c7a9b2d094e ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 73205a0cf15dd45ec77060643b1d591ebba6a02655b5e78e83766114f128826c ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1046-1049-20261031 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Run exact scoped diagnose helper
@@ -47,7 +47,7 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = ac44590038a9f9be747018c5d5d122203b3cb6a5b340151e77229c7a9b2d094e ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 73205a0cf15dd45ec77060643b1d591ebba6a02655b5e78e83766114f128826c ]] || exit 1
             [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1046-1049-20261031 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-pr-1046-1049-20261031:refs/remotes/origin/codex/ops-pr-1046-1049-20261031 >/dev/null 2>&1 || exit 1
@@ -55,6 +55,10 @@ jobs:
             umask 077
             indo_tmp=$(mktemp -d /tmp/batch1046-1049.XXXXXX)
             trap 'rm -rf "$indo_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1046-1049-qc-copy-probe.py" > "$indo_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$indo_tmp/run.py" | cut -d ' ' -f1)" = ac44590038a9f9be747018c5d5d122203b3cb6a5b340151e77229c7a9b2d094e ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1046-1049-preflight.py" > "$indo_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$indo_tmp/run.py" | cut -d ' ' -f1)" = 73205a0cf15dd45ec77060643b1d591ebba6a02655b5e78e83766114f128826c ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1035-quote-preflight.py" > "$indo_tmp/pr1035-quote-preflight.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$indo_tmp/pr1035-quote-preflight.py" | cut -d ' ' -f1)" = 2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1044-indo-preflight.py" > "$indo_tmp/pr1044-indo-preflight.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$indo_tmp/pr1044-indo-preflight.py" | cut -d ' ' -f1)" = 940e9675d628bc0af628ac3964b9073069f99d682a7bc812960ac6e1b88d3004 ]] || exit 1
             timeout --signal=TERM --kill-after=30s 22m python3 -B "$indo_tmp/run.py" diagnose

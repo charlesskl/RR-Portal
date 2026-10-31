@@ -3,6 +3,7 @@
 //（产品编号&产品名称 / 规格描述 / MOQ / 人民币或 USD 阶梯价）。
 const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
+const { supplierMetadata: metadataFromRows } = require('./supplierMetadata');
 
 function toStr(v) {
   if (v == null) return '';
@@ -127,34 +128,14 @@ function sheetjsRows(sheet) {
   });
 }
 
-// Read explicit supplier labels above the detail header, never infer ownership
-// from a file name or from a material's name/remarks.
-function supplierMetadata(sheets) {
-  const names = new Map();
-  for (const sheet of sheets) {
+// Ordinary imports retain their header-only lookup. A destructive full snapshot
+// must also notice a later supplier section instead of assigning it to the first.
+function supplierMetadata(sheets, fullScan = false) {
+  return metadataFromRows(sheets.flatMap(sheet => {
+    if (fullScan) return sheet.rows;
     const header = sheet.rows.findIndex(isQuotationHeader);
-    const rows = sheet.rows.slice(0, header < 0 ? 30 : header);
-    for (const row of rows) {
-      for (let index = 0; index < row.length; index++) {
-        const text = toStr(row[index]);
-        const match = text.match(/^(?:供应商(?:名称|名)?|供應商(?:名稱|名)?|SUPPLIER(?:\s*NAME)?)(?:\s*[:：]\s*(.*))?\s*$/i);
-        if (!match) continue;
-        let name = (match[1] || '').trim();
-        if (!name) {
-          for (let next = index + 1; next < row.length; next++) {
-            const candidate = toStr(row[next]);
-            if (!candidate || candidate === text) continue; // merged label cells
-            if (/[:：]$/.test(candidate)) break;
-            name = candidate;
-            break;
-          }
-        }
-        if (name && name.length <= 100) names.set(norm(name.normalize('NFKC')), name);
-      }
-    }
-  }
-  const supplier_names = [...names.values()];
-  return { supplier_names, supplier_name: supplier_names.length === 1 ? supplier_names[0] : '' };
+    return sheet.rows.slice(0, header < 0 ? 30 : header);
+  }));
 }
 
 async function readSheets(buffer) {
@@ -187,7 +168,7 @@ async function parseSheets(sheets, options = {}) {
     const failed = parsed.find(result => result.error);
     if (failed) return failed;
     const items = parsed.flatMap((result,index) => result.items.map(item => ({...item, source_sheet:matched[index].name})));
-    return {...parsed[0], ...supplierMetadata(sheets), items, count:items.length, sheet_used:matched.map(sheet=>sheet.name).join('、'),
+    return {...parsed[0], ...supplierMetadata(sheets, true), items, count:items.length, sheet_used:matched.map(sheet=>sheet.name).join('、'),
       sheets_used:matched.map(sheet=>sheet.name), complete_sheet_scan:true, unpriced_items:parsed.flatMap(result=>result.unpriced_items || [])};
   }
 
@@ -204,7 +185,7 @@ async function parseSheets(sheets, options = {}) {
   if (!picked) return { error: '未找到五金表头（零件名称 / 用量 / 单价RMB）' };
 
   const cols = indexHeader(picked.rows[headerRow]);
-  const supplier = supplierMetadata(sheets);
+  const supplier = supplierMetadata(sheets, options._fullSupplierSnapshot);
   if (cols.name == null || (!cols.supplierTemplate && (cols.qty == null || cols.unitPrice == null))) {
     return { error: '表头字段不完整（需要 产品名称、MOQ 与单价，或旧版 零件名称 / 用量 / 单价RMB）' };
   }

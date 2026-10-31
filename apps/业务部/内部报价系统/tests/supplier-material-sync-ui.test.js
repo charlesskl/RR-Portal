@@ -128,3 +128,32 @@ test('拒绝历史归属确认或多供应商混合文件时不误认领、不�
  mixed.select('__new__');mixed.name('甲');
  assert.match(mixed.host.querySelector('preview').innerHTML,/多个供应商/);mixed.apply();assert.equal(mixed.changes(),0);
 });
+
+test('供应商英文词边界不合并，自动新增不删除名称相近的已有供应商',async()=>{
+ const old=row('原有物料','A',{supplier_name:'A B Limited'});
+ const root={mixed_products:{a:{packaging_materials:[old]}},mixed_shared:{}};
+ const s=await setup({root,supplierName:'AB Limited',supplierNames:['AB Limited'],items:[{product_code:'A',name:'新物料',qty:1}]});
+ assert.match(s.host.querySelector('preview').innerHTML,/value="AB Limited"/);
+ s.apply();
+ const rows=root.mixed_products.a.packaging_materials;
+ assert.equal(s.changes(),1);assert.equal(rows.length,2);assert.equal(rows[0],old);
+ assert.equal(rows[1].supplier_name,'AB Limited');assert.notEqual(rows[1].supplier_id,'A');
+ assert.equal(s.confirmations.length,1);
+});
+
+test('手选名称只差内部空格的供应商仍需不一致确认，取消时保留原物料',async()=>{
+ const old=row('原有物料','A',{supplier_name:'A B Limited'});
+ const root={mixed_products:{a:{packaging_materials:[old]}},mixed_shared:{}};
+ const s=await setup({root,confirmed:false,supplierName:'AB Limited',supplierNames:['AB Limited'],items:[{product_code:'A',name:'新物料',qty:1}]});
+ s.select('A');s.apply();
+ assert.equal(s.confirmations.length,1);assert.match(s.confirmations[0],/当前选择为“A B Limited”/);
+ assert.equal(s.changes(),0);assert.deepEqual(root.mixed_products.a.packaging_materials,[old]);
+});
+
+test('供应商名称仍可按大小写、首尾及连续空白匹配',async()=>{
+ const root={mixed_products:{a:{packaging_materials:[row('原有物料','A',{supplier_name:'A B Limited'})]}},mixed_shared:{}};
+ const s=await setup({root,supplierName:'  a   b LIMITED  ',supplierNames:['a b LIMITED'],items:[{product_code:'A',name:'新物料',qty:1}]});
+ s.apply();
+ assert.equal(s.changes(),1);assert.equal(root.mixed_products.a.packaging_materials.length,1);
+ assert.equal(root.mixed_products.a.packaging_materials[0].supplier_id,'A');assert.equal(s.confirmations.length,1);
+});

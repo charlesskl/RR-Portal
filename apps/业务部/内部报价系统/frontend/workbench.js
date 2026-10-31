@@ -3645,7 +3645,7 @@ function attachSupplierMaterialImportUI(host, payload, canEdit, onChange, fxRmbH
             {id:'__shared__',label:'每包装共有费用',byCode:true,existing:mixedRoot.mixed_shared?.[targetKey] || [],items:allocation.sharedItems}];
         };
         const detectedSupplier = String(result.supplier_name || '').trim();
-        const supplierNameKey = value => supplierSync.normalize(value).replace(/\s/g, '');
+        const supplierNameKey = value => supplierSync.normalize(value);
         if (supplierSync && detectedSupplier) {
           const matches = supplierSync.suppliers(scopeBatches([])).filter(supplier=>supplierNameKey(supplier.name)===supplierNameKey(detectedSupplier));
           if (matches.length === 1) supplierChoice = matches[0].id;

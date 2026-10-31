@@ -45,6 +45,13 @@ export function applyShipmentImport(existing: readonly ExistingShipmentImportRow
       if (!(Number(materialId) > 0)) throw new Error(`第 ${target + 1} 行缺少已确认的出库物料 ID，请重新关联后导入`)
       snapshot.id = materialId
       const changedMaterial = !material || Object.keys(snapshot).some(key => JSON.stringify(snapshot[key as keyof Material]) !== JSON.stringify(material[key as keyof Material]))
+      if (!old.material_snapshot && changedMaterial) {
+        snapshot.shipment_hs_product_fallback = true
+        // Ordinary rows used product HS defaults for missing/blank codes. Keep
+        // that behavior when packing data first becomes a shipment snapshot.
+        // An existing snapshot's explicit empty code must remain an empty code.
+        for (const field of ['hs_cn', 'hs_id'] as const) if (!present(snapshot[field])) delete snapshot[field]
+      }
       next[target] = { ...old, ...patch,
         // A local snapshot retains the confirmed material identity. Identical
         // linked snapshots can still consolidate across source batches.

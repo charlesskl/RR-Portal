@@ -1242,10 +1242,13 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     }
     const phs = m?.product_code && !m.tool_kind ? productHs.get(m.product_code) : undefined
     setCell(ws, ri, 0, i + 1, 'n')
-    // Imported snapshots are this shipment's explicit declaration data. Clearing
-    // a code must not silently restore a different code from the product master.
-    setCell(ws, ri, 1, it.material_snapshot ? m?.hs_cn ?? '' : m?.hs_cn || phs?.hsCN || '', 's')
-    setCell(ws, ri, 2, it.material_snapshot ? m?.hs_id ?? '' : m?.hs_id || phs?.hsID || '', 's')
+    // A packing-only import retains the ordinary row's absent-code fallback.
+    // Explicitly cleared codes and historical import snapshots remain explicit.
+    const hsCode = (field: 'hs_cn' | 'hs_id', fallback?: string) => !it.material_snapshot
+      || m?.shipment_hs_product_fallback === true && m[field] == null
+      ? m?.[field] || fallback || '' : m?.[field] ?? ''
+    setCell(ws, ri, 1, hsCode('hs_cn', phs?.hsCN), 's')
+    setCell(ws, ri, 2, hsCode('hs_id', phs?.hsID), 's')
     setCell(ws, ri, 3, m?.product_code || '', 's')
     setCell(ws, ri, 4, customsFormulaName(it, m, effCustoms(it)), 's')
     setCell(ws, ri, 5, m?.name_zh || '', 's')

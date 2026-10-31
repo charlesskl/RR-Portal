@@ -99,6 +99,9 @@ export interface ShipmentImportSource {
 
 export interface Material {
   import_source?: ShipmentImportSource
+  // A linked ordinary row converted to a local packing snapshot retains its
+  // original product-HS fallback for absent codes; explicit empty codes do not.
+  shipment_hs_product_fallback?: boolean
   department?: string
   id?: number
   tool_kind?: '工具' | '机器设备'

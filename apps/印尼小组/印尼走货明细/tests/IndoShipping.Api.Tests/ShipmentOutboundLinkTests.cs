@@ -17,6 +17,42 @@ namespace IndoShipping.Api.Tests;
 public class ShipmentOutboundLinkTests
 {
     [Fact]
+    public async Task Linked_packing_snapshot_preserves_absent_HS_fallback_and_explicit_clear_without_stock_changes()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        const string stockSql = """
+            SELECT jsonb_build_object(
+                'materials',(SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM materials x),
+                'outbound',(SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM outbound x),
+                'receipts',(SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM po_receipts x))::text
+            """;
+        var before = await f.Db.ExecuteScalarAsync<string>(stockSql);
+        var body = Body(2, imported: true);
+        body.items![0].material_snapshot = JsonSerializer.SerializeToElement(new {
+            id = 66, name_zh = "中边模", length = 25, shipment_hs_product_fallback = true });
+        var id = Id(await f.Controller.Create(body));
+        Assert.False(await f.Db.ExecuteScalarAsync<bool>(
+            "SELECT material_snapshot ? 'hs_cn' FROM shipment_items WHERE shipment_id=@id", new { id }));
+        Assert.True(await f.Db.ExecuteScalarAsync<bool>(
+            "SELECT (material_snapshot->>'shipment_hs_product_fallback')::boolean FROM shipment_items WHERE shipment_id=@id", new { id }));
+        body.items[0].material_snapshot = JsonSerializer.SerializeToElement(new {
+            id = 66, name_zh = "中边模", length = 25, shipment_hs_product_fallback = true, hs_id = "" });
+        Assert.IsType<OkObjectResult>(await f.Controller.Update(id, body));
+        var row = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(id)).Value)
+            .GetProperty("items")[0];
+        var snapshot = row.GetProperty("material_snapshot");
+        if (snapshot.ValueKind == JsonValueKind.String) snapshot = JsonDocument.Parse(snapshot.GetString()!).RootElement;
+        Assert.True(snapshot.GetProperty("shipment_hs_product_fallback").GetBoolean());
+        Assert.False(snapshot.TryGetProperty("hs_cn", out _));
+        Assert.Equal("", snapshot.GetProperty("hs_id").GetString());
+        Assert.Equal(1, row.GetProperty("outbound_id").GetInt32());
+        Assert.Equal(66, row.GetProperty("material_id").GetInt32());
+        Assert.Equal(2m, row.GetProperty("qty").GetDecimal());
+        Assert.Equal(4m, row.GetProperty("kg").GetDecimal());
+        Assert.Equal(before, await f.Db.ExecuteScalarAsync<string>(stockSql));
+    }
+
+    [Fact]
     public async Task Imported_source_columns_and_formula_cache_survive_save_reload_only_in_shipment()
     {
         await using var f = await Fixture.Create(); if (f is null) return;

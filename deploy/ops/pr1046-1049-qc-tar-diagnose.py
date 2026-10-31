@@ -4,7 +4,7 @@ ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1046-1049-qc-tar-
 FAILED=ROOT/'deploy/backups/pr1046-1049-qc-20261031-2/prepare'
 MANIFEST_SHA256='d5817fb052c9d0a4417bf0fcac0eaec8f90cfec8155c0f0005a629d6b3b4de87'
 CODE={'ai-ocr.js','app.js','qc-backend.js','report_export.js','server/server.js'}
-EXECUTE=True;BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';STAGE='entry'
+EXECUTE=False;BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031';STAGE='entry'
 def need(v,label):
  global STAGE
  STAGE=label

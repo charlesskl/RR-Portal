@@ -2,9 +2,9 @@
 No lifecycle, SQL writes, configuration changes, business-file copies or cleanup.
 """
 import hashlib,importlib.util,json,os,pathlib,re,stat,subprocess,sys,urllib.request,urllib.error
-ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1046-1049-preflight-1'
+ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1046-1049-preflight-2'
 BRANCH='refs/heads/codex/ops-pr-1046-1049-20261031'
-BASE='d0bb564d85bc0b39a91e6d9c23658d97356c9253';EXECUTE=True
+BASE='0d7599859e5e01e90e4bbcbe71a9bd4a0a77b417';EXECUTE=True
 DEPS={'pr1035-quote-preflight.py':'2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5','pr1044-indo-preflight.py':'940e9675d628bc0af628ac3964b9073069f99d682a7bc812960ac6e1b88d3004'}
 APPS={'qc':'apps/生产部/品质管理系统','internal-quote':'apps/业务部/内部报价系统','indo-shipping':'apps/印尼小组/印尼走货明细'}
 STAGE='entry'
@@ -58,6 +58,16 @@ def public():
    finally:e.close()
   need(status==expected and len(body)<=1024**2,'expected-public-health-and-auth-protection');v[path]={'status':status,'bodySHA256':sha(body)}
  return v
+def qc_capacity():
+ root=ROOT/APPS['qc']/'data';need(root.is_dir()and not any(p.is_symlink()for p in(root,*root.parents)),'fixed-qc-data-real-root');v={'root':str(root.relative_to(ROOT)),'bytes':0,'regularFiles':0,'directories':1,'databases':0}
+ for path in root.rglob('*'):
+  s=path.lstat();need(not stat.S_ISLNK(s.st_mode)and(stat.S_ISREG(s.st_mode)or stat.S_ISDIR(s.st_mode)),'qc-capacity-regular-metadata-only')
+  if stat.S_ISDIR(s.st_mode):v['directories']+=1
+  else:
+   v['regularFiles']+=1;v['bytes']+=s.st_size
+   if path.suffix.lower()in('.db','.sqlite','.sqlite3'):v['databases']+=1
+  need(v['regularFiles']+v['directories']<=100000 and v['bytes']<=32*1024**3,'bounded-qc-data-capacity-metadata')
+ return v
 def main():
  need(EXECUTE is True and sys.argv[1:]==['diagnose']and os.environ.get('RELEASE_BRANCH')==BRANCH and os.environ.get('RELEASE_MODE')=='diagnose'and os.environ.get('RELEASE_ATTEMPT')=='1','explicit-first-fresh-readonly-profile')
  os.umask(0o077);need(OUT.parent.is_dir()and not any(p.is_symlink()for p in(OUT.parent,*OUT.parent.parents))and not OUT.exists(),'fresh-private-profile');OUT.mkdir(mode=0o700)
@@ -71,7 +81,7 @@ def main():
    if name in('qc','internal-quote'):entry['source']=source(name,r)
    else:entry.update(wwwroot=I.web_inventory(r),backendFiles=I.backend_inventory(r))
    v['targets'][name]=entry
-  v['quoteStartup']=P.startup_counts();docker_root=json.loads(command(['docker','info','--format','{{json .DockerRootDir}}']));fs=os.statvfs(docker_root);v['space']={'available':fs.f_bavail*fs.f_frsize,'free':fs.f_bfree*fs.f_frsize}
+  v['quoteStartup']=P.startup_counts();v['qcData']=qc_capacity();docker_root=json.loads(command(['docker','info','--format','{{json .DockerRootDir}}']));fs=os.statvfs(docker_root);v['space']={'available':fs.f_bavail*fs.f_frsize,'free':fs.f_bfree*fs.f_frsize}
   v['memory']={k:int(a.split()[0])*1024 for k,_,a in(line.partition(':')for line in pathlib.Path('/proc/meminfo').read_text().splitlines())if k in('MemAvailable','MemTotal','SwapFree','SwapTotal')};v['public']=public();after,_=containers();need(before==after and git('rev-parse','HEAD').decode().strip()==v['hostGitHead']and all(P.shared_file(n)==row for n,row in v['shared'].items()),'runtime-and-shared-source-stable-during-readonly-profile');v['allRuntimeUnchanged']=True;v['success']=True
  except Exception as e:v.update(errorType=type(e).__name__,stage=STAGE)
  v['resultSHA256']=sha(enc(v));private('result.private.json',v);I=load('pr1044-indo-preflight.py');I.wire(v);return 0 if v['success']else 1

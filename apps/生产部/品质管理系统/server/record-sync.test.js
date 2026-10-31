@@ -91,6 +91,15 @@ test('failed record writes retain pending deletes and a replacement for retry', 
   const pending = w.__QC_SYNC_NOW(); await tick(); requests[0].resolve({ ok: false, status: 500 }); await pending;
   assert.deepEqual(Array.from(w.__QC_PENDING_DELETES), [3]); assert.equal(w.__QC_FORCE_REPLACE, 1);
 });
+test('cancelled deletion staging restores earlier revisions without discarding later deletion intents', () => {
+  const { window: w } = browser();
+  w.__QC_MARK_DELETED([1]);
+  const rollback = w.__QC_MARK_DELETED([1,2,2,3]);
+  w.__QC_MARK_DELETED([3,4]);
+  rollback();
+  assert.deepEqual(Array.from(w.__QC_PENDING_DELETES), [1,3,4]);
+  rollback(); assert.deepEqual(Array.from(w.__QC_PENDING_DELETES), [1,3,4]);
+});
 
 function appFunction(name, context) {
   const app = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');

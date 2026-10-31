@@ -234,12 +234,25 @@
   }
   window.__QC_MARK_DELETED = function (ids) {
     if (!Array.isArray(ids)) return;
+    var previous = [];
     for (var i = 0; i < ids.length; i++) {
       var n = Number(ids[i]) || 0;
       if (!n) continue;
+      previous.push({ id: n, revision: deleteRevisions[n], marked: nextDeleteRevision + 1 });
       deleteRevisions[n] = ++nextDeleteRevision;
       if (window.__QC_PENDING_DELETES.indexOf(n) === -1) window.__QC_PENDING_DELETES.push(n);
     }
+    /* 主记录持久化失败时撤回本轮标记，不撤销此前或后来操作的删除请求。 */
+    return function () {
+      previous.reverse().forEach(function (entry) {
+        if (deleteRevisions[entry.id] !== entry.marked) return;
+        if (entry.revision !== undefined) deleteRevisions[entry.id] = entry.revision;
+        else {
+          delete deleteRevisions[entry.id];
+          window.__QC_PENDING_DELETES = window.__QC_PENDING_DELETES.filter(function (id) { return id !== entry.id; });
+        }
+      });
+    };
   };
 
   /* ── 开机：同步 XHR 拉全量（必须同步，才能赶在 app.js 的 init 之前写好 localStorage）── */

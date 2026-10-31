@@ -5004,6 +5004,8 @@ function renderReviewPage() {
   });
 
   const list = state.records.filter(r => recStatus(r) === _reviewTab);
+  const visibleIds = new Set(list.map(r => r.id));
+  _reviewSelected = new Set([..._reviewSelected].filter(id => visibleIds.has(id)));
   if (_reviewTab === 'approved') list.sort((a,b) => (b.reviewAt||'').localeCompare(a.reviewAt||''));
   else                           list.sort((a,b) => (b.updatedAt||'').localeCompare(a.updatedAt||''));
 
@@ -5060,8 +5062,8 @@ function renderReviewPage() {
     </style>
     <div class="review-batch-bar" style="display:flex;align-items:center;gap:10px;padding:8px 4px;background:var(--bg);">
       <span style="font-size:12px;color:var(--text-dim)">已选 <b id="reviewSelCount">${_reviewSelected.size}</b> 条</span>
-      <button class="action-btn" onclick="batchApproveSelected()" ${_reviewSelected.size ? '' : 'disabled'}>✓ 批量通过</button>
-      <button class="action-btn del" onclick="batchDeleteSelected()" ${_reviewSelected.size ? '' : 'disabled'}>🗑 批量删除</button>
+      ${canReview ? `<button class="action-btn" onclick="batchApproveSelected()" ${_reviewSelected.size && _reviewTab !== 'approved' ? '' : 'disabled'}>✓ 批量通过</button>` : ''}
+      ${can('deleteRecord') ? `<button class="action-btn del" onclick="batchDeleteSelected()" ${_reviewSelected.size ? '' : 'disabled'}>🗑 批量删除</button>` : ''}
     </div>`;
   wrap.innerHTML = batchBar + `<table class="data-table" style="min-width:1368px">
     <thead><tr>
@@ -5091,37 +5093,51 @@ function toggleReviewSelectAll(on) {
 function batchApproveSelected() {
   if (!can('reviewRecord')) { showToast('当前账号无权限执行此操作', 'error'); return; }
   if (!_reviewSelected.size) { showToast('请先勾选记录', 'info'); return; }
-  const targets = state.records.filter(r => _reviewSelected.has(r.id) && recStatus(r) !== 'approved');
+  const targets = state.records.filter(r => _reviewSelected.has(r.id) && recStatus(r) === _reviewTab && recStatus(r) !== 'approved');
   if (!targets.length) { showToast('所选记录均已审核', 'info'); return; }
   if (!confirm(`确认批量通过 ${targets.length} 条记录的审核？`)) return;
   const u = _liveUser(), now = nowIso(), name = (u && (u.name || u.username)) || '';
-  targets.forEach(r => {
-    r.status = 'approved'; r.reviewBy = name; r.reviewAt = now; r.updatedAt = now;
-    r.rejectReason = ''; r.rejectBy = ''; r.rejectAt = '';
-    delete r.resubmitted;
+  const previousRecords = state.records, ids = new Set(targets.map(r => r.id));
+  state.records = state.records.map(r => {
+    if (!ids.has(r.id)) return r;
+    const reviewed = { ...r, status: 'approved', reviewBy: name, reviewAt: now, updatedAt: now,
+      rejectReason: '', rejectBy: '', rejectAt: '' };
+    delete reviewed.resubmitted;
+    return reviewed;
   });
+  if (persist() === false) {
+    state.records = previousRecords;
+    showToast('批量审核未保存，请检查登录状态和浏览器存储空间后重试，原记录及选择已保留', 'error');
+    return;
+  }
   _reviewSelected.clear();
-  persist();
-  showToast(`✓ 已批量通过 ${targets.length} 条审核`, 'success');
+  showToast(`${targets.length} 条审核操作已在本地暂存，等待服务器同步`, 'info');
   renderReviewPage();
   updateTopKpis();
 }
 
-/* 批量删除（已审核记录需审核权限，未审核任何账号可删规则同单条删除） */
+/* 批量删除沿用单条删除权限；只处理当前列表仍存在的选中记录。 */
 function batchDeleteSelected() {
   if (!can('deleteRecord')) { showToast('当前账号无权限执行此操作', 'error'); return; }
   if (!_reviewSelected.size) { showToast('请先勾选记录', 'info'); return; }
-  const locked = state.records.filter(r => _reviewSelected.has(r.id) && recStatus(r) === 'approved');
+  const targets = state.records.filter(r => _reviewSelected.has(r.id) && recStatus(r) === _reviewTab);
+  if (!targets.length) { showToast('选中记录已变更，请刷新列表后重选', 'info'); renderReviewPage(); return; }
+  const locked = targets.filter(r => recStatus(r) === 'approved');
   if (locked.length && !can('reviewRecord')) {
     showToast(`所选含 ${locked.length} 条已审核记录，需先反审核退回后才能删除`, 'error'); return;
   }
-  if (!confirm(`确认批量删除所选 ${_reviewSelected.size} 条记录？此操作不可撤销。`)) return;
-  const ids = [..._reviewSelected];
-  if (window.__QC_MARK_DELETED) window.__QC_MARK_DELETED(ids);
-  state.records = state.records.filter(r => !_reviewSelected.has(r.id));
+  if (!confirm(`确认批量删除所选 ${targets.length} 条记录？此操作不可撤销。`)) return;
+  const ids = targets.map(r => r.id), deletedIds = new Set(ids), previousRecords = state.records;
+  const undoDeleted = window.__QC_MARK_DELETED ? window.__QC_MARK_DELETED(ids) : null;
+  state.records = state.records.filter(r => !deletedIds.has(r.id));
+  if (persist() === false) {
+    state.records = previousRecords;
+    if (typeof undoDeleted === 'function') undoDeleted();
+    showToast('批量删除未保存，请检查登录状态和浏览器存储空间后重试，原记录及选择已保留', 'error');
+    return;
+  }
   _reviewSelected.clear();
-  persist();
-  showToast(`✓ 已批量删除 ${ids.length} 条记录`, 'success');
+  showToast(`${ids.length} 条删除操作已在本地暂存，等待服务器同步`, 'info');
   renderReviewPage();
   updateTopKpis();
 }

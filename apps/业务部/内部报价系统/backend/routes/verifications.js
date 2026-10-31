@@ -289,7 +289,7 @@ router.put('/workshops', async (req, res) => {
         const latest = await db.prepare("SELECT id FROM quote_verification_versions WHERE quote_id=? AND status<>'cancelled' ORDER BY version_no DESC,id DESC LIMIT 1").get(version.quote_id);
         if (!latest || latest.id !== id) throw Object.assign(new Error('版本已变化，请刷新后重试'),{status:409});
         const quote = await db.prepare('SELECT customer FROM quotes WHERE id=?').get(version.quote_id);
-        if (fixedWorkshop(quote) && name !== fixedWorkshop(quote)) throw Object.assign(new Error('ToyMonster 核价统一分配华登'),{status:400});
+        if (fixedWorkshop(quote) && name !== fixedWorkshop(quote)) throw Object.assign(new Error('该客户核价统一分配华登'),{status:400});
         const sales = await db.prepare("SELECT * FROM quote_verification_sections WHERE version_id=? AND dept='sales'").get(id);
         if (!sales) throw Object.assign(new Error('缺少业务核价信息'),{status:409});
         assertRevision(sales,expected[id]);

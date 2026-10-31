@@ -35,7 +35,7 @@ test('reviewed records have evidence and no conflicting customer/SKU assignments
     assert.ok(!keys.has(key),key);keys.add(key);
     assert.ok(r.evidence.length>0);
     for(const e of r.evidence){assert.match(e.sha256,/^[a-f0-9]{64}$/);assert.ok(e.file&&e.sheet&&e.cell);}
-    assert.equal(workshop(r.customer,r.sku),r.customer.toUpperCase()==='TOYMONSTER'?'华登':r.workshop==='河源'?'待分配车间':r.workshop,key);
+    assert.equal(workshop(r.customer,r.sku),['TOYMONSTER','SKYCASTLE'].includes(r.customer.replace(/\s/g,'').toUpperCase())?'华登':r.workshop==='河源'?'待分配车间':r.workshop,key);
   }
 });
 
@@ -43,4 +43,14 @@ test('ToyMonster全部任务统一华登，其余河源分配取消且原始核�
  const sections=[{dept:'sales',payload_json:JSON.stringify({workshop_assignment:{name:'河源'},amount:123})}];const before=JSON.stringify(sections);
  for(const name of ['ToyMonster','TOYMONSTER','Toy Monster']) assert.equal(workshop(name,'UNKNOWN',sections),'华登');
  assert.equal(workshop('John Adams','12091',sections),'待分配车间');assert.equal(JSON.stringify(sections),before);
+});
+
+test('Sky Castle全部任务归华登，覆盖旧河源和显式其他分配，保留核价数据',()=>{
+ for(const name of ['Sky Castle','SKY CASTLE','SkyCastle']){
+  for(const target of ['河源','兴信B',null]){
+   const payload={amount:123.4567,formula:'=A1',workshop_assignment:target?{name:target}:undefined};
+   const sections=[{dept:'sales',payload_json:JSON.stringify(payload)}],before=JSON.stringify(sections);
+   assert.equal(workshop(name,'UNMAPPED',sections),'华登');assert.equal(JSON.stringify(sections),before);
+  }
+ }
 });

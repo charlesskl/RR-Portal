@@ -49,3 +49,13 @@ test('未确认报价仍被拦截；直接核价完成后可按新基准复制�
  assert.equal(JSON.parse(f.native.prepare("SELECT payload_json FROM quote_verification_sections WHERE version_id=? AND dept='sales'").get(next.body.id).payload_json).header.fx_rmb_hkd,.9);
  assert.deepEqual(f.native.prepare('SELECT * FROM quote_verification_sections WHERE version_id=?').all(version),before);assert.equal(f.native.prepare('SELECT count(*) n FROM quote_customer_confirmations').get().n,0);
 });
+
+test('Sky Castle任务只能分配华登，列表同步显示且拒绝其他车间不写入',async t=>{
+ const f=fixture(t),created=await f.call('POST /',{body:{...f.input,customer:'Sky Castle'}});assert.equal(created.statusCode,201);
+ const section=f.native.prepare("SELECT * FROM quote_verification_sections WHERE version_id=? AND dept='sales'").get(created.body.version_id);
+ const rev=require('../backend/services/verificationMetadata').payloadRevision(section);
+ const denied=await f.call('PUT /workshops',{body:{version_ids:[created.body.version_id],workshop:'兴信B',expected_revisions:{[created.body.version_id]:rev}}});
+ assert.equal(denied.statusCode,400);assert.deepEqual(f.native.prepare('SELECT * FROM quote_verification_sections WHERE id=?').get(section.id),section);
+ const allowed=await f.call('PUT /workshops',{body:{version_ids:[created.body.version_id],workshop:'华登',expected_revisions:{[created.body.version_id]:rev}}});
+ assert.equal(allowed.statusCode,200);assert.equal((await f.call('GET /')).body.rows[0].workshop,'华登');
+});

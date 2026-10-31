@@ -8,6 +8,12 @@ using IndoShipping.Api.Features.Bootstrap;
 using IndoShipping.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
+using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Xunit;
@@ -16,6 +22,67 @@ namespace IndoShipping.Api.Tests;
 
 public class ShipmentOutboundLinkTests
 {
+    [Fact]
+    public async Task Linked_packing_JSON_roundtrips_over_HTTP_with_explicit_zeros_and_unchanged_stock()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        var before = await f.Db.ExecuteScalarAsync<string>("""
+            SELECT jsonb_build_object(
+                'materials',(SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM materials x),
+                'outbound',(SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM outbound x),
+                'receipts',(SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM po_receipts x))::text
+            """);
+        // Controller/JSON/transaction integration only. Production authentication
+        // middleware is unchanged and remains covered by its own permission tests.
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing", Args = [] });
+        builder.Configuration.Sources.Clear();
+        builder.Configuration.AddInMemoryCollection();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddSingleton<ISqlConnectionFactory>(new SqlConnectionFactory(f.Connection));
+        builder.Services.AddControllers().AddApplicationPart(typeof(ShipmentsController).Assembly);
+        await using var app = builder.Build();
+        app.MapControllers(); await app.StartAsync();
+        try
+        {
+            using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+            var body = Body(2, imported: true);
+            body.items![0].customs_company = "本单报关公司";
+            body.items[0].formula_name = "本单公式";
+            body.items[0].weighing_qty = 8;
+            body.items[0].material_snapshot = JsonSerializer.SerializeToElement(new {
+                id = 66, name_zh = "中边模", length = 90, width = 80, name_en = "Local English", hs_cn = "0012345678" });
+            var created = await client.PostAsJsonAsync("/api/shipments", body);
+            created.EnsureSuccessStatusCode();
+            var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+            body.items[0].cartons = 0; body.items[0].weighing_qty = 0;
+            body.items[0].material_snapshot = JsonSerializer.SerializeToElement(new {
+                id = 66, name_zh = "中边模", length = 0, width = 80, name_en = "Local English", hs_cn = "0012345678" });
+            (await client.PutAsJsonAsync($"/api/shipments/{id}", body)).EnsureSuccessStatusCode();
+            var row = (await client.GetFromJsonAsync<JsonElement>($"/api/shipments/{id}")).GetProperty("items")[0];
+            var snapshot = row.GetProperty("material_snapshot");
+            if (snapshot.ValueKind == JsonValueKind.String) snapshot = JsonDocument.Parse(snapshot.GetString()!).RootElement;
+            Assert.Equal(0, row.GetProperty("cartons").GetInt32());
+            Assert.Equal(0m, row.GetProperty("weighing_qty").GetDecimal());
+            Assert.Equal("本单报关公司", row.GetProperty("customs_company").GetString());
+            Assert.Equal("本单公式", row.GetProperty("formula_name").GetString());
+            Assert.Equal(0, snapshot.GetProperty("length").GetInt32());
+            Assert.Equal(80, snapshot.GetProperty("width").GetInt32());
+            Assert.Equal("Local English", snapshot.GetProperty("name_en").GetString());
+            Assert.Equal("0012345678", snapshot.GetProperty("hs_cn").GetString());
+            var saved = await f.Db.QuerySingleAsync("SELECT * FROM shipment_items WHERE shipment_id=@id", new { id });
+            Assert.Equal(1, (int)saved.outbound_id); Assert.Equal(66, (int)saved.material_id);
+            Assert.Equal(2m, (decimal)saved.qty); Assert.Equal(4m, (decimal)saved.kg);
+            Assert.Equal(before, await f.Db.ExecuteScalarAsync<string>("""
+                SELECT jsonb_build_object(
+                    'materials',(SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM materials x),
+                    'outbound',(SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM outbound x),
+                    'receipts',(SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM po_receipts x))::text
+                """));
+        }
+        finally { await app.StopAsync(); }
+    }
+
     [Fact]
     public async Task Linked_packing_snapshot_preserves_absent_HS_fallback_and_explicit_clear_without_stock_changes()
     {

@@ -7,6 +7,11 @@ const linkedFields = ['cartons', 'carton_no', 'carton_group', 'qty_per_carton', 
 const linkedMaterialFields = ['length', 'width', 'height', 'weight_per_carton', 'gross_per_pc', 'hs_cn', 'hs_id',
   'name_en', 'image', 'import_source'] as const
 const present = (value: unknown) => value != null && value !== ''
+function importValues(row: ShipmentImportItem) {
+  const values = { ...row }
+  delete values._fileFields; delete values._fileMaterialFields; delete values._fileWeighingQty
+  return values
+}
 
 /** A file may update declaration/packing data, never the linked stock or PO basis. */
 export function applyShipmentImport(existing: readonly ExistingShipmentImportRow[], materials: ReadonlyMap<number, Material>,
@@ -19,27 +24,30 @@ export function applyShipmentImport(existing: readonly ExistingShipmentImportRow
   const affectedGroups = new Set<string>()
   imported.forEach((row, index) => {
     const target = targets[index]
-    if (target === -1) { next.push({ ...row, material_snapshot: { ...row.material_snapshot } }); return }
+    if (target === -1) { next.push({ ...importValues(row), material_snapshot: { ...row.material_snapshot } }); return }
     const old = existing[target], material = current[target].material_snapshot
     const oldGroup = cartonGroupKey(old, materials)
     if (oldGroup) affectedGroups.add(oldGroup)
     if (!old.outbound_id) {
-      const provided = Object.fromEntries(Object.entries(row).filter(([, value]) => present(value)))
+      const provided = Object.fromEntries(Object.entries(importValues(row)).filter(([, value]) => present(value)))
       next[target] = { ...old, ...provided, material_snapshot: mergeShipmentImportMaterial(material, row.material_snapshot) }
     } else {
-      for (const field of ['cartons', 'weighing_qty'] as const) if (present(row[field])
-        && (!Number.isFinite(Number(row[field])) || Number(row[field]) < 0 || (field === 'cartons' && !Number.isInteger(Number(row[field])))))
+      const fileField = (field: keyof ShipmentImportItem) => !row._fileFields || row._fileFields.includes(field)
+      const fileMaterialField = (field: keyof Material) => !row._fileMaterialFields || row._fileMaterialFields.includes(field)
+      const fileValues = row._fileWeighingQty == null ? row : { ...row, weighing_qty: row._fileWeighingQty }
+      for (const field of ['cartons', 'weighing_qty'] as const) if (fileField(field) && present(fileValues[field])
+        && (!Number.isFinite(Number(fileValues[field])) || Number(fileValues[field]) < 0 || (field === 'cartons' && !Number.isInteger(Number(fileValues[field])))))
         throw new Error(`第 ${target + 1} 行${field === 'cartons' ? '箱数必须为非负整数' : '称重数量必须为非负数'}`)
       for (const field of ['length', 'width', 'height', 'weight_per_carton', 'gross_per_pc'] as const)
-        if (present(row.material_snapshot[field]) && (!Number.isFinite(Number(row.material_snapshot[field])) || Number(row.material_snapshot[field]) < 0))
+        if (fileMaterialField(field) && present(row.material_snapshot[field]) && (!Number.isFinite(Number(row.material_snapshot[field])) || Number(row.material_snapshot[field]) < 0))
           throw new Error(`第 ${target + 1} 行尺寸或重量无效，请核对文件后导入`)
-      const patch = Object.fromEntries(linkedFields.filter(field => present(row[field])).map(field => [field, row[field]]))
+      const patch = Object.fromEntries(linkedFields.filter(field => fileField(field) && present(fileValues[field])).map(field => [field, fileValues[field]]))
       // Preserve an existing physical carton group even when the uploaded file
       // uses a fresh editor-local group ID. Partial conflicting updates fail below.
       if (old.carton_group) patch.carton_group = old.carton_group
       const merged = mergeShipmentImportMaterial(material, row.material_snapshot)
       const snapshot = { ...material }
-      for (const field of linkedMaterialFields) if (present(merged[field])) Object.assign(snapshot, { [field]: merged[field] })
+      for (const field of linkedMaterialFields) if (fileMaterialField(field) && present(merged[field])) Object.assign(snapshot, { [field]: merged[field] })
       // The backend checks snapshot.id against the outbound's actual material.
       const materialId = old.material_snapshot?.id || (Number(old.material_id) > 0 ? old.material_id : material?.id)
       if (!(Number(materialId) > 0)) throw new Error(`第 ${target + 1} 行缺少已确认的出库物料 ID，请重新关联后导入`)

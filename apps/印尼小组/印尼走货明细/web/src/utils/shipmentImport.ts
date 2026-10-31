@@ -8,6 +8,10 @@ import { normalizeShipmentDeclaration } from './shipmentDeclaration'
 
 export interface ShipmentImportItem {
   material_snapshot: Material
+  // File intent, captured before master/dictionary defaults. Removed on apply.
+  _fileFields?: readonly (keyof ShipmentImportItem)[]
+  _fileMaterialFields?: readonly (keyof Material)[]
+  _fileWeighingQty?: number
   qty?: number; kg?: number; cartons?: number; carton_group?: string; carton_no?: string
   qty_per_carton?: string; weighing_qty?: number; purchase_unit?: string; pallet?: string
   price?: number; currency?: string; supplier?: string; customs_company?: string
@@ -26,9 +30,15 @@ export function planShipmentImport(imported: ShipmentImportItem[], existing: Exi
     const matches = existing.flatMap((row, index) => {
       const m = row.material_snapshot
       if (!m || !norm(source.name_zh) || norm(m.name_zh) !== norm(source.name_zh)) return []
-      if (norm(m.product_code || m.related_product_code) !== norm(source.product_code || source.related_product_code)) return []
-      if (norm(m.spec) !== norm(source.spec)) return []
-      if (norm(row.supplier || m.supplier) !== norm(item.supplier || source.supplier)) return []
+      // Catalog defaults cannot identify a historical outbound variant. When a
+      // file omits part of a linked identity, retain every compatible candidate
+      // so ambiguity is reviewed instead of silently choosing the master value.
+      const fileIdentity = !!row.outbound_id && item._fileMaterialFields
+      if ((!fileIdentity || fileIdentity.includes('product_code') || fileIdentity.includes('related_product_code'))
+        && norm(m.product_code || m.related_product_code) !== norm(source.product_code || source.related_product_code)) return []
+      if ((!fileIdentity || fileIdentity.includes('spec')) && norm(m.spec) !== norm(source.spec)) return []
+      if ((!fileIdentity || fileIdentity.includes('supplier') || item._fileFields?.includes('supplier'))
+        && norm(row.supplier || m.supplier) !== norm(item.supplier || source.supplier)) return []
       if (!row.outbound_id && item.customs_company && norm(row.customs_company || m.customs_company) !== norm(item.customs_company)) return []
       if (item.po_no && norm(row.po_no) !== norm(item.po_no)) return []
       return [index]
@@ -39,6 +49,32 @@ export function planShipmentImport(imported: ShipmentImportItem[], existing: Exi
 }
 const text = (v: unknown) => String(v ?? '').trim()
 const norm = (v: unknown) => text(v).normalize('NFKC').replace(/\s+/g, '').toLowerCase()
+function captureFileFields(item: ShipmentImportItem, weighingQty?: number): ShipmentImportItem {
+  const present = (value: unknown) => value != null && value !== ''
+  const fields = Object.entries(item).filter(([, value]) => present(value)).map(([field]) => field) as (keyof ShipmentImportItem)[]
+  // The parser's name-based formula suggestion is useful for new rows, but is
+  // not an explicit command to replace a linked row's existing formula name.
+  const source = item.material_snapshot.import_source
+  const formula = source?.cells.find(cell => norm(cell.label) === norm('套公式名称栏'))
+    ?? source?.cells.find(cell => norm(cell.label).startsWith(norm('套公式名称栏')))
+  const weighingCell = source?.cells.find(cell => norm(cell.label) === norm('称重数量'))
+    ?? source?.cells.find(cell => norm(cell.label).startsWith(norm('称重数量')))
+  const invalidWeighing = !!weighingCell && (weighingCell.error || present(weighingCell.value) && weighingQty == null)
+  const measuredWeight = item.material_snapshot.gross_per_pc != null || item.material_snapshot.weight_per_carton != null
+  // A new packing quantity is not a new weighing measurement. Derived counts
+  // belong to linked updates only alongside a file-provided weight basis.
+  // An explicit weighing zero remains an instruction even without weight cells.
+  if (weighingQty != null && !fields.includes('weighing_qty')) fields.push('weighing_qty')
+  return { ...item,
+    _fileWeighingQty: weighingQty,
+    _fileFields: fields.filter(field => (field !== 'formula_name' || !source || formula && !formula.error && present(formula.value))
+      && (field !== 'weighing_qty' || !invalidWeighing && (weighingQty != null || measuredWeight))),
+    // A corrupt measuring-count cell cannot establish a replacement gross
+    // measurement pair. Keep the linked row's complete old basis until fixed.
+    _fileMaterialFields: Object.entries(item.material_snapshot).filter(([field, value]) => present(value)
+      && (!invalidWeighing || !['gross_per_pc', 'weight_per_carton'].includes(field))).map(([field]) => field) as (keyof Material)[],
+  }
+}
 const units: Record<string, string> = { kg: 'KGM', kgm: 'KGM', 公斤: 'KGM', 千克: 'KGM', 个: 'PCE', 件: 'PCE', pcs: 'PCE', pce: 'PCE', set: 'SET', 套: 'SET', tne: 'TNE', 吨: 'TNE', m: 'MTR', 米: 'MTR' }
 const currencies: Record<string, string> = { CNY: '¥', USD: 'US$', HKD: 'HK$', IDR: 'IDR' }
 
@@ -162,7 +198,8 @@ export function parseShipmentWorkbook(wb: XLSX.WorkBook): ShipmentImportResult {
         if (netTotal != null) material.net_per_pc = netTotal / weightQty
         if (grossTotal != null) material.gross_per_pc = grossTotal / weightQty
       } else if (grossTotal != null || netTotal != null) notices.push('有毛净重合计但没有有效件数；源值已保留，请补充件数后核对重量')
-      const weighing = number(['称重数量']) ?? shipmentWeightQuantity(name, shipmentPackingAverageQty(qpc))
+      const explicitWeighing = number(['称重数量'])
+      const weighing = explicitWeighing ?? shipmentWeightQuantity(name, shipmentPackingAverageQty(qpc))
       // Preserve a supplied per-piece gross weight without treating total weight as per-carton weight.
       const effectiveWeighing = weighing > 0 ? weighing : material.gross_per_pc != null ? 1 : undefined
       if ((material.weight_per_carton == null || grossTotal != null && weightQty > 0) && material.gross_per_pc != null && effectiveWeighing)
@@ -194,7 +231,7 @@ export function parseShipmentWorkbook(wb: XLSX.WorkBook): ShipmentImportResult {
         notices.push('单件净重大于毛重，已保留源值，请核对')
       const normalized = normalizeShipmentDeclaration(item, material)
       if (normalized.kg !== item.kg && item.kg != null) notices.push(`${unit} 申报数量已按送货数量对应，原表值保存在“原表资料”；采购金额保持不变`)
-      rows.push({ key: `${sheet}:${r + 1}`, sheet, row: r + 1, imageCol, selected: true, warnings: notices, item: normalized })
+      rows.push({ key: `${sheet}:${r + 1}`, sheet, row: r + 1, imageCol, selected: true, warnings: notices, item: captureFileFields(normalized, explicitWeighing) })
     }
   }
   if (!rows.length) warnings.push('未识别到含货号、产品中文名称的主明细表')
@@ -212,7 +249,10 @@ export async function importShipmentFile(file: File) {
     const images = await extractSheetImages(zip, sheet, true)
     for (const row of parsed.rows.filter(row => row.sheet === sheet)) {
       const matched = images.filter(image => image.row === row.row - 1 && image.col === row.imageCol)
-      if (matched.length === 1) row.item.material_snapshot.image = matched[0].dataUrl
+      if (matched.length === 1) {
+        row.item.material_snapshot.image = matched[0].dataUrl
+        row.item._fileMaterialFields = [...(row.item._fileMaterialFields || []), 'image']
+      }
       else if (matched.length > 1) row.warnings.push('多张图片对应同一行，未自动选择')
     }
   }

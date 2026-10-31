@@ -1405,7 +1405,7 @@ export default function ShipmentsPage() {
               <Button size="small" onClick={openTools}>从工具库选择</Button>
               <Button size="small" onClick={() => { loadLatestSchedule(); setSchedPickerOpen(true) }}>🔗 从排期勾选</Button>
               <Button size="small" onClick={addItem}>➕ 加一行</Button>
-              <ShipmentImport existing={items.map(row => ({ ...row, material_snapshot: matMap.get(row.material_id!) }))} onImport={(imported: ShipmentImportItem[], targets: number[]) => {
+              <ShipmentImport existing={items} materials={matMap} onImport={(imported: ShipmentImportItem[], targets: number[]) => {
                 try {
                   if (sheetWritePending.current || editorLoadState.current !== 'ready') {
                     message.info('资料正在加载或校验，请完成后再导入'); return false

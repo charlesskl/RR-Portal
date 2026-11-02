@@ -5,7 +5,7 @@ normal protected PR approval/merge. Root owns publication and execution.
 """
 import hashlib, importlib.util, json, os, pathlib, re, select, subprocess, sys, time
 
-EXECUTE=True
+EXECUTE=False
 DIAGNOSE_SHA='0aeb31f9a4aea3f9d67eb8489687d7a035aa8f7fd8ea34ede9c6bd56dace9f25'
 DIAGNOSE_FILE='pr1053-preflight.py'
 BRANCH='refs/heads/codex/ops-pr1053-20261102'

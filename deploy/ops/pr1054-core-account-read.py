@@ -19,8 +19,8 @@ async def main():
     await c.execute(text('SET TRANSACTION READ ONLY'))
     await c.execute(text("SET LOCAL statement_timeout='5s'"))
     if (await c.execute(text('SHOW transaction_read_only'))).scalar_one()!='on':raise RuntimeError('not_read_only')
-    q=text('SELECT id,username,full_name,department,role,is_active,permissions FROM users WHERE btrim(full_name)=:name OR btrim(username)=:name ORDER BY id LIMIT 9')
-    rows=(await c.execute(q,{'name':name})).mappings().all()
+    q=text('SELECT id,username,full_name,department,role,is_active,permissions FROM users WHERE btrim(full_name)=:name OR btrim(username)=:name OR full_name LIKE :contains OR username LIKE :contains ORDER BY id LIMIT 9')
+    rows=(await c.execute(q,{'name':name,'contains':'%'+name+'%'})).mappings().all()
     out=[]
     for r in rows:
      p=r['permissions'] or [];d=(r['department'] or '').strip().lower()

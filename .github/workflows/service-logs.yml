@@ -2,7 +2,7 @@ name: PR 1053 Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [prepare]}
+      mode: {type: choice, required: true, options: [deploy]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'bcc8072571dd2e06fc9e79416303a563e74a563eac3df95317d76f069a833f5f'
+  SCOPED_RELEASE_HELPER_SHA256: 'cc4356edf2383e4159bc906e3b785005445a3a6e561e8d140b4304b0db106fd2'
 jobs:
   scoped-operation:
     runs-on: ubuntu-latest
@@ -27,8 +27,8 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = bcc8072571dd2e06fc9e79416303a563e74a563eac3df95317d76f069a833f5f ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr1053-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = cc4356edf2383e4159bc906e3b785005445a3a6e561e8d140b4304b0db106fd2 ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr1053-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Run bounded reviewed operation
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
@@ -47,8 +47,8 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = bcc8072571dd2e06fc9e79416303a563e74a563eac3df95317d76f069a833f5f ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr1053-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = cc4356edf2383e4159bc906e3b785005445a3a6e561e8d140b4304b0db106fd2 ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr1053-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-pr1053-20261102:refs/remotes/origin/codex/ops-pr1053-20261102 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/codex/ops-pr1053-20261102)" = "$RELEASE_SHA" ]] || exit 1
@@ -56,7 +56,7 @@ jobs:
             batch_tmp=$(mktemp -d /tmp/pr1053.XXXXXX)
             trap 'rm -rf "$batch_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1053-schema-release.py" > "$batch_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_tmp/run.py" | cut -d ' ' -f1)" = bcc8072571dd2e06fc9e79416303a563e74a563eac3df95317d76f069a833f5f ]] || exit 1
+            [[ "$(sha256sum "$batch_tmp/run.py" | cut -d ' ' -f1)" = cc4356edf2383e4159bc906e3b785005445a3a6e561e8d140b4304b0db106fd2 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1053-preflight.py" > "$batch_tmp/pr1053-preflight.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_tmp/pr1053-preflight.py" | cut -d ' ' -f1)" = 0aeb31f9a4aea3f9d67eb8489687d7a035aa8f7fd8ea34ede9c6bd56dace9f25 ]] || exit 1
-            timeout --signal=TERM --kill-after=10s 4m python3 -B "$batch_tmp/run.py" prepare
+            timeout --signal=TERM --kill-after=10s 4m python3 -B "$batch_tmp/run.py" deploy

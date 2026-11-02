@@ -4,7 +4,7 @@ No uploaded document bodies, environment files, credentials or RAM output buffer
 are read. Runtime code/static files are hashed; temporary folders get metadata only.
 """
 import datetime,hashlib,json,os,pathlib,re,stat,subprocess,sys,urllib.request,urllib.error
-EXECUTE=True
+EXECUTE=False
 ROOT=pathlib.Path('/opt/rr-portal')
 OUT=ROOT/'deploy/backups/pr1055-preflight-1-20261102'
 BRANCH='refs/heads/codex/ops-pr1055-20261102'

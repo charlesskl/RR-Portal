@@ -4,7 +4,7 @@ Temporary in-process download links may expire at the one authorized restart.
 Uploaded originals stay with users; no persistent business store is introduced.
 """
 import copy,datetime,gzip,hashlib,importlib.util,io,json,os,pathlib,re,stat,subprocess,sys,tarfile,time
-EXECUTE=True
+EXECUTE=False
 ROOT=pathlib.Path('/opt/rr-portal')
 ARCHIVE=ROOT/'deploy/backups/pr1055-release-1-20261102'
 BRANCH='refs/heads/codex/ops-pr1055-20261102'

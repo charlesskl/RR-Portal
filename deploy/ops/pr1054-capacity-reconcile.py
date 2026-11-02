@@ -1,7 +1,7 @@
 """INERT read-only capacity/reclaim reconciliation. Never call a reclaim/lifecycle function."""
 import datetime,hashlib,importlib.util,json,os,pathlib,stat,sys
 
-EXECUTE=True
+EXECUTE=False
 ROOT=pathlib.Path('/opt/rr-portal')
 OUT=ROOT/'deploy/backups/pr1054-capacity-reconcile-1-20261102'
 FAILED=ROOT/'deploy/backups/pr1054-reclaim1053-public-1-20261102'

@@ -1,7 +1,7 @@
 """INERT, one successful public-dist copy only. No live links, business data or cache cleanup."""
 import ctypes,errno,hashlib,importlib.util,json,os,pathlib,re,stat,sys
 
-EXECUTE=True
+EXECUTE=False
 ROOT=pathlib.Path('/opt/rr-portal')
 OUT=ROOT/'deploy/backups/pr1054-reclaim1053-public-1-20261102'
 SOURCE=ROOT/'deploy/backups/pr1053-static-2-20261102/prepare/context/new-wwwroot'

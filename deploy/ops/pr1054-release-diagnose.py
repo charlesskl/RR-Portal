@@ -1,6 +1,6 @@
 """INERT, single-run observation after a pre-stop busy abort. No replay or cleanup."""
 import datetime,hashlib,importlib.util,json,os,pathlib,re,stat,sys,time,urllib.request,urllib.error
-EXECUTE=True
+EXECUTE=False
 RELEASE_FILE='pr1054-engineering-release.py'
 RELEASE_SHA='e9347f1d7aaf0680e07d0747ecaf66709a29faf67d9107a04612a77732126694'
 FAILED_SHA='17b0fc0e59b3ddcc29b5d72841c7437b69b1f64ff289db12594621de5ce4d861'

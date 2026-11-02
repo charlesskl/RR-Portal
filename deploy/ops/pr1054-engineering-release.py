@@ -6,7 +6,7 @@ Every lifecycle/publication action is one-shot and has durable intent/receipts.
 """
 import copy,datetime,gzip,hashlib,importlib.util,io,json,os,pathlib,re,shutil,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error
 
-EXECUTE=True
+EXECUTE=False
 ROOT=pathlib.Path('/opt/rr-portal')
 APP='apps/工程部/工程资料管理系统'
 SERVICE='gongcheng-ziliao'

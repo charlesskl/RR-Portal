@@ -5,7 +5,7 @@ A warm file inventory is per-file stable, not a globally atomic backup or snapsh
 """
 import datetime,hashlib,json,os,pathlib,re,stat,subprocess,sys,urllib.request,urllib.error
 
-EXECUTE=True
+EXECUTE=False
 ROOT=pathlib.Path('/opt/rr-portal')
 OUT=ROOT/'deploy/backups/pr1054-preflight-1-20261102'
 BRANCH='refs/heads/codex/ops-pr1054-20261102'

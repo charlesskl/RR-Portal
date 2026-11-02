@@ -48,7 +48,7 @@ def cmd(args,body=None,limit=4*1024**2):
 def profile():
  ids=cmd(['docker','ps','-aq','--no-trunc']).decode().split();need(len(ids)==len(set(ids))==46)
  rows=json.loads(cmd(['docker','inspect',*ids],limit=16*1024**2));need({r['Id']for r in rows}==set(ids));core=[r for r in rows if(r['Config'].get('Labels')or{}).get('com.docker.compose.project')=='rr-portal'and(r['Config'].get('Labels')or{}).get('com.docker.compose.service')=='core'];need(len(core)==1 and core[0]['State']['Running']and core[0]['State'].get('Health',{}).get('Status')=='healthy')
- safe={r['Id']:{'image':r['Image'],'config':sha(enc(r['Config'])),'host':sha(enc(r['HostConfig'])),'mounts':sha(enc(r['Mounts'])),'pid':r['State']['Pid'],'started':r['State']['StartedAt'],'health':r['State'].get('Health',{}).get('Status'),'restarts':r['RestartCount']}for r in rows}
+ safe={r['Id']:{'image':r['Image'],'config':sha(enc(r['Config'])),'host':sha(enc(r['HostConfig'])),'mounts':sha(enc(sorted(r['Mounts'],key=enc))),'pid':r['State']['Pid'],'started':r['State']['StartedAt'],'health':r['State'].get('Health',{}).get('Status'),'restarts':r['RestartCount']}for r in rows}
  return safe,core[0]['Id']
 def encrypt(raw):
  p=pathlib.Path(__file__).with_name('account-lookup.public.pem');fd=os.open(p,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
@@ -69,7 +69,7 @@ def main():
  name=os.environ.get('LOOKUP_NAME','');need(sha(name.encode())==NAME_SHA);v={'phase':'diagnose','success':False,'readOnly':True,'passwordQueried':False,'accountWrites':False,'configurationWrites':False,'lifecycleWrites':False}
  try:
   STAGE='runtime-before';before,cid=profile();STAGE='core-readonly-query';raw=cmd(['docker','exec','-i',cid,'python','-B','-c',QUERY],enc({'name':name}),limit=16384);STAGE='validate-selected-safe-fields';data=json.loads(raw);need(data.get('readOnlyTransaction')is True and data.get('passwordQueried')is False and type(data.get('matches'))is list and len(data['matches'])<=9)
-  fields={'id','username','full_name','department','role','is_active','canEdit','canApprove'};need(all(type(r)is dict and set(r)==fields for r in data['matches']));STAGE='encrypt-result';cipher=encrypt(enc(data));STAGE='runtime-after';after,cid2=profile();need(cid==cid2 and before==after);v.update(success=True,encryptedAccountResult=cipher,encryption='RSA-4096-OAEP-SHA256',all46RuntimeUnchanged=True)
+  fields={'id','username','full_name','department','role','is_active','canEdit','canApprove'};need(all(type(r)is dict and set(r)==fields for r in data['matches']));STAGE='encrypt-result';cipher=encrypt(enc(data));v.update(encryptedAccountResult=cipher,encryption='RSA-4096-OAEP-SHA256',readonlyQueryCompleted=True);STAGE='runtime-after';after,cid2=profile();need(cid==cid2);v.update(success=True,all46RuntimeUnchanged=before==after,coreRuntimeUnchanged=before[cid]==after[cid],runtimeChangedFields={k:[n for n in before[k]if before[k][n]!=after[k][n]]for k in before if before[k]!=after[k]})
  except Exception as e:v.update(errorType=type(e).__name__,stage=STAGE,lastCommand=LAST_COMMAND)
  v['resultSHA256']=sha(enc(v));wire(v);return 0 if v['success']else 1
 if __name__=='__main__':sys.exit(main())

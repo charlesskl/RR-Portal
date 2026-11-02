@@ -5,7 +5,7 @@ normal protected PR approval/merge. Root owns publication and execution.
 """
 import hashlib, importlib.util, json, os, pathlib, re, select, subprocess, sys, time
 
-EXECUTE=True
+EXECUTE=False
 DIAGNOSE_SHA='658ae30857ff0a89c040cc32e24d993ed7894b03e42309472249743b9fbe5774'
 DIAGNOSE_FILE='indo-text-20261102-diagnostic-library.py'
 BRANCH='refs/heads/codex/ops-indo-shipment-text-20261102'

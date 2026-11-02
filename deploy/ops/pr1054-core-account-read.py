@@ -1,6 +1,6 @@
 """INERT bounded personal-account lookup. No password read, login, bootstrap or update."""
 import base64,hashlib,json,os,pathlib,re,subprocess,sys
-EXECUTE=True
+EXECUTE=False
 PUBLIC_KEY='-----BEGIN PUBLIC KEY-----\nMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAw2E+TQnImP4iiJl5x84c\nM+3iaRr70QzBgwIlbbUn+SWQ1/GzaDBoV3RIDIYd1+jnbYCDCPtHIq/jjY0wo/hr\nRA/YYa6xHKZqIQ749JvRHRy2p4ALfRHi/b7u3oNdmJey2nmuThj6xgnTzBzrOc/X\nvOxTDliX/T7oBUk+J9d54ZR4wGlAQhfpDU5NwQuvSBBpPussOZ4Pi62GlATWMp0i\n7fVSzlNbha408oK2dbsdnoBf3KiZdT0vXDt3fjJvAAb0ZN4/StX257XRSn9iCb3u\n+OHcajgOIqmAdLEEV8TMVEi/Q/rXxs09ojW1wxpgwRi9xhhkLsC1BsVn1fOM6Reo\n6YdeO3lHI+JODq5CPcq/bp/xaFcqJD5Fb85fnMKJ0FHLgTw5ZDEch7+E13RZyNPM\nCe5bdcXli7Bg8sAoEslMTCptvh6783fJsNY6zwm4S+erV+APCz5+/Nc4ZvdkBT/s\n8FMqjBxN5U5g5VzGhYcQUHlRWF5qkNz7DtiaXXU7LUV+sxtTjLHOknkk5Jp/cOie\nUXz2VL+pq/ujKfRLS77iponYXrdQEY2eWQGvqJpgRP/MXzAvzQJdZtD2LCxH0Gdb\nOfv5e/yG2C3Qggc7Z4eFeaLbC0BRBrCHFbKqym8dJKsoOcjd/29UM7DvbMetjSTA\nph7sWRuLHy7ohSmRfLUlXx8CAwEAAQ==\n-----END PUBLIC KEY-----\n'
 NAME_SHA='a4bea20289a9a67055fe383b30d6d4ad89079f439783d07a9650094010de6608'
 BRANCH='refs/heads/codex/ops-pr1054-20261102'

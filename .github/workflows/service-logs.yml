@@ -12,10 +12,11 @@ concurrency:
   cancel-in-progress: false
 env:
   LOOKUP_NAME: ${{ inputs.full_name }}
-  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'ce3c97d78e7d385a1a99c0f309f75fc73b8d91964ddb3b7a6d24fb630e8fa71c'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
+  SCOPED_RELEASE_HELPER_SHA256: '4bbdd539288a6165f28adca593e1def12dfba97325e773b64c45adff0cb8f17a'
 jobs:
   scoped-operation:
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -30,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "::add-mask::$LOOKUP_NAME"
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = ce3c97d78e7d385a1a99c0f309f75fc73b8d91964ddb3b7a6d24fb630e8fa71c ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 4bbdd539288a6165f28adca593e1def12dfba97325e773b64c45adff0cb8f17a ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr1054-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Run bounded reviewed operation
@@ -50,7 +51,7 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256,LOOKUP_NAME
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = ce3c97d78e7d385a1a99c0f309f75fc73b8d91964ddb3b7a6d24fb630e8fa71c ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 4bbdd539288a6165f28adca593e1def12dfba97325e773b64c45adff0cb8f17a ]] || exit 1
             [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr1054-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-pr1054-20261102:refs/remotes/origin/codex/ops-pr1054-20261102 >/dev/null 2>&1 || exit 1
@@ -59,5 +60,5 @@ jobs:
             batch_tmp=$(mktemp -d /tmp/pr1054.XXXXXX)
             trap 'rm -rf "$batch_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1054-core-account-read.py" > "$batch_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_tmp/run.py" | cut -d ' ' -f1)" = ce3c97d78e7d385a1a99c0f309f75fc73b8d91964ddb3b7a6d24fb630e8fa71c ]] || exit 1
+            [[ "$(sha256sum "$batch_tmp/run.py" | cut -d ' ' -f1)" = 4bbdd539288a6165f28adca593e1def12dfba97325e773b64c45adff0cb8f17a ]] || exit 1
             timeout --signal=TERM --kill-after=10s 4m python3 -B "$batch_tmp/run.py" diagnose

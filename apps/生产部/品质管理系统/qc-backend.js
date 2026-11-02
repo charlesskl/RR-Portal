@@ -225,7 +225,29 @@
         nextDeleteRevision = Math.max(nextDeleteRevision, deleteRevisions[id]);
       });
       window.__QC_FORCE_REPLACE = draft.replacement || false;
-      localStorage.setItem(KEY.records, JSON.stringify(draft.state));
+      /* 草稿恢复用「合并」而不是「整包覆盖」：
+         草稿里每条记录若服务器已有且更新（如审核人已在别处审核/修改），以服务器为准；
+         只有服务器没有的（真正未同步的本地新记录）才从草稿补进来。
+         否则旧草稿会把页面永久定格在旧状态（已审核的记录还显示待审核）。 */
+      try {
+        var serverState = JSON.parse(localStorage.getItem(KEY.records) || '{}');
+        var serverById = Object.create(null);
+        (serverState.records || []).forEach(function (r) { serverById[r.id] = r; });
+        var merged = (serverState.records || []).slice();
+        var indexOfId = Object.create(null);
+        merged.forEach(function (r, i) { indexOfId[r.id] = i; });
+        (draft.state.records || []).forEach(function (dr) {
+          var sr = serverById[dr.id];
+          if (!sr) { indexOfId[dr.id] = merged.length; merged.push(dr); return; }
+          if (String(dr.updatedAt || '') > String(sr.updatedAt || '')) merged[indexOfId[dr.id]] = dr;
+        });
+        localStorage.setItem(KEY.records, JSON.stringify({
+          records: merged,
+          nextId: Math.max(Number(serverState.nextId) || 31, Number(draft.state.nextId) || 31),
+        }));
+      } catch (_) {
+        localStorage.setItem(KEY.records, JSON.stringify(draft.state));   /* 合并失败退回原逻辑 */
+      }
       failedWrites[apiUrl('/api/records')] = true;
       notice(volatile
         ? '当前账号有未同步验货记录，仅保留在当前页面，本地草稿备份不可用。请勿关闭或刷新，核对后点击“重试同步”；系统不会自动重发。'

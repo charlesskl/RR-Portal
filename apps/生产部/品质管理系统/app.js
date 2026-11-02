@@ -4690,16 +4690,20 @@ function resetSingleEntryFormForNext() {
   /* 连续录入：保留 供应商/客户/类型（类似手动批量录入，通常同一批），
      其余字段清空；检验员由 clearForm 默认当前登录账号 */
   const _keep = {
-    supplier: getVal('f_supplier'),
-    client:   getVal('f_client'),
-    type:     document.getElementById('f_type')?.value || '成品',
-    aqlLevel: getVal('f_aqlLevel'),
+    supplier:    getVal('f_supplier'),
+    client:      getVal('f_client'),
+    processType: getVal('f_processType'),
+    productNo:   getVal('f_productNo'),
+    type:        document.getElementById('f_type')?.value || '成品',
+    aqlLevel:    getVal('f_aqlLevel'),
   };
   clearForm();
-  setVal('f_supplier', _keep.supplier);
-  setVal('f_client',   _keep.client);
-  setVal('f_type',     _keep.type);
-  setVal('f_aqlLevel', _keep.aqlLevel || 'MAJ 1.0,MIN 2.5');
+  setVal('f_supplier',    _keep.supplier);
+  setVal('f_client',      _keep.client);
+  setVal('f_processType', _keep.processType);   /* 连续录入同加工类型居多，保留 */
+  setVal('f_productNo',   _keep.productNo);     /* 连续录入同货号居多，保留 */
+  setVal('f_type',        _keep.type);
+  setVal('f_aqlLevel',    _keep.aqlLevel || 'MAJ 1.0,MIN 2.5');
   syncAqlLevelPills();
   const dateEl     = document.getElementById('f_date');
   const inspDateEl = document.getElementById('f_inspDate');

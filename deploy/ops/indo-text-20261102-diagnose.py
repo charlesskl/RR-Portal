@@ -4,7 +4,7 @@ import datetime, hashlib, json, os, pathlib, re, stat, subprocess, sys
 ROOT = pathlib.Path('/opt/rr-portal')
 OUT = ROOT / 'deploy/backups/indo-shipment-text-20261102-diagnose-1'
 BRANCH = 'refs/heads/codex/ops-indo-shipment-text-20261102'
-EXECUTE = True
+EXECUTE = False
 STAGE = 'entry'
 TARGET_SERVICE = 'indo-shipping'
 EXPECTED_CID = '58a9bc0a94611e21a4d8987edd85857fa3f53521ca649bafa3a166890cf3eb2a'

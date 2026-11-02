@@ -2,7 +2,7 @@ name: Indo Shipment Text Scoped Operation
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [diagnose]}
+      mode: {type: choice, required: true, options: [prepare]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '8d0c0a79948f2363b9352dd14941f26843125b8424087bb7debf7a50e3002f35'
+  SCOPED_RELEASE_HELPER_SHA256: '5a499cc152043022587baf938273f829f0f8a868983c29e405576d2fd2d6fa0c'
 jobs:
   scoped-operation:
     runs-on: ubuntu-latest
@@ -27,8 +27,8 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 8d0c0a79948f2363b9352dd14941f26843125b8424087bb7debf7a50e3002f35 ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-indo-shipment-text-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 5a499cc152043022587baf938273f829f0f8a868983c29e405576d2fd2d6fa0c ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-indo-shipment-text-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Run bounded reviewed operation
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
@@ -47,14 +47,16 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 8d0c0a79948f2363b9352dd14941f26843125b8424087bb7debf7a50e3002f35 ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-indo-shipment-text-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 5a499cc152043022587baf938273f829f0f8a868983c29e405576d2fd2d6fa0c ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-indo-shipment-text-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-indo-shipment-text-20261102:refs/remotes/origin/codex/ops-indo-shipment-text-20261102 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/codex/ops-indo-shipment-text-20261102)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
             text_tmp=$(mktemp -d /tmp/indo-text-20261102.XXXXXX)
             trap 'rm -rf "$text_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/indo-text-20261102-diagnose.py" > "$text_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$text_tmp/run.py" | cut -d ' ' -f1)" = 8d0c0a79948f2363b9352dd14941f26843125b8424087bb7debf7a50e3002f35 ]] || exit 1
-            timeout --signal=TERM --kill-after=10s 4m python3 -B "$text_tmp/run.py" diagnose
+            git show "$RELEASE_SHA:deploy/ops/indo-text-20261102-release.py" > "$text_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$text_tmp/run.py" | cut -d ' ' -f1)" = 5a499cc152043022587baf938273f829f0f8a868983c29e405576d2fd2d6fa0c ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/indo-text-20261102-diagnostic-library.py" > "$text_tmp/indo-text-20261102-diagnostic-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$text_tmp/indo-text-20261102-diagnostic-library.py" | cut -d ' ' -f1)" = 658ae30857ff0a89c040cc32e24d993ed7894b03e42309472249743b9fbe5774 ]] || exit 1
+            timeout --signal=TERM --kill-after=10s 4m python3 -B "$text_tmp/run.py" prepare

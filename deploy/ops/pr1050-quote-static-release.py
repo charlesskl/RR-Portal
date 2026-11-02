@@ -5,7 +5,7 @@ import copy,decimal,hashlib,importlib.util,io,json,os,pathlib,re,stat,subprocess
 ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/pr1050-quote-static-20261102-1'
 APP='apps/业务部/内部报价系统';SERVICE='internal-quote';ALIAS='rr-portal-internal-quote:latest'
 BASE='38a35585770e0e837229d50f20ee4a9a759037ad';HOST_BASE='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c';HEAD='d90b03c8db023da5fce3c62455a890c007bd6900';TARGET='f167419f2da5874dcb6cdb603a38834ea61074b0';TREE='55e4291039b76f6a8c9a1159d80e432d16f59ba2';APP_TREE='a45a07eea5259b859d565257ca1fe249be4ce0c2'
-BRANCH='refs/heads/codex/ops-pr-1050-1051-20261102';PHASE='deploy';EXECUTE=True;PREPARED_SHA256='01a96797087d2b056c60de702aaf4fe2a485bf048254efa9a35acf5d8f213696';DEPLOY_SHA256=''
+BRANCH='refs/heads/codex/ops-pr-1050-1051-20261102';PHASE='verify';EXECUTE=True;PREPARED_SHA256='01a96797087d2b056c60de702aaf4fe2a485bf048254efa9a35acf5d8f213696';DEPLOY_SHA256='abba3fa0411ef234039fb9f36abf83f513c8c7203cd34fedeaa5e875acb90596'
 CID='0cfa8edaff44bbc74b4443b6dec444c90e2f115833ff9913abf8c9b6c462ef7a';LIVE_IMAGE='sha256:adf5b723ca5f8edae60a0a0f12a3828b8cd488a99eeee6405b61092805620294';BASE_IMAGE='sha256:43a6c0fb79b127a88a42b6eb6d1ee0a6ec9f6c18c2cd17bfaa34ad633d08c5e1';DIRTY_PATH_COUNT=5;DIRTY_SHA256='74b8a9c5caefdc5a220f12cd14972229312beef004e76129d0fb2bb691a0507e';PROFILE_PATH='/opt/rr-portal/deploy/backups/pr1050-1051-preflight-1-20261102/result.private.json';PROFILE_RESULT_SHA256='e313c021adb6e54884bd1c42e2738e39ad227782d0e8f2ed42b91db1e1032003'
 ALLOWED_CODE=('frontend/verification-compact.css', 'frontend/verification.html')
 CODE=('frontend/verification-compact.css', 'frontend/verification.html')

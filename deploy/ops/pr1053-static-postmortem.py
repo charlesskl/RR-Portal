@@ -1,6 +1,6 @@
 """INERT one-use read-only R1 postmortem. Never build, tag, copy, restart, retry or clean."""
 import datetime,hashlib,importlib.util,json,os,pathlib,re,stat,subprocess,sys
-EXECUTE=True
+EXECUTE=False
 ROOT=pathlib.Path('/opt/rr-portal')
 OUT=ROOT/'deploy/backups/pr1053-static-postmortem-1-20261102'
 FAILED=ROOT/'deploy/backups/pr1053-static-1-20261102/prepare'

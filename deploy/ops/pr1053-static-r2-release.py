@@ -2,7 +2,7 @@
 No npm, remote downloads, app restart, business-row write, rollback or phase replay.
 """
 import datetime,hashlib,importlib.util,io,json,os,pathlib,re,shutil,stat,subprocess,sys,tarfile,time,urllib.error,urllib.request
-EXECUTE=True
+EXECUTE=False
 BRANCH='refs/heads/codex/ops-pr1053-20261102'
 ROOT=pathlib.Path('/opt/rr-portal')
 ARCHIVE=ROOT/'deploy/backups/pr1053-static-2-20261102'

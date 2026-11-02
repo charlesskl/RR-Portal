@@ -10,10 +10,11 @@ concurrency:
   queue: max
   cancel-in-progress: false
 env:
-  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
+  SCOPED_RELEASE_WORKFLOW_PIN: 'false'
   SCOPED_RELEASE_HELPER_SHA256: 'bfa5dfc92c644a2ce3220cc5a5a2b3688e5068e07c75b50341422f81ee423cab'
 jobs:
   scoped-operation:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:

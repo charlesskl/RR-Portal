@@ -2,7 +2,7 @@ name: PR 1055 Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [prepare]}
+      mode: {type: choice, required: true, options: [deploy]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'cd343fd58625937bf96380d65627f31b771c4836f25afad3a9d8980bb16c3bd1'
+  SCOPED_RELEASE_HELPER_SHA256: '5342d880edc9935bed1e5e387adcd437e725adca8bc7d2bd0fd72927ca45c29f'
 jobs:
   scoped-operation:
     runs-on: ubuntu-latest
@@ -27,8 +27,8 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = cd343fd58625937bf96380d65627f31b771c4836f25afad3a9d8980bb16c3bd1 ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr1055-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 5342d880edc9935bed1e5e387adcd437e725adca8bc7d2bd0fd72927ca45c29f ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr1055-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Run bounded reviewed operation
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
@@ -47,8 +47,8 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = cd343fd58625937bf96380d65627f31b771c4836f25afad3a9d8980bb16c3bd1 ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr1055-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 5342d880edc9935bed1e5e387adcd437e725adca8bc7d2bd0fd72927ca45c29f ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr1055-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = deploy && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 120s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-pr1055-20261102:refs/remotes/origin/codex/ops-pr1055-20261102 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/codex/ops-pr1055-20261102)" = "$RELEASE_SHA" ]] || exit 1
@@ -56,7 +56,7 @@ jobs:
             batch_tmp=$(mktemp -d /tmp/pr1055.XXXXXX)
             trap 'rm -rf "$batch_tmp"' EXIT
             git show "$RELEASE_SHA:deploy/ops/pr1055-tomy-release.py" > "$batch_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_tmp/run.py" | cut -d ' ' -f1)" = cd343fd58625937bf96380d65627f31b771c4836f25afad3a9d8980bb16c3bd1 ]] || exit 1
+            [[ "$(sha256sum "$batch_tmp/run.py" | cut -d ' ' -f1)" = 5342d880edc9935bed1e5e387adcd437e725adca8bc7d2bd0fd72927ca45c29f ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1055-preflight.py" > "$batch_tmp/pr1055-preflight.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_tmp/pr1055-preflight.py" | cut -d ' ' -f1)" = 0a2e27c86ceddb0623e6a5223a65cb5906b6d873d52475dcb4fb3debe17994a0 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1055-native-check.cjs" > "$batch_tmp/pr1055-native-check.cjs" 2>/dev/null || exit 1
@@ -67,4 +67,4 @@ jobs:
             [[ "$(sha256sum "$batch_tmp/pr1055-build-provenance.json" | cut -d ' ' -f1)" = fe0cc17c733964106a280803d222f314f3d3ec1281831f325ffe965601a8ae17 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1055-dist-delta.tar.gz" > "$batch_tmp/pr1055-dist-delta.tar.gz" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_tmp/pr1055-dist-delta.tar.gz" | cut -d ' ' -f1)" = f32048711dd33360699e672a5b444781a5d5750054f78704f97a9b57236ca799 ]] || exit 1
-            timeout --signal=TERM --kill-after=30s 21m python3 -B "$batch_tmp/run.py" prepare
+            timeout --signal=TERM --kill-after=30s 21m python3 -B "$batch_tmp/run.py" deploy

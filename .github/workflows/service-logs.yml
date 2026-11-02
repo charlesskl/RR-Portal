@@ -2,7 +2,7 @@ name: PR 1050-1051 Scoped Release
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [diagnose]}
+      mode: {type: choice, required: true, options: [prepare]}
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: 'f0756401c72cc6be1e2aef8ca5a14e13210754a747f231f843ce79314234af39'
+  SCOPED_RELEASE_HELPER_SHA256: '05902133320ae8444bb31c5cd8b0b5f6f972633d12d4fbcd2565dc1405fa7121'
 jobs:
   scoped-operation:
     runs-on: ubuntu-latest
@@ -27,8 +27,8 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = f0756401c72cc6be1e2aef8ca5a14e13210754a747f231f843ce79314234af39 ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1050-1051-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 05902133320ae8444bb31c5cd8b0b5f6f972633d12d4fbcd2565dc1405fa7121 ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1050-1051-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Run bounded reviewed operation
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
@@ -47,18 +47,16 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = f0756401c72cc6be1e2aef8ca5a14e13210754a747f231f843ce79314234af39 ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1050-1051-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 05902133320ae8444bb31c5cd8b0b5f6f972633d12d4fbcd2565dc1405fa7121 ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-pr-1050-1051-20261102 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-pr-1050-1051-20261102:refs/remotes/origin/codex/ops-pr-1050-1051-20261102 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/codex/ops-pr-1050-1051-20261102)" = "$RELEASE_SHA" ]] || exit 1
             umask 077
             batch_tmp=$(mktemp -d /tmp/pr1050-1051.XXXXXX)
             trap 'rm -rf "$batch_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/pr1050-1051-preflight.py" > "$batch_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_tmp/run.py" | cut -d ' ' -f1)" = f0756401c72cc6be1e2aef8ca5a14e13210754a747f231f843ce79314234af39 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1050-quote-static-release.py" > "$batch_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_tmp/run.py" | cut -d ' ' -f1)" = 05902133320ae8444bb31c5cd8b0b5f6f972633d12d4fbcd2565dc1405fa7121 ]] || exit 1
             git show "$RELEASE_SHA:deploy/ops/pr1035-quote-preflight.py" > "$batch_tmp/pr1035-quote-preflight.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_tmp/pr1035-quote-preflight.py" | cut -d ' ' -f1)" = 2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/pr1044-indo-preflight.py" > "$batch_tmp/pr1044-indo-preflight.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_tmp/pr1044-indo-preflight.py" | cut -d ' ' -f1)" = 940e9675d628bc0af628ac3964b9073069f99d682a7bc812960ac6e1b88d3004 ]] || exit 1
-            timeout --signal=TERM --kill-after=10s 4m python3 -B "$batch_tmp/run.py" diagnose
+            timeout --signal=TERM --kill-after=10s 4m python3 -B "$batch_tmp/run.py" prepare

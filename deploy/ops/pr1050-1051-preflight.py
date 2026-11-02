@@ -4,7 +4,7 @@ No lifecycle, SQL writes, configuration changes, business-file copies or cleanup
 import hashlib,importlib.util,json,os,pathlib,re,stat,subprocess,sys,urllib.request,urllib.error
 ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/pr1050-1051-preflight-1-20261102'
 BRANCH='refs/heads/codex/ops-pr-1050-1051-20261102'
-BASE='38a35585770e0e837229d50f20ee4a9a759037ad';EXECUTE=True
+BASE='38a35585770e0e837229d50f20ee4a9a759037ad';EXECUTE=False
 DEPS={'pr1035-quote-preflight.py':'2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5','pr1044-indo-preflight.py':'940e9675d628bc0af628ac3964b9073069f99d682a7bc812960ac6e1b88d3004'}
 APPS={'qc':'apps/生产部/品质管理系统','internal-quote':'apps/业务部/内部报价系统'}
 STAGE='entry'

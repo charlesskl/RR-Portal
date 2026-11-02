@@ -4,6 +4,8 @@ EXECUTE=True
 PUBLIC_KEY='-----BEGIN PUBLIC KEY-----\nMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAw2E+TQnImP4iiJl5x84c\nM+3iaRr70QzBgwIlbbUn+SWQ1/GzaDBoV3RIDIYd1+jnbYCDCPtHIq/jjY0wo/hr\nRA/YYa6xHKZqIQ749JvRHRy2p4ALfRHi/b7u3oNdmJey2nmuThj6xgnTzBzrOc/X\nvOxTDliX/T7oBUk+J9d54ZR4wGlAQhfpDU5NwQuvSBBpPussOZ4Pi62GlATWMp0i\n7fVSzlNbha408oK2dbsdnoBf3KiZdT0vXDt3fjJvAAb0ZN4/StX257XRSn9iCb3u\n+OHcajgOIqmAdLEEV8TMVEi/Q/rXxs09ojW1wxpgwRi9xhhkLsC1BsVn1fOM6Reo\n6YdeO3lHI+JODq5CPcq/bp/xaFcqJD5Fb85fnMKJ0FHLgTw5ZDEch7+E13RZyNPM\nCe5bdcXli7Bg8sAoEslMTCptvh6783fJsNY6zwm4S+erV+APCz5+/Nc4ZvdkBT/s\n8FMqjBxN5U5g5VzGhYcQUHlRWF5qkNz7DtiaXXU7LUV+sxtTjLHOknkk5Jp/cOie\nUXz2VL+pq/ujKfRLS77iponYXrdQEY2eWQGvqJpgRP/MXzAvzQJdZtD2LCxH0Gdb\nOfv5e/yG2C3Qggc7Z4eFeaLbC0BRBrCHFbKqym8dJKsoOcjd/29UM7DvbMetjSTA\nph7sWRuLHy7ohSmRfLUlXx8CAwEAAQ==\n-----END PUBLIC KEY-----\n'
 NAME_SHA='a4bea20289a9a67055fe383b30d6d4ad89079f439783d07a9650094010de6608'
 BRANCH='refs/heads/codex/ops-pr1054-20261102'
+STAGE='entry'
+LAST_COMMAND=None
 QUERY=r'''import asyncio,json,sys
 async def main():
  from sqlalchemy import text
@@ -34,7 +36,14 @@ def sha(v):return hashlib.sha256(v).hexdigest()
 def need(v):
  if not v:raise RuntimeError('bounded-readonly-account-check-failed')
 def cmd(args,body=None,limit=4*1024**2):
+ global LAST_COMMAND
  r=subprocess.run(args,input=body,capture_output=True,timeout=30)
+ LAST_COMMAND={'family':args[:2],'exitCode':r.returncode,'stdoutBytes':len(r.stdout),'stderrBytes':len(r.stderr)}
+ if args[:2]==['docker','exec']and r.returncode!=0:
+  try:
+   e=json.loads(r.stdout)
+   if set(e)=={'errorType'}and re.fullmatch('[A-Za-z]+',e['errorType']):LAST_COMMAND['innerErrorType']=e['errorType']
+  except Exception:pass
  need(r.returncode==0 and len(r.stdout)<=limit and len(r.stderr)<=1024**2);return r.stdout
 def profile():
  ids=cmd(['docker','ps','-aq','--no-trunc']).decode().split();need(len(ids)==len(set(ids))==46)
@@ -55,11 +64,12 @@ def wire(v):
  for i,p in enumerate(parts,1):print(json.dumps([0,n(i),n(len(parts)),n(len(raw)),d(sha(raw)),d(p.hex())],separators=(',',':')))
  print(json.dumps([1,n(len(parts)),n(len(raw)),d(sha(raw))],separators=(',',':')))
 def main():
+ global STAGE
  need(EXECUTE is True and sys.argv[1:]==['diagnose']and os.environ.get('RELEASE_BRANCH')==BRANCH and os.environ.get('RELEASE_MODE')=='diagnose'and os.environ.get('RELEASE_ATTEMPT')=='1')
  name=os.environ.get('LOOKUP_NAME','');need(sha(name.encode())==NAME_SHA);v={'phase':'diagnose','success':False,'readOnly':True,'passwordQueried':False,'accountWrites':False,'configurationWrites':False,'lifecycleWrites':False}
  try:
-  before,cid=profile();raw=cmd(['docker','exec','-i',cid,'python','-B','-c',QUERY],enc({'name':name}),limit=16384);data=json.loads(raw);need(data.get('readOnlyTransaction')is True and data.get('passwordQueried')is False and type(data.get('matches'))is list and len(data['matches'])<=9)
-  fields={'id','username','full_name','department','role','is_active','canEdit','canApprove'};need(all(type(r)is dict and set(r)==fields for r in data['matches']));cipher=encrypt(enc(data));after,cid2=profile();need(cid==cid2 and before==after);v.update(success=True,encryptedAccountResult=cipher,encryption='RSA-4096-OAEP-SHA256',all46RuntimeUnchanged=True)
- except Exception as e:v['errorType']=type(e).__name__
+  STAGE='runtime-before';before,cid=profile();STAGE='core-readonly-query';raw=cmd(['docker','exec','-i',cid,'python','-B','-c',QUERY],enc({'name':name}),limit=16384);STAGE='validate-selected-safe-fields';data=json.loads(raw);need(data.get('readOnlyTransaction')is True and data.get('passwordQueried')is False and type(data.get('matches'))is list and len(data['matches'])<=9)
+  fields={'id','username','full_name','department','role','is_active','canEdit','canApprove'};need(all(type(r)is dict and set(r)==fields for r in data['matches']));STAGE='encrypt-result';cipher=encrypt(enc(data));STAGE='runtime-after';after,cid2=profile();need(cid==cid2 and before==after);v.update(success=True,encryptedAccountResult=cipher,encryption='RSA-4096-OAEP-SHA256',all46RuntimeUnchanged=True)
+ except Exception as e:v.update(errorType=type(e).__name__,stage=STAGE,lastCommand=LAST_COMMAND)
  v['resultSHA256']=sha(enc(v));wire(v);return 0 if v['success']else 1
 if __name__=='__main__':sys.exit(main())

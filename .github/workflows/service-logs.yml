@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SCOPED_RELEASE_WORKFLOW_PIN: 'true'
-  SCOPED_RELEASE_HELPER_SHA256: '35070dec80a33542e7e6f81b08f020ab3168468577527d1d3a031b7b12e89b60'
+  SCOPED_RELEASE_HELPER_SHA256: '19b72a9b348ecc2160e62b0a6a318df9102574977fdfdf00d0b3cfe8e14ca1bb'
 jobs:
   scoped-operation:
     runs-on: ubuntu-latest
@@ -27,7 +27,7 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         run: |
           set -euo pipefail
-          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 35070dec80a33542e7e6f81b08f020ab3168468577527d1d3a031b7b12e89b60 ]] || exit 1
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 19b72a9b348ecc2160e62b0a6a318df9102574977fdfdf00d0b3cfe8e14ca1bb ]] || exit 1
           [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-engineering-admin-access-20261103 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Run bounded reviewed operation
@@ -47,7 +47,7 @@ jobs:
           envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
           script: |
             set -euo pipefail
-            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 35070dec80a33542e7e6f81b08f020ab3168468577527d1d3a031b7b12e89b60 ]] || exit 1
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = 19b72a9b348ecc2160e62b0a6a318df9102574977fdfdf00d0b3cfe8e14ca1bb ]] || exit 1
             [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-engineering-admin-access-20261103 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-engineering-admin-access-20261103:refs/remotes/origin/codex/ops-engineering-admin-access-20261103 >/dev/null 2>&1 || exit 1
@@ -55,9 +55,7 @@ jobs:
             umask 077
             batch_tmp=$(mktemp -d /tmp/engineering-admin-access.XXXXXX)
             trap 'rm -rf "$batch_tmp"' EXIT
-            git show "$RELEASE_SHA:deploy/ops/engineering-admin-access.py" > "$batch_tmp/run.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_tmp/run.py" | cut -d ' ' -f1)" = 35070dec80a33542e7e6f81b08f020ab3168468577527d1d3a031b7b12e89b60 ]] || exit 1
-            git show "$RELEASE_SHA:deploy/ops/account_transaction.py" > "$batch_tmp/account_transaction.py" 2>/dev/null || exit 1
-            [[ "$(sha256sum "$batch_tmp/account_transaction.py" | cut -d ' ' -f1)" = 1cabeb832120ca1235c7f052587b7e616ff221a3c42ca7db2a7b4d923527574c ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/engineering-admin-access-observe.py" > "$batch_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_tmp/run.py" | cut -d ' ' -f1)" = 19b72a9b348ecc2160e62b0a6a318df9102574977fdfdf00d0b3cfe8e14ca1bb ]] || exit 1
             export ACCOUNT_SCOPE_SHA256=156c0b41ead9816ff65b8caf904c865512a5e3fe5b3ddd7a6d6473dfa123aa50
             timeout --signal=TERM --kill-after=10s 4m python3 -B "$batch_tmp/run.py" diagnose

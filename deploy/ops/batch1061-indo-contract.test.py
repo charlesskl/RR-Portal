@@ -113,4 +113,42 @@ class ContractTests(unittest.TestCase):
         self.assertTrue(result['environmentFileRead']);self.assertTrue(result['environmentFileHashedOnly']);self.assertFalse(result['environmentFileBodiesCopied'])
         self.assertTrue(result['healthReadOnlyProbe']);self.assertFalse(result['explicitSqlAccessPerformed']);self.assertFalse(result['rawDockerConfigOrEnvExported'])
 
+class BuildSourceContractTests(unittest.TestCase):
+    MERGED_MAIN='bc94908439ed3414b013d72f00f128a6459cf0aa'
+    REVIEWED_PR='84bcd989ce13d1e8255d4ed27321f1fa5d4ab324'
+    APP_TREE='848f96985403eef1a38102a4f6a0613eb6901552'
+
+    def consumer(self,source_head=None,app_tree=None):
+        # These are the actual distinct #1061 merge and reviewed PR commits. The
+        # local-build contract must bind the former while source_check keeps the latter.
+        e=extracted(RTREE,{'need','enc','sha','pin','read','local_build_contract'},
+            HEAD=self.REVIEWED_PR,TARGET=self.MERGED_MAIN,APP_TREE=self.APP_TREE,__file__='/synthetic/operator.py',
+            LOCAL_BUILD_PROVENANCE_NAME='batch1061-indo-build-provenance.json')
+        manifest={'index.html':'1'*64}
+        value={'sourceHead':source_head or self.MERGED_MAIN,'appTree':app_tree or self.APP_TREE,
+            'newManifestSHA256':e['sha'](e['enc'](manifest)),'VITE_BASE_PATH':'/indo-shipping/','sourceExtraction':'git-archive',
+            'freshExtraction':True,'freshNpmCi':True,'npmCiExitCode':0,'buildExitCode':0,
+            'nodeModulesRootSymlink':False,'nodeModulesExternalSymlinks':0}
+        body=e['enc'](value)
+        fake=types.SimpleNamespace(is_file=lambda:True,is_symlink=lambda:False,read_bytes=lambda:body,
+            stat=lambda:types.SimpleNamespace(st_size=len(body)))
+        fake.with_name=lambda name:fake
+        e.update(pathlib=types.SimpleNamespace(Path=lambda name:fake),EXPECTED_NEW_MANIFEST=manifest,
+            EXPECTED_NEW_MANIFEST_SHA256=value['newManifestSHA256'],EXPECTED_LOCAL_BUILD_PROVENANCE_SHA256=e['sha'](body))
+        return e
+
+    def test_actual_merged_main_build_is_accepted_with_distinct_reviewed_pr_head(self):
+        e=self.consumer();self.assertNotEqual(e['HEAD'],e['TARGET'])
+        self.assertEqual(e['local_build_contract']()['sourceHead'],self.MERGED_MAIN)
+
+    def test_resealed_build_from_pr_head_or_other_commit_is_rejected(self):
+        for source in(self.REVIEWED_PR,'9'*40):
+            with self.subTest(source=source):
+                e=self.consumer(source_head=source)
+                with self.assertRaises(RuntimeError):e['local_build_contract']()
+
+    def test_resealed_merge_build_with_different_app_tree_is_rejected(self):
+        e=self.consumer(app_tree='8'*40)
+        with self.assertRaises(RuntimeError):e['local_build_contract']()
+
 if __name__=='__main__':unittest.main()

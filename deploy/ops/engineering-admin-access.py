@@ -11,7 +11,7 @@ import sys
 import time
 from account_transaction import SCOPE, SCOPE_SHA256, capabilities, digest, encode, plan, require
 
-EXECUTE = True
+EXECUTE = False
 BRANCH = 'refs/heads/codex/ops-engineering-admin-access-20261103'
 BASE = pathlib.Path('/opt/rr-portal/deploy/backups/engineering-admin-access-2-20261103')
 MODES = ('diagnose', 'maintain', 'verify', 'reconcile')

@@ -8,7 +8,7 @@ import stat
 import subprocess
 import sys
 
-EXECUTE = True
+EXECUTE = False
 BRANCH = 'refs/heads/codex/ops-engineering-admin-access-20261103'
 SCOPE_SHA256 = '156c0b41ead9816ff65b8caf904c865512a5e3fe5b3ddd7a6d6473dfa123aa50'
 BASE = pathlib.Path('/opt/rr-portal/deploy/backups/engineering-admin-access-1-20261103')

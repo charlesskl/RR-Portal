@@ -15,7 +15,7 @@ import stat
 import subprocess
 import sys
 
-EXECUTE = True
+EXECUTE = False
 BRANCH = 'refs/heads/codex/ops-ssh-root-reset-20261103'
 MODE = 'reset-root'
 ROTATION_ID = 'ssh-root-reset-20261103-5833a273c12c93b5'

@@ -7,11 +7,11 @@ concurrency:
   group: deploy-cloud
   cancel-in-progress: false
 env:
-  RESET_WORKFLOW_PIN: 'true'
+  RESET_WORKFLOW_PIN: 'false'
   RESET_HELPER_SHA256: '5d9c5e57d20adc4a076c36f31c5db989bb234acb91a4af19914dec4d59031e52'
 jobs:
   rotate:
-    if: github.ref == 'refs/heads/codex/ops-ssh-root-reset-20261103' && github.run_attempt == 1
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

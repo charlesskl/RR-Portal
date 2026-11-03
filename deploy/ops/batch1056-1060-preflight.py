@@ -2,7 +2,7 @@
 No lifecycle, SQL writes, configuration changes, business-file copies or cleanup.
 """
 import hashlib,importlib.util,json,os,pathlib,re,stat,subprocess,sys,urllib.request,urllib.error
-ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/batch1056-1060-preflight-2-20261103'
+ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/batch1056-1060-preflight-3-20261103'
 BRANCH='refs/heads/codex/ops-batch1056-1060-20261103'
 BASE='90f2fa661c923c4d3144ba21d22789b38553638b';EXECUTE=True
 DEPS={'pr1035-quote-preflight.py':'2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5','pr1044-indo-preflight.py':'940e9675d628bc0af628ac3964b9073069f99d682a7bc812960ac6e1b88d3004'}
@@ -73,6 +73,8 @@ def main():
  os.umask(0o077);need(OUT.parent.is_dir()and not any(p.is_symlink()for p in(OUT.parent,*OUT.parent.parents))and not OUT.exists(),'fresh-private-profile');OUT.mkdir(mode=0o700)
  v={'phase':'diagnose','mode':'diagnose','success':False,'readOnly':True,'businessWrites':False,'lifecycleWrites':False,'configWrites':False,'plaintextCredentialsWritten':False,'businessFileBodiesCopied':False,'sourceBaseline':BASE}
  try:
+  ids=command(['docker','ps','-aq','--no-trunc']).decode().split();need(0<len(ids)<1000 and len(set(ids))==len(ids),'bounded-metadata-inventory')
+  inventory=json.loads(command(['docker','inspect',*ids]));v['containerInventory']=[{'id':r['Id'],'name':r['Name'],'project':(r['Config'].get('Labels')or{}).get('com.docker.compose.project'),'service':(r['Config'].get('Labels')or{}).get('com.docker.compose.service'),'image':r['Image'],'running':r['State']['Running'],'pid':r['State']['Pid'],'started':r['State']['StartedAt'],'restarts':r['RestartCount'],'oom':r['State']['OOMKilled']}for r in inventory];v['observedContainerCount']=len(inventory)
   P=load('pr1035-quote-preflight.py');I=load('pr1044-indo-preflight.py');before,targets=containers();v['allRuntime']=before;v['observedContainerCount']=len(before);v['containerNames']=[json.loads(line)for line in command(['docker','ps','-a','--no-trunc','--format','{"id":{{json .ID}},"name":{{json .Names}}}']).splitlines()];v['hostGitHead']=git('rev-parse','HEAD').decode().strip();need(v['hostGitHead']=='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c','observed-host-checkout-preserved')
   v['shared']={n:P.shared_file(n)for n in P.SHARED};v['env']={str(p.relative_to(ROOT)):P.shared_file(str(p))for p in ROOT.glob('.env*')if p.is_file()};v['gatewayAuth']=P.gateway_auth();v['unstaged']=P.dirty_summary(git('diff','--name-only','-z'));v['staged']=P.dirty_summary(git('diff','--cached','--name-only','-z'));v['targets']={}
   for name,r in targets.items():

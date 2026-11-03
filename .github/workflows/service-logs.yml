@@ -2,7 +2,7 @@ name: Engineering Admin Access
 on:
   workflow_dispatch:
     inputs:
-      mode: {type: choice, required: true, options: [diagnose]}
+      mode: {type: choice, required: true, options: [maintain]}
 permissions:
   contents: read
 concurrency:
@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = f503abd16e913009ae3e8c71ba1f29fe528a46f66f58168d7b9596b272cc9628 ]] || exit 1
-          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-engineering-admin-access-20261103 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-engineering-admin-access-20261103 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = maintain && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
       - name: Run bounded reviewed operation
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
@@ -48,7 +48,7 @@ jobs:
           script: |
             set -euo pipefail
             [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = f503abd16e913009ae3e8c71ba1f29fe528a46f66f58168d7b9596b272cc9628 ]] || exit 1
-            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-engineering-admin-access-20261103 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = diagnose && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-engineering-admin-access-20261103 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = maintain && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             cd /opt/rr-portal
             timeout --signal=TERM --kill-after=2s 60s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-engineering-admin-access-20261103:refs/remotes/origin/codex/ops-engineering-admin-access-20261103 >/dev/null 2>&1 || exit 1
             [[ "$(git rev-parse refs/remotes/origin/codex/ops-engineering-admin-access-20261103)" = "$RELEASE_SHA" ]] || exit 1
@@ -60,4 +60,5 @@ jobs:
             git show "$RELEASE_SHA:deploy/ops/account_transaction.py" > "$batch_tmp/account_transaction.py" 2>/dev/null || exit 1
             [[ "$(sha256sum "$batch_tmp/account_transaction.py" | cut -d ' ' -f1)" = ac32dd86b8ac8d56f2cd0f8940c2649f83815b14dc36502b2b1857a030424b64 ]] || exit 1
             export ACCOUNT_SCOPE_SHA256=156c0b41ead9816ff65b8caf904c865512a5e3fe5b3ddd7a6d6473dfa123aa50
-            timeout --signal=TERM --kill-after=10s 4m python3 -B "$batch_tmp/run.py" diagnose
+            export ACCOUNT_DIAGNOSE_SHA256=c67e290bab20d949af40d19d356ba705ca76033267fa4155006437de620ef55b
+            timeout --signal=TERM --kill-after=10s 4m python3 -B "$batch_tmp/run.py" maintain

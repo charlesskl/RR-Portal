@@ -7,10 +7,10 @@ The only writes are a NEW private diagnostic archive containing hashes/metadata 
 """
 import hashlib,importlib.util,json,os,pathlib,re,stat,subprocess,sys
 ROOT=pathlib.Path('/opt/rr-portal')
-ARCHIVE=ROOT/'deploy/backups/batch1061-indo-preflight-1-20261103'
+ARCHIVE=ROOT/'deploy/backups/batch1061-indo-preflight-2-20261103'
 BASE='e6459c7e9d7483527f7b22abbe93753183075fb8'
 BRANCH='refs/heads/codex/ops-batch1056-1060-20261103'
-EXECUTE=False
+EXECUTE=True
 APP='apps/印尼小组/印尼走货明细';SERVICE='indo-shipping'
 DEPS={'pr1044-indo-preflight.py':'940e9675d628bc0af628ac3964b9073069f99d682a7bc812960ac6e1b88d3004',
       'pr1035-quote-preflight.py':'2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5'}

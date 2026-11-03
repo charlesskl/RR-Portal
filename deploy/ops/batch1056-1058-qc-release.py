@@ -1,40 +1,33 @@
-"""INERT combined QC PR 1056/1057/1058 release draft; NOT execution-ready.
-No execution, Git publication, server access or deployment was performed to create this file.
-All source/head/profile/image/container/evidence pins below remain intentionally unbound.
-The fresh profile contains live/canonical/source drift; explicit full-inventory and correction
-pins below remain unbound until independent baseline review. There is no inherited
-owner-normalization exception and no fallback to any historical diagnostic archive.
-Only the pinned active QC CID may receive one stop/copy/start behind QC-only maintenance.
-Preserve the exact stopped QC backup and every other profiled container, including stopped
-containers; never select a target by compose service-label uniqueness.
-No dependencies/startup/schema/migration changes, DB restore, host checkout, config/env/auth
-changes, unrelated lifecycle, automatic retry or replay. Cold proof covers every row/schema
-of all 13 company SQLite DBs (including users/perms/tombstones/sequences), every hidden-inclusive
-non-DB entry, owner and mode. The existing /app code bind is never replaced; only the nine
-explicit tar members are updated and every other hidden/private entry stays byte/metadata exact.
-No cross-database atomic snapshot claim is made.
-Before enablement: reconcile current bind source/absence pins and canonical image source; bind
-fresh profile and exact target commits/trees/hashes/tests; validate candidate/quiet/cold guards;
-complete full suite, independent review, browser acceptance and the reviewed capacity budget.
+"""Source-pinned combined QC PR 1056/1057/1058 scoped release.
+Only the explicitly selected one-shot phase on the pinned operations branch is allowed.
+The exact active QC container receives one stop/copy/start behind QC-only maintenance;
+its existing RW code/data binds, stopped backup container and every other container stay intact.
+No host checkout, dependency/schema/seed/auth/config change, database restore, global cleanup,
+automatic mutation retry or phase replay. Source, three PR heads, full live/canonical inventories,
+profile7, native tests and capacity bounds are checked before production lifecycle begins.
+Cold proof covers all thirteen SQLite company databases, users, permissions, tombstones,
+sequences and every hidden-inclusive non-DB entry. Only nine explicit code tar members change;
+all other code-bind files retain bytes and metadata. Cross-database atomicity is not claimed.
+Final phase completion still requires actual runtime, source, data and remaining-space evidence.
 """
 import calendar,contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error
 ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/batch1056-1058-qc-20261103-1'
 APP='apps/生产部/品质管理系统';DATA_ROOT=ROOT/APP/'data';CODE_ROOT=pathlib.Path('/opt/qc-code')
-HOST_BASE='';BASE='';TARGET='';TREE='';APP_TREE=''
-REVIEWED_HEADS={'1056':'','1057':'','1058':''}
-PHASE='';PREPARED_SHA256='';DEPLOY_SHA256='';EXECUTE=False
+HOST_BASE='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c';BASE='90f2fa661c923c4d3144ba21d22789b38553638b';TARGET='bc94908439ed3414b013d72f00f128a6459cf0aa';TREE='cf83eca5a36a0adbf97710bd43b5d5ee8a839435';APP_TREE='9ef75737c8af7bac8079fa53b958dd9e8eea53a4'
+REVIEWED_HEADS={'1056': 'e46a3a2da46414cb131ce10b1a2e9884df646835', '1057': '8d5facb4d0ede97999a6e8fa8db4feab017aecdd', '1058': 'bc4c5a7d0fea9f9e51d1800ce79f270635c230ae'}
+PHASE='prepare';PREPARED_SHA256='';DEPLOY_SHA256='';EXECUTE=True
 BRANCH='refs/heads/codex/ops-batch1056-1060-20261103'
-ALIAS='rr-portal-qc:latest';CID='';LIVE_IMAGE='';BASE_IMAGE='';ALIAS_IMAGE=''
-LIVE_SOURCE_SHA256='';LIVE_SOURCE_DIFFERENCES=()
-QC_BACKUP_ID='';EXPECTED_CONTAINER_COUNT=None
-# Five PR-diff paths plus four explicit repairs of the freshly observed runtime drift.
+ALIAS='rr-portal-qc:latest';CID='080cfbbcdd68dcb43e8a627ac8e5b1d6cc1b237f322ffac4c26a97ef23b09567';LIVE_IMAGE='sha256:f4ae6aa9dd4ffec6e7dcca66eaae748a4e69cdc160eced9b10b4e2ab9a019494';BASE_IMAGE='sha256:3b3d5cb74579a38a9c0846327af7fd282740b2313912eef083eae33bd08ff788';ALIAS_IMAGE='sha256:3b3d5cb74579a38a9c0846327af7fd282740b2313912eef083eae33bd08ff788'
+LIVE_SOURCE_SHA256='d7459826d0805f9b28f8cf3402e6df985d4e5ee6f8ff64df61bbda9a4bb2559e';LIVE_SOURCE_DIFFERENCES=('ai-ocr.js', 'app.js', 'dev-server.js', 'package.json', 'qc-backend.js', 'report_export.js', 'server/extract-seed.js', 'server/server.js')
+QC_BACKUP_ID='712466bf56a8537eb914ac8c835f0315dee1d33ad4faae3665af71ed803988f9';EXPECTED_CONTAINER_COUNT=47
+# Six PR-diff paths plus three explicit repairs of the freshly observed runtime drift.
 # Corrections must equal exact unchanged main-baseline bytes, never arbitrary live content.
-DIFF_CODE=('ai-ocr.js','app.js','qc-backend.js','mobile.css','server/server.js')
-CORRECTION_CODE=('report_export.js','dev-server.js','package.json','server/extract-seed.js')
+DIFF_CODE=('ai-ocr.js','app.js','qc-backend.js','mobile.css','server/server.js','report_export.js')
+CORRECTION_CODE=('dev-server.js','package.json','server/extract-seed.js')
 CODE=DIFF_CODE+CORRECTION_CODE;RUNTIME_ALLOWED=set(CODE)
-REVIEWED_FILES={};REVIEWED_PATHS=();TEST_FILES={};EXPECTED_NATIVE_TESTS=None
-PROFILE_PATH='';PROFILE_RESULT_SHA256='';PROFILE_VALUE_SHA256=''
-DIRTY_PATH_COUNT=None;DIRTY_SHA256=''
+REVIEWED_FILES={'ai-ocr.js': '5ba68a460e104d99ca22496d5152e897d0a89ea2493be10d0fd13e2fb44b12c9', 'app.js': 'f11ba9ad194c0534ec0f05e40ab3acf72e6f3b1bbd51485c1cab63de9de1aedb', 'qc-backend.js': 'd61d83a4103a5b981aedc8e74671f8cd41bf5b3810233498c4b49d121abcb711', 'mobile.css': '190aa9555d106fe36ffa6e7358247918f2f83d3cf09f2edb5f8aaa6ef83883d3', 'server/server.js': '99ed400e2db50c18979a6b9bc908cca440a717b35f1fc95f84ea1aff8f8bb162', 'report_export.js': '2e5dfd9cf122ff5cf26626963150c1c053ae9421321a966660e5c53a44ab05a4', 'dev-server.js': 'cafe36c8ad15052076789b4ff3989089d962a3d5ec5be0cc3fb644295d179bb6', 'package.json': '218f8febf785633f94ef3658eb0c1f15833b0d481d5f344b8ba48c89cf656c66', 'server/extract-seed.js': 'a424fe29564c663cc7bea901529c841da466a1e818c6d10798b67c35cf188951'};REVIEWED_PATHS=('ai-ocr.js', 'app-safety.test.js', 'app.js', 'frontend-auth.test.js', 'judgement-flow.test.js', 'mobile.css', 'ocr-batch.test.js', 'qc-backend.js', 'report_export.js', 'server/ocr-parser.test.js', 'server/server.js');TEST_FILES={'app-safety.test.js': '7773e6f4bea6837719a18f34c1c62d033464de366f391ffb562cfa591974bfd7', 'frontend-auth.test.js': 'cab193beb8f208b24bfc05d94180a118da48b6bb6d9b72507a64a817f914e563', 'judgement-flow.test.js': 'ed92a25110cfc350c33658fb6160d9011fdd46760603683772720eceb7614839', 'ocr-batch.test.js': '11b415ad5262bb74597d07d31955d1857f22bf09c0f18dc035c936e83594e06f', 'review-batch.test.js': '7d58f60ce1759df4312f4997a4d9d0c28240efc1fe8a3eee45407c987577fcd9', 'server/api-auth.test.js': '80efe977eb2d648819529ffd2048b1ee34f8f027ce28b13312f7c8d1cbde84da', 'server/export.test.js': 'b0aaf1a20ab74bd4733f93486a007d8bcda4bf714f35de477cbd667a822b57cd', 'server/record-sync.test.js': '5e033ef71bbf663810a3653c5cf8fadf31498bfdc51fd4639bf4ff626855a7bf', 'server/ocr-parser.test.js': '2f7e8b1fb357233e9f58c71f90ef9ef9d32fc61e3d43e46d322542910afd3342'};EXPECTED_NATIVE_TESTS=245
+PROFILE_PATH='/opt/rr-portal/deploy/backups/batch1056-1060-preflight-7-20261103/result.private.json';PROFILE_RESULT_SHA256='4254808bb647be2a271012a46b13b7e2569febac7cb2d56aa2d764ce0e94beac';PROFILE_VALUE_SHA256='024915be11e34dd5e12c877d3a9124c616e2f600326610fcb8ba6ffc386c994b'
+DIRTY_PATH_COUNT=5;DIRTY_SHA256='74b8a9c5caefdc5a220f12cd14972229312beef004e76129d0fb2bb691a0507e'
 COMPANIES=('dg-xingxin','dg-huadeng-a','dg-huadeng-b','dg-huajia','hy-huakang-a','hy-huakang-b','hy-huakang-c','hy-huakang-d','hy-huadeng','hy-huaxing','sy-huadeng','sy-xingxin','xs-huadeng')
 OUT=None;P=None;O=None;L=None;SERIAL=0;STAGE='entry'
 
@@ -45,8 +38,8 @@ QUIET_PROBE="const fs=require('fs');let connections=0;for(const f of ['/proc/net
 NATIVE_TEST="const fs=require('fs'),path=require('path'),os=require('os'),crypto=require('crypto'),cp=require('child_process');\nconst data=JSON.parse(fs.readFileSync(0,'utf8')),dir=fs.mkdtempSync(path.join(os.tmpdir(),'qms1056-1058-native-'));\ntry{\n const sources=['app.js','ai-ocr.js','qc-backend.js','report_export.js','index.html','mobile.css','sso.js','server/server.js','server/auth.js'];\n for(const n of sources){const p=path.join(dir,n);fs.mkdirSync(path.dirname(p),{recursive:true,mode:0o700});fs.writeFileSync(p,fs.readFileSync('/app/'+n),{mode:0o600,flag:'wx'});}\n fs.writeFileSync(path.join(dir,'server','seed.json'),JSON.stringify({users:[],records:[],defectLib:[]}),{mode:0o600,flag:'wx'});\n fs.writeFileSync(path.join(dir,'server','ai-config.json'),JSON.stringify({enabled:false,apiKey:'',baseURL:'http://127.0.0.1:1/disabled-native-test-only'}),{mode:0o600,flag:'wx'});\n for(const[n,v]of Object.entries(data.files)){\n  if(!/^[A-Za-z0-9_./-]+\\.test\\.js$/.test(n)||n.split('/').includes('..'))throw Error('testpath');\n  const b=Buffer.from(v.body,'base64');if(crypto.createHash('sha256').update(b).digest('hex')!==v.sha256)throw Error('testsha');\n  const p=path.join(dir,n);fs.mkdirSync(path.dirname(p),{recursive:true,mode:0o700});fs.writeFileSync(p,b,{mode:0o600,flag:'wx'});\n }\n const out=cp.spawnSync(process.execPath,['--test','--test-reporter=tap',...Object.keys(data.files).sort()],{cwd:dir,env:{PATH:process.env.PATH,NODE_ENV:'test',HOME:dir,TMPDIR:dir,DATA_PATH:path.join(dir,'data'),PORT:'0',DASHSCOPE_API_KEY:'',QC_BAILIAN_API_KEY:'',QC_INSPECTIONS_READ_TOKEN:'',NODE_NO_WARNINGS:'1'},encoding:'utf8',timeout:180000,maxBuffer:8*1024**2});\n fs.writeFileSync(1,out.stdout||'');fs.writeFileSync(2,out.stderr||'');if(out.status!==0)throw Error('native-test-failed');\n const count=k=>{const line=out.stdout.split('\\n').find(s=>s.startsWith('# '+k+' '));return line?Number(line.slice(k.length+3)):NaN;};\n if(!Number.isSafeInteger(data.expected)||data.expected<=0||count('tests')!==data.expected||count('pass')!==data.expected||count('fail')!==0||count('skipped')!==0)throw Error('native-test-count-or-skip');\n}finally{fs.rmSync(dir,{recursive:true,force:true});}"
 # Independently reviewed profile7-bound small-footprint budget; no old backup/image cleanup.
 # Retain 256MiB ordinary / 8GiB physical free; allocation already spent is not reserved twice.
-CAPACITY_BUDGET={'approved': True, 'profileFileSHA256': '4254808bb647be2a271012a46b13b7e2569febac7cb2d56aa2d764ce0e94beac', 'ordinaryReserveBytes': 268435456, 'physicalReserveBytes': 8589934592, 'imageGrowthUpperBytes': 8388608, 'overlayStageUpperBytes': 4194304, 'coldBackupUpperBytes': 16777216, 'evidenceUpperBytes': 16777216, 'dataRootUpperBytes': 4194304, 'databaseUpperCount': 13, 'minimumMemAvailableBytes': 536870912, 'ordinaryRequiredBytes': 314572800, 'physicalRequiredBytes': 8636071936}
-CAPACITY_BUDGET_SHA256='4c4e6350ab0957ac201e49f89407ad3be81e14e27d0ea85adbf7b6499b0577f8'
+CAPACITY_BUDGET={'approved': True, 'profileFileSHA256': '4254808bb647be2a271012a46b13b7e2569febac7cb2d56aa2d764ce0e94beac', 'ordinaryReserveBytes': 268435456, 'physicalReserveBytes': 8589934592, 'imageGrowthUpperBytes': 4194304, 'overlayStageUpperBytes': 4194304, 'coldBackupUpperBytes': 16777216, 'evidenceUpperBytes': 12582912, 'dataRootUpperBytes': 4194304, 'databaseUpperCount': 13, 'minimumMemAvailableBytes': 536870912, 'ordinaryRequiredBytes': 306184192, 'physicalRequiredBytes': 8627683328}
+CAPACITY_BUDGET_SHA256='fb8e2d0b59c3aec3cfc808012210cbd5d43ab12587bee25dc3c3bd7a918ccf83'
 
 def need(v,label):
  global STAGE
@@ -208,7 +201,7 @@ def source_check():
  need(git('rev-parse','refs/remotes/origin/main').decode().strip()==TARGET and git('rev-parse',TARGET+'^{tree}').decode().strip()==TREE and git('rev-parse',TARGET+':'+APP).decode().strip()==APP_TREE,'exact-reviewed-main-tree-and-combined-qc-app-tree')
  for head in REVIEWED_HEADS.values():git('merge-base','--is-ancestor',head,TARGET)
  paths=[p[len(APP)+1:]for p in git('diff','--name-only','-z',BASE,TARGET,'--',APP).decode().split('\0')if p];need(set(paths)==set(REVIEWED_PATHS),'exact-complete-reviewed-qc-app-path-scope');production={n for n in paths if not n.endswith(('.test.js','.test.json'))and((n.startswith('server/')or'/'not in n)and n.endswith(('.js','.html','.css','.json')))};need(production==set(DIFF_CODE)and set(CORRECTION_CODE).isdisjoint(production)and all(re.fullmatch(r'[A-Za-z0-9_./-]+',n)and '..'not in n.split('/')for n in CODE),'only-reviewed-qc-production-code-files')
- need(all(git('show',BASE+':'+APP+'/'+n)==git('show',TARGET+':'+APP+'/'+n)for n in CORRECTION_CODE),'four-runtime-corrections-are-exact-reviewed-unchanged-main-baseline-bytes')
+ need(all(git('show',BASE+':'+APP+'/'+n)==git('show',TARGET+':'+APP+'/'+n)for n in CORRECTION_CODE),'three-runtime-corrections-are-exact-reviewed-unchanged-main-baseline-bytes')
  need({'app-safety.test.js','frontend-auth.test.js','judgement-flow.test.js','ocr-batch.test.js','review-batch.test.js','server/api-auth.test.js','server/export.test.js','server/record-sync.test.js','server/ocr-parser.test.js'}==set(TEST_FILES)and all(re.fullmatch(r'[A-Za-z0-9_./-]+\.test\.js',n)and '..'not in n.split('/')and pin(h)for n,h in TEST_FILES.items()),'reviewed-offline-qc-ocr-review-permission-and-record-sync-native-test-manifest')
  need(all(git('show',BASE+':'+APP+'/'+n)==git('show',TARGET+':'+APP+'/'+n)for n in('Dockerfile','package.json','server/auth.js','server/seed.json','server/ai-config.json','dev-server.js')),'unchanged-build-auth-seed-config-and-no-dependencies')
  need(startup_contract(git('show',BASE+':'+APP+'/server/server.js'))==startup_contract(git('show',TARGET+':'+APP+'/server/server.js')),'unchanged-qc-schema-migrations-companies-seeding-and-getdb-startup');package=json.loads(git('show',TARGET+':'+APP+'/package.json'));need(not package.get('dependencies')and not package.get('devDependencies'),'zero-npm-dependencies-qc-runtime');return {n:git('show',TARGET+':'+APP+'/'+n)for n in CODE}
@@ -464,7 +457,7 @@ def main():
  global OUT,STAGE
  need(EXECUTE is True and all(pin(v,40)for v in(HOST_BASE,BASE,TARGET,TREE,APP_TREE))and pin(CID)and pin(QC_BACKUP_ID)and all(re.fullmatch(r'sha256:[a-f0-9]{64}',v)for v in(LIVE_IMAGE,BASE_IMAGE,ALIAS_IMAGE))and pin(LIVE_SOURCE_SHA256)and pin(PROFILE_RESULT_SHA256)and pin(PROFILE_VALUE_SHA256)and PHASE in('prepare','deploy','verify')and sys.argv[1:]==[PHASE]and os.environ.get('RELEASE_BRANCH')==BRANCH and os.environ.get('RELEASE_MODE')==PHASE and os.environ.get('RELEASE_ATTEMPT')=='1','explicit-one-shot-reviewed-qc-phase-only');os.umask(0o077);need(ARCHIVE.parent.is_dir()and not ARCHIVE.parent.is_symlink(),'private-parent');ARCHIVE.mkdir(mode=0o700,exist_ok=True);OUT=ARCHIVE/PHASE;need(not OUT.exists()and not OUT.is_symlink(),'fresh-private-qc-phase-no-replay');OUT.mkdir(mode=0o700);v={'service':'qc','mode':PHASE,'resultPath':str(OUT/'result.private.json'),'phase':PHASE,'base':BASE,'reviewedHeads':REVIEWED_HEADS,'target':TARGET,'tree':TREE,'appTree':APP_TREE,'hostBase':HOST_BASE,'success':False,'hostSourceCheckoutPerformed':False,'automaticMutationRetry':False,'credentialsChanged':False,'allNonQcServicesLifecycleOperated':False,'postgresAccessPerformed':False}
  try:
-  setup();v['details']={'prepare':prepare,'deploy':deploy,'verify':verify}[PHASE]();v['success']=True
+  setup();v['details']={'prepare':prepare,'deploy':deploy,'verify':verify}[PHASE]();v['finalSpaceBeforeSeal']=free_check();v['success']=True
  except Exception as e:
   original_stage=STAGE;v.update(errorType=type(e).__name__,stage=original_stage,dependencyStage=None if O is None else O.STAGE,safeFailureContext=failure_context(e))
   if PHASE=='deploy':

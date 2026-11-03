@@ -6,7 +6,7 @@ No schema/dependency/startup changes; no #1047 migration exception is accepted.
 import calendar,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,resource,selectors,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error
 # DRAFT ONLY. Root must independently bind the final source, profile, runtime and
 # capacity pins after CI/review. This file has never been run against any host.
-ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/batch1060-quote-20261103-r1'
+ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/batch1060-quote-20261103-r2'
 APP='apps/业务部/内部报价系统'
 BASE='90f2fa661c923c4d3144ba21d22789b38553638b'
 HOST_BASE='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c';TARGET='e6459c7e9d7483527f7b22abbe93753183075fb8';TREE='12b8971f928afe00ba331b817c9c0dcf6dc0154d';HEAD='40b6b28c4409562ad5252b53faab79c6348f3a2e';APP_TREE='116c0d74d46ac8dc4e93a413bc9ff2608eb1dd6c'
@@ -35,7 +35,7 @@ EXPECTED_NATIVE_TESTS=18
 REVIEWED_PATHS=(*CODE,'tests/injection-mold-column.test.js','tests/injection-pricing.test.js',
  'tests/product-mix.test.js','tests/supplier-edit.test.js','tests/injection-pricing-api.test.js',
  'tests/pricing-supplier-renderer.test.js')
-PROFILE_PATH='/opt/rr-portal/deploy/backups/batch1056-1060-preflight-5-20261103/result.private.json';PROFILE_RESULT_SHA256='f1b26fabf74d28b6974f31c5e26f91f14279e896de15ca24aa20221dad82efc4';DIRTY_PATH_COUNT=5;DIRTY_SHA256='74b8a9c5caefdc5a220f12cd14972229312beef004e76129d0fb2bb691a0507e'
+PROFILE_PATH='/opt/rr-portal/deploy/backups/batch1056-1060-preflight-6-20261103/result.private.json';PROFILE_RESULT_SHA256='5ddca1bf8ef501d837321962fedbef9141f658da5eafc8e70ae614c95a58d55a';DIRTY_PATH_COUNT=5;DIRTY_SHA256='74b8a9c5caefdc5a220f12cd14972229312beef004e76129d0fb2bb691a0507e'
 UNRESOLVED_PINS=('HOST_BASE','TARGET','TREE','HEAD','APP_TREE','REVIEWED_FILES','TEST_FILES',
  'CID','LIVE_IMAGE','BASE_IMAGE','EXPECTED_CONTAINER_IDS','PROFILE_PATH','PROFILE_RESULT_SHA256',
  'DIRTY_PATH_COUNT','DIRTY_SHA256','MAX_OVERLAY_BYTES','MAX_ARCHIVE_BYTES','MIN_AVAILABLE_BYTES','MIN_FREE_BYTES',

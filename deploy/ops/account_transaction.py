@@ -107,11 +107,11 @@ class Postgres:
             if row[key] is not None:
                 row[key] = row[key].isoformat()
         identity(row)
-        rel = (await self.c.execute(self.text("SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='users'"))).scalar_one()
+        rel = (await self.c.execute(self.text("SELECT c.relkind::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='users'"))).scalar_one()
         triggers = (await self.c.execute(self.text("SELECT t.tgname FROM pg_trigger t WHERE t.tgrelid='public.users'::regclass AND NOT t.tgisinternal ORDER BY t.tgname"))).scalars().all()
         require(not triggers, 'unexpected_users_triggers')
         columns = [dict(r) for r in (await self.c.execute(self.text("SELECT column_name,data_type,is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='users' ORDER BY ordinal_position"))).mappings().all()]
-        constraints = [dict(r) for r in (await self.c.execute(self.text("SELECT conname,contype,pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid='public.users'::regclass ORDER BY conname"))).mappings().all()]
+        constraints = [dict(r) for r in (await self.c.execute(self.text("SELECT conname,contype::text AS contype,pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid='public.users'::regclass ORDER BY conname"))).mappings().all()]
         indexes = [dict(r) for r in (await self.c.execute(self.text("SELECT indexname,indexdef FROM pg_indexes WHERE schemaname='public' AND tablename='users' ORDER BY indexname"))).mappings().all()]
         rules = (await self.c.execute(self.text("SELECT rulename FROM pg_rules WHERE schemaname='public' AND tablename='users' ORDER BY rulename"))).scalars().all()
         require(not rules, 'unexpected_users_rules')

@@ -13,7 +13,7 @@ from account_transaction import SCOPE, SCOPE_SHA256, capabilities, digest, encod
 
 EXECUTE = True
 BRANCH = 'refs/heads/codex/ops-engineering-admin-access-20261103'
-BASE = pathlib.Path('/opt/rr-portal/deploy/backups/engineering-admin-access-1-20261103')
+BASE = pathlib.Path('/opt/rr-portal/deploy/backups/engineering-admin-access-2-20261103')
 MODES = ('diagnose', 'maintain', 'verify', 'reconcile')
 EXPECTED_CONTAINERS = 46
 
@@ -214,8 +214,9 @@ def main():
         if not BASE.exists():
             BASE.mkdir(mode=0o700)
         private_directory(BASE, False)
-        phase = BASE / (mode + '-attempt1')
-        private_directory(phase, True)
+        candidate_phase = BASE / (mode + '-attempt1')
+        private_directory(candidate_phase, True)
+        phase = candidate_phase
         durable_write(phase / 'intent.private.json', {'mode': mode, 'scope': SCOPE,
                       'scopeSHA256': SCOPE_SHA256, 'attempt': 1})
         stage = 'runtime_before'

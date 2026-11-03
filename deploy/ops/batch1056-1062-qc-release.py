@@ -11,11 +11,11 @@ all other code-bind files retain bytes and metadata. Cross-database atomicity is
 Final phase completion still requires actual runtime, source, data and remaining-space evidence.
 """
 import calendar,contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error
-ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/batch1056-1062-qc-20261103-2'
+ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/batch1056-1062-qc-20261103-3'
 APP='apps/生产部/品质管理系统';DATA_ROOT=ROOT/APP/'data';CODE_ROOT=pathlib.Path('/opt/qc-code')
 HOST_BASE='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c';BASE='90f2fa661c923c4d3144ba21d22789b38553638b';TARGET='ec0789c6ec94692c2c23717a473273c2acf666e4';TREE='5bcf828fcc57df5e762588885efc71afc019f33f';APP_TREE='d22e3c980022d5850db15993cf9990405b279d12'
 REVIEWED_HEADS={'1056': 'e46a3a2da46414cb131ce10b1a2e9884df646835', '1057': '8d5facb4d0ede97999a6e8fa8db4feab017aecdd', '1058': 'bc4c5a7d0fea9f9e51d1800ce79f270635c230ae', '1062': '24f423bde8f689646208ee4292bbc9d55e0bd8d2'}
-PHASE='prepare';PREPARED_SHA256='';DEPLOY_SHA256='';EXECUTE=False
+PHASE='prepare';PREPARED_SHA256='';DEPLOY_SHA256='';EXECUTE=True
 BRANCH='refs/heads/codex/ops-batch1056-1060-20261103'
 ALIAS='rr-portal-qc:latest';CID='080cfbbcdd68dcb43e8a627ac8e5b1d6cc1b237f322ffac4c26a97ef23b09567';LIVE_IMAGE='sha256:f4ae6aa9dd4ffec6e7dcca66eaae748a4e69cdc160eced9b10b4e2ab9a019494';BASE_IMAGE='sha256:3b3d5cb74579a38a9c0846327af7fd282740b2313912eef083eae33bd08ff788';ALIAS_IMAGE='sha256:3b3d5cb74579a38a9c0846327af7fd282740b2313912eef083eae33bd08ff788'
 LIVE_SOURCE_SHA256='e1cd85721464c2befcdd424b82ef62514aeb8efed24e755969583c7a4687a86c';LIVE_SOURCE_DIFFERENCES=('ai-ocr.js', 'app.js', 'dev-server.js', 'index.html', 'package.json', 'qc-backend.js', 'report_export.js', 'server/auth.js', 'server/extract-seed.js', 'server/server.js')
@@ -115,6 +115,12 @@ def bundle(bodies,metadata):
    need(n in bodies and sha(bodies[n])==metadata[n]['sha256'],'bundle-exact-reviewed-bytes');m=tarfile.TarInfo(n);m.uid=metadata[n]['uid'];m.gid=metadata[n]['gid'];m.mode=metadata[n]['mode'];m.size=len(bodies[n]);m.mtime=metadata[n]['mtime'];t.addfile(m,io.BytesIO(bodies[n]))
  return b.getvalue()
 
+def copy_bundle(cid,patch):
+ need(pin(cid),'copy-bundle-pinned-container-id');need(type(patch)is bytes and 0<len(patch)<=128*1024**2,'copy-bundle-bounded-bytes')
+ # Docker 29.2.1 CopyUIDGID (-a) remaps stdin-tar owners to Config.User.
+ # Omit it to retain the reviewed tar owners; six-field readback remains strict.
+ run(['docker','cp','-',cid+':/app'],patch)
+
 def stopped_check(cid,expected):
  for n in CODE:
   _,v=copied_file(cid,n);need(v==expected[n],'stopped-source-bytes-owner-mode-readback')
@@ -123,11 +129,17 @@ def utc_ns(text):
  x=re.fullmatch(r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(?:Z|\+00:00)',text);need(x is not None,'strict-utc-nanosecond-timestamp');d=datetime.datetime.strptime(x[1],'%Y-%m-%dT%H:%M:%S');return calendar.timegm(d.timetuple())*10**9+int((x[2]or'').ljust(9,'0'))
 
 def scratch(image_id,patch,expected):
+ global STAGE
  cid=run(['docker','create','--network','none','--restart','no','--label','io.rr-portal.qc1056-1062-scratch='+TARGET,'--entrypoint','/bin/true',image_id]).decode().strip();need(pin(cid),'one-owned-never-started-scratch')
+ failure_stage=None
  try:
-  row=memory(['docker','inspect',cid])[0];need(row['Image']==image_id and row['State']['Pid']==0 and row['State']['StartedAt'].startswith('0001-')and not row['Mounts']and row['HostConfig']['NetworkMode']=='none','scratch-never-started-no-mounts');run(['docker','cp','--archive','-',cid+':/app'],patch);stopped_check(cid,expected)
+  row=memory(['docker','inspect',cid])[0];need(row['Image']==image_id and row['State']['Pid']==0 and row['State']['StartedAt'].startswith('0001-')and not row['Mounts']and row['HostConfig']['NetworkMode']=='none','scratch-never-started-no-mounts');copy_bundle(cid,patch);stopped_check(cid,expected)
+ except BaseException:
+  failure_stage=STAGE
+  raise
  finally:
   row=memory(['docker','inspect',cid])[0];need(row['Image']==image_id and not row['State']['Running']and row['State']['Pid']==0 and(row['Config'].get('Labels')or{}).get('io.rr-portal.qc1056-1062-scratch')==TARGET,'remove-only-owned-never-started-scratch');run(['docker','rm',cid])
+  if failure_stage is not None:STAGE=failure_stage
 
 def sealed(phase,digest):
  d=ARCHIVE/phase;need(pin(digest)and sha((d/'manifest.json').read_bytes())==digest,'sealed-prior-phase-manifest');mf=json.loads((d/'manifest.json').read_bytes());files={str(p.relative_to(d))for p in d.rglob('*')if p.is_file()and p.name!='manifest.json'};need(files==set(mf)and all(not p.is_symlink()and(p.is_file()or p.is_dir())for p in d.rglob('*')),'complete-private-evidence-files');need(all(L.safe_path(n)and L.file_hash(d/n)==h for n,h in mf.items()),'all-prior-evidence-bytes-sealed');v=json.loads((d/'result.private.json').read_bytes());need(v['success']is True and(v['target'],v['tree'],v['appTree'])==(TARGET,TREE,APP_TREE),'successful-source-bound-prior-phase');return v,d
@@ -463,7 +475,7 @@ def deploy():
     need(gate_record(path)==owned,'pre-stop-failure-only-own-qc-gate-cas');path.unlink();cleanup['clearedOwnUnchangedGate']=True
    except Exception as e:cleanup['cleanupErrorType']=type(e).__name__
   private(OUT/'pre-stop-failure-gate.private.json',enc(cleanup));STAGE=failed_stage;raise
- need(not memory(['docker','inspect',CID])[0]['State']['Running'],'same-original-qc-stopped');cold=storage('cold-before');free_check();need(code_bind_manifest()==p['oldSignature'],'stopped-bind-tree-exact-before-targeted-copy');run(['docker','cp','--archive','-',CID+':/app'],(d/'patch.tar').read_bytes());stopped_check(CID,p['metadata']);patched_bind=code_bind_manifest();compare_code_bind(p['oldSignature'],patched_bind,p['metadata']);private(OUT/'patched-code-bind-hash-manifest.private.json',enc(patched_bind));free_check();start_begin=time.time_ns();run(['docker','start',CID],timeout=90);start_end=time.time_ns();private(OUT/'single-start-window.private.json',enc({'beginNs':start_begin,'endNs':start_end,'stopBeginNs':stop_begin,'container':CID}));health();after=runtime();need(set(before)==set(after)and all(after[c]==before[c]for c in before if c!=CID),'every-other-existing-container-exact');old,new=before[CID],after[CID];need(new==dict(old,started=new['started'],pid=new['pid'],restarts=0)and new['running']and new['health']=='healthy'and old['started']!=new['started']and old['pid']!=new['pid'],'one-same-qc-cid-manual-start-only-runtime-delta');need(start_begin<=utc_ns(new['started'])<=start_end,'manual-qc-start-in-exact-integer-ns-command-window');s,actual=source(CID,'live-upgraded-source',TARGET);need(actual==expected_live_source(p),'live-full-tracked-source-payload-target-and-other-files-exact-before');need(code_bind_manifest()==patched_bind,'hidden-inclusive-code-bind-still-exact-after-single-start');post=storage('after-start');compare_storage(cold,post);need(protection(after)==protected,'all-config-env-auth-binds-preserved');need(runtime()==after and image(ALIAS)['Id']==ALIAS_IMAGE and gate_record(path)==owned,'final-qc-runtime-alias-gate-cas');run(['docker','tag',p['candidate'],ALIAS]);need(image(ALIAS)['Id']==p['candidate'],'durable-qc-canonical-promoted-once');need(gate_record(path)==owned,'own-qc-maintenance-gate-unchanged-before-clear');path.unlink();entry(False,ingress);public_files(cache_headers);return {'candidate':p['candidate'],'runtime':after,'protected':protected,'allQmsBusinessAuthTombstonesSchemaAndFilesPreserved':True,'singleStopCopyStart':True,'sameContainer':CID,'liveImage':LIVE_IMAGE,'durableImage':p['candidate'],'reviewedRuntimeCorrections':list(CORRECTION_CODE),'liveBindSignature':patched_bind,'existingCodeBindPreserved':True,'activeImageRecreated':False,'quietSamples':samples,'historicalDockerEventsNotRequiredOrClaimed':True,'nonAtomicCrossDatabaseSnapshotClaimed':False}
+ need(not memory(['docker','inspect',CID])[0]['State']['Running'],'same-original-qc-stopped');cold=storage('cold-before');free_check();need(code_bind_manifest()==p['oldSignature'],'stopped-bind-tree-exact-before-targeted-copy');copy_bundle(CID,(d/'patch.tar').read_bytes());stopped_check(CID,p['metadata']);patched_bind=code_bind_manifest();compare_code_bind(p['oldSignature'],patched_bind,p['metadata']);private(OUT/'patched-code-bind-hash-manifest.private.json',enc(patched_bind));free_check();start_begin=time.time_ns();run(['docker','start',CID],timeout=90);start_end=time.time_ns();private(OUT/'single-start-window.private.json',enc({'beginNs':start_begin,'endNs':start_end,'stopBeginNs':stop_begin,'container':CID}));health();after=runtime();need(set(before)==set(after)and all(after[c]==before[c]for c in before if c!=CID),'every-other-existing-container-exact');old,new=before[CID],after[CID];need(new==dict(old,started=new['started'],pid=new['pid'],restarts=0)and new['running']and new['health']=='healthy'and old['started']!=new['started']and old['pid']!=new['pid'],'one-same-qc-cid-manual-start-only-runtime-delta');need(start_begin<=utc_ns(new['started'])<=start_end,'manual-qc-start-in-exact-integer-ns-command-window');s,actual=source(CID,'live-upgraded-source',TARGET);need(actual==expected_live_source(p),'live-full-tracked-source-payload-target-and-other-files-exact-before');need(code_bind_manifest()==patched_bind,'hidden-inclusive-code-bind-still-exact-after-single-start');post=storage('after-start');compare_storage(cold,post);need(protection(after)==protected,'all-config-env-auth-binds-preserved');need(runtime()==after and image(ALIAS)['Id']==ALIAS_IMAGE and gate_record(path)==owned,'final-qc-runtime-alias-gate-cas');run(['docker','tag',p['candidate'],ALIAS]);need(image(ALIAS)['Id']==p['candidate'],'durable-qc-canonical-promoted-once');need(gate_record(path)==owned,'own-qc-maintenance-gate-unchanged-before-clear');path.unlink();entry(False,ingress);public_files(cache_headers);return {'candidate':p['candidate'],'runtime':after,'protected':protected,'allQmsBusinessAuthTombstonesSchemaAndFilesPreserved':True,'singleStopCopyStart':True,'sameContainer':CID,'liveImage':LIVE_IMAGE,'durableImage':p['candidate'],'reviewedRuntimeCorrections':list(CORRECTION_CODE),'liveBindSignature':patched_bind,'existingCodeBindPreserved':True,'activeImageRecreated':False,'quietSamples':samples,'historicalDockerEventsNotRequiredOrClaimed':True,'nonAtomicCrossDatabaseSnapshotClaimed':False}
 
 def verify():
  source_check();value,_=sealed('deploy',DEPLOY_SHA256);p=value['details'];prepared,_=sealed('prepare',PREPARED_SHA256);baseline=prepared['details']

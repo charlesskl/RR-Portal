@@ -1,11 +1,66 @@
-name: Batch 1056-1062 Scoped Release (Closed)
+name: QMS 1056-1062 Scoped Release
 on:
   workflow_dispatch:
+    inputs:
+      mode: {type: choice, required: true, options: [prepare]}
 permissions:
   contents: read
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+env:
+  SCOPED_RELEASE_WORKFLOW_PIN: 'true'
+  SCOPED_RELEASE_HELPER_SHA256: 'a43d1d9e29c4030c01a411c5c9a5233e9108566b74d6af2983f5f35c9e44da99'
 jobs:
-  closed:
+  scoped-operation:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
-      - name: No server operation while scratch copy is reviewed
-        run: echo 'Prepare stopped before QC lifecycle. Entry closed; both failed archives retained.'
+      - name: Validate exact branch and SSH host fingerprint
+        shell: bash
+        env:
+          RELEASE_BRANCH: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = a43d1d9e29c4030c01a411c5c9a5233e9108566b74d6af2983f5f35c9e44da99 ]] || exit 1
+          [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-batch1056-1060-20261103 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]] || exit 1
+      - name: Run bounded reviewed operation
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        env:
+          RELEASE_BRANCH: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 10m
+          envs: RELEASE_BRANCH,RELEASE_SHA,RELEASE_ATTEMPT,RELEASE_MODE,SCOPED_RELEASE_WORKFLOW_PIN,SCOPED_RELEASE_HELPER_SHA256
+          script: |
+            set -euo pipefail
+            [[ "$SCOPED_RELEASE_WORKFLOW_PIN" = true && "$SCOPED_RELEASE_HELPER_SHA256" = a43d1d9e29c4030c01a411c5c9a5233e9108566b74d6af2983f5f35c9e44da99 ]] || exit 1
+            [[ "$RELEASE_BRANCH" = refs/heads/codex/ops-batch1056-1060-20261103 && "$RELEASE_ATTEMPT" = 1 && "$RELEASE_MODE" = prepare && "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            cd /opt/rr-portal
+            timeout --signal=TERM --kill-after=2s 120s git -c core.hooksPath=/dev/null fetch --no-write-fetch-head origin +refs/heads/codex/ops-batch1056-1060-20261103:refs/remotes/origin/codex/ops-batch1056-1060-20261103 >/dev/null 2>&1 || exit 1
+            [[ "$(git rev-parse refs/remotes/origin/codex/ops-batch1056-1060-20261103)" = "$RELEASE_SHA" ]] || exit 1
+            umask 077
+            batch_tmp=$(mktemp -d /tmp/batch1056-1060.XXXXXX)
+            trap 'rm -rf "$batch_tmp"' EXIT
+            git show "$RELEASE_SHA:deploy/ops/batch1056-1062-qc-release.py" > "$batch_tmp/run.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_tmp/run.py" | cut -d ' ' -f1)" = a43d1d9e29c4030c01a411c5c9a5233e9108566b74d6af2983f5f35c9e44da99 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/pr1035-quote-preflight.py" > "$batch_tmp/pr1035-quote-preflight.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_tmp/pr1035-quote-preflight.py" | cut -d ' ' -f1)" = 2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-ops-library.py" > "$batch_tmp/release-data-ops-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_tmp/release-data-ops-library.py" | cut -d ' ' -f1)" = ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5 ]] || exit 1
+            git show "$RELEASE_SHA:deploy/ops/release-data-library.py" > "$batch_tmp/release-data-library.py" 2>/dev/null || exit 1
+            [[ "$(sha256sum "$batch_tmp/release-data-library.py" | cut -d ' ' -f1)" = d63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9 ]] || exit 1
+            timeout --signal=TERM --kill-after=30s 8m python3 -B "$batch_tmp/run.py" prepare

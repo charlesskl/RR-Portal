@@ -36,6 +36,92 @@ def literal(name):
     return ast.literal_eval(node.value)
 
 
+class BundleCopyTests(unittest.TestCase):
+    def helpers(self):
+        names = {'need', 'pin', 'copy_bundle', 'stopped_check', 'scratch'}
+        nodes = [n for n in SOURCE.body if isinstance(n, ast.FunctionDef) and n.name in names]
+        self.assertEqual(len(nodes), len(names))
+        env = {'re': re, 'STAGE': 'synthetic-entry', 'TARGET': '1' * 40,
+               'CODE': literal('DIFF_CODE') + literal('CORRECTION_CODE')}
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), 'copy-bundle-only', 'exec'), env)
+        return env
+
+    def test_copy_uses_exact_stdin_tar_destination_without_archive_owner_remapping(self):
+        env = self.helpers(); calls = []; patch = b'synthetic reviewed tar bytes'
+        env['run'] = lambda args, data=None: calls.append((args, data))
+        env['copy_bundle']('a' * 64, patch)
+        self.assertEqual(calls, [(['docker', 'cp', '-', 'a' * 64 + ':/app'], patch)])
+
+    def test_invalid_container_or_nonbytes_empty_payload_is_rejected_before_copy(self):
+        env = self.helpers(); calls = []
+        env['run'] = lambda *args: calls.append(args)
+        for cid, patch in [('a' * 63, b'x'), ('a' * 64 + ':/other', b'x'),
+                           ('a' * 64, b''), ('a' * 64, 'text'), ('a' * 64, bytearray(b'x'))]:
+            with self.subTest(cid=cid, kind=type(patch).__name__), self.assertRaises(RuntimeError):
+                env['copy_bundle'](cid, patch)
+        self.assertEqual(calls, [])
+
+    def scratch_fixture(self, *, fail_readback=False, fail_cleanup=False):
+        env = self.helpers(); cid = 'a' * 64; image = 'sha256:' + 'b' * 64; calls = []
+        metadata = {'sha256': 'c' * 64, 'bytes': 12, 'uid': 0, 'gid': 0,
+                    'mode': 0o755, 'mtime': 1793714952}
+        expected = {name: dict(metadata) for name in env['CODE']}
+        row = {'Image': image, 'State': {'Pid': 0, 'Running': False, 'StartedAt': '0001-01-01'},
+               'Mounts': [], 'HostConfig': {'NetworkMode': 'none'},
+               'Config': {'Labels': {'io.rr-portal.qc1056-1062-scratch': env['TARGET']}}}
+        env['memory'] = lambda args: [row]
+        env['copied_file'] = lambda *args: (b'', dict(metadata, uid=100) if fail_readback else dict(metadata))
+        def run(args, data=None):
+            calls.append((args, data)); env['STAGE'] = 'synthetic-command-output'
+            if args[:2] == ['docker', 'create']: return cid.encode()
+            if args[:2] == ['docker', 'rm'] and fail_cleanup:
+                env['need'](False, 'synthetic-cleanup-failure')
+            return b''
+        env['run'] = run
+        return env, cid, image, calls, expected
+
+    def test_scratch_and_deploy_both_use_the_shared_copy_function(self):
+        env, cid, image, calls, expected = self.scratch_fixture()
+        env['scratch'](image, b'synthetic tar', expected)
+        self.assertEqual([call for call in calls if call[0][:2] == ['docker', 'cp']],
+                         [(['docker', 'cp', '-', cid + ':/app'], b'synthetic tar')])
+        self.assertEqual(calls[-1][0], ['docker', 'rm', cid])
+        for name in ('scratch', 'deploy'):
+            node = next(n for n in SOURCE.body if isinstance(n, ast.FunctionDef) and n.name == name)
+            copies = [n for n in ast.walk(node) if isinstance(n, ast.Call) and
+                      isinstance(n.func, ast.Name) and n.func.id == 'copy_bundle']
+            self.assertEqual(len(copies), 1, name)
+            self.assertNotIn("'cp'", ast.unparse(node), name)
+
+    def test_all_six_metadata_fields_remain_exact_for_every_payload_file(self):
+        env = self.helpers(); cid = 'a' * 64
+        metadata = {'sha256': 'c' * 64, 'bytes': 12, 'uid': 0, 'gid': 0,
+                    'mode': 0o755, 'mtime': 1793714952}
+        expected = {name: dict(metadata) for name in env['CODE']}
+        env['copied_file'] = lambda *args: (b'', dict(metadata))
+        env['stopped_check'](cid, expected)
+        for name in env['CODE']:
+            for field in metadata:
+                changed = dict(metadata); changed[field] = 'd' * 64 if field == 'sha256' else metadata[field] + 1
+                env['copied_file'] = lambda actual_cid, actual_name: (b'', changed if actual_name == name else dict(metadata))
+                with self.subTest(name=name, field=field), self.assertRaisesRegex(RuntimeError, '^stopped-source-bytes-owner-mode-readback$'):
+                    env['stopped_check'](cid, expected)
+
+    def test_successful_owned_scratch_cleanup_preserves_original_failure_stage(self):
+        env, cid, image, calls, expected = self.scratch_fixture(fail_readback=True)
+        with self.assertRaisesRegex(RuntimeError, '^stopped-source-bytes-owner-mode-readback$'):
+            env['scratch'](image, b'synthetic tar', expected)
+        self.assertEqual(env['STAGE'], 'stopped-source-bytes-owner-mode-readback')
+        self.assertEqual(calls[-1][0], ['docker', 'rm', cid])
+
+    def test_cleanup_failure_keeps_its_own_failure_and_stage(self):
+        env, cid, image, calls, expected = self.scratch_fixture(fail_readback=True, fail_cleanup=True)
+        with self.assertRaisesRegex(RuntimeError, '^synthetic-cleanup-failure$'):
+            env['scratch'](image, b'synthetic tar', expected)
+        self.assertEqual(env['STAGE'], 'synthetic-cleanup-failure')
+        self.assertEqual(calls[-1][0], ['docker', 'rm', cid])
+
+
 class CodeBindGuardTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='synthetic-qc-code-guard-')
@@ -178,7 +264,7 @@ class InertScopeAndBudgetTests(unittest.TestCase):
         self.assertIs(literal('EXECUTE'),False)
         phase=literal('PHASE');self.assertIn(phase,('', 'prepare','deploy','verify'))
         archive=next(n for n in SOURCE.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='ARCHIVE'for t in n.targets))
-        self.assertEqual(ast.literal_eval(archive.value.right),'deploy/backups/batch1056-1062-qc-20261103-2')
+        self.assertEqual(ast.literal_eval(archive.value.right),'deploy/backups/batch1056-1062-qc-20261103-3')
         self.assertEqual(set(literal('REVIEWED_HEADS')),{'1056','1057','1058','1062'})
         e=self.helpers()
         if not phase:

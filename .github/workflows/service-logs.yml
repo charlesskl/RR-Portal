@@ -8,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   inspect:
-    if: github.ref == 'refs/heads/codex/ops-ssh-login-check-20261103' && github.run_attempt == 1
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:

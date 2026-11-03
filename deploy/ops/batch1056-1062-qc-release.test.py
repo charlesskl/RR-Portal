@@ -1,13 +1,17 @@
 """Synthetic pure-helper checks; never imports or invokes the release entry point."""
 import ast
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
 import re
 import stat
+import sqlite3
 import subprocess
+import tarfile
 import tempfile
+import types
 import unittest
 
 DRAFT = pathlib.Path(__file__).with_name('batch1056-1062-qc-release.py')
@@ -174,7 +178,7 @@ class InertScopeAndBudgetTests(unittest.TestCase):
         self.assertIs(literal('EXECUTE'),False)
         phase=literal('PHASE');self.assertIn(phase,('', 'prepare','deploy','verify'))
         archive=next(n for n in SOURCE.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='ARCHIVE'for t in n.targets))
-        self.assertEqual(ast.literal_eval(archive.value.right),'deploy/backups/batch1056-1062-qc-20261103-1')
+        self.assertEqual(ast.literal_eval(archive.value.right),'deploy/backups/batch1056-1062-qc-20261103-2')
         self.assertEqual(set(literal('REVIEWED_HEADS')),{'1056','1057','1058','1062'})
         e=self.helpers()
         if not phase:
@@ -263,6 +267,155 @@ class InertScopeAndBudgetTests(unittest.TestCase):
         for count in(None,0,-1,True,287.0):
             e['EXPECTED_NATIVE_TESTS']=count
             with self.subTest(count=count),self.assertRaises(RuntimeError):e['test_manifest_contract']()
+
+
+class QcSqliteClassificationTests(unittest.TestCase):
+    def load(self,name):
+        spec=importlib.util.spec_from_file_location('synthetic_'+name.replace('.','_'),DRAFT.with_name(name))
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+
+    def create_db(self,path,label):
+        with sqlite3.connect(path)as db:
+            db.execute('CREATE TABLE synthetic(id INTEGER PRIMARY KEY,label TEXT,quantity INTEGER)')
+            db.execute('INSERT INTO synthetic VALUES(1,?,?)',(label,7))
+
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory(prefix='synthetic-qc-active-history-');self.addCleanup(self.temp.cleanup)
+        self.root=pathlib.Path(self.temp.name).resolve();self.data=self.root/'data';self.data.mkdir(mode=0o700)
+        self.companies=literal('COMPANIES');self.backups={}
+        for company in self.companies:
+            folder=self.data/company;folder.mkdir(mode=0o700)
+            self.create_db(folder/'qc.db','active-'+company)
+            backup=folder/'qc.db.bak.20260910-152122';self.create_db(backup,'historical-'+company)
+            backup.chmod(0o640);os.utime(backup,ns=(1700000000000000000,1700000000000000000))
+            self.backups[str(backup.relative_to(self.data))]=hashlib.sha256(backup.read_bytes()).hexdigest()
+        (self.data/'sessions.json').write_text('{"version":1,"sessions":[]}')
+        self.ops=self.load('release-data-ops-library.py');self.lib=self.load('release-data-library.py')
+        libraries={'release-data-ops-library.py':self.ops,'release-data-library.py':self.lib,'pr1035-quote-preflight.py':types.SimpleNamespace()}
+        names={'need','enc','sha','pin','setup','qc_database_names','data_estimate','data_metadata'}
+        definitions=[n for n in SOURCE.body if isinstance(n,ast.FunctionDef)and n.name in names]
+        self.env={'pathlib':pathlib,'hashlib':hashlib,'json':json,'re':re,'stat':stat,'ROOT':self.root,'OUT':self.root/'unused-output',
+                  'DATA_ROOT':self.data,'COMPANIES':self.companies,'LEGACY_SQLITE_BACKUPS':self.backups,'O_DATABASE_NAMES':None,
+                  'load':lambda name:libraries[name],'run':lambda *a,**kw:self.fail('No subprocess may run in SQLite classifier tests'),'STAGE':'synthetic'}
+        exec(compile(ast.Module(body=definitions,type_ignores=[]),'actual-classifier-and-setup','exec'),self.env)
+        self.original_scanner=self.ops.database_names;self.env['setup']()
+
+    def classified(self):return self.env['qc_database_names'](self.data)
+
+    def test_production_history_pins_are_exactly_the_thirteen_observed_paths(self):
+        pins=literal('LEGACY_SQLITE_BACKUPS')
+        self.assertEqual(set(pins),{c+'/qc.db.bak.20260910-152122'for c in self.companies})
+        self.assertTrue(all(re.fullmatch('[a-f0-9]{64}',value)for value in pins.values()))
+        self.assertEqual(pins['dg-xingxin/qc.db.bak.20260910-152122'],'3f87c024e94f313e223fe72cbf9e1100ac3d69742c17c629db56cab9869babb8')
+
+    def test_both_library_entry_points_share_wrapper_and_total_bytes_still_include_history(self):
+        self.assertIs(self.env['O_DATABASE_NAMES'],self.original_scanner)
+        self.assertIs(self.ops.database_names,self.env['qc_database_names']);self.assertIs(self.lib.databases,self.env['qc_database_names'])
+        self.assertEqual(len(self.original_scanner(self.data)),26)
+        self.assertEqual(self.classified(),sorted(c+'/qc.db'for c in self.companies))
+        estimate=self.env['data_estimate']()
+        self.assertEqual(estimate['databases'],13);self.assertEqual(estimate['regularFiles'],27)
+        self.assertEqual(estimate['bytes'],sum(p.stat().st_size for p in self.data.rglob('*')if p.is_file()))
+
+    def test_actual_sqlite_capture_audits_thirteen_active_dbs_and_archives_every_historical_byte(self):
+        before=self.env['data_metadata'](self.classified());original_connect=self.lib.connect
+        def no_historical_sql_open(path,*args,**kw):
+            self.assertNotIn('.bak.',str(path));return original_connect(path,*args,**kw)
+        self.lib.connect=no_historical_sql_open
+        result=self.ops.sqlite_capture('qc',self.data,self.root/'cold-capture')
+        self.assertEqual(set(result['sqlite']),{c+'/qc.db'for c in self.companies})
+        self.assertEqual(len(result['sqlite']),13)
+        for name,audit in result['sqlite'].items():
+            self.assertEqual(audit['tables']['synthetic']['rows'],1)
+            with sqlite3.connect((self.root/'cold-capture/sqlite'/name).as_uri()+'?mode=ro',uri=True)as db:
+                self.assertEqual(db.execute('SELECT label,quantity FROM synthetic').fetchone(),('active-'+name.split('/')[0],7))
+        files={row['path']:row for row in result['files']}
+        self.assertTrue(set(self.backups)<=set(files));self.assertIn('sessions.json',files)
+        with tarfile.open(self.root/'cold-capture/files.tar','r')as archive:
+            for name,digest in self.backups.items():
+                member=archive.getmember(name);self.assertTrue(member.isfile());self.assertFalse(member.islnk())
+                body=archive.extractfile(member).read();self.assertEqual(body,(self.data/name).read_bytes())
+                self.assertEqual(hashlib.sha256(body).hexdigest(),digest);self.assertEqual(files[name]['sha256'],digest)
+                self.assertEqual(member.mode,0o640)
+        self.assertEqual(self.env['data_metadata'](self.classified()),before)
+        historical={row['path']:row for row in before if row['path']in self.backups}
+        self.assertEqual(len(historical),13)
+        for name,row in historical.items():
+            meta=(self.data/name).stat();self.assertEqual(row['type'],'file');self.assertEqual(row['sha256'],self.backups[name])
+            self.assertEqual([row[k]for k in('uid','gid','mode','mtimeNs')],[meta.st_uid,meta.st_gid,0o640,1700000000000000000])
+
+    def test_unknown_sqlite_with_an_arbitrary_or_hidden_extension_is_rejected(self):
+        for name in ['unknown.payload','.hidden-sqlite']:
+            path=self.data/name;self.create_db(path,'unknown')
+            with self.subTest(name=name),self.assertRaises(RuntimeError):self.classified()
+            path.unlink()
+
+    def test_missing_changed_or_corrupt_history_is_never_silently_excluded(self):
+        name=next(iter(self.backups));path=self.data/name;body=path.read_bytes()
+        for change in ['missing','modified','corrupt']:
+            if change=='missing':path.unlink()
+            else:path.write_bytes(body+b'changed'if change=='modified'else b'no SQLite header')
+            with self.subTest(change=change),self.assertRaises(RuntimeError):self.classified()
+            path.write_bytes(body)
+
+    def test_historical_hardlink_is_rejected_before_a_tar_or_snapshot_is_created(self):
+        name=next(iter(self.backups));path=self.data/name;path.unlink();os.link(path.with_name('qc.db'),path)
+        with self.assertRaisesRegex(RuntimeError,'regular-single-link'):self.classified()
+        self.assertFalse((self.root/'cold-capture').exists())
+
+    def test_missing_active_or_nonfixed_root_is_rejected(self):
+        path=self.data/self.companies[0]/'qc.db';path.unlink()
+        with self.assertRaises(RuntimeError):self.classified()
+        with self.assertRaisesRegex(RuntimeError,'fixed-qc-root'):self.env['qc_database_names'](self.root)
+
+
+class FailedCapacityWitnessTests(unittest.TestCase):
+    def setUp(self):
+        names={'need','capacity_witness','remaining_capacity','free_check'}
+        nodes=[n for n in SOURCE.body if isinstance(n,ast.FunctionDef)and n.name in names]
+        self.b=literal('CAPACITY_BUDGET');self.data={'bytes':1837078,'databases':13,'privatePathNeverExported':'secret'}
+        fake_path=lambda value:types.SimpleNamespace(is_absolute=lambda:True,read_text=lambda:'MemAvailable: 8586264 kB\n')
+        self.env={'STAGE':'synthetic','budget_contract':lambda:self.b,'pathlib':types.SimpleNamespace(Path=fake_path),'re':re,
+            'memory':lambda *args:'/synthetic/docker','os':types.SimpleNamespace(statvfs=lambda root:types.SimpleNamespace(f_bavail=314368000,f_bfree=9115664384,f_frsize=1)),
+            'allocation':lambda folder:1708032,'ARCHIVE':None,'data_estimate':lambda:self.data,'time':types.SimpleNamespace(time_ns=lambda:123),'CAPACITY_BUDGET_SHA256':'1'*64,'LAST_CAPACITY_WITNESS':None}
+        exec(compile(ast.Module(body=nodes,type_ignores=[]),'actual-free-check-with-synthetic-measurements','exec'),self.env)
+
+    def test_current_exact_numbers_pass_with_thirteen_active_without_lowering_any_bound(self):
+        value=self.env['free_check']();w=self.env['LAST_CAPACITY_WITNESS']
+        self.assertTrue(w['passed']);self.assertTrue(all(w['checks'].values()))
+        self.assertEqual(value['minimumOrdinaryBytes'],304476160);self.assertEqual(value['minimumPhysicalBytes'],8625975296)
+        self.assertEqual(w['activeDatabaseUpperCount'],13);self.assertNotIn('privatePathNeverExported',json.dumps(w))
+
+    def test_original_twenty_six_count_failure_has_numeric_witness_attached_by_real_except_statement(self):
+        self.data['databases']=26
+        with self.assertRaisesRegex(RuntimeError,'actual-qc-space'):self.env['free_check']()
+        witness=self.env['LAST_CAPACITY_WITNESS'];self.assertFalse(witness['passed'])
+        self.assertEqual([k for k,v in witness['checks'].items()if not v],['activeDatabaseCount'])
+        self.assertEqual(witness['activeDatabases'],26);self.assertEqual(witness['activeDatabaseUpperCount'],13)
+        main=next(n for n in SOURCE.body if isinstance(n,ast.FunctionDef)and n.name=='main')
+        handler=next(n for n in main.body if isinstance(n,ast.Try)).handlers[0]
+        attach=next(n for n in handler.body if isinstance(n,ast.If)and any(isinstance(x,ast.Constant)and x.value=='failedCapacityWitness'for x in ast.walk(n)))
+        self.env['v']={};exec(compile(ast.Module(body=[attach],type_ignores=[]),'actual-failure-attachment','exec'),self.env)
+        self.assertEqual(self.env['v']['failedCapacityWitness'],witness)
+        self.data['databases']=13;self.env['free_check']();self.env['v']={}
+        exec(compile(ast.Module(body=[attach],type_ignores=[]),'no-stale-success-witness','exec'),self.env)
+        self.assertEqual(self.env['v'],{})
+
+    def test_each_capacity_failure_is_identified_by_safe_numeric_boolean_fields(self):
+        remaining=self.env['remaining_capacity'](self.b,1708032)
+        base=[self.b,self.data,remaining,314368000,9115664384,8792334336,1708032]
+        for failed in ['dataBytes','activeDatabaseCount','ordinary','physical','memory','archiveAllocation']:
+            args=list(base);args[1]=dict(self.data)
+            if failed=='dataBytes':args[1]['bytes']=self.b['dataRootUpperBytes']+1
+            if failed=='activeDatabaseCount':args[1]['databases']=14
+            if failed=='ordinary':args[3]=remaining['ordinary']-1
+            if failed=='physical':args[4]=remaining['physical']-1
+            if failed=='memory':args[5]=self.b['minimumMemAvailableBytes']-1
+            if failed=='archiveAllocation':args[6]=sum(self.b[k]for k in('overlayStageUpperBytes','coldBackupUpperBytes','evidenceUpperBytes'))+1
+            witness=self.env['capacity_witness'](*args)
+            with self.subTest(failed=failed):
+                self.assertFalse(witness['passed']);self.assertEqual([k for k,v in witness['checks'].items()if not v],[failed])
+                self.assertTrue(all(type(v)is int for k,v in witness.items()if k not in('checks','passed')))
 
 
 class AuthPolicyContractTests(unittest.TestCase):

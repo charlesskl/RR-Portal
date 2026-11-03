@@ -11,11 +11,11 @@ all other code-bind files retain bytes and metadata. Cross-database atomicity is
 Final phase completion still requires actual runtime, source, data and remaining-space evidence.
 """
 import calendar,contextlib,copy,datetime,hashlib,importlib.util,io,json,os,pathlib,re,stat,subprocess,sys,tarfile,time,urllib.request,urllib.error
-ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/batch1056-1062-qc-20261103-1'
+ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/batch1056-1062-qc-20261103-2'
 APP='apps/生产部/品质管理系统';DATA_ROOT=ROOT/APP/'data';CODE_ROOT=pathlib.Path('/opt/qc-code')
 HOST_BASE='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c';BASE='90f2fa661c923c4d3144ba21d22789b38553638b';TARGET='ec0789c6ec94692c2c23717a473273c2acf666e4';TREE='5bcf828fcc57df5e762588885efc71afc019f33f';APP_TREE='d22e3c980022d5850db15993cf9990405b279d12'
 REVIEWED_HEADS={'1056': 'e46a3a2da46414cb131ce10b1a2e9884df646835', '1057': '8d5facb4d0ede97999a6e8fa8db4feab017aecdd', '1058': 'bc4c5a7d0fea9f9e51d1800ce79f270635c230ae', '1062': '24f423bde8f689646208ee4292bbc9d55e0bd8d2'}
-PHASE='prepare';PREPARED_SHA256='';DEPLOY_SHA256='';EXECUTE=False
+PHASE='prepare';PREPARED_SHA256='';DEPLOY_SHA256='';EXECUTE=True
 BRANCH='refs/heads/codex/ops-batch1056-1060-20261103'
 ALIAS='rr-portal-qc:latest';CID='080cfbbcdd68dcb43e8a627ac8e5b1d6cc1b237f322ffac4c26a97ef23b09567';LIVE_IMAGE='sha256:f4ae6aa9dd4ffec6e7dcca66eaae748a4e69cdc160eced9b10b4e2ab9a019494';BASE_IMAGE='sha256:3b3d5cb74579a38a9c0846327af7fd282740b2313912eef083eae33bd08ff788';ALIAS_IMAGE='sha256:3b3d5cb74579a38a9c0846327af7fd282740b2313912eef083eae33bd08ff788'
 LIVE_SOURCE_SHA256='e1cd85721464c2befcdd424b82ef62514aeb8efed24e755969583c7a4687a86c';LIVE_SOURCE_DIFFERENCES=('ai-ocr.js', 'app.js', 'dev-server.js', 'index.html', 'package.json', 'qc-backend.js', 'report_export.js', 'server/auth.js', 'server/extract-seed.js', 'server/server.js')
@@ -30,6 +30,9 @@ PROFILE_PATH='/opt/rr-portal/deploy/backups/batch1056-1060-preflight-9-20261103/
 DIRTY_PATH_COUNT=5;DIRTY_SHA256='74b8a9c5caefdc5a220f12cd14972229312beef004e76129d0fb2bb691a0507e'
 REQUIRED_TEST_FILES=('app-safety.test.js', 'frontend-auth.test.js', 'judgement-flow.test.js', 'ocr-batch.test.js', 'review-batch.test.js', 'server/api-auth.test.js', 'server/export.test.js', 'server/record-sync.test.js', 'server/ocr-parser.test.js', 'frontend-ocr-rotation.test.js', 'server/ocr-grounding.test.js', 'server/ocr-delivery-columns.test.js', 'server/session-store.test.js')
 COMPANIES=('dg-xingxin','dg-huadeng-a','dg-huadeng-b','dg-huajia','hy-huakang-a','hy-huakang-b','hy-huakang-c','hy-huakang-d','hy-huadeng','hy-huaxing','sy-huadeng','sy-xingxin','xs-huadeng')
+# Exact historical SQLite copies observed read-only; never treated as active databases.
+LEGACY_SQLITE_BACKUPS={'dg-huadeng-a/qc.db.bak.20260910-152122': '00a24845ea120c1316a68b136562667b3be05f0d02afa4185e16a571b0deca44', 'dg-huadeng-b/qc.db.bak.20260910-152122': '00a24845ea120c1316a68b136562667b3be05f0d02afa4185e16a571b0deca44', 'dg-huajia/qc.db.bak.20260910-152122': '00a24845ea120c1316a68b136562667b3be05f0d02afa4185e16a571b0deca44', 'dg-xingxin/qc.db.bak.20260910-152122': '3f87c024e94f313e223fe72cbf9e1100ac3d69742c17c629db56cab9869babb8', 'hy-huadeng/qc.db.bak.20260910-152122': '00a24845ea120c1316a68b136562667b3be05f0d02afa4185e16a571b0deca44', 'hy-huakang-a/qc.db.bak.20260910-152122': '428991af92169210849bc008237d4c6642b4f9b94db38e0770f86cdc321b2154', 'hy-huakang-b/qc.db.bak.20260910-152122': '00a24845ea120c1316a68b136562667b3be05f0d02afa4185e16a571b0deca44', 'hy-huakang-c/qc.db.bak.20260910-152122': '00a24845ea120c1316a68b136562667b3be05f0d02afa4185e16a571b0deca44', 'hy-huakang-d/qc.db.bak.20260910-152122': '00a24845ea120c1316a68b136562667b3be05f0d02afa4185e16a571b0deca44', 'hy-huaxing/qc.db.bak.20260910-152122': '00a24845ea120c1316a68b136562667b3be05f0d02afa4185e16a571b0deca44', 'sy-huadeng/qc.db.bak.20260910-152122': '00a24845ea120c1316a68b136562667b3be05f0d02afa4185e16a571b0deca44', 'sy-xingxin/qc.db.bak.20260910-152122': '00a24845ea120c1316a68b136562667b3be05f0d02afa4185e16a571b0deca44', 'xs-huadeng/qc.db.bak.20260910-152122': '00a24845ea120c1316a68b136562667b3be05f0d02afa4185e16a571b0deca44'}
+O_DATABASE_NAMES=None;LAST_CAPACITY_WITNESS=None
 OUT=None;P=None;O=None;L=None;SERIAL=0;STAGE='entry'
 
 DEPS={'pr1035-quote-preflight.py': '2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5', 'release-data-ops-library.py': 'ff9138a1d5bfed1b10077112da6ebcda2d65240f583e2d0e12ce1325cfbaafd5', 'release-data-library.py': 'd63168fd3057f4f2aba2d93f9fab31d2d65c6dd0f3234877d71fcff1e04e62b9'}
@@ -178,8 +181,23 @@ def transport(value):
  print(enc([1,nib(len(parts)),nib(len(raw)),digest]).decode(),flush=True)
 
 def setup():
- global P,O,L
- P=load('pr1035-quote-preflight.py');O=load('release-data-ops-library.py');L=load('release-data-library.py');O.L=L;O.ROOT=ROOT;O.run=run;L.databases=O.database_names;P.OUT=OUT;P.command=lambda args,limit=8*1024**2,data=None,timeout=90:run(args,data,timeout)
+ global P,O,L,O_DATABASE_NAMES
+ P=load('pr1035-quote-preflight.py');O=load('release-data-ops-library.py');L=load('release-data-library.py');O.L=L;O.ROOT=ROOT;O.run=run;O_DATABASE_NAMES=O.database_names;O.database_names=qc_database_names;L.databases=qc_database_names;P.OUT=OUT;P.command=lambda args,limit=8*1024**2,data=None,timeout=90:run(args,data,timeout)
+
+def qc_database_names(tree):
+ # Discover every SQLite magic file with the original reviewed scanner first.
+ # Only thirteen exact active paths are opened/audited as databases. Historical
+ # copies remain complete regular files in non_database_inventory/files.tar.
+ need(pathlib.Path(tree)==DATA_ROOT and callable(O_DATABASE_NAMES),'fixed-qc-root-and-original-magic-scanner')
+ active={company+'/qc.db'for company in COMPANIES};historical={company+'/qc.db.bak.20260910-152122'for company in COMPANIES}
+ need(len(active)==len(historical)==13 and type(LEGACY_SQLITE_BACKUPS)is dict and set(LEGACY_SQLITE_BACKUPS)==historical and all(pin(h)for h in LEGACY_SQLITE_BACKUPS.values()),'exact-thirteen-active-and-thirteen-pinned-historical-qc-paths')
+ names=O_DATABASE_NAMES(tree)
+ need(len(names)==len(set(names))and set(names)==active|historical,'no-missing-or-unknown-sqlite-magic-files-in-qc-data')
+ for name in sorted(historical):
+  path=DATA_ROOT/name;meta=path.lstat()
+  need(stat.S_ISREG(meta.st_mode)and not stat.S_ISLNK(meta.st_mode)and meta.st_nlink==1,'historical-qc-sqlite-copy-regular-single-link-never-followed')
+  need(L.file_hash(path)==LEGACY_SQLITE_BACKUPS[name],'historical-qc-sqlite-copy-complete-bytes-match-readonly-inventory')
+ return sorted(active)
 
 def storage_contract():
  rows=memory(['docker','inspect',CID]);need(len(rows)==1,'one-fixed-qc-storage-container');r=rows[0]
@@ -314,8 +332,21 @@ def remaining_capacity(b,used):
  pending=archive_bound-used+b['imageGrowthUpperBytes']
  return {'ordinary':b['ordinaryReserveBytes']+pending,'physical':b['physicalReserveBytes']+pending}
 
+def capacity_witness(b,data,remaining,available,free,mem,used):
+ values={'availableBytes':available,'physicalFreeBytes':free,'minimumOrdinaryBytes':remaining['ordinary'],'minimumPhysicalBytes':remaining['physical'],
+  'memAvailableBytes':mem,'minimumMemAvailableBytes':b['minimumMemAvailableBytes'],'ownArchiveAllocatedBytes':used,
+  'archiveUpperBytes':sum(b[k]for k in('overlayStageUpperBytes','coldBackupUpperBytes','evidenceUpperBytes')),
+  'dataBytes':data['bytes'],'dataUpperBytes':b['dataRootUpperBytes'],'activeDatabases':data['databases'],'activeDatabaseUpperCount':b['databaseUpperCount']}
+ need(all(type(v)is int and v>=0 for v in values.values()),'typed-numeric-only-capacity-witness')
+ checks={'dataBytes':values['dataBytes']<=values['dataUpperBytes'],'activeDatabaseCount':values['activeDatabases']<=values['activeDatabaseUpperCount'],
+  'ordinary':available>=remaining['ordinary'],'physical':free>=remaining['physical'],'memory':mem>=b['minimumMemAvailableBytes'],'archiveAllocation':used<=values['archiveUpperBytes']}
+ return dict(values,checks=checks,passed=all(checks.values()))
+
 def free_check():
- b=budget_contract();root=memory(['docker','info','--format','{{json .DockerRootDir}}']);need(type(root)is str and pathlib.Path(root).is_absolute(),'actual-absolute-docker-root-for-qc-capacity');match=re.search(r'^MemAvailable:\s+([0-9]+) kB$',pathlib.Path('/proc/meminfo').read_text(),re.M);need(match is not None,'fresh-memavailable');mem=int(match[1])*1024;fs=os.statvfs(root);used=allocation(ARCHIVE);data=data_estimate();remaining=remaining_capacity(b,used);v={'available':fs.f_bavail*fs.f_frsize,'free':fs.f_bfree*fs.f_frsize,'qcData':data,'memAvailableBytes':mem,'ownArchiveAllocatedBytes':used,'minimumOrdinaryBytes':remaining['ordinary'],'minimumPhysicalBytes':remaining['physical'],'capacityBudgetSHA256':CAPACITY_BUDGET_SHA256};need(data['bytes']<=b['dataRootUpperBytes']and data['databases']<=b['databaseUpperCount']and v['available']>=remaining['ordinary']and v['free']>=remaining['physical']and mem>=b['minimumMemAvailableBytes']and used<=b['overlayStageUpperBytes']+b['coldBackupUpperBytes']+b['evidenceUpperBytes'],'actual-qc-space-memory-data-size-own-evidence-within-reviewed-budget');return v
+ global LAST_CAPACITY_WITNESS
+ b=budget_contract();root=memory(['docker','info','--format','{{json .DockerRootDir}}']);need(type(root)is str and pathlib.Path(root).is_absolute(),'actual-absolute-docker-root-for-qc-capacity');match=re.search(r'^MemAvailable:\s+([0-9]+) kB$',pathlib.Path('/proc/meminfo').read_text(),re.M);need(match is not None,'fresh-memavailable');mem=int(match[1])*1024;fs=os.statvfs(root);used=allocation(ARCHIVE);data=data_estimate();remaining=remaining_capacity(b,used);v={'available':fs.f_bavail*fs.f_frsize,'free':fs.f_bfree*fs.f_frsize,'qcData':data,'memAvailableBytes':mem,'ownArchiveAllocatedBytes':used,'minimumOrdinaryBytes':remaining['ordinary'],'minimumPhysicalBytes':remaining['physical'],'capacityBudgetSHA256':CAPACITY_BUDGET_SHA256}
+ LAST_CAPACITY_WITNESS=capacity_witness(b,data,remaining,v['available'],v['free'],mem,used);LAST_CAPACITY_WITNESS['sampledAtNs']=time.time_ns()
+ need(LAST_CAPACITY_WITNESS['passed'],'actual-qc-space-memory-data-size-own-evidence-within-reviewed-budget');return v
 
 def profile_check(before):
  p=pathlib.Path(PROFILE_PATH);need(PROFILE_PATH and p.is_absolute()and p.parent.parent==ROOT/'deploy/backups'and p.parent.name=='batch1056-1060-preflight-9-20261103'and p.name=='result.private.json','bound-fresh-qc-batch-profile-path');need(pin(PROFILE_RESULT_SHA256)and pin(PROFILE_VALUE_SHA256)and p.is_file()and not p.is_symlink()and file_hash(p)==PROFILE_RESULT_SHA256,'bound-fresh-successful-qc-readonly-profile');v=json.loads(p.read_bytes());verify=dict(v);need(verify.pop('resultSHA256')==PROFILE_VALUE_SHA256==sha(enc(verify)),'canonical-successful-profile-result-digest');need(v['success']is True and v['readOnly']is True and v['allRuntimeUnchanged']is True and v['sourceBaseline']==BASE and v['hostGitHead']==HOST_BASE and all(v[k]is False for k in('businessWrites','lifecycleWrites','configWrites','plaintextCredentialsWritten','businessFileBodiesCopied')),'successful-nonmutating-source-bound-batch-profile');q=v['targets']['qc'];need(q['id']==CID and q['canonicalImage']['id']==ALIAS_IMAGE and pin(LIVE_SOURCE_SHA256)and sha(enc(q['source']['actual']))==LIVE_SOURCE_SHA256 and tuple(q['source']['differences'])==LIVE_SOURCE_DIFFERENCES,'profile-same-qc-service-source-and-accepted-durable-alias');need(v['unstaged']['trackedPathCount']==DIRTY_PATH_COUNT and v['unstaged']['rawPathInventorySHA256']==DIRTY_SHA256 and v['staged']['trackedPathCount']==0,'profile-bound-existing-dirty-inventory');observed=v['allRuntime'];need(set(observed)==set(before)and all(observed[c]['image']==before[c]['image']and observed[c]['configSHA256']==before[c]['config']and observed[c]['hostConfigSHA256']==before[c]['hostConfig']and observed[c]['mountsSHA256']==sha(enc(before[c]['mounts']))and all(observed[c][k]==before[c][k]for k in('pid','started','restarts','running','oom','health'))for c in before),'fresh-profile-all-profiled-runtime-contracts-including-stopped-backup-still-exact');protected=protection(before);need(v['shared']==protected['shared']and v['env']==protected['env']and v['gatewayAuth']==protected['auth'],'fresh-profile-shared-config-env-and-gateway-auth-exact');b=budget_contract();data=v['qcData'];need(set(data)=={'root','bytes','regularFiles','directories','databases'}and data['root']==str(DATA_ROOT.relative_to(ROOT))and all(type(data[k])is int and data[k]>=0 for k in('bytes','regularFiles','directories','databases'))and 1<=data['databases']<=b['databaseUpperCount']and data['bytes']<=b['dataRootUpperBytes'],'fresh-profile-qc-metadata-only-size-budget');return v['resultSHA256']
@@ -493,6 +524,7 @@ def main():
   setup();v['details']={'prepare':prepare,'deploy':deploy,'verify':verify}[PHASE]();v['finalSpaceBeforeSeal']=free_check();v['success']=True
  except Exception as e:
   original_stage=STAGE;v.update(errorType=type(e).__name__,stage=original_stage,dependencyStage=None if O is None else O.STAGE,safeFailureContext=failure_context(e))
+  if LAST_CAPACITY_WITNESS is not None and LAST_CAPACITY_WITNESS.get('passed')is False:v['failedCapacityWitness']=LAST_CAPACITY_WITNESS
   if PHASE=='deploy':
    try:v['failureGate']=retain_failure_gate()
    except Exception as gate_error:v['failureGate']={'errorType':type(gate_error).__name__,'stage':STAGE,'automaticReplay':False}

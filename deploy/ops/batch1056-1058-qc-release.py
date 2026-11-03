@@ -15,7 +15,7 @@ ROOT=pathlib.Path('/opt/rr-portal');ARCHIVE=ROOT/'deploy/backups/batch1056-1058-
 APP='apps/生产部/品质管理系统';DATA_ROOT=ROOT/APP/'data';CODE_ROOT=pathlib.Path('/opt/qc-code')
 HOST_BASE='f22fbffa1789234fe1c78bf776f4dcb3fe867d0c';BASE='90f2fa661c923c4d3144ba21d22789b38553638b';TARGET='bc94908439ed3414b013d72f00f128a6459cf0aa';TREE='cf83eca5a36a0adbf97710bd43b5d5ee8a839435';APP_TREE='9ef75737c8af7bac8079fa53b958dd9e8eea53a4'
 REVIEWED_HEADS={'1056': 'e46a3a2da46414cb131ce10b1a2e9884df646835', '1057': '8d5facb4d0ede97999a6e8fa8db4feab017aecdd', '1058': 'bc4c5a7d0fea9f9e51d1800ce79f270635c230ae'}
-PHASE='prepare';PREPARED_SHA256='';DEPLOY_SHA256='';EXECUTE=True
+PHASE='prepare';PREPARED_SHA256='';DEPLOY_SHA256='';EXECUTE=False
 BRANCH='refs/heads/codex/ops-batch1056-1060-20261103'
 ALIAS='rr-portal-qc:latest';CID='080cfbbcdd68dcb43e8a627ac8e5b1d6cc1b237f322ffac4c26a97ef23b09567';LIVE_IMAGE='sha256:f4ae6aa9dd4ffec6e7dcca66eaae748a4e69cdc160eced9b10b4e2ab9a019494';BASE_IMAGE='sha256:3b3d5cb74579a38a9c0846327af7fd282740b2313912eef083eae33bd08ff788';ALIAS_IMAGE='sha256:3b3d5cb74579a38a9c0846327af7fd282740b2313912eef083eae33bd08ff788'
 LIVE_SOURCE_SHA256='d7459826d0805f9b28f8cf3402e6df985d4e5ee6f8ff64df61bbda9a4bb2559e';LIVE_SOURCE_DIFFERENCES=('ai-ocr.js', 'app.js', 'dev-server.js', 'package.json', 'qc-backend.js', 'report_export.js', 'server/extract-seed.js', 'server/server.js')

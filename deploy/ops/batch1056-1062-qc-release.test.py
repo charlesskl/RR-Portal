@@ -169,17 +169,49 @@ class InertScopeAndBudgetTests(unittest.TestCase):
         return budget
 
     def test_new_archive_is_distinct_and_all_final_bindings_are_inert(self):
-        self.assertIs(literal('EXECUTE'),False);self.assertEqual(literal('PHASE'),'')
+        # Binding source pins is distinct from authorizing an execution. This
+        # local review must remain inert in every supported release phase.
+        self.assertIs(literal('EXECUTE'),False)
+        phase=literal('PHASE');self.assertIn(phase,('', 'prepare','deploy','verify'))
         archive=next(n for n in SOURCE.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='ARCHIVE'for t in n.targets))
         self.assertEqual(ast.literal_eval(archive.value.right),'deploy/backups/batch1056-1062-qc-20261103-1')
-        for name in('HOST_BASE','BASE','TARGET','TREE','APP_TREE','PROFILE_PATH','PROFILE_RESULT_SHA256','PROFILE_VALUE_SHA256',
-                    'CID','QC_BACKUP_ID','LIVE_IMAGE','BASE_IMAGE','ALIAS_IMAGE','LIVE_SOURCE_SHA256','DIRTY_SHA256','PREPARED_SHA256','DEPLOY_SHA256','CAPACITY_BUDGET_SHA256'):
-            self.assertEqual(literal(name),'',name)
-        self.assertIsNone(literal('EXPECTED_CONTAINER_COUNT'));self.assertIsNone(literal('EXPECTED_NATIVE_TESTS'));self.assertIsNone(literal('DIRTY_PATH_COUNT'))
-        self.assertEqual(literal('REVIEWED_FILES'),{});self.assertEqual(literal('TEST_FILES'),{});self.assertEqual(literal('REVIEWED_PATHS'),())
-        self.assertEqual(set(literal('REVIEWED_HEADS')),{'1056','1057','1058','1062'});self.assertEqual(literal('REVIEWED_HEADS')['1062'],'')
+        self.assertEqual(set(literal('REVIEWED_HEADS')),{'1056','1057','1058','1062'})
         e=self.helpers()
-        with self.assertRaises(RuntimeError):e['budget_contract']()
+        if not phase:
+            for name in('HOST_BASE','BASE','TARGET','TREE','APP_TREE','PROFILE_PATH','PROFILE_RESULT_SHA256','PROFILE_VALUE_SHA256',
+                        'CID','QC_BACKUP_ID','LIVE_IMAGE','BASE_IMAGE','ALIAS_IMAGE','LIVE_SOURCE_SHA256','DIRTY_SHA256','PREPARED_SHA256','DEPLOY_SHA256','CAPACITY_BUDGET_SHA256'):
+                self.assertEqual(literal(name),'',name)
+            self.assertIsNone(literal('EXPECTED_CONTAINER_COUNT'));self.assertIsNone(literal('EXPECTED_NATIVE_TESTS'));self.assertIsNone(literal('DIRTY_PATH_COUNT'))
+            self.assertEqual(literal('REVIEWED_FILES'),{});self.assertEqual(literal('TEST_FILES'),{});self.assertEqual(literal('REVIEWED_PATHS'),())
+            self.assertEqual(literal('REVIEWED_HEADS')['1062'],'')
+            with self.assertRaises(RuntimeError):e['budget_contract']()
+            return
+        for name in('HOST_BASE','BASE','TARGET','TREE','APP_TREE'):
+            self.assertTrue(e['pin'](literal(name),40),name)
+        self.assertTrue(all(e['pin'](head,40)for head in literal('REVIEWED_HEADS').values()))
+        for name in('CID','QC_BACKUP_ID','LIVE_SOURCE_SHA256','PROFILE_RESULT_SHA256','PROFILE_VALUE_SHA256','DIRTY_SHA256','CAPACITY_BUDGET_SHA256'):
+            self.assertTrue(e['pin'](literal(name)),name)
+        self.assertNotEqual(literal('CID'),literal('QC_BACKUP_ID'))
+        for name in('LIVE_IMAGE','BASE_IMAGE','ALIAS_IMAGE'):
+            self.assertRegex(literal(name),r'^sha256:[a-f0-9]{64}$')
+        self.assertEqual(literal('BASE_IMAGE'),literal('ALIAS_IMAGE'))
+        self.assertEqual(literal('PROFILE_PATH'),'/opt/rr-portal/deploy/backups/batch1056-1060-preflight-9-20261103/result.private.json')
+        self.assertEqual(literal('EXPECTED_CONTAINER_COUNT'),47)
+        self.assertEqual(literal('EXPECTED_NATIVE_TESTS'),339)
+        self.assertIs(type(literal('DIRTY_PATH_COUNT')),int);self.assertGreaterEqual(literal('DIRTY_PATH_COUNT'),0)
+        code=literal('DIFF_CODE')+literal('CORRECTION_CODE')
+        self.assertEqual(set(literal('REVIEWED_FILES')),set(code))
+        self.assertTrue(all(e['pin'](digest)for digest in literal('REVIEWED_FILES').values()))
+        reviewed=literal('REVIEWED_PATHS')
+        self.assertTrue(reviewed);self.assertEqual(len(reviewed),len(set(reviewed)))
+        self.assertTrue(all(re.fullmatch(r'[A-Za-z0-9_./-]+',name)and '..'not in name.split('/')for name in reviewed))
+        self.assertTrue(set(literal('DIFF_CODE'))<=set(reviewed))
+        e.update(CAPACITY_BUDGET_SHA256=literal('CAPACITY_BUDGET_SHA256'),PROFILE_RESULT_SHA256=literal('PROFILE_RESULT_SHA256'),
+                 TEST_FILES=literal('TEST_FILES'),EXPECTED_NATIVE_TESTS=literal('EXPECTED_NATIVE_TESTS'))
+        self.assertEqual(e['budget_contract'](),literal('CAPACITY_BUDGET'))
+        self.assertEqual(set(e['test_manifest_contract']()),set(literal('REQUIRED_TEST_FILES')))
+        for name,required in(('PREPARED_SHA256',phase in('deploy','verify')),('DEPLOY_SHA256',phase=='verify')):
+            self.assertTrue(e['pin'](literal(name))if required else literal(name)=='',name)
 
     def test_explicit_eleven_file_scope_includes_auth_index_and_unchanged_three_repairs(self):
         diff=literal('DIFF_CODE');correction=literal('CORRECTION_CODE')

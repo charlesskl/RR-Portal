@@ -2,11 +2,13 @@
 No lifecycle, SQL writes, configuration changes, business-file copies or cleanup.
 """
 import hashlib,importlib.util,json,os,pathlib,re,stat,subprocess,sys,urllib.request,urllib.error
-ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/batch1056-1060-preflight-3-20261103'
+ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/batch1056-1060-preflight-4-20261103'
 BRANCH='refs/heads/codex/ops-batch1056-1060-20261103'
 BASE='90f2fa661c923c4d3144ba21d22789b38553638b';EXECUTE=True
 DEPS={'pr1035-quote-preflight.py':'2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5','pr1044-indo-preflight.py':'940e9675d628bc0af628ac3964b9073069f99d682a7bc812960ac6e1b88d3004'}
 APPS={'qc':'apps/生产部/品质管理系统','internal-quote':'apps/业务部/内部报价系统'}
+TARGET_IDS={'qc':'080cfbbcdd68dcb43e8a627ac8e5b1d6cc1b237f322ffac4c26a97ef23b09567','internal-quote':'0cfa8edaff44bbc74b4443b6dec444c90e2f115833ff9913abf8c9b6c462ef7a'}
+QC_BACKUP_ID='712466bf56a8537eb914ac8c835f0315dee1d33ad4faae3665af71ed803988f9'
 STAGE='entry'
 def need(v,label):
  global STAGE
@@ -32,7 +34,9 @@ def containers():
   v[r['Id']]={'image':r['Image'],'configSHA256':sha(enc(r['Config'])),'hostConfigSHA256':sha(enc(r['HostConfig'])),'envSHA256':sha(enc(sorted(r['Config'].get('Env')or[]))),'mountsSHA256':sha(enc(sorted(r['Mounts'],key=enc))),'pid':r['State']['Pid'],'started':r['State']['StartedAt'],'restarts':r['RestartCount'],'running':r['State']['Running'],'oom':r['State']['OOMKilled'],'health':r['State'].get('Health',{}).get('Status')}
   l=r['Config'].get('Labels')or{};service=l.get('com.docker.compose.service')
   if l.get('com.docker.compose.project')=='rr-portal'and service in APPS:
-   need(service not in targets,'one-original-target-service');targets[service]=r
+   if r['Id']==QC_BACKUP_ID:
+    need(service=='qc' and r['Name']=='/rr-portal-qc-1-bak1103' and r['State']['Running'] is False and r['State']['Pid']==0,'preserved-exact-stopped-qc-backup');continue
+   need(service not in targets and r['Id']==TARGET_IDS[service] and r['Name']=='/rr-portal-'+service+'-1' and r['State']['Running'] is True,'exact-observed-active-service');targets[service]=r
  need(set(targets)==set(APPS),'all-two-original-targets');return v,targets
 SOURCE_PROBE=r"""const fs=require('fs'),path=require('path'),crypto=require('crypto'),items=JSON.parse(fs.readFileSync(0,'utf8'));let out={};if(!Array.isArray(items)||items.length>2000)throw Error('scope');for(const n of items){if(!/^[A-Za-z0-9_./-]+$/.test(n)||n.split('/').some(x=>x==='..'||x===''||x==='data'||x==='uploads'||x==='legacy-data')||/(^|\/)\.env(\.|$)/.test(n))throw Error('path');const p='/app/'+n;for(let d=path.dirname(p);d!=='/';d=path.dirname(d))if(fs.lstatSync(d).isSymbolicLink())throw Error('parentlink');if(!fs.existsSync(p)){out[n]={absent:true};continue;}const a=fs.lstatSync(p);if(!a.isFile()||a.isSymbolicLink()||a.size>128*1024**2)throw Error('file');const fd=fs.openSync(p,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);try{const b=fs.readFileSync(fd),z=fs.fstatSync(fd);if(b.length!==a.size||a.ino!==z.ino||a.mtimeMs!==z.mtimeMs||a.ctimeMs!==z.ctimeMs)throw Error('changed');out[n]={sha256:crypto.createHash('sha256').update(b).digest('hex'),gitBlobSHA1:crypto.createHash('sha1').update('blob '+b.length+'\0').update(b).digest('hex'),bytes:b.length,uid:a.uid,gid:a.gid,mode:a.mode&4095};}finally{fs.closeSync(fd);}}console.log(JSON.stringify(out));"""
 def source(service,r):

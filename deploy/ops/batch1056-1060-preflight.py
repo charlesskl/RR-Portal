@@ -2,7 +2,7 @@
 No lifecycle, SQL writes, configuration changes, business-file copies or cleanup.
 """
 import hashlib,importlib.util,json,os,pathlib,re,stat,subprocess,sys,urllib.request,urllib.error
-ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/batch1056-1060-preflight-4-20261103'
+ROOT=pathlib.Path('/opt/rr-portal');OUT=ROOT/'deploy/backups/batch1056-1060-preflight-5-20261103'
 BRANCH='refs/heads/codex/ops-batch1056-1060-20261103'
 BASE='90f2fa661c923c4d3144ba21d22789b38553638b';EXECUTE=True
 DEPS={'pr1035-quote-preflight.py':'2b2739aa00cad03bfce8472b7416d725364b8d4ed354a5a7e9ca905a47aaffa5','pr1044-indo-preflight.py':'940e9675d628bc0af628ac3964b9073069f99d682a7bc812960ac6e1b88d3004'}
@@ -39,7 +39,7 @@ def containers():
    need(service not in targets and r['Id']==TARGET_IDS[service] and r['Name']=='/rr-portal-'+service+'-1' and r['State']['Running'] is True,'exact-observed-active-service');targets[service]=r
  need(set(targets)==set(APPS),'all-two-original-targets');return v,targets
 SOURCE_PROBE=r"""const fs=require('fs'),path=require('path'),crypto=require('crypto'),items=JSON.parse(fs.readFileSync(0,'utf8'));let out={};if(!Array.isArray(items)||items.length>2000)throw Error('scope');for(const n of items){if(!/^[A-Za-z0-9_./-]+$/.test(n)||n.split('/').some(x=>x==='..'||x===''||x==='data'||x==='uploads'||x==='legacy-data')||/(^|\/)\.env(\.|$)/.test(n))throw Error('path');const p='/app/'+n;for(let d=path.dirname(p);d!=='/';d=path.dirname(d))if(fs.lstatSync(d).isSymbolicLink())throw Error('parentlink');if(!fs.existsSync(p)){out[n]={absent:true};continue;}const a=fs.lstatSync(p);if(!a.isFile()||a.isSymbolicLink()||a.size>128*1024**2)throw Error('file');const fd=fs.openSync(p,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);try{const b=fs.readFileSync(fd),z=fs.fstatSync(fd);if(b.length!==a.size||a.ino!==z.ino||a.mtimeMs!==z.mtimeMs||a.ctimeMs!==z.ctimeMs)throw Error('changed');out[n]={sha256:crypto.createHash('sha256').update(b).digest('hex'),gitBlobSHA1:crypto.createHash('sha1').update('blob '+b.length+'\0').update(b).digest('hex'),bytes:b.length,uid:a.uid,gid:a.gid,mode:a.mode&4095};}finally{fs.closeSync(fd);}}console.log(JSON.stringify(out));"""
-def source(service,r):
+def source(service,r,image=False):
  app=APPS[service];expected={}
  for row in git('ls-tree','-r','-z',BASE,'--',app).split(b'\0'):
   if not row:continue
@@ -48,7 +48,7 @@ def source(service,r):
   else:take=(n.startswith('server/')or'/'not in n)and n.endswith(('.js','.html','.css','.json'))
   if not take or any(p in n.split('/')for p in('data','uploads','legacy-data','node_modules'))or n.startswith('.')or n.endswith(('.test.js','.test.json')):continue
   need(mode in('100644','100755')and kind=='blob'and re.fullmatch('[A-Za-z0-9_./-]+',n),'safe-fixed-tracked-code-only');expected[n]=blob
- need(1<=len(expected)<=2000,'bounded-code-file-inventory');actual=json.loads(command(['docker','exec','--user','0','-i',r['Id'],'node','-e',SOURCE_PROBE],enc(sorted(expected)),180))
+ need(1<=len(expected)<=2000,'bounded-code-file-inventory');probe=(['docker','run','--rm','-i','--read-only','--network','none','--restart','no','--log-driver','none','--entrypoint','node',r['Id'],'-e',SOURCE_PROBE] if image else ['docker','exec','--user','0','-i',r['Id'],'node','-e',SOURCE_PROBE]);actual=json.loads(command(probe,enc(sorted(expected)),180))
  need(set(actual)==set(expected),'complete-actual-source-hashes');return {'expectedGitBlobSHA1':expected,'actual':actual,'differences':[n for n in expected if actual[n].get('gitBlobSHA1')!=expected[n]]}
 def public():
  class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -87,6 +87,14 @@ def main():
    if name in('qc','internal-quote'):entry['source']=source(name,r)
    else:entry.update(wwwroot=I.web_inventory(r),backendFiles=I.backend_inventory(r))
    v['targets'][name]=entry
+  q=targets['qc'];v['qcImmutableSources']={name:source('qc',{'Id':imageid},True)for name,imageid in [('runtimeImage',q['Image']),('canonicalImage',v['targets']['qc']['canonicalImage']['id'])]}
+  v['quoteDataCapacity']={}
+  for n in ('data','legacy-data','uploads'):
+   folder=ROOT/APPS['internal-quote']/'backend'/n
+   if not folder.exists():v['quoteDataCapacity'][n]={'absent':True};continue
+   need(folder.is_dir()and not any(p.is_symlink()for p in(folder,*folder.parents)),'quote-real-data-root-metadata');items=list(folder.rglob('*'));need(len(items)<100000 and all(p.is_file()or p.is_dir()for p in items)and not any(p.is_symlink()for p in items),'quote-regular-only-metadata');v['quoteDataCapacity'][n]={'bytes':sum(p.stat().st_size for p in items if p.is_file()),'regularFiles':sum(p.is_file()for p in items),'directories':sum(p.is_dir()for p in items)+1}
+  sql="BEGIN READ ONLY; SELECT json_build_object('internalQuoteRelationBytes',COALESCE((SELECT sum(pg_total_relation_size(c.oid)) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='internal_quote' AND c.relkind IN('r','m','p')),0),'databaseBytes',pg_database_size(current_database())); ROLLBACK;"
+  v['quotePostgresCapacity']=json.loads(P.command(['docker','exec','-i',P.unique_service('db'),'sh','-c','exec psql -X -q -At -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-rrportal}" -d "${POSTGRES_DB:-rrportal}"'],65536,sql.encode()))
   v['quoteStartup']=P.startup_counts();v['qcData']=qc_capacity();docker_root=json.loads(command(['docker','info','--format','{{json .DockerRootDir}}']));fs=os.statvfs(docker_root);v['space']={'available':fs.f_bavail*fs.f_frsize,'free':fs.f_bfree*fs.f_frsize}
   v['memory']={k:int(a.split()[0])*1024 for k,_,a in(line.partition(':')for line in pathlib.Path('/proc/meminfo').read_text().splitlines())if k in('MemAvailable','MemTotal','SwapFree','SwapTotal')};v['public']=public();after,_=containers();need(before==after and git('rev-parse','HEAD').decode().strip()==v['hostGitHead']and all(P.shared_file(n)==row for n,row in v['shared'].items()),'runtime-and-shared-source-stable-during-readonly-profile');v['allRuntimeUnchanged']=True;v['success']=True
  except Exception as e:v.update(errorType=type(e).__name__,stage=STAGE)

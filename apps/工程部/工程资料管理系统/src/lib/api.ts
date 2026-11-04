@@ -1,5 +1,12 @@
 import type { AppConfig, DirEntry, DocTypeItem, Overview, ProjectInfo, TrashItem, WalkItem } from "@/types";
 
+function responseError(status: number, data: unknown, fallback: string): Error {
+  const body = data && typeof data === "object" ? data as { error?: unknown; code?: unknown } : {};
+  const error = new Error(typeof body.error === "string" ? body.error : fallback);
+  Object.assign(error, { status, ...(typeof body.code === "string" ? { code: body.code } : {}) });
+  return error;
+}
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const method = (init?.method || "GET").toUpperCase();
   const headers = new Headers(init?.headers);
@@ -8,9 +15,7 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, headers, credentials: "same-origin" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const error = new Error((data as { error?: string }).error || "请求失败 (" + res.status + ")");
-    Object.assign(error, { status: res.status });
-    throw error;
+    throw responseError(res.status, data, "请求失败 (" + res.status + ")");
   }
   return data as T;
 }
@@ -126,7 +131,7 @@ export const api = {
         try {
           const data = JSON.parse(xhr.responseText);
           if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-          else reject(new Error(data.error || `上传失败 (${xhr.status})`));
+          else reject(responseError(xhr.status, data, `上传失败 (${xhr.status})`));
         } catch {
           reject(new Error("上传响应解析失败"));
         }
@@ -137,9 +142,12 @@ export const api = {
   },
 
   /* ---------- Server-verified personal account ---------- */
-  epmsSession: () => req<EpmsSession>("api/epms/session"),
-  epmsLogin: (username: string, password: string) =>
-    req<EpmsSession>("api/epms/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) }),
+  epmsSession: () => req<EpmsSession | null>("api/epms/session"),
+  epmsLogin: (username: string, password: string, currentSession?: Pick<EpmsSession, "id" | "canEdit">) =>
+    req<EpmsSession>("api/epms/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password, ...(currentSession ? { expectedActorId: currentSession.id, expectedCanEdit: currentSession.canEdit } : {}) }),
+    }),
   epmsLogout: () => req<{ ok: true }>("api/epms/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
 
 };

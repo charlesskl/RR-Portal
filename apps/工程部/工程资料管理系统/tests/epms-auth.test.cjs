@@ -24,3 +24,54 @@ test('EPMS verifies fresh core identities and request boundaries', async()=>{
  await fails(()=>createCoreEpmsAuth(async()=>{throw Error('synthetic failure')}).authenticate({...req(cookie),method:'GET'}),503);await fails(()=>createCoreEpmsAuth(async()=>new Response('x'.repeat(65537))).authenticate({...req(cookie),method:'GET'}),503);ok('unavailable or oversized core responses fail closed');
  const result={status:'GREEN',passed:checks.length,checks,sourceSHA256:crypto.createHash('sha256').update(fs.readFileSync(path.join(APP,'epms-auth.ts'))).digest('hex'),noNetwork:true,onlySyntheticCredentials:true};console.log(JSON.stringify(result));
 });
+
+test('guarded personal re-login checks the fresh actor before replacing the cookie', async () => {
+ const cases = [
+  { name: 'same identity and edit rights', value: user, expected: true, status: 200 },
+  { name: 'different identity', value: { ...user, id: 12 }, expected: true, status: 409 },
+  { name: 'edit permission revoked', value: { ...user, permissions: [] }, expected: true, status: 409 },
+  { name: 'edit permission newly granted', value: user, expected: false, status: 409 },
+  { name: 'same readonly identity', value: { ...user, permissions: [] }, expected: false, status: 200 },
+ ];
+ for (const c of cases) {
+  const observed = [], target = response();
+  const guardedAuth = createCoreEpmsAuth(async (url, init) => {
+   observed.push(url);
+   assert.equal(Object.hasOwn(target.headers, 'Set-Cookie'), false, c.name + ': no cookie before fresh /me');
+   if (url.endsWith('/login')) assert.deepEqual(JSON.parse(init.body), { username: user.username, password: 'synthetic-only' });
+   return new Response(JSON.stringify(url.endsWith('/login') ? { access_token: jwt } : c.value));
+  });
+  const operation = () => guardedAuth.login(req(), target, { username: user.username, password: 'synthetic-only', expectedActorId: String(user.id), expectedCanEdit: c.expected, role: 'admin', canEdit: true });
+  if (c.status === 409) {
+   await assert.rejects(operation, error => error.status === 409 && /保存或下载.*退出账号再登录/.test(error.message), c.name);
+   assert.equal(Object.hasOwn(target.headers, 'Set-Cookie'), false, c.name);
+  } else {
+   const accepted = await operation();
+   assert.equal(accepted.id, String(user.id)); assert.equal(accepted.canEdit, c.expected);
+   assert.match(target.headers['Set-Cookie'], /^rr_epms_session=/);
+  }
+  assert.deepEqual(observed, ['http://core:8000/api/auth/login', 'http://core:8000/api/auth/me']);
+ }
+});
+
+test('malformed re-login constraints reject before any core request or cookie write', async () => {
+ let requested = 0; const guardedAuth = createCoreEpmsAuth(async () => { requested++; throw Error('must not call core'); });
+ for (const constraints of [
+  { expectedActorId: '' , expectedCanEdit: true }, { expectedActorId: ' 11', expectedCanEdit: true },
+  { expectedActorId: 11, expectedCanEdit: true }, { expectedActorId: null, expectedCanEdit: true },
+  { expectedActorId: 'x'.repeat(129), expectedCanEdit: true }, { expectedActorId: '11' },
+  { expectedCanEdit: false }, { expectedActorId: '11', expectedCanEdit: 'true' },
+  { expectedActorId: '11', expectedCanEdit: 1 }, { expectedActorId: '11', expectedCanEdit: null },
+ ]) {
+  const target = response();
+  await assert.rejects(() => guardedAuth.login(req(), target, { username: user.username, password: 'synthetic-only', ...constraints }), error => error.status === 400);
+  assert.equal(Object.hasOwn(target.headers, 'Set-Cookie'), false);
+ }
+ assert.equal(requested, 0);
+});
+
+test('guarded bad credentials retain the core adapter internal 401 and never replace the cookie', async () => {
+ const target = response(), guardedAuth = createCoreEpmsAuth(async () => new Response('{}', { status: 401 }));
+ await assert.rejects(() => guardedAuth.login(req(), target, { username: user.username, password: 'synthetic-wrong', expectedActorId: String(user.id), expectedCanEdit: true }), error => error.status === 401);
+ assert.equal(Object.hasOwn(target.headers, 'Set-Cookie'), false);
+});

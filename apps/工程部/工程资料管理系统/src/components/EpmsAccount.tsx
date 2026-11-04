@@ -13,12 +13,12 @@ export function EpmsAccountProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let alive = true;
     api.epmsSession().then((value) => { if (alive) accept(value); }).catch((cause) => {
-      if (alive) { accept(null); if (cause.status !== 401) setError(cause.message); }
+      if (alive) { accept(null); if (cause.code !== "EPMS_AUTH_REQUIRED") setError(cause.message); }
     }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; setApiSession(null); };
   }, [accept]);
   const login = async (username: string, password: string) => {
-    const value = await api.epmsLogin(username, password);
+    const value = await api.epmsLogin(username, password, session || undefined);
     accept(value); setError(""); setRevision((value) => value + 1);
   };
   const logout = async () => { await api.epmsLogout(); accept(null); setRevision((value) => value + 1); };
@@ -33,6 +33,7 @@ export function CoreAccountControl({ beforeLogout }: { beforeLogout?: () => Prom
     <div className="flex max-w-full flex-wrap items-center gap-2 text-xs">
       {session ? <>
         <span>{session.name} · {session.canEdit ? "可编辑" : "只读"}</span>
+        <button type="button" disabled={busy} className="min-h-11 px-2 underline" onClick={() => { setFailure(""); setOpen(true); }}>重新登录</button>
         <button type="button" disabled={busy} className="min-h-11 px-2 underline" onClick={async () => {
           setBusy(true); setFailure("");
           try { await beforeLogout?.(); await logout(); } catch (cause) { setFailure((cause as Error).message); }
@@ -44,7 +45,9 @@ export function CoreAccountControl({ beforeLogout }: { beforeLogout?: () => Prom
       {(error || failure) && <span role="status" className="text-destructive">{failure || error}</span>}
       <Dialog open={open} onOpenChange={(value) => { setOpen(value); if (!value) setPassword(""); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>使用核心系统个人账号登录</DialogTitle><DialogDescription>使用门户个人账号，姓名、部门和权限以账号资料为准。</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>使用核心系统个人账号登录</DialogTitle><DialogDescription>{session
+            ? "请重新验证当前个人账号，未保存的资料会保留。切换账号前请先保存或下载资料，再退出账号。"
+            : "使用门户个人账号，姓名、部门和权限以账号资料为准。"}</DialogDescription></DialogHeader>
           <form className="space-y-3" onSubmit={async (event) => {
             event.preventDefault(); setBusy(true); setFailure("");
             try { await login(username, password); setOpen(false); }

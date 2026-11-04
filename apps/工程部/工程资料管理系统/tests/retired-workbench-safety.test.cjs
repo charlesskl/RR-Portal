@@ -96,7 +96,8 @@ test('initialization and account-only endpoints never create document records; r
     const original = snapshot(x.root);
     assert.equal(fs.existsSync(path.join(x.root, x.project, '.epms')), false);
     const session = await x.call('/api/epms/session'); assert.equal(session.status, 200); assert.deepEqual(session.body, editor);
-    assert.equal((await x.call('/api/epms/session', undefined, { anonymous: true })).status, 401);
+    const anonymousSession = await x.call('/api/epms/session', undefined, { anonymous: true });
+    assert.equal(anonymousSession.status, 200); assert.equal(anonymousSession.body, null);
     const login = await x.call('/api/epms/login', { username: user.username, password: 'synthetic-only' });
     assert.equal(login.status, 200); assert.match(login.headers['set-cookie'], /HttpOnly; SameSite=Strict/);
     assert.equal((await x.call('/api/epms/logout', {})).status, 200);
@@ -113,7 +114,9 @@ test('editor access is read-only for anonymous, readonly, revoked, unavailable i
     assert.deepEqual((await x.call(url)).body, { readOnly: false });
     assert.equal((await x.call(url, undefined, { anonymous: true })).body.readOnly, true);
     x.state.user.permissions = []; assert.equal((await x.call(url)).body.readOnly, true);
-    x.state.coreStatus = 401; assert.equal((await x.call(url)).status, 401);
+    x.state.coreStatus = 401;
+    const expired = await x.call(url);
+    assert.equal(expired.status, 403); assert.equal(expired.body.code, 'EPMS_AUTH_REQUIRED');
     x.state.coreStatus = 503; assert.equal((await x.call(url)).status, 503);
     x.state.coreStatus = 200; x.state.user = structuredClone(user);
     for (const status of ['draft', 'pending', 'approved']) {
@@ -139,7 +142,8 @@ test('all legacy write routes enforce fresh engineering edit permission even on 
       x.state.user = { ...user, permissions: identity === 'approve-only' ? ['epms:approve'] : [], role: identity === 'admin-without-edit' ? 'admin' : 'user' };
       for (const [url, body, options = {}] of attempts) {
         const result = await x.call(url, body, { ...options, anonymous: identity === 'anonymous', headers: { 'x-role': 'admin', 'x-can-edit': 'true' } });
-        assert.equal(result.status, identity === 'anonymous' ? 401 : 403);
+        assert.equal(result.status, 403);
+        assert.equal(result.body.code, identity === 'anonymous' ? 'EPMS_AUTH_REQUIRED' : undefined);
       }
       assert.deepEqual(snapshot(x.root), before);
     }

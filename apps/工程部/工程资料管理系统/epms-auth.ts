@@ -76,10 +76,18 @@ export function createCoreEpmsAuth(fetchCore: FetchLike = fetch): CoreEpmsAuth {
     },
     async login(req, res, body) {
       requireEpmsWriteOrigin(req);
+      const guarded = Object.hasOwn(body, "expectedActorId") || Object.hasOwn(body, "expectedCanEdit");
+      const expectedActorId = body.expectedActorId, expectedCanEdit = body.expectedCanEdit;
+      if (guarded && (typeof expectedActorId !== "string" || !expectedActorId || expectedActorId.length > 128
+        || expectedActorId.trim() !== expectedActorId || typeof expectedCanEdit !== "boolean")) throw new EpmsError(400, "重新登录的账号状态不完整，请先保存或下载未保存资料并退出账号再登录");
       if (typeof body.username !== "string" || !body.username.trim() || body.username.length > 200 || typeof body.password !== "string" || !body.password || body.password.length > 4096) throw new EpmsError(400, "请输入账号和密码");
       const value = await request("login", undefined, { username: body.username.trim(), password: body.password }) as Record<string, unknown>;
       const token = value?.access_token; if (typeof token !== "string" || token.length > 8192 || !TOKEN.test(token)) throw new EpmsError(503, "账号服务登录响应无效");
-      const actor = coreUserCapabilities(await request("me", token)); setCookie(req, res, token); return actor;
+      const actor = coreUserCapabilities(await request("me", token));
+      // Client expectations only restrict replacing an existing login. Fresh
+      // core identity and permissions remain the sole source of capability.
+      if (guarded && (actor.id !== expectedActorId || actor.canEdit !== expectedCanEdit)) throw new EpmsError(409, "账号或编辑权限已变化，请先保存或下载未保存资料并退出账号再登录");
+      setCookie(req, res, token); return actor;
     },
     async logout(req, res) { requireEpmsWriteOrigin(req); setCookie(req, res, "", true); return { ok: true }; },
   };

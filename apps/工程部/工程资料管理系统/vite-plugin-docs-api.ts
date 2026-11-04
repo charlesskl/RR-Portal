@@ -613,7 +613,15 @@ async function accountDispatch(req: IncomingMessage, res: ServerResponse, url: U
     return json(res, 200, url.pathname.endsWith("/login") ? await options.coreAuth.login(req, res, await epmsJsonBody(req)) : await options.coreAuth.logout(req, res));
   }
   if (req.method !== "GET") throw new EpmsError(405, "方法不允许");
-  return json(res, 200, await store.session(options.authenticateEpms ? await options.authenticateEpms(req) : null));
+  try {
+    const actor = options.authenticateEpms ? await options.authenticateEpms(req) : null;
+    return json(res, 200, actor ? await store.session(actor) : null);
+  } catch (e) {
+    // Personal-account expiry is separate from the portal's HTTP Basic login.
+    // A browser-visible 401 can invalidate that unrelated gateway credential.
+    if (e instanceof EpmsError && e.status === 401) return json(res, 200, null);
+    throw e;
+  }
 }
 async function editorAccess(req: IncomingMessage, res: ServerResponse, url: URL, root: string, store: EpmsStore, options: DocsApiOptions): Promise<void> {
   res.setHeader("Cache-Control", "no-store");
@@ -698,7 +706,12 @@ export function docsApi(input: DocsApiOptions = {}): Plugin {
   let epms: EpmsStore;
   const middleware = (req: Connect.IncomingMessage, res: ServerResponse, next: () => void) => {
     const url = new URL(req.url || "/", "http://localhost");
-    const report = (e: unknown) => fail(res, e instanceof EpmsError ? e.status : 500, e instanceof EpmsError ? e.message : "服务器内部错误，原资料已保留");
+    const report = (e: unknown) => {
+      if (e instanceof EpmsError && e.status === 401) {
+        return json(res, 403, { error: e.message, code: "EPMS_AUTH_REQUIRED" });
+      }
+      return fail(res, e instanceof EpmsError ? e.status : 500, e instanceof EpmsError ? e.message : "服务器内部错误，原资料已保留");
+    };
     if (["/api/epms/login", "/api/epms/logout", "/api/epms/session"].includes(url.pathname)) {
       accountDispatch(req, res, url, epms, options).catch(report); return;
     }

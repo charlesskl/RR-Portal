@@ -53,6 +53,62 @@ class RetryImap:
 
 
 class MailboxRetryTests(unittest.TestCase):
+    def test_shared_retry_uses_only_parser_environment_and_exact_selected_uids(self):
+        fake = RetryImap()
+        parsed = {"status": "parsed", "fingerprint": "synthetic-fingerprint", "message": {}, "items": []}
+        environment = {"VOYAGEPLEX_MAIL_ADDRESS": CREDENTIALS["address"],
+                       "VOYAGEPLEX_MAIL_AUTH_CODE": CREDENTIALS["auth_code"],
+                       "VOYAGEPLEX_MAIL_IMAP_HOST": CREDENTIALS["host"],
+                       "VOYAGEPLEX_MAIL_FOLDER": CREDENTIALS["folder"]}
+        payload = {"company": "Xingxin", "expected_address": CREDENTIALS["address"],
+                   "selected_uids": [12, 11], "expected_uid_validity": 123}
+        with patch.dict("os.environ", environment), TestClient(app) as client, \
+                patch("app.mailbox.BoundedImap", return_value=fake) as imap, \
+                patch("app.main.parse_isolated", return_value=parsed):
+            response = client.post("/v1/mailbox/retry-shared", json=payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["mailbox_uid"] for row in response.json()["items"]], [11, 12])
+        self.assertEqual(imap.call_args.args, (CREDENTIALS["host"], 993))
+        self.assertEqual(fake.commands, [("FETCH", (str(uid), fields)) for uid in (11, 12)
+                                        for fields in ("(INTERNALDATE RFC822.SIZE)", "(BODY.PEEK[])")])
+        self.assertNotIn(CREDENTIALS["auth_code"], response.text)
+
+    def test_shared_address_mismatch_is_rejected_before_any_fetch(self):
+        payload = {"company": "Xingxin", "expected_address": "old@example.invalid",
+                   "selected_uids": [11], "expected_uid_validity": 123}
+        with patch.dict("os.environ", {"VOYAGEPLEX_MAIL_ADDRESS": CREDENTIALS["address"]}), \
+                TestClient(app) as client, patch("app.main.fetch_mailbox") as fetch:
+            self.assertEqual(client.post("/v1/mailbox/retry-shared", json=payload).status_code, 409)
+            fetch.assert_not_called()
+
+    def test_shared_retry_forbids_credentials_folder_cursor_and_company_overrides(self):
+        payload = {"company": "Xingxin", "expected_address": CREDENTIALS["address"],
+                   "selected_uids": [11], "expected_uid_validity": 123}
+        with TestClient(app) as client, patch("app.main.fetch_mailbox") as fetch:
+            for key, value in {"auth_code": CREDENTIALS["auth_code"], "address": "other@example.invalid",
+                               "host": "other.invalid", "folder": "Other", "after_uid": 100,
+                               "start_date": "1900-01-01", "company": "Huadeng"}.items():
+                with self.subTest(key=key):
+                    response = client.post("/v1/mailbox/retry-shared", json={**payload, key: value})
+                    self.assertEqual(response.status_code, 422)
+                    self.assertNotIn(CREDENTIALS["auth_code"], response.text)
+            for selected in ([], [1, 1], list(range(1, 7)), [True], [1.0], ["1"], [0], [4294967296]):
+                self.assertEqual(client.post("/v1/mailbox/retry-shared", json={**payload, "selected_uids": selected}).status_code, 422)
+            fetch.assert_not_called()
+
+    def test_shared_uid_validity_conflict_uses_existing_gate_and_never_fetches(self):
+        fake = RetryImap()
+        fake.validity = 124
+        payload = {"company": "Xingxin", "expected_address": CREDENTIALS["address"],
+                   "selected_uids": [11], "expected_uid_validity": 123}
+        environment = {"VOYAGEPLEX_MAIL_ADDRESS": CREDENTIALS["address"],
+                       "VOYAGEPLEX_MAIL_AUTH_CODE": CREDENTIALS["auth_code"]}
+        with patch.dict("os.environ", environment), TestClient(app) as client, \
+                patch("app.mailbox.BoundedImap", return_value=fake):
+            self.assertEqual(client.post("/v1/mailbox/retry-shared", json=payload).status_code, 409)
+            self.assertEqual(client.post("/v1/mailbox/retry-shared", json=payload).status_code, 409)
+        self.assertEqual(fake.commands, [])
+
     def test_selected_uids_are_exact_sorted_and_ignore_normal_cursor_and_start_date(self):
         fake = RetryImap()
         with patch("app.mailbox.BoundedImap", return_value=fake):

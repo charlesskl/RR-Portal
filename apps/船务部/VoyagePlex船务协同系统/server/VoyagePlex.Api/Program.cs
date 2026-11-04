@@ -44,6 +44,7 @@ using (var scope = app.Services.CreateScope())
     database.Database.EnsureCreated();
     ExportTemplateEndpoints.EnsureSchema(database);
     InventoryWritebackEndpoints.EnsureSchema(database);
+    EnsureMailReviewAuditSchema(database);
     FactoryMappingEndpoints.EnsureSchema(database);
     database.Database.ExecuteSqlRaw("""
         CREATE TABLE IF NOT EXISTS MailSyncStates (
@@ -856,9 +857,11 @@ app.MapGet("/api/mail/candidates", async (AppDbContext db, CancellationToken can
 
 app.MapPatch("/api/mail/candidates/{itemId:long}", async (long itemId, JsonObject payload, AppDbContext db, CancellationToken cancellationToken) =>
 {
+    await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
     var entity = await db.ImportEmailItems.FirstOrDefaultAsync(item => item.Id == itemId && item.MailboxKey != "", cancellationToken);
     if (entity is null) return Results.NotFound(new { error = "候选邮件不存在" });
     if (entity.HandlingStatus != "Pending") return Results.Conflict(new { error = "只有待确认候选项可以修改" });
+    var beforeVersion = DailyMailRules.ReviewVersion(entity);
     if (payload["fields"] is not JsonObject fields || payload["items"] is not JsonArray cargoItems || payload["warehouseGroups"] is not JsonArray warehouseGroups)
         return Results.BadRequest(new { error = "候选资料格式无效" });
     if (cargoItems.Count > 5000 || warehouseGroups.Count > 200) return Results.BadRequest(new { error = "候选资料数量超出范围" });
@@ -885,30 +888,69 @@ app.MapPatch("/api/mail/candidates/{itemId:long}", async (long itemId, JsonObjec
     if (soNumber != "") stored["so_numbers"] = new JsonArray(soNumber.Split(',', '，').Select(value => value.Trim()).Where(value => value != "").Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
     entity.ResultJson = stored.ToJsonString(); entity.ReviewedAt = DateTime.UtcNow;
     await db.SaveChangesAsync(cancellationToken);
+    await RecordMailReviewAudit(db, entity, "EditReview", "", beforeVersion, entity.HandlingStatus, entity.HandlingOutcome, cancellationToken);
+    await transaction.CommitAsync(cancellationToken);
     return Results.Ok(new { entity.Id, savedAt = entity.ReviewedAt });
 });
 
 app.MapPost("/api/mail/candidates/{itemId:long}/{action}", async (long itemId, string action, AppDbContext db, CancellationToken cancellationToken) =>
 {
     if (action is not ("confirm" or "ignore" or "acknowledge")) return Results.BadRequest(new { error = "候选任务操作无效" });
+    await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
     var entity = await db.ImportEmailItems.Include(item => item.ImportBatch)
         .FirstOrDefaultAsync(item => item.Id == itemId && item.MailboxKey != "", cancellationToken);
     if (entity is null) return Results.NotFound(new { error = "候选邮件不存在" });
     if (entity.HandlingStatus != "Pending") return Results.Conflict(new { error = "邮件已确认，请刷新后查看处理结果" });
-    if (action is "ignore" or "acknowledge")
-    {
-        entity.HandlingStatus = action == "acknowledge" ? "Processed" : "Ignored"; entity.HandlingOutcome = "NoTask"; entity.ReviewedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
-        return Results.Ok(new { entity.Id, entity.HandlingStatus, taskIds = Array.Empty<long>() });
-    }
-    await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+    var beforeVersion = DailyMailRules.ReviewVersion(entity);
+    var beforeHandling = entity.HandlingStatus; var beforeOutcome = entity.HandlingOutcome;
     try
     {
-        var taskIds = await ConfirmMailboxCandidate(entity, db, cancellationToken);
+        long[] taskIds;
+        if (action is "ignore" or "acknowledge")
+        {
+            if (await HasDirectMailTaskLinks(entity, db, cancellationToken))
+                throw new InvalidOperationException("邮件已有关联任务，不能标记为无需建任务");
+            entity.HandlingStatus = action == "acknowledge" ? "Processed" : "Ignored"; entity.HandlingOutcome = "NoTask"; entity.ReviewedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cancellationToken); taskIds = [];
+        }
+        else taskIds = await ConfirmMailboxCandidate(entity, db, cancellationToken);
+        await RecordMailReviewAudit(db, entity, action, "", beforeVersion, beforeHandling, beforeOutcome, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return Results.Ok(new { entity.Id, entity.HandlingStatus, taskIds });
     }
     catch (InvalidOperationException error) { await transaction.RollbackAsync(cancellationToken); return Results.BadRequest(new { error = error.Message }); }
+});
+
+app.MapPost("/api/mail/candidates/{itemId:long}/restore-review", async (long itemId, JsonObject payload, HttpContext context, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    if (context.Items["CurrentUser"] is not AppUser { Role: "admin" or "supervisor" or "shipping" })
+        return Results.Json(new { error = "当前账号无权恢复邮件核对" }, statusCode: 403);
+    var expected = payload["expectedReviewVersion"]?.ToString() ?? "";
+    var reason = payload["reason"]?.ToString().Trim() ?? "";
+    if (!Regex.IsMatch(expected, "^[a-f0-9]{64}$") || reason.Length is < 1 or > 500)
+        return Results.BadRequest(new { error = "请刷新邮件详情并填写1至500字的恢复原因" });
+    // Begin before reading: SQLite serializes this action with confirm/acknowledge.
+    await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+    var item = await db.ImportEmailItems.FirstOrDefaultAsync(value => value.Id == itemId && value.MailboxKey != "", cancellationToken);
+    if (item is null) return Results.NotFound(new { error = "邮件记录不存在" });
+    if (DailyMailRules.ReviewVersion(item) != expected)
+        return Results.Conflict(new { error = "邮件资料已变化，请刷新详情后重新核对" });
+    if (!DailyMailRules.CanRestoreTaskReview(item))
+        return Results.Conflict(new { error = "只有已标记无需建任务、尚未关联任务的新增或变更邮件可以恢复核对" });
+    try
+    {
+        if (await HasDirectMailTaskLinks(item, db, cancellationToken) ||
+            (await ConfirmedDuplicateTaskIds(item, db, cancellationToken)).Length > 0)
+            return Results.Conflict(new { error = "邮件或其重复邮件已关联任务，请核对已有任务，不要重复建立" });
+        var oldHandling = item.HandlingStatus; var oldOutcome = item.HandlingOutcome;
+        item.HandlingStatus = "Pending"; item.HandlingOutcome = ""; item.ReviewedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        await RecordMailReviewAudit(db, item, "RestoreReview", reason, expected, oldHandling, oldOutcome, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return Results.Ok(new { item.Id, item.HandlingStatus, reviewVersion = DailyMailRules.ReviewVersion(item) });
+    }
+    catch (InvalidOperationException error)
+    { await transaction.RollbackAsync(cancellationToken); return Results.Conflict(new { error = error.Message }); }
 });
 
 app.MapPost("/api/mail/candidates/batch/{action}", async (string action, JsonObject payload, AppDbContext db, CancellationToken cancellationToken) =>
@@ -918,16 +960,24 @@ app.MapPost("/api/mail/candidates/batch/{action}", async (string action, JsonObj
         return Results.BadRequest(new { error = "邮件编号格式无效" });
     var ids = submittedIds.Select(value => value!.GetValue<long>()).Distinct().ToArray();
     if (ids.Length is < 1 or > 100) return Results.BadRequest(new { error = "请选择1至100个候选项" });
+    await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
     var entities = await db.ImportEmailItems.Where(item => ids.Contains(item.Id) && item.MailboxKey != "" && item.HandlingStatus == "Pending").ToListAsync(cancellationToken);
     if (entities.Count != ids.Length) return Results.BadRequest(new { error = "部分候选项不存在或已处理，请刷新后重试" });
     var taskIds = new List<long>();
-    await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
     try
     {
         foreach (var entity in entities)
         {
-            if (action is "ignore" or "acknowledge") { entity.HandlingStatus = action == "acknowledge" ? "Processed" : "Ignored"; entity.HandlingOutcome = "NoTask"; entity.ReviewedAt = DateTime.UtcNow; }
+            var beforeVersion = DailyMailRules.ReviewVersion(entity);
+            var beforeHandling = entity.HandlingStatus; var beforeOutcome = entity.HandlingOutcome;
+            if (action is "ignore" or "acknowledge")
+            {
+                if (await HasDirectMailTaskLinks(entity, db, cancellationToken))
+                    throw new InvalidOperationException("邮件已有关联任务，不能标记为无需建任务");
+                entity.HandlingStatus = action == "acknowledge" ? "Processed" : "Ignored"; entity.HandlingOutcome = "NoTask"; entity.ReviewedAt = DateTime.UtcNow;
+            }
             else taskIds.AddRange(await ConfirmMailboxCandidate(entity, db, cancellationToken));
+            await RecordMailReviewAudit(db, entity, action, "", beforeVersion, beforeHandling, beforeOutcome, cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return Results.Ok(new { processed = entities.Count, taskIds = taskIds.Distinct().ToArray() });
@@ -993,18 +1043,28 @@ app.MapGet("/api/imports/email/mailbox/items/{itemId:long}", async (long itemId,
     var fieldSo = parsed?["fields"]?["so_number"]?.ToString() ?? "";
     if (soNumbers.Length == 0 && fieldSo != "") soNumbers = [fieldSo];
     var duplicateTaskIds = await ConfirmedDuplicateTaskIds(item, db, cancellationToken);
+    long[] recordedTaskIds;
+    try { recordedTaskIds = DailyMailRules.RecordedTaskIds(item); }
+    catch (InvalidOperationException) { recordedTaskIds = []; }
+    var linked = await db.ShipmentTasks.AsNoTracking().Where(task => recordedTaskIds.Contains(task.Id))
+        .Select(task => new { task.Id, task.ExportDetailsJson, task.WarehouseGroupsJson }).ToListAsync(cancellationToken);
+    var linkedTasks = linked.Select(task => new { task.Id, shipmentMode = MailTaskMode(task.ExportDetailsJson, task.WarehouseGroupsJson) });
     var relatedTasks = await db.ShipmentTasks.AsNoTracking().Where(task => duplicateTaskIds.Contains(task.Id) || (task.SoNumber != null && soNumbers.Contains(task.SoNumber)))
         .Select(task => new { task.Id, task.SoNumber, task.PlannedShipDate, task.ContainerType, task.CutoffDate, task.SiDeadline, task.Port }).ToListAsync(cancellationToken);
     return Results.Ok(new { item.Id, item.ImportBatchId, item.MailSubject, item.MailSender,
         item.MailReceivedAt, item.MailReceivedDate, item.Status, item.Error, item.WorkCategory,
         item.ClassificationSource, item.ClassificationConfidence, item.NeedsClassificationReview,
-        item.HandlingStatus, item.HandlingOutcome, item.ShipmentMode, item.TaskIdsJson, item.WorkNote, item.ReviewedAt, parsed, relatedTasks, duplicateTaskIds });
+        item.HandlingStatus, item.HandlingOutcome, item.ShipmentMode, item.TaskIdsJson, item.WorkNote, item.ReviewedAt, parsed, relatedTasks, duplicateTaskIds,
+        reviewVersion = DailyMailRules.ReviewVersion(item), canRestoreReview = DailyMailRules.CanRestoreTaskReview(item), linkedTasks });
 });
 
 app.MapPatch("/api/imports/email/mailbox/items/{itemId:long}", async (long itemId, JsonObject payload, AppDbContext db, CancellationToken cancellationToken) =>
 {
+    await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
     var item = await db.ImportEmailItems.FirstOrDefaultAsync(value => value.Id == itemId && value.MailboxKey != "", cancellationToken);
     if (item is null) return Results.NotFound(new { error = "邮件记录不存在" });
+    var beforeVersion = DailyMailRules.ReviewVersion(item);
+    var beforeHandling = item.HandlingStatus; var beforeOutcome = item.HandlingOutcome;
     var categories = new[] { "Unclassified", "Shipment", "Change", "FollowUp", "Other" };
     var handlingStatuses = new[] { "Pending", "Processed", "Ignored" };
     var category = payload["workCategory"]?.ToString() ?? item.WorkCategory;
@@ -1016,11 +1076,15 @@ app.MapPatch("/api/imports/email/mailbox/items/{itemId:long}", async (long itemI
     if (category != item.WorkCategory) return Results.BadRequest(new { error = "邮件分类由系统解析决定，不能人工修改" });
     if (item.HandlingStatus != "Pending" && handling != item.HandlingStatus)
         return Results.Conflict(new { error = "已关联任务的邮件不能重新设为待确认" });
+    if (handling != item.HandlingStatus && await HasDirectMailTaskLinks(item, db, cancellationToken))
+        return Results.Conflict(new { error = "邮件已有关联任务，不能更改处理状态" });
     if (handling == "Processed" && item.HandlingOutcome != "Task") item.HandlingOutcome = "NoTask";
     item.HandlingStatus = handling;
     item.WorkNote = note;
     item.ReviewedAt = DateTime.UtcNow;
     await db.SaveChangesAsync(cancellationToken);
+    await RecordMailReviewAudit(db, item, "UpdateHandling", "", beforeVersion, beforeHandling, beforeOutcome, cancellationToken);
+    await transaction.CommitAsync(cancellationToken);
     return Results.Ok(new { item.Id, item.WorkCategory, item.HandlingStatus, item.WorkNote, item.ReviewedAt });
 });
 
@@ -1038,8 +1102,9 @@ app.MapPost("/api/imports/email/mailbox/retry-failed", async (JsonObject payload
 {
     if (context.Items["CurrentUser"] is not AppUser { Role: "admin" })
         return Results.Json(new { error = "只有管理员可以重试失败邮件" }, statusCode: 403);
-    if (db.Company != "Huadeng" || db.MailOwnerId is null or <= 0)
-        return Results.BadRequest(new { error = "请先选择华登船务员邮箱" });
+    if ((db.Company == "Huadeng" && db.MailOwnerId is null or <= 0) ||
+        (db.Company == "Xingxin" && db.MailOwnerId is not null) || db.Company is not ("Xingxin" or "Huadeng"))
+        return Results.BadRequest(new { error = "请选择有效厂区；华登须先选择船务员邮箱" });
     if (payload["itemIds"] is not JsonArray ids || ids.Count is < 1 or > 5 ||
         ids.Any(value => value is not JsonValue number || !number.TryGetValue<long>(out var id) || id <= 0))
         return Results.BadRequest(new { error = "请选择1至5封不同的失败邮件" });
@@ -1851,6 +1916,78 @@ static List<object> CandidateFieldChanges(JsonObject previous, JsonObject curren
     return result;
 }
 
+static void EnsureMailReviewAuditSchema(AppDbContext db) => db.Database.ExecuteSqlRaw("""
+    CREATE TABLE IF NOT EXISTS MailReviewAudits (
+        Id INTEGER PRIMARY KEY AUTOINCREMENT, Company TEXT NOT NULL, MailOwnerId INTEGER NOT NULL,
+        ImportEmailItemId INTEGER NOT NULL, ActorId INTEGER NOT NULL, Action TEXT NOT NULL,
+        Reason TEXT NOT NULL, BeforeVersion TEXT NOT NULL, AfterVersion TEXT NOT NULL,
+        OldHandlingStatus TEXT NOT NULL, OldHandlingOutcome TEXT NOT NULL,
+        NewHandlingStatus TEXT NOT NULL, NewHandlingOutcome TEXT NOT NULL,
+        TaskIdsJson TEXT NOT NULL, CreatedAt TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS IX_MailReviewAudits_Company_Item
+        ON MailReviewAudits (Company, ImportEmailItemId, Id);
+    """);
+
+static string MailTaskMode(string exportDetails, string warehouseGroups)
+{
+    try
+    {
+        var mode = JsonNode.Parse(exportDetails)?["shipmentMode"]?.ToString();
+        if (mode is "Warehouse" or "Container" or "Delivery") return mode;
+    }
+    catch (Exception error) when (error is JsonException or InvalidOperationException) { }
+    // Legacy or malformed export details must not invent a container shipment.
+    // Actual saved warehouse groups remain useful even when export JSON is invalid.
+    try
+    {
+        if (JsonNode.Parse(warehouseGroups) is JsonArray { Count: > 0 }) return "Warehouse";
+    }
+    catch (Exception error) when (error is JsonException or InvalidOperationException) { }
+    return "Unknown";
+}
+
+static async Task RecordMailReviewAudit(AppDbContext db, ImportEmailItem item, string action, string reason,
+    string beforeVersion, string oldHandling, string oldOutcome, CancellationToken cancellationToken)
+{
+    if (db.CurrentUserId is not > 0 || db.Database.CurrentTransaction is null)
+        throw new InvalidOperationException("邮件状态操作必须由已登录账号在事务中执行");
+    var actorId = db.CurrentUserId.Value; var afterVersion = DailyMailRules.ReviewVersion(item); var now = DateTime.UtcNow;
+    await db.Database.ExecuteSqlInterpolatedAsync($"""
+        INSERT INTO MailReviewAudits (Company, MailOwnerId, ImportEmailItemId, ActorId, Action, Reason,
+            BeforeVersion, AfterVersion, OldHandlingStatus, OldHandlingOutcome,
+            NewHandlingStatus, NewHandlingOutcome, TaskIdsJson, CreatedAt)
+        VALUES ({item.Company}, {item.MailOwnerId}, {item.Id}, {actorId}, {action}, {reason},
+            {beforeVersion}, {afterVersion}, {oldHandling}, {oldOutcome},
+            {item.HandlingStatus}, {item.HandlingOutcome}, {item.TaskIdsJson}, {now})
+        """, cancellationToken);
+}
+
+static async Task<bool> HasDirectMailTaskLinks(ImportEmailItem item, AppDbContext db, CancellationToken cancellationToken)
+{
+    if (DailyMailRules.RecordedTaskIds(item).Length > 0) return true;
+    var sources = await db.ShipmentTasks.AsNoTracking()
+        .Where(task => task.SourceImportItemId == item.Id || (task.SourceEmailsJson != "[]" && task.SourceEmailsJson != ""))
+        .Select(task => new { task.SourceImportItemId, task.SourceEmailsJson }).ToListAsync(cancellationToken);
+    foreach (var task in sources)
+    {
+        if (task.SourceImportItemId == item.Id) return true;
+        try
+        {
+            var rows = JsonNode.Parse(task.SourceEmailsJson) as JsonArray
+                ?? throw new InvalidOperationException("任务邮件来源资料无效，请联系管理员核对");
+            foreach (var node in rows)
+            {
+                if (node is not JsonObject row || !long.TryParse(row["id"]?.ToString(), out var id) || id <= 0)
+                    throw new InvalidOperationException("任务邮件来源资料无效，请联系管理员核对");
+                if (id == item.Id) return true;
+            }
+        }
+        catch (JsonException error) { throw new InvalidOperationException("任务邮件来源资料无效，请联系管理员核对", error); }
+    }
+    return false;
+}
+
 static async Task<long[]> ConfirmedDuplicateTaskIds(ImportEmailItem entity, AppDbContext db, CancellationToken cancellationToken)
 {
     if (db.Company != "Huadeng" || (entity.Fingerprint == "" && entity.BusinessFingerprint == "")) return [];
@@ -1892,9 +2029,17 @@ static async Task<long[]> ConfirmMailboxCandidate(ImportEmailItem entity, AppDbC
     foreach (var (groupKey, taskPayload) in ShipmentTaskPayloads(stored))
     {
         var incomingSo = ShipmentSoNumber(taskPayload);
-        var existing = await db.ShipmentTasks.FirstOrDefaultAsync(task =>
-            (task.SourceImportItemId == sourceItemId && task.SourceGroupKey == groupKey) ||
-            (task.SourceGroupKey == groupKey && !string.IsNullOrEmpty(incomingSo) && task.SoNumber == incomingSo), cancellationToken);
+        // The exact source is authoritative. An SO alone is not unique; never pick
+        // an arbitrary task when a change matches multiple real tasks.
+        var existing = await db.ShipmentTasks.SingleOrDefaultAsync(task =>
+            task.SourceImportItemId == sourceItemId && task.SourceGroupKey == groupKey, cancellationToken);
+        if (existing is null && !string.IsNullOrEmpty(incomingSo))
+        {
+            var matches = await db.ShipmentTasks.Where(task => task.SourceGroupKey == groupKey && task.SoNumber == incomingSo)
+                .OrderBy(task => task.Id).Take(2).ToListAsync(cancellationToken);
+            if (matches.Count > 1) throw new InvalidOperationException($"邮件 #{entity.Id} 的 SO 号对应多个任务，请先核对任务归属，不能自动选择");
+            existing = matches.SingleOrDefault();
+        }
         if (entity.WorkCategory == "Change" && existing is null)
             throw new InvalidOperationException($"变更邮件 #{entity.Id} 未找到关联任务，请先核对 SO 号");
         var task = existing ?? new ShipmentTask { SourceImportItemId = sourceItemId, SourceGroupKey = groupKey };

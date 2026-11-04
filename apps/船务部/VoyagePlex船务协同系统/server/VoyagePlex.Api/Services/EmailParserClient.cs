@@ -36,6 +36,20 @@ public sealed class EmailParserClient(HttpClient httpClient, VoyagePlex.Api.Data
             await response.Content.ReadAsStringAsync(cancellationToken));
     }
 
+    public async Task<ParserResponse> RetrySharedMailboxAsync(IReadOnlyList<long> selectedUids,
+        long expectedUidValidity, string expectedAddress, CancellationToken cancellationToken)
+    {
+        // Shared mailbox credentials remain exclusively in the parser environment.
+        using var response = await httpClient.PostAsJsonAsync("/v1/mailbox/retry-shared", new
+        {
+            company = "Xingxin", selected_uids = selectedUids,
+            expected_uid_validity = expectedUidValidity, expected_address = expectedAddress
+        }, cancellationToken);
+        return new ParserResponse((int)response.StatusCode,
+            response.Content.Headers.ContentType?.ToString() ?? "application/json",
+            await response.Content.ReadAsStringAsync(cancellationToken));
+    }
+
     public async Task<ParserResponse> ParseBatchAsync(
         IReadOnlyList<IFormFile> files,
         CancellationToken cancellationToken)

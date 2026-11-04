@@ -258,9 +258,11 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
     public async Task<object> RetryFailedAsync(IReadOnlyList<long> itemIds, CancellationToken cancellationToken,
         string company, long? ownerId)
     {
-        if (company != "Huadeng" || ownerId is null or <= 0 || itemIds.Count is < 1 or > 5 ||
+        if (company is not ("Xingxin" or "Huadeng") ||
+            (company == "Huadeng" && ownerId is null or <= 0) || (company == "Xingxin" && ownerId is not null) ||
+            itemIds.Count is < 1 or > 5 ||
             itemIds.Any(id => id <= 0) || itemIds.Distinct().Count() != itemIds.Count)
-            throw new MailboxRetryRejectedException("请选择华登邮箱及1至5封不同的失败邮件");
+            throw new MailboxRetryRejectedException("请选择有效邮箱及1至5封不同的失败邮件");
         await SyncLock.WaitAsync(cancellationToken);
         try
         {
@@ -269,18 +271,28 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             db.Company = company; db.MailOwnerId = ownerId;
             if (await db.ImportEmailItems.CountAsync(item => itemIds.Contains(item.Id), cancellationToken) != itemIds.Count)
                 throw new MailboxRetryRejectedException("部分邮件不存在或不属于所选邮箱", 404);
-            var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(value => value.Id == ownerId && value.IsActive &&
-                (value.CompanyAccess == "Huadeng" || value.CompanyAccess == "Both" || value.Role == "admin"), cancellationToken);
-            if (owner is null || !ServerMailboxConfiguration.TryGet(owner, out var credentials, out _))
-                throw new MailboxRetryRejectedException("所选邮箱配置不可用，请联系管理员");
+            ServerMailboxCredentials? credentials = null;
+            if (company == "Huadeng")
+            {
+                var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(value => value.Id == ownerId && value.IsActive &&
+                    (value.CompanyAccess == "Huadeng" || value.CompanyAccess == "Both" || value.Role == "admin"), cancellationToken);
+                if (owner is null || !ServerMailboxConfiguration.TryGet(owner, out var personalCredentials, out _))
+                    throw new MailboxRetryRejectedException("所选邮箱配置不可用，请联系管理员");
+                credentials = personalCredentials;
+            }
             var state = await db.MailSyncStates.AsNoTracking().SingleOrDefaultAsync(cancellationToken)
                 ?? throw new MailboxRetryRejectedException("所选邮箱尚无可核对的同步身份");
             ValidateRetryIdentity(state, credentials);
             var originals = await ReadRetryRows(db, itemIds, state, credentials, cancellationToken);
-            var originalByUid = originals.ToDictionary(item => RetryUid(item, ownerId.Value, state, credentials));
+            var originalByUid = originals.ToDictionary(item => RetryUid(item, ownerId ?? 0, state, credentials));
             var parser = scope.ServiceProvider.GetRequiredService<EmailParserClient>();
-            var payload = ReadMailboxPayload(await parser.RetryMailboxAsync(originalByUid.Keys.Order().ToArray(),
-                state.UidValidity, credentials, cancellationToken), null);
+            var selectedUids = originalByUid.Keys.Order().ToArray();
+            var response = credentials is null
+                ? await parser.RetrySharedMailboxAsync(selectedUids, state.UidValidity, state.Address, cancellationToken)
+                : await parser.RetryMailboxAsync(selectedUids, state.UidValidity, credentials, cancellationToken);
+            if (response.StatusCode == 409)
+                throw new MailboxRetryRejectedException("邮箱身份在重试期间变化，已保留原数据");
+            var payload = ReadMailboxPayload(response, state.Address);
             if (payload["configured"]?.GetValue<bool>() != true ||
                 payload["uid_validity"]?.GetValue<long>() != state.UidValidity ||
                 !string.Equals(payload["address"]?.GetValue<string>(), state.Address, StringComparison.OrdinalIgnoreCase))
@@ -304,6 +316,9 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                     throw new InvalidOperationException("邮箱重试返回了不完整的解析结果");
                 if (item["status"]!.ToString() == "parsed" && original.Fingerprint != "" && item["fingerprint"]!.ToString() != original.Fingerprint)
                     throw new MailboxRetryRejectedException("邮箱重试返回的邮件内容指纹与原邮件不一致，已保留原数据");
+                if (item["status"]!.ToString() == "parsed" && original.BusinessFingerprint != "" &&
+                    (item["business_fingerprint"]?.ToString() ?? "") != original.BusinessFingerprint)
+                    throw new MailboxRetryRejectedException("邮箱重试返回的邮件业务指纹与原邮件不一致，已保留原数据");
             }
             if (results.Count != originalByUid.Count)
                 throw new InvalidOperationException("邮箱重试尚未返回全部指定邮件，请逐封重试");
@@ -312,20 +327,24 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             // transaction so a user-confirmed or changed item can never be overwritten.
             db.ChangeTracker.Clear();
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-            var currentOwner = await db.Users.AsNoTracking().FirstOrDefaultAsync(value => value.Id == ownerId && value.IsActive &&
-                (value.CompanyAccess == "Huadeng" || value.CompanyAccess == "Both" || value.Role == "admin"), cancellationToken);
-            if (currentOwner is null || !ServerMailboxConfiguration.TryGet(currentOwner, out var currentCredentials, out _) ||
-                currentCredentials != credentials)
-                throw new MailboxRetryRejectedException("邮箱用户绑定在重试期间已变化，已保留原数据");
+            if (credentials is not null)
+            {
+                var currentOwner = await db.Users.AsNoTracking().FirstOrDefaultAsync(value => value.Id == ownerId && value.IsActive &&
+                    (value.CompanyAccess == "Huadeng" || value.CompanyAccess == "Both" || value.Role == "admin"), cancellationToken);
+                if (currentOwner is null || !ServerMailboxConfiguration.TryGet(currentOwner, out var currentCredentials, out _) ||
+                    currentCredentials != credentials)
+                    throw new MailboxRetryRejectedException("邮箱用户绑定在重试期间已变化，已保留原数据");
+            }
             var currentState = await db.MailSyncStates.AsNoTracking().SingleAsync(cancellationToken);
             ValidateRetryIdentity(currentState, credentials);
             if (currentState.Address != state.Address || currentState.UidValidity != state.UidValidity ||
-                currentState.MailboxIdentity != state.MailboxIdentity)
+                currentState.MailboxIdentity != state.MailboxIdentity || currentState.ConfigurationKey != state.ConfigurationKey ||
+                currentState.LastUid < state.LastUid)
                 throw new MailboxRetryRejectedException("邮箱同步身份已变化，请重新核对");
             var currentRows = await ReadRetryRows(db, itemIds, currentState, credentials, cancellationToken);
             foreach (var current in currentRows)
             {
-                var uid = RetryUid(current, ownerId.Value, currentState, credentials);
+                var uid = RetryUid(current, ownerId ?? 0, currentState, credentials);
                 var original = originalByUid.GetValueOrDefault(uid);
                 if (original is null || current.Id != original.Id || current.ImportBatchId != original.ImportBatchId ||
                     current.MailReceivedAt != original.MailReceivedAt || current.MailReceivedDate != original.MailReceivedDate ||
@@ -336,7 +355,8 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                     current.WorkCategory != original.WorkCategory || current.ClassificationSource != original.ClassificationSource ||
                     current.ClassificationConfidence != original.ClassificationConfidence ||
                     current.NeedsClassificationReview != original.NeedsClassificationReview || current.DuplicateOfItemId != original.DuplicateOfItemId ||
-                    current.WorkNote != original.WorkNote || current.ReviewedAt != original.ReviewedAt)
+                    current.WorkNote != original.WorkNote || current.ReviewedAt != original.ReviewedAt ||
+                    current.TaskIdsJson != original.TaskIdsJson || current.CreatedAt != original.CreatedAt)
                     throw new MailboxRetryRejectedException("失败邮件在重试期间已变化，请重新核对");
             }
             var recovered = new List<long>();
@@ -344,7 +364,7 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             var contacts = new Dictionary<string, MailContact>(StringComparer.OrdinalIgnoreCase);
             foreach (var current in currentRows.OrderBy(row => row.Id))
             {
-                var item = results[RetryUid(current, ownerId.Value, currentState, credentials)];
+                var item = results[RetryUid(current, ownerId ?? 0, currentState, credentials)];
                 if (item["status"]!.ToString() == "failed") continue;
                 var fingerprint = item["fingerprint"]?.ToString() ?? "";
                 var duplicate = fingerprint == "" ? null : await db.ImportEmailItems.AsNoTracking()
@@ -379,35 +399,41 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
         finally { SyncLock.Release(); }
     }
 
-    private static void ValidateRetryIdentity(MailSyncState state, ServerMailboxCredentials credentials)
+    private static void ValidateRetryIdentity(MailSyncState state, ServerMailboxCredentials? credentials)
     {
-        if (state.MailboxIdentity != ServerMailboxConfiguration.MailboxIdentity(credentials) ||
-            state.Address != credentials.Address || state.UidValidity is <= 0 or > uint.MaxValue)
+        if (string.IsNullOrWhiteSpace(state.Address) || state.UidValidity is <= 0 or > uint.MaxValue ||
+            (credentials is null && state.Id != 1) ||
+            (credentials is not null && (state.MailboxIdentity != ServerMailboxConfiguration.MailboxIdentity(credentials) ||
+                                        state.Address != credentials.Address)))
             throw new MailboxRetryRejectedException("邮箱配置与原同步身份不一致，已保留原数据");
     }
 
-    private static long RetryUid(ImportEmailItem item, long ownerId, MailSyncState state, ServerMailboxCredentials credentials)
+    private static long RetryUid(ImportEmailItem item, long ownerId, MailSyncState state, ServerMailboxCredentials? credentials)
     {
         var segment = item.MailboxKey[(item.MailboxKey.LastIndexOf(':') + 1)..];
+        var expectedKey = credentials is null ? $"{state.Address}:{state.UidValidity}:{segment}"
+            : $"Huadeng:{ownerId}:{state.MailboxIdentity}:{credentials.Address}:{state.UidValidity}:{segment}";
         if (!long.TryParse(segment, out var uid) || uid is <= 0 or > uint.MaxValue || uid > state.LastUid ||
-            item.MailboxKey != $"Huadeng:{ownerId}:{state.MailboxIdentity}:{credentials.Address}:{state.UidValidity}:{uid}")
+            segment != uid.ToString(System.Globalization.CultureInfo.InvariantCulture) || item.MailboxKey != expectedKey ||
+            (credentials is null && (item.Company != "Xingxin" || item.MailOwnerId != 0 || ownerId != 0)))
             throw new MailboxRetryRejectedException("失败邮件与原邮箱身份不一致，已保留原数据");
         return uid;
     }
 
     private static async Task<List<ImportEmailItem>> ReadRetryRows(AppDbContext db, IReadOnlyList<long> ids,
-        MailSyncState state, ServerMailboxCredentials credentials, CancellationToken cancellationToken)
+        MailSyncState state, ServerMailboxCredentials? credentials, CancellationToken cancellationToken)
     {
         var rows = await db.ImportEmailItems.Include(item => item.ImportBatch).Where(item => ids.Contains(item.Id))
             .ToListAsync(cancellationToken);
         if (rows.Count != ids.Count)
             throw new MailboxRetryRejectedException("部分邮件不存在或不属于所选邮箱", 404);
-        if (rows.Any(item => item.Company != db.Company || item.MailOwnerId != db.MailOwnerId ||
+        var expectedOwner = db.Company == "Huadeng" ? db.MailOwnerId : 0;
+        if (rows.Any(item => item.Company != db.Company || item.MailOwnerId != expectedOwner ||
                 item.Status != "failed" || item.HandlingStatus != "Pending" || item.HandlingOutcome != "" ||
                 item.WorkNote != "" || item.ReviewedAt is not null ||
                 string.Equals(item.ClassificationSource, "Manual", StringComparison.OrdinalIgnoreCase) ||
                 item.ImportBatch is not { Kind: "Email", Status: "PendingConfirmation" } ||
-                item.ImportBatch.Company != db.Company || item.ImportBatch.MailOwnerId != db.MailOwnerId) ||
+                item.ImportBatch.Company != db.Company || item.ImportBatch.MailOwnerId != expectedOwner) ||
             await db.ShipmentTasks.IgnoreQueryFilters().AnyAsync(task => task.SourceImportItemId != null &&
                 ids.Contains(task.SourceImportItemId.Value), cancellationToken))
             throw new MailboxRetryRejectedException("邮件不存在、不属于所选邮箱或已处理，已保留原数据");
@@ -416,7 +442,7 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
         {
             if (JsonNode.Parse(item.TaskIdsJson) is not JsonArray { Count: 0 })
                 throw new MailboxRetryRejectedException("邮件已有任务关联，已保留原数据");
-            RetryUid(item, db.MailOwnerId!.Value, state, credentials);
+            RetryUid(item, db.MailOwnerId ?? 0, state, credentials);
         }
         return rows;
     }

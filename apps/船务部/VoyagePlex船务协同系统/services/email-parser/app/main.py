@@ -14,8 +14,8 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
-from pydantic import BaseModel, Field, field_validator
-from typing import Annotated
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Annotated, Literal
 from fastapi.responses import Response
 
 from .factory_workbook import parse_factory_workbook
@@ -73,6 +73,21 @@ class RetryMailboxRequest(PersonalMailboxRequest):
         return selected_mailbox_uids(values)
 
 
+class SharedRetryMailboxRequest(BaseModel):
+    # A shared retry may select old UIDs, never replace the parser's credentials,
+    # host, folder, date range or normal polling cursor.
+    model_config = ConfigDict(extra="forbid")
+    company: Literal["Xingxin"]
+    expected_address: str = Field(strict=True, min_length=1, max_length=254)
+    selected_uids: list[MailboxUid] = Field(min_length=1, max_length=5)
+    expected_uid_validity: MailboxUid
+
+    @field_validator("selected_uids")
+    @classmethod
+    def unique_selected_uids(cls, values):
+        return selected_mailbox_uids(values)
+
+
 @app.post("/v1/mailbox/test")
 def test_personal_mailbox(payload: PersonalMailboxRequest):
     return test_mailbox_connection({"address": payload.address, "auth_code": payload.auth_code,
@@ -95,6 +110,17 @@ async def retry_personal_mailbox(payload: RetryMailboxRequest):
     return await poll_mailbox(payload.after_uid, payload.start_date, payload.company,
                               {"address": payload.address, "auth_code": payload.auth_code, "host": payload.host, "folder": payload.folder},
                               payload.selected_uids, payload.expected_uid_validity)
+
+
+@app.post("/v1/mailbox/retry-shared")
+async def retry_shared_mailbox(payload: SharedRetryMailboxRequest):
+    address = os.environ.get("VOYAGEPLEX_MAIL_ADDRESS", "").strip()
+    if not address or address.lower() != payload.expected_address.lower():
+        return Response(content='{"error":"共享邮箱配置与原同步身份不一致，已保留原数据"}',
+                        status_code=409, media_type="application/json")
+    return await poll_mailbox(company="Xingxin", credentials=None,
+                              selected_uids=payload.selected_uids,
+                              expected_uid_validity=payload.expected_uid_validity)
 
 
 async def _mail_thread(function, args, control):

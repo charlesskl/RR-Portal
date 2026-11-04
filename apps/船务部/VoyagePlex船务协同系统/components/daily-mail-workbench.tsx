@@ -20,12 +20,12 @@ type WarehouseGroup = {warehouse:string;references:string[];items:Cargo[];contai
 type MailItem = {id:number;mailSubject:string;mailSender:string;mailReceivedAt:string;mailReceivedDate:string;workCategory:WorkCategory;shipmentMode:string;status:string;error:string;handlingStatus:string;handlingOutcome:string;needsClassificationReview:boolean;taskIdsJson:string};
 type ContainerPlan = {group_key:string;so_number:string;container_type:string;vessel_name?:string;si_deadline?:string;cutoff_date?:string;capacity_boxes?:string};
 type Parsed = {shipment_groups?:ContainerPlan[];fields?:Record<string,string>;items?:Cargo[];warehouse_groups?:WarehouseGroup[];so_numbers?:string[];message?:{body_text?:string};attachments?:Array<{filename:string}>;warnings?:string[]};
-type Detail = MailItem & {duplicateTaskIds?:number[];parsed?:Parsed;relatedTasks?:Array<{id:number;soNumber:string;plannedShipDate?:string;containerType:string;cutoffDate:string;siDeadline:string;port:string}>};
+type Detail = MailItem & {reviewVersion:string;canRestoreReview:boolean;linkedTasks?:Array<{id:number;shipmentMode:string}>;duplicateTaskIds?:number[];parsed?:Parsed;relatedTasks?:Array<{id:number;soNumber:string;plannedShipDate?:string;containerType:string;cutoffDate:string;siDeadline:string;port:string}>};
 type Day = {date:string;total:number;pending:number};
 type Dates = {startDate:string;days:Day[]};
 type Page = {total:number;page:number;pageSize:number;items:MailItem[]};
 const categoryLabels:Record<WorkCategory,string>={Unclassified:"待判断",Shipment:"新增",Change:"变更",FollowUp:"待跟进",Other:"其他"};
-const modeLabels:Record<string,string>={Warehouse:"交仓",Container:"整柜",Unknown:"方式待识别"};
+const modeLabels:Record<string,string>={Warehouse:"交仓",Container:"整柜",Delivery:"送货",Unknown:"方式待识别"};
 const fieldLabels:Record<string,string>={so_number:"SO号",container_type:"柜型",ship_date:"计划走货日期",si_deadline:"SI截止",cutoff_date:"截数期",port:"装货港",destination_country:"收货国家",special_requirements:"特殊要求"};
 const cargoLabels:Record<string,string>={product_code:"货号",product_name:"货名",spec:"规格",contract_number:"合同号",customer_po:"客户PO",quantity:"数量",pieces:"件数",volume:"体积",pallet_count:"卡板",supplier:"生产工厂"};
 function chinaToday(){return new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Shanghai"}).format(new Date());}
@@ -95,19 +95,30 @@ export function DailyMailWorkbench({route=""}:{route?:string}){
   async function act(action:"confirm"|"acknowledge",ids:number[]){
     if(!ids.length)return;
     if(dirty){setError("请先保存当前核对资料，再确认处理。");return;}
-    const chosen=result.items.filter(item=>ids.includes(item.id));
     if(action==="confirm"){
       let checks:Detail[];try{checks=await Promise.all(ids.map(async id=>readResponse<Detail>(await taskFetch(`/api/imports/email/mailbox/items/${id}`,{cache:"no-store"}))));}catch(reason){setError(reason instanceof Error?reason.message:"检查关联任务失败");return;}
       const duplicateIds=Array.from(new Set(checks.flatMap(item=>item.duplicateTaskIds||[])));
       const duplicateNotice=duplicateIds.length?`\n同一邮件已建立任务 ${duplicateIds.map(id=>`#${id}`).join("、")}，对应邮件将关联已有任务，不重复建立。`:"";
-      const creates=chosen.filter(item=>item.workCategory==="Shipment").length;const changes=chosen.filter(item=>item.workCategory==="Change").length;
+      const creates=checks.filter(item=>item.workCategory==="Shipment").length;const changes=checks.filter(item=>item.workCategory==="Change").length;
       if(!window.confirm(`将确认 ${ids.length} 封邮件：${creates} 封新增资料、${changes} 封变更资料。有修改权限的相关任务会更新；未找到任务的变更邮件会提示核对。${duplicateNotice}继续吗？`))return;
     }
+    if(action==="acknowledge"&&!window.confirm(`确认将 ${ids.length} 封邮件标记为“无需建任务”？\n此操作不会建立任务，也不会把邮件中的变更写入已有任务。需要安排走货或更新资料时，请取消并选择“确认建立／更新任务”。`))return;
     setWorking(true);setError("");setNotice("");try{
       const value=await readResponse<{processed:number;taskIds:number[]}>(await taskFetch(`/api/mail/candidates/batch/${action}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ids})}));
       setNotice(action==="acknowledge"?`${value.processed} 封邮件已确认，无需建任务。`:`已确认 ${value.processed} 封邮件，关联 ${value.taskIds.length} 个走柜任务。`);
       setSelected(new Set());setRefresh(value=>value+1);
     }catch(reason){setError(reason instanceof Error?reason.message:"确认失败");}finally{setWorking(false);}
+  }
+  async function restoreReview(){
+    if(!detail?.canRestoreReview||working||dirty)return;
+    const reason=window.prompt("恢复后仍需核对资料并再次确认，系统不会自动建立任务。请填写恢复原因：","");
+    if(reason===null)return;
+    if(!reason.trim()||reason.trim().length>500){setError("请填写1至500字的恢复原因。");return;}
+    setWorking(true);setError("");setNotice("");
+    try{
+      await readResponse(await taskFetch(`/api/mail/candidates/${detail.id}/restore-review`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({expectedReviewVersion:detail.reviewVersion,reason:reason.trim()})}));
+      setSelected(new Set());setNotice("已恢复为待核对，原邮件分类、货物及SO资料保留。请核对后确认建立／更新任务。");setRefresh(value=>value+1);
+    }catch(reason){setError(reason instanceof Error?reason.message:"恢复核对失败");}finally{setWorking(false);}
   }
   async function sync(){if(dirty){setError("请先保存当前核对资料，再读取邮件。");return;}setWorking(true);setError("");try{
     const value=await readResponse<{configured:boolean;imported:number;waitingUntil?:string}>(await taskFetch("/api/imports/email/mailbox/sync",{method:"POST"}));
@@ -132,6 +143,7 @@ export function DailyMailWorkbench({route=""}:{route?:string}){
       {detail.error&&<div className="form-error">{detail.error}</div>}
       {detail.needsClassificationReview&&<div className="notice">系统未识别出任务类型；暂不能建立任务。如不需要任务，可确认无需建任务。</div>}
       {detail.status==="duplicate"&&<div className="notice">重复邮件不会再次建立任务，可确认无需建任务。</div>}
+      {detail.canRestoreReview&&<div className="notice">此前已将此邮件标记为无需建任务。如需处理，请先恢复核对；原分类和解析资料会保留，恢复操作不会自动建立任务。</div>}
       {!!detail.duplicateTaskIds?.length&&<div className="notice">同一邮件已建立任务 {detail.duplicateTaskIds.map(id=>`#${id}`).join("、")}，确认时将关联已有任务，不会重复建立。</div>}
       {detail.relatedTasks?.map(task=><div className="daily-mail-related" key={task.id}><Link href={`/shipments/${task.id}`}>关联任务 #{task.id} · SO {task.soNumber}</Link>{detail.workCategory==="Change"&&Object.entries(relatedFieldKeys).map(([field,key])=>{const previous=String(task[key as keyof typeof task]??"");const current=parsed?.fields?.[field];return current&&current!==previous?<p key={field}>{fieldLabels[field]}：<del>{previous||"空"}</del> → <strong>{current}</strong></p>:null;})}</div>)}
       <div className="form-grid">{Object.entries(fieldLabels).map(([key,label])=><label key={key} className={key==="special_requirements"?"full-width":""}><span>{label}</span>{key==="special_requirements"?<textarea rows={4} value={parsed?.fields?.[key]||""} disabled={!editable||working} onChange={event=>editField(key,event.target.value)}/>:<input value={parsed?.fields?.[key]||""} disabled={!editable||working} onChange={event=>editField(key,event.target.value)}/>}</label>)}</div>
@@ -141,7 +153,7 @@ export function DailyMailWorkbench({route=""}:{route?:string}){
       {parsed?.fields?.cargo_split_required==="true"&&<div className="review-section"><h3>本次出运 / 等待通知分配</h3>{parsed.items?.map((item,index)=><label className="cargo-scope-row" key={index}><span>{String(item.product_code||"")} · {String(item.customer_po||"")} · {String(item.quantity||0)} 个</span><select disabled={!editable||working} value={String(item.shipment_scope||"unassigned")} onChange={event=>editCargo(index,"shipment_scope",event.target.value)}><option value="unassigned">请选择</option><option value="current">本次出运</option><option value="waiting">剩余散货，等待客户通知</option></select></label>)}</div>}
       {!!parsed?.warnings?.length&&<div className="notice">{parsed.warnings.join("；")}</div>}
       <details className="daily-mail-body"><summary>邮件正文及附件（{parsed?.attachments?.length||0}）</summary><pre>{parsed?.message?.body_text||"无正文"}</pre>{parsed?.attachments?.map((attachment,index)=><p key={index}>{attachment.filename}</p>)}</details>
-      <div className="daily-mail-actions">{dirty&&<span>资料尚未保存</span>}{editable&&<button className="secondary-button" disabled={working||!dirty} onClick={()=>void save()}>保存核对资料</button>}{detail.handlingStatus==="Pending"&&<><button className="secondary-button" disabled={working||dirty} onClick={()=>void act("acknowledge",[detail.id])}>已确认，无需建任务</button><button className="primary-button" disabled={!editable||working||dirty} onClick={()=>void act("confirm",[detail.id])}>{detail.workCategory==="Change"?"确认更新任务":"确认建立任务"}</button></>}{taskIds(detail).map(id=><Link className="secondary-button" href={`/shipments/${id}`} key={id}>查看任务 #{id}</Link>)}</div>
+      <div className="daily-mail-actions">{dirty&&<span>资料尚未保存</span>}{editable&&<button className="secondary-button" disabled={working||!dirty} onClick={()=>void save()}>保存核对资料</button>}{detail.handlingStatus==="Pending"&&<><button className="secondary-button" disabled={working||dirty} onClick={()=>void act("acknowledge",[detail.id])}>已确认，无需建任务</button><button className="primary-button" disabled={!editable||working||dirty} onClick={()=>void act("confirm",[detail.id])}>{detail.workCategory==="Change"?"确认更新任务":"确认建立任务"}</button></>}{detail.canRestoreReview&&<button className="secondary-button" disabled={working||dirty} onClick={()=>void restoreReview()}>恢复核对</button>}{detail.linkedTasks?.map(task=><Link className="secondary-button" href={`/shipments/${task.id}`} key={task.id}>查看{modeLabels[task.shipmentMode]||"关联"}任务 #{task.id}</Link>)}</div>
     </>:<div className="mail-workbench-empty">选择当天邮件，查看系统识别的资料</div>}</Dialog.Content></Dialog.Portal></Dialog.Root></div></div>
   </section>;
 }

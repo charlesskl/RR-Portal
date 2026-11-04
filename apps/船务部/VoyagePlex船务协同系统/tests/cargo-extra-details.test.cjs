@@ -5,9 +5,9 @@ const ts=require('typescript');
 function load(file){
  const source=fs.readFileSync(file,'utf8');
  const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2020}}).outputText;
- const module={exports:{}};
- new Function('module','exports','require',js)(module,module.exports,name=>name==='@/lib/cargo-extra-details'?load('lib/cargo-extra-details.ts'):name==='@radix-ui/react-dialog'?new Proxy({},{get:(_,key)=>`Dialog.${key}`}):require(name));
- return module.exports;
+ const loadedModule={exports:{}};
+ new Function('module','exports','require',js)(loadedModule,loadedModule.exports,name=>name==='@/lib/cargo-extra-details'?load('lib/cargo-extra-details.ts'):name==='@radix-ui/react-dialog'?new Proxy({},{get:(_,key)=>`Dialog.${key}`}):require(name));
+ return loadedModule.exports;
 }
 const {CargoExtraDetails}=load('components/cargo-extra-details.tsx');
 function nodes(tree){if(!tree||typeof tree!=='object')return [];return [tree,...[tree.props?.children].flat(Infinity).flatMap(nodes)];}

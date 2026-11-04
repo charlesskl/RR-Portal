@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Security.Cryptography;
+using System.Text;
 using VoyagePlex.Api.Entities;
 
 namespace VoyagePlex.Api.Services;
@@ -21,6 +23,42 @@ public static class DailyMailRules
     public static bool CanCreateTask(ImportEmailItem item)
         => item.HandlingStatus == "Pending" && item.Status is "pending" &&
             !item.NeedsClassificationReview && item.WorkCategory is "Shipment" or "Change";
+
+    // A review token is an optimistic concurrency check, never an authorization token.
+    // Include the parsed document so a late save/reparse cannot be restored from a stale preview.
+    public static string ReviewVersion(ImportEmailItem item) => Convert.ToHexString(SHA256.HashData(
+        Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+        {
+            item.Id, item.Company, item.MailOwnerId, item.ImportBatchId, item.MailboxKey,
+            item.FileName, item.MailSubject, item.MailSender, item.MailReceivedAt, item.MailReceivedDate,
+            item.Fingerprint, item.BusinessFingerprint, item.DuplicateOfItemId, item.Status,
+            item.HandlingStatus, item.HandlingOutcome, item.TaskIdsJson, item.WorkCategory,
+            item.ClassificationSource, item.ClassificationConfidence, item.NeedsClassificationReview,
+            item.ShipmentMode, item.ResultJson, item.WorkNote, item.Error,
+            ReviewedAtTicks = item.ReviewedAt?.Ticks, CreatedAtTicks = item.CreatedAt.Ticks,
+        })))).ToLowerInvariant();
+
+    public static long[] RecordedTaskIds(ImportEmailItem item)
+    {
+        try
+        {
+            var ids = JsonSerializer.Deserialize<long[]>(item.TaskIdsJson);
+            if (ids is null || ids.Any(id => id <= 0) || ids.Distinct().Count() != ids.Length)
+                throw new InvalidOperationException("邮件任务关联资料无效，请联系管理员核对");
+            return ids;
+        }
+        catch (JsonException error)
+        { throw new InvalidOperationException("邮件任务关联资料无效，请联系管理员核对", error); }
+    }
+
+    public static bool CanRestoreTaskReview(ImportEmailItem item)
+    {
+        if (item.MailboxKey == "" || item.HandlingStatus != "Processed" || item.HandlingOutcome != "NoTask" ||
+            item.Status != "pending" || item.NeedsClassificationReview || item.WorkCategory is not ("Shipment" or "Change"))
+            return false;
+        try { return RecordedTaskIds(item).Length == 0; }
+        catch (InvalidOperationException) { return false; }
+    }
 
     public static void ApplyConfirmedChanges(ShipmentTask task, JsonObject parsed)
     {

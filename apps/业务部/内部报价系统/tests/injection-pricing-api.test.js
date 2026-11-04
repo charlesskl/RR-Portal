@@ -103,6 +103,34 @@ test('真实隔离保存接口保留自动/手填/历史来源及供应商精确
     for (const index of [6, 7]) { assert.equal(sheet.getCell(start + index, 9).formula, `ROUND(2020/J${start + index}/L${start + index},4)`); assert.equal(sheet.getCell(start + index, 9).result, .505); }
     assert.equal(sheet.getCell(start + 8, 9).value, .1234);
   }
+  const targetRow = { mold_no: 'INDEX-260309-08', name: '爆米花桶', product_group_id: '', product_group_name: '',
+    source_sheet_name: '排模资料', source_sheet_index: 0, mold_part_index: 0, mold_part_count: 1,
+    material: 'PP', weight_g: 57, machine_model: '20A', sets: 1, cycle_sec: 30,
+    target: .446, shot_price: 4304.9327, shot_price_mode: 'auto', note: '恢复隔离夹具' };
+  savedMolding.injection.push(targetRow);
+  savedMolding.machine_prices[0].price = 1920;
+  const beforeRecoverySave = await api('/sections/' + section('molding').id, 'PUT', {
+    payload: savedMolding, base_filled_at: section('molding').filled_at });
+  quote = await read();
+  const recovery = JSON.parse(section('molding').payload_json);
+  const otherRowsBefore = structuredClone(recovery.injection.slice(0, -1));
+  assert.equal(recovery.injection.at(-1).target, .446, '实际保存接口不替用户自动改历史目标');
+  const reference = { ...targetRow, target: 2600, shot_price: null };
+  const recoveryContext = vm.createContext({ window: { InjectionPricing: Pricing } });
+  vm.runInContext(workbench.slice(workbench.indexOf('function engineeringTargetForInjection('),
+    workbench.indexOf('// 仅补齐明确自动行')), recoveryContext);
+  assert.equal(recoveryContext.applyEngineeringTargetForInjection(recovery.injection.at(-1), [reference], recovery.machine_prices), true);
+  assert.equal(recovery.injection.at(-1).target, 2600); assert.equal(recovery.injection.at(-1).shot_price, .7385);
+  await api('/sections/' + section('molding').id, 'PUT', { payload: recovery, base_filled_at: beforeRecoverySave.filled_at });
+  quote = await read();
+  const reopenedRecovery = JSON.parse(section('molding').payload_json);
+  assert.deepEqual(reopenedRecovery, recovery, '真实接口保存并重开保留恢复后的全部字段');
+  assert.deepEqual(reopenedRecovery.injection.slice(0, -1), otherRowsBefore, '其他历史/手填/空价行逐字段不变');
+  const recoverySql = new DatabaseSync(path.join(temporary, 'test.db'), { readOnly: true });
+  try {
+    assert.deepEqual(JSON.parse(recoverySql.prepare('SELECT payload_json FROM quote_sections WHERE id=?').get(section('molding').id).payload_json), recovery,
+      '数据库实际已存2600和0.7385，其他参数与JSON完整保留');
+  } finally { recoverySql.close(); }
   const row = { name: '隔离物料', supplier_id: 'A', supplier_name: '同名供应商', qty: 1 };
   const other = { name: '其他供应商物料', supplier_id: 'B', supplier_name: '同名供应商', qty: 5 };
   Supplier.setSupplier(row, '同名供应商', [row, other]);

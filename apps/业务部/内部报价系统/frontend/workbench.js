@@ -4673,6 +4673,34 @@ function engineeringImagesForInjection(row, refMolds) {
   ].filter(Boolean))];
 }
 
+function engineeringTargetForInjection(row, refMolds) {
+  if (row.catalog_raw_weight != null) return { status: 'managed' };
+  const identity = value => [value.product_group_id ?? '', value.product_group_name ?? '',
+    value.mold_no ?? '', value.name ?? '', value.mold_part_index ?? 0];
+  const rowIdentity = identity(row);
+  const matches = (refMolds || []).filter(mold => identity(mold).every((value, index) => value === rowIdentity[index]));
+  if (!matches.length) return { status: 'missing' };
+  if (matches.length !== 1) return { status: 'conflict' };
+  const reference = matches[0];
+  // A matching display name alone must not bridge different engineering sources.
+  for (const key of ['product_group_id', 'product_group_name', 'source_sheet_name', 'source_sheet_index']) {
+    if ((row[key] ?? '') !== (reference[key] ?? '')) return { status: 'conflict' };
+  }
+  const target = reference.target;
+  if (!['number', 'string'].includes(typeof target) || target === '' || !Number.isFinite(Number(target)) || Number(target) <= 0) {
+    return { status: 'invalid' };
+  }
+  return { status: Number(row.target) === Number(target) ? 'same' : 'different', target: Number(target) };
+}
+
+function applyEngineeringTargetForInjection(row, refMolds, machinePrices) {
+  const reference = engineeringTargetForInjection(row, refMolds);
+  if (reference.status !== 'different') return false;
+  row.target = reference.target;
+  window.InjectionPricing.reprice(row, machinePrices);
+  return true;
+}
+
 // 仅补齐明确自动行的空价及后续零件零价；历史未标记/手填值保留，按钮套价可传 overwrite=true。
 function applyInjectionReferencePrices(payload, { overwrite = false, material = true, machine = true } = {}) {
   let materialHits = 0;
@@ -4920,6 +4948,48 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     };
     td.appendChild(input);
   };
+  const engineeringTargetCell = (td, row, { readonly, refreshCalcs, onChange }) => {
+    const input = document.createElement('input');
+    input.type = 'number'; input.step = 'any'; input.style.minWidth = '100px';
+    input.value = row.target ?? ''; input.readOnly = readonly;
+    td.appendChild(input);
+    const notice = document.createElement('div');
+    notice.className = 'muted';
+    td.appendChild(notice);
+    const renderNotice = () => {
+      notice.innerHTML = '';
+      const reference = engineeringTargetForInjection(row, refMolds);
+      if (reference.status === 'conflict') {
+        notice.textContent = '工程来源不唯一或已变化，请先核对；目标数未修改。';
+      } else if (reference.status === 'different') {
+        const text = document.createElement('div');
+        text.textContent = `本行目标数 ${row.target ?? '空白'}；工程目标数 ${reference.target}。`;
+        notice.appendChild(text);
+        if (!readonly) {
+          const button = document.createElement('button');
+          button.type = 'button'; button.className = 'mini';
+          button.textContent = `使用工程目标数（${reference.target}）`;
+          button.onclick = () => {
+            const latest = engineeringTargetForInjection(row, refMolds);
+            if (latest.status !== 'different') { renderNotice(); return; }
+            const previousTarget = row.target;
+            if (!confirm(`仅修改本行 ${row.mold_no || ''} ${row.name || ''}\n目标数：${row.target ?? '空白'} → 工程 ${latest.target}\n并按本单机型费用和套数重算本行啤价。其他行保持不变，修改后仍需保存草稿。`)) return;
+            if (row.target !== previousTarget || engineeringTargetForInjection(row, refMolds).target !== latest.target) {
+              renderNotice(); return;
+            }
+            if (!applyEngineeringTargetForInjection(row, refMolds, payload.machine_prices)) { renderNotice(); return; }
+            input.value = row.target; refreshShot(row); refreshCalcs(); renderNotice(); onChange();
+          };
+          notice.appendChild(button);
+        }
+      }
+    };
+    if (!readonly) input.oninput = () => {
+      row.target = input.value === '' ? null : Number(input.value);
+      refreshShot(row); refreshCalcs(); renderNotice(); onChange();
+    };
+    renderNotice();
+  };
   const refreshChangedMachinePrices = () => {
     for (const row of payload.injection) {
       if (row.shot_price_mode === 'auto' &&
@@ -5093,7 +5163,8 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     { key: 'side_action', label: '行位', width: '90px' },
     { key: 'sets', label: '套数', type: 'number', width: '70px', onValue: refreshShot },
     { key: 'machine_model', label: '机型', width: '90px', className: 'molding-machine-key', onValue: refreshShot },
-    { key: 'target', label: '目标数', type: 'number', width: '100px', className: 'molding-machine-key', onValue: refreshShot },
+    { key: 'target', label: '目标数', type: 'number', width: '150px', className: 'molding-machine-key',
+      renderCell: engineeringTargetCell },
     { key: 'mold_size', label: '模具尺寸', width: '130px' },
     { key: 'cycle_sec', label: '周期(秒)', type: 'number', width: '80px' },
     { key: 'finished_amt', label: '成品金额 HK$', readonly: true, width: '100px',

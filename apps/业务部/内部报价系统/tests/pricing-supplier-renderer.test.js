@@ -34,15 +34,18 @@ function contextFor(payload) {
     document: { createElement: tag => new Element(tag) },
     num: value => Number(value) || 0, setTimeout() {},
     onChange: () => changes.push(JSON.stringify(payload)), alert: message => alerts.push(message),
+    confirm: () => true,
     refMolds: [], engineeringImagesForInjection: () => [],
   });
   vm.runInContext(source.slice(source.indexOf('function renderTable('), source.indexOf('// 辅助/包装材料 类别')), context);
   vm.runInContext(source.slice(source.indexOf('function formatNum('), source.indexOf('function legacyFormulaAmount(')), context);
+  vm.runInContext(source.slice(source.indexOf('function engineeringTargetForInjection('), source.indexOf('// 仅补齐明确自动行')), context);
   return { context, changes, alerts };
 }
-function molding(payload, readonly = false) {
+function molding(payload, readonly = false, refMolds = []) {
   const fixture = contextFor(payload);
   const { context } = fixture;
+  context.refMolds = refMolds;
   const moldingStart = source.indexOf('function renderMolding(');
   const pricingStart = source.indexOf('  const shotRefreshers =', moldingStart);
   const columnsStart = source.indexOf('  const cols = [', moldingStart);
@@ -161,6 +164,100 @@ test('未标记历史价即使等于计算值，也不随参考费用变化；�
   ui.edit('target', '1000');
   assert.equal(row.shot_price, 4); assert.equal(row.shot_price_mode, 'auto');
   ui.editFee(0, '3000'); assert.equal(row.shot_price, 3);
+});
+
+test('工程2600与已存0.446差异明确提示；仅确认本行恢复后按目标2600计价，重开仍保留', async () => {
+  const { expandEngineeringMolds } = require('../backend/services/engineeringMolds');
+  const { parseWorkbook } = require('../backend/services/parseMoldSheet');
+  const workbook = new (require('exceljs').Workbook)(); const sheet = workbook.addWorksheet('排模资料');
+  sheet.addRow(['序号', '模具编号', '名称', '材料', '净重', '周期', '机型', '目标数', '啤工', '套数']);
+  sheet.addRow([1, 'INDEX-260309-08', '爆米花桶', 'PP', 57, 30, '20A', 2600, .446, 1]);
+  const parsed = parseWorkbook(Buffer.from(await workbook.xlsx.writeBuffer()));
+  assert.equal(parsed.error, undefined); assert.equal(parsed.molds[0].target, 2600);
+  assert.equal(parsed.molds[0].shot_price, .446, '源表啤工价与明确目标数必须保持独立');
+  const references = expandEngineeringMolds(parsed.molds);
+  assert.equal(references[0].target, 2600, '解析和拆分不把2600改成0.446');
+  const row = { ...references[0], target: .446, shot_price: 4304.9327, shot_price_mode: 'auto', note: '原备注' };
+  const payload = payloadWith(row); payload.machine_prices[0].price = 1920;
+  const syncContext = vm.createContext({ window: { InjectionPricing: Pricing } });
+  vm.runInContext(source.slice(source.indexOf('function engineeringMoldSyncKey('), source.indexOf('function engineeringImagesForInjection(')) +
+    source.slice(source.indexOf('function syncInjectionMolds('), source.indexOf('// 啤机部料价表默认值')), syncContext);
+  const synced = { machine_prices: payload.machine_prices, injection: [structuredClone(row)] };
+  syncContext.syncInjectionMolds(synced, references);
+  assert.equal(synced.injection[0].target, .446, '默认同步仍保留已存目标；不能批量猜改历史资料');
+  const other = { ...row, mold_no: 'UNCHANGED', target: 3300, shot_price: 0, shot_price_mode: 'manual' };
+  payload.injection.push(other); const otherBefore = structuredClone(other), before = structuredClone(row);
+  const ui = molding(payload, false, references);
+  assert.deepEqual(row, before, '打开表格只提示，不自动修复历史目标或价格');
+  const buttons = ui.cell('target').querySelectorAll('button'); assert.equal(buttons.length, 1);
+  assert.equal(buttons[0].textContent, '使用工程目标数（2600）');
+  let confirmation;
+  ui.context.confirm = text => { confirmation = text; return false; }; buttons[0].onclick();
+  assert.deepEqual(row, before); assert.match(confirmation, /0.446 → 工程 2600/);
+  ui.context.confirm = () => true; buttons[0].onclick();
+  assert.equal(row.target, 2600); assert.equal(row.shot_price, .7385); assert.equal(row.shot_price_mode, 'auto');
+  assert.equal(ui.input('target').value, '2600'); assert.equal(ui.input('shot_price').value, '0.7385');
+  assert.equal(row.weight_g, 57); assert.equal(row.cycle_sec, 30); assert.equal(row.note, '原备注');
+  assert.deepEqual(other, otherBefore, '不修改其他行的目标数、手填零价或来源');
+  const reopenedPayload = JSON.parse(JSON.stringify(payload));
+  const reopened = molding(reopenedPayload, false, references);
+  assert.equal(reopened.input('target').value, '2600'); assert.equal(reopened.input('shot_price').value, '0.7385');
+  assert.equal(reopened.cell('target').querySelectorAll('button').length, 0);
+  const exported = await require('../backend/services/exportInternal').buildWorkbook({ quote: { qty: 1000 },
+    sections: [{ dept: 'molding', payload_json: JSON.stringify(reopenedPayload) }] });
+  const loaded = new (require('exceljs').Workbook)(); await loaded.xlsx.load(await exported.xlsx.writeBuffer());
+  for (const name of ['报价明细', '啤机明细']) {
+    const ws = loaded.getWorksheet(name); let first;
+    ws.eachRow(r => { if (r.getCell(1).value === '模号' && r.getCell(2).value === '模具名称') first = r.number + 1; });
+    assert.equal(ws.getCell(first, 12).value, 2600); assert.equal(ws.getCell(first, 9).result, .7385);
+    assert.equal(ws.getCell(first, 9).formula, `ROUND(1920/J${first}/L${first},4)`);
+  }
+});
+
+test('工程目标来源重复或源工作表不同则拒绝恢复；只读只提示，普通手改仍联动', () => {
+  const row = { mold_no: 'SAME', name: '零件', product_group_id: 'A', product_group_name: '甲',
+    source_sheet_name: '源表', source_sheet_index: 0, mold_part_index: 0, machine_model: '20A', target: .446, sets: 1, shot_price: 1 };
+  const reference = { ...row, target: 2600 };
+  for (const references of [[reference, { ...reference }], [{ ...reference, source_sheet_name: '其他源表' }]]) {
+    const payload = payloadWith({ ...row }), before = structuredClone(payload);
+    const ui = molding(payload, false, references);
+    assert.equal(ui.cell('target').querySelectorAll('button').length, 0);
+    assert.match(ui.cell('target').children[1].textContent, /工程来源不唯一或已变化/);
+    assert.deepEqual(payload, before);
+  }
+  const readonly = molding(payloadWith({ ...row }), true, [reference]);
+  assert.equal(readonly.cell('target').querySelectorAll('button').length, 0);
+  assert.equal(readonly.input('target').readOnly, true);
+  const stalePayload = payloadWith({ ...row }); const staleReference = { ...reference };
+  const stale = molding(stalePayload, false, [staleReference]);
+  stale.context.confirm = () => { staleReference.target = 3300; return true; };
+  stale.cell('target').querySelectorAll('button')[0].onclick();
+  assert.equal(stalePayload.injection[0].target, .446, '确认期间来源变动不得应用未确认的3300');
+  const editablePayload = payloadWith({ ...row }); const ui = molding(editablePayload, false, [reference]);
+  ui.edit('target', '3400'); assert.equal(editablePayload.injection[0].target, 3400);
+  assert.equal(editablePayload.injection[0].shot_price, .5941, '正常目标输入使用本单2020费用，仍走原计价规则');
+});
+
+test('工程目标恢复使用完整独立字段，不以分隔符拼接、近似模号或缺失值猜来源', () => {
+  const payload = payloadWith({ mold_no: 'M|N', name: 'P', target: .446, sets: 1, machine_model: '20A', shot_price: null });
+  for (const references of [[{ mold_no: 'M', name: 'N|P', target: 2600 }], [{ mold_no: 'M|N-1', name: 'P', target: 2600 }],
+    [{ mold_no: 'M|N', name: 'P', target: null }], [{ mold_no: 'M|N', name: 'P', target: 0 }],
+    [{ mold_no: 'M|N', name: 'P', target: true }]]) {
+    const before = structuredClone(payload), ui = molding(payload, false, references);
+    assert.equal(ui.cell('target').querySelectorAll('button').length, 0); assert.deepEqual(payload, before);
+  }
+});
+
+test('已由共模目录管理的分阶段行不提供工程目标恢复，直接调用也不修改任何参数', () => {
+  const row = { mold_no: 'CATALOG-M', name: '分阶段零件', target: .446, sets: 1, machine_model: '20A',
+    shot_price: .1234, shot_price_mode: 'auto', catalog_raw_weight: 0, catalog_part_id: 'OWNED-PART',
+    technical: { stages: [{ target: 2800, cavity: 4 }, { target: 3300, cavity: 8 }] } };
+  const payload = payloadWith(row), before = structuredClone(payload);
+  const references = [{ mold_no: row.mold_no, name: row.name, target: 2600 }];
+  const ui = molding(payload, false, references);
+  assert.equal(ui.cell('target').querySelectorAll('button').length, 0);
+  assert.equal(ui.context.applyEngineeringTargetForInjection(row, references, payload.machine_prices), false);
+  assert.deepEqual(payload, before, '独立共模目标、完整阶段参数、价格和来源均不改');
 });
 
 test('真实供应商输入保留同名原标识，改名歧义恢复原归属，JSON重载可继续同步', () => {

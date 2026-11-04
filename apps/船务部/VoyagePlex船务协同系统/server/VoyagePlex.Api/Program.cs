@@ -1120,6 +1120,44 @@ app.MapPost("/api/imports/email/mailbox/retry-failed", async (JsonObject payload
     { return Results.Json(new { error = "邮箱重试失败，已保留原邮件与同步断点，请联系管理员" }, statusCode: 502); }
 });
 
+app.MapPost("/api/imports/email/mailbox/backfill-missing", async (JsonObject payload, HttpContext context,
+    AppDbContext db, MailboxSyncService sync, CancellationToken cancellationToken) =>
+{
+    if (context.Items["CurrentUser"] is not AppUser { Role: "admin" } actor)
+        return Results.Json(new { error = "只有管理员可以补录明确缺失的邮件" }, statusCode: 403);
+    var allowed = new HashSet<string>(StringComparer.Ordinal) { "expectedUidValidity", "capturedLastUid",
+        "expectedAddressSHA256", "expectedMailboxIdentitySHA256", "expectedConfigurationKeySHA256", "messages", "reason" };
+    if (payload.Any(value => !allowed.Contains(value.Key)) ||
+        payload["expectedUidValidity"] is not JsonValue validity || !validity.TryGetValue<long>(out var uidValidity) ||
+        payload["capturedLastUid"] is not JsonValue cursor || !cursor.TryGetValue<long>(out var capturedLastUid) ||
+        payload["expectedAddressSHA256"] is not JsonValue address || !address.TryGetValue<string>(out var addressHash) ||
+        payload["expectedMailboxIdentitySHA256"] is not JsonValue identity || !identity.TryGetValue<string>(out var identityHash) ||
+        payload["expectedConfigurationKeySHA256"] is not JsonValue configuration || !configuration.TryGetValue<string>(out var configurationHash) ||
+        payload["reason"] is not JsonValue reasonValue || !reasonValue.TryGetValue<string>(out var reason) ||
+        payload["messages"] is not JsonArray messages || messages.Count is < 1 or > 5)
+        return Results.BadRequest(new { error = "请提供明确邮件及完整的原邮箱核对资料，不能覆盖邮箱配置" });
+    var selected = new List<MissingMailboxMessage>();
+    foreach (var node in messages)
+    {
+        if (node is not JsonObject message || message.Count != 2 ||
+            message["uid"] is not JsonValue uidValue || !uidValue.TryGetValue<long>(out var uid) ||
+            message["receivedAt"] is not JsonValue received || !received.TryGetValue<string>(out var receivedAt))
+            return Results.BadRequest(new { error = "请逐封提供明确UID及带时区的已核对收件时间" });
+        selected.Add(new MissingMailboxMessage(uid, receivedAt));
+    }
+    try
+    {
+        return Results.Ok(await sync.BackfillMissingAsync(new MissingMailboxBackfillRequest(uidValidity, capturedLastUid,
+            addressHash, identityHash, configurationHash, selected, reason), actor.Id, cancellationToken, db.Company, db.MailOwnerId));
+    }
+    catch (MailboxRetryRejectedException error)
+    { return Results.Json(new { error = error.Message }, statusCode: error.StatusCode); }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    { return Results.Json(new { error = "邮箱补录请求超时，请先核对指定邮件是否已有记录；同步断点不会回退" }, statusCode: 504); }
+    catch (Exception) when (!cancellationToken.IsCancellationRequested)
+    { return Results.Json(new { error = "邮箱补录未完成，请先核对指定邮件记录；同步断点不会回退" }, statusCode: 502); }
+});
+
 app.MapPost("/api/imports/email/split-preview", (JsonObject payload) =>
 {
     try

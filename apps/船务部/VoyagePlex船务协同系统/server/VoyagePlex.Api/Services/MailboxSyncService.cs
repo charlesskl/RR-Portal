@@ -399,6 +399,203 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
         finally { SyncLock.Release(); }
     }
 
+    public async Task<object> BackfillMissingAsync(MissingMailboxBackfillRequest request, long actorId,
+        CancellationToken cancellationToken, string company, long? ownerId)
+    {
+        if (company is not ("Xingxin" or "Huadeng") ||
+            (company == "Huadeng" && ownerId is null or <= 0) || (company == "Xingxin" && ownerId is not null) ||
+            request.Messages.Count is < 1 or > 5 || request.Messages.Select(value => value.Uid).Distinct().Count() != request.Messages.Count ||
+            request.UidValidity is <= 0 or > uint.MaxValue || request.CapturedLastUid is <= 0 or > uint.MaxValue ||
+            request.Messages.Any(value => value.Uid <= 0 || value.Uid > request.CapturedLastUid) ||
+            new[] { request.AddressSHA256, request.MailboxIdentitySHA256, request.ConfigurationKeySHA256 }
+                .Any(value => !System.Text.RegularExpressions.Regex.IsMatch(value, "^[a-f0-9]{64}$")) ||
+            request.Reason.Trim().Length is < 1 or > 500)
+            throw new MailboxRetryRejectedException("请提供1至5封明确邮件及完整的原邮箱核对资料", 400);
+        await SyncLock.WaitAsync(cancellationToken);
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Company = company; db.MailOwnerId = ownerId; db.CurrentUserId = actorId;
+            await RequireBackfillAdmin(db, actorId, cancellationToken);
+            var credentials = await BackfillCredentials(db, ownerId, cancellationToken);
+            var state = await db.MailSyncStates.AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+                ?? throw new MailboxRetryRejectedException("所选邮箱尚无可核对的同步身份");
+            ValidateRetryIdentity(state, credentials);
+            if (credentials is not null && state.ConfigurationKey != ServerMailboxConfiguration.ConfigurationKey(credentials))
+                throw new MailboxRetryRejectedException("邮箱连接配置与原同步身份不一致，未补录邮件");
+            ValidateBackfillNamespace(state, request);
+            var setting = await db.MailSystemSettings.AsNoTracking().SingleAsync(cancellationToken);
+            ValidateBackfillDates(request.Messages, setting);
+            var keys = request.Messages.ToDictionary(value => value.Uid,
+                value => credentials is null ? $"{state.Address}:{state.UidValidity}:{value.Uid}"
+                    : $"Huadeng:{ownerId}:{state.MailboxIdentity}:{state.Address}:{state.UidValidity}:{value.Uid}");
+            await RequireMissingKeys(db, keys.Values.ToArray(), cancellationToken);
+            var selectedUids = keys.Keys.Order().ToArray();
+            var parser = scope.ServiceProvider.GetRequiredService<EmailParserClient>();
+            var response = credentials is null
+                ? await parser.RetrySharedMailboxAsync(selectedUids, state.UidValidity, state.Address, cancellationToken)
+                : await parser.RetryMailboxAsync(selectedUids, state.UidValidity, credentials, cancellationToken);
+            if (response.StatusCode == 409)
+                throw new MailboxRetryRejectedException("邮箱身份已变化，未补录邮件");
+            var payload = ReadMailboxPayload(response, state.Address);
+            if (payload["configured"]?.GetValue<bool>() != true || payload["uid_validity"]?.GetValue<long>() != state.UidValidity)
+                throw new MailboxRetryRejectedException("邮箱身份不一致，未补录邮件");
+            var approved = request.Messages.ToDictionary(value => value.Uid);
+            var parsed = new Dictionary<long, JsonObject>();
+            foreach (var node in payload["items"]!.AsArray())
+            {
+                if (node is not JsonObject item || item["mailbox_uid"] is not JsonValue uidValue ||
+                    !uidValue.TryGetValue<long>(out var uid) || !approved.TryGetValue(uid, out var expected) ||
+                    !parsed.TryAdd(uid, item))
+                    throw new MailboxRetryRejectedException("邮箱返回的邮件集合不一致，未补录邮件");
+                if (item["status"]?.ToString() != "parsed" || item["message"] is not JsonObject ||
+                    item["items"] is not JsonArray || string.IsNullOrWhiteSpace(item["fingerprint"]?.ToString()))
+                    throw new MailboxRetryRejectedException("指定邮件尚未全部解析成功，未补录邮件，请逐封核对");
+                var receivedAt = item["mailbox_received_at"]?.ToString() ?? "";
+                if (receivedAt.Length > 80 || !System.Text.RegularExpressions.Regex.IsMatch(receivedAt, @"^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$") ||
+                    !SameReceivedInstant(expected.ReceivedAt, receivedAt))
+                    throw new MailboxRetryRejectedException("邮箱收件时间与已核对资料不一致，未补录邮件");
+            }
+            if (parsed.Count != approved.Count)
+                throw new MailboxRetryRejectedException("邮箱未返回全部指定邮件，未补录邮件");
+
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            await RequireBackfillAdmin(db, actorId, cancellationToken);
+            var currentCredentials = await BackfillCredentials(db, ownerId, cancellationToken);
+            if (currentCredentials != credentials)
+                throw new MailboxRetryRejectedException("邮箱绑定在补录期间已变化，未补录邮件");
+            var currentState = await db.MailSyncStates.AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+                ?? throw new MailboxRetryRejectedException("邮箱同步身份已变化，未补录邮件");
+            ValidateRetryIdentity(currentState, currentCredentials);
+            ValidateBackfillNamespace(currentState, request);
+            if (currentState.LastUid < state.LastUid)
+                throw new MailboxRetryRejectedException("邮箱同步断点已变化，未补录邮件");
+            var currentSetting = await db.MailSystemSettings.AsNoTracking().SingleAsync(cancellationToken);
+            if (currentSetting.StartDate != setting.StartDate || currentSetting.RetentionDays != setting.RetentionDays ||
+                currentSetting.DailyWorkflowVersion != setting.DailyWorkflowVersion)
+                throw new MailboxRetryRejectedException("邮箱读取范围在补录期间已变化，未补录邮件");
+            ValidateBackfillDates(request.Messages, currentSetting);
+            await RequireMissingKeys(db, keys.Values.ToArray(), cancellationToken);
+            var batches = new Dictionary<string, ImportBatch>();
+            var contacts = new Dictionary<string, MailContact>(StringComparer.OrdinalIgnoreCase);
+            var imported = new List<object>();
+            foreach (var uid in selectedUids)
+            {
+                var item = parsed[uid];
+                var receivedAt = item["mailbox_received_at"]!.ToString();
+                var date = MailboxDateRules.ReceivedDate(receivedAt);
+                if (!batches.TryGetValue(date, out var batch))
+                {
+                    batch = new ImportBatch { Kind = "Email", FileName = $"{date} 收到的邮件", MailReceivedDate = date,
+                        Status = "PendingConfirmation", ParserVersion = "mailbox-imap" };
+                    batches.Add(date, batch); db.ImportBatches.Add(batch);
+                }
+                var fingerprint = item["fingerprint"]!.ToString();
+                var duplicate = await db.ImportEmailItems.AsNoTracking()
+                    .Where(value => value.Fingerprint == fingerprint && value.Status != "failed")
+                    .OrderBy(value => value.Id).Select(value => (long?)value.Id).FirstOrDefaultAsync(cancellationToken);
+                var subject = item["message"]?["subject"]?.ToString() ?? "";
+                var sender = item["message"]?["sender"]?.ToString() ?? "";
+                var email = MailClassificationRules.NormalizeEmail(sender);
+                if (email != "")
+                {
+                    if (!contacts.TryGetValue(email, out var contact))
+                    {
+                        contact = await db.MailContacts.FirstOrDefaultAsync(value => value.Email == email, cancellationToken);
+                        if (contact is null)
+                        {
+                            var internalContact = MailContactRules.IsInternal(email);
+                            contact = new MailContact { Email = email, DisplayName = sender,
+                                ContactType = internalContact ? "Internal" : "Unknown", IsConfirmed = internalContact };
+                            db.MailContacts.Add(contact);
+                        }
+                        contacts.Add(email, contact);
+                    }
+                    contact.MessageCount++; contact.UpdatedAt = DateTime.UtcNow;
+                }
+                var classification = MailClassificationRules.ClassifyParsed(subject, item);
+                var entity = new ImportEmailItem { ImportBatch = batch, MailboxKey = keys[uid],
+                    FileName = item["filename"]?.ToString() ?? $"mail-{uid}.eml", MailSubject = subject, MailSender = sender,
+                    MailReceivedAt = receivedAt, MailReceivedDate = date, Fingerprint = fingerprint,
+                    BusinessFingerprint = item["business_fingerprint"]?.ToString() ?? "", ResultJson = item.ToJsonString(),
+                    Status = duplicate is null ? "pending" : "duplicate", DuplicateOfItemId = duplicate,
+                    ShipmentMode = classification.Mode, WorkCategory = classification.Category,
+                    ClassificationSource = classification.Source, ClassificationConfidence = classification.Confidence,
+                    NeedsClassificationReview = classification.NeedsReview, HandlingStatus = "Pending", HandlingOutcome = "", TaskIdsJson = "[]" };
+                db.ImportEmailItems.Add(entity); batch.TotalCount++; batch.ParsedCount++;
+                // Save IDs inside the single transaction so later selected duplicates
+                // link to real rows, never a guessed or not-yet-assigned ID.
+                await db.SaveChangesAsync(cancellationToken);
+                var version = DailyMailRules.ReviewVersion(entity);
+                var reason = request.Reason.Trim(); var now = DateTime.UtcNow;
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO MailReviewAudits (Company, MailOwnerId, ImportEmailItemId, ActorId, Action, Reason,
+                        BeforeVersion, AfterVersion, OldHandlingStatus, OldHandlingOutcome,
+                        NewHandlingStatus, NewHandlingOutcome, TaskIdsJson, CreatedAt)
+                    VALUES ({entity.Company}, {entity.MailOwnerId}, {entity.Id}, {actorId}, {"BackfillMissing"}, {reason},
+                        {""}, {version}, {""}, {""}, {entity.HandlingStatus}, {entity.HandlingOutcome}, {entity.TaskIdsJson}, {now})
+                    """, cancellationToken);
+                imported.Add(new { uid, itemId = entity.Id, entity.Status, receivedDate = date });
+            }
+            await transaction.CommitAsync(cancellationToken);
+            return new { requested = selectedUids.Length, imported = imported.Count, items = imported.ToArray() };
+        }
+        finally { SyncLock.Release(); }
+    }
+
+    private static async Task RequireBackfillAdmin(AppDbContext db, long actorId, CancellationToken cancellationToken)
+    {
+        if (actorId <= 0 || !await db.Users.AsNoTracking().AnyAsync(value => value.Id == actorId && value.IsActive && value.Role == "admin", cancellationToken))
+            throw new MailboxRetryRejectedException("只有管理员可以补录明确缺失的邮件", 403);
+    }
+
+    private static async Task<ServerMailboxCredentials?> BackfillCredentials(AppDbContext db, long? ownerId, CancellationToken cancellationToken)
+    {
+        if (db.Company == "Xingxin") return null;
+        var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(value => value.Id == ownerId && value.IsActive &&
+            (value.CompanyAccess == "Huadeng" || value.CompanyAccess == "Both" || value.Role == "admin"), cancellationToken);
+        if (owner is null || !ServerMailboxConfiguration.TryGet(owner, out var credentials, out _))
+            throw new MailboxRetryRejectedException("所选邮箱绑定或配置不可用");
+        return credentials;
+    }
+
+    private static void ValidateBackfillNamespace(MailSyncState state, MissingMailboxBackfillRequest request)
+    {
+        static string Hash(string value) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+        if (state.UidValidity != request.UidValidity || state.LastUid < request.CapturedLastUid ||
+            Hash(state.Address) != request.AddressSHA256 || Hash(state.MailboxIdentity) != request.MailboxIdentitySHA256 ||
+            Hash(state.ConfigurationKey) != request.ConfigurationKeySHA256)
+            throw new MailboxRetryRejectedException("邮箱身份与已核对资料不一致，未补录邮件");
+    }
+
+    private static void ValidateBackfillDates(IReadOnlyList<MissingMailboxMessage> messages, MailSystemSetting setting)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(8));
+        if (setting.RetentionDays is < 30 or > 730 || !DateOnly.TryParseExact(setting.StartDate, "yyyy-MM-dd",
+            System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var start))
+            throw new MailboxRetryRejectedException("邮箱读取范围配置无效，未补录邮件");
+        var retentionStart = today.AddDays(-setting.RetentionDays);
+        foreach (var message in messages)
+        {
+            if (message.ReceivedAt.Length > 80 || !System.Text.RegularExpressions.Regex.IsMatch(message.ReceivedAt, @"^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$") ||
+                !DateTimeOffset.TryParse(message.ReceivedAt, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var instant))
+                throw new MailboxRetryRejectedException("请提供带时区的已核对收件时间", 400);
+            var date = DateOnly.FromDateTime(instant.ToOffset(TimeSpan.FromHours(8)).DateTime);
+            if (date < start || date < retentionStart || date > today)
+                throw new MailboxRetryRejectedException("指定邮件超出当前起始日期或在线保存范围，未补录邮件");
+        }
+    }
+
+    private static async Task RequireMissingKeys(AppDbContext db, string[] keys, CancellationToken cancellationToken)
+    {
+        if (await db.ImportEmailItems.IgnoreQueryFilters().AsNoTracking().AnyAsync(value => keys.Contains(value.MailboxKey), cancellationToken))
+            throw new MailboxRetryRejectedException("指定邮件已有记录，请使用现有记录核对或重试，未补录邮件");
+    }
+
     private static void ValidateRetryIdentity(MailSyncState state, ServerMailboxCredentials? credentials)
     {
         if (string.IsNullOrWhiteSpace(state.Address) || state.UidValidity is <= 0 or > uint.MaxValue ||
@@ -542,3 +739,8 @@ public sealed class MailboxRetryRejectedException(string message, int statusCode
 {
     public int StatusCode { get; } = statusCode;
 }
+
+public sealed record MissingMailboxMessage(long Uid, string ReceivedAt);
+public sealed record MissingMailboxBackfillRequest(long UidValidity, long CapturedLastUid,
+    string AddressSHA256, string MailboxIdentitySHA256, string ConfigurationKeySHA256,
+    IReadOnlyList<MissingMailboxMessage> Messages, string Reason);

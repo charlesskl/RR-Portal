@@ -6342,8 +6342,8 @@ function createDepartmentExportButton(dept, quoteId) {
 function installDepartmentExport(host, dept, quoteId) {
   if (!host || !DEPARTMENT_EXPORT_NAMES[dept]) return;
   const sanitize = () => {
-    // 喷油部、电子部、搪胶和车缝部保留报价导入入口，其余部门沿用手动填写模式。
-    if (!['painting', 'electronic', 'slush', 'sewing'].includes(dept)) {
+    // 保留支持 Excel 报价导入的部门入口。
+    if (!['painting', 'electronic', 'slush', 'sewing', 'assembly'].includes(dept)) {
       host.querySelectorAll('button').forEach(button => {
         if (dept === 'assembly' && button.closest('[data-mixed-assembly-import]')) return;
         if (/导入/.test(button.textContent || '') || /上传.*报价/.test(button.textContent || '')) button.remove();

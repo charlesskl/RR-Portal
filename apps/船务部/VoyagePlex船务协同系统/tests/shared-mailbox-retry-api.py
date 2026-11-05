@@ -2,6 +2,7 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import shutil
 from pathlib import Path
 import secrets
 import socket
@@ -15,6 +16,10 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 DLL = ROOT / "server/VoyagePlex.Api/bin/Debug/net8.0/VoyagePlex.Api.dll"
+DOTNET = os.environ.get("DOTNET_EXECUTABLE") or shutil.which("dotnet")
+if not DOTNET:
+    raise RuntimeError("Install .NET 8 or set DOTNET_EXECUTABLE to run the isolated API tests")
+DOTNET_PATH = str(Path(DOTNET).resolve().parent) + ":/usr/bin:/bin:/usr/sbin:/sbin"
 ADDRESS = "shared@example.invalid"
 DATE = "2026-10-13T00:00:00Z"
 
@@ -88,13 +93,13 @@ def run():
                 assert response.status == expected, (path, response.status, value)
                 return value
 
-        env = {"PATH": "/Users/fovo/.dotnet:/usr/bin:/bin", "HOME": str(owned),
+        env = {"PATH": DOTNET_PATH, "HOME": str(owned),
                "DOTNET_CLI_TELEMETRY_OPTOUT": "1", "ASPNETCORE_ENVIRONMENT": "Production",
                "ASPNETCORE_URLS": base, "ConnectionStrings__Default": f"Data Source={db_path}",
                "EmailParser__BaseUrl": f"http://127.0.0.1:{parser.server_port}",
                "VOYAGEPLEX_HUADENG_MAILBOXES_JSON": "[]", "Logging__LogLevel__Default": "Error"}
         with (owned / "api.log").open("wb") as log:
-            api = subprocess.Popen(["/Users/fovo/.dotnet/dotnet", str(DLL)], cwd=owned, env=env, stdout=log, stderr=log)
+            api = subprocess.Popen([DOTNET, str(DLL)], cwd=owned, env=env, stdout=log, stderr=log)
             try:
                 admin = Client()
                 deadline = time.monotonic() + 30

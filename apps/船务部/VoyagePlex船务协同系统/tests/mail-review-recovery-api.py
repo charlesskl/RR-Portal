@@ -7,6 +7,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import shutil
 from pathlib import Path
 import secrets
 import socket
@@ -20,6 +21,10 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 DLL = ROOT / "server/VoyagePlex.Api/bin/Debug/net8.0/VoyagePlex.Api.dll"
+DOTNET = os.environ.get("DOTNET_EXECUTABLE") or shutil.which("dotnet")
+if not DOTNET:
+    raise RuntimeError("Install .NET 8 or set DOTNET_EXECUTABLE to run the isolated API tests")
+DOTNET_PATH = str(Path(DOTNET).resolve().parent) + ":/usr/bin:/bin:/usr/sbin:/sbin"
 PREFIX = "MR-" + secrets.token_hex(5)
 
 
@@ -73,7 +78,7 @@ def run():
         # No .env/appsettings or user HOME configuration is read: content root and
         # working directory are our temp directory, and environment is allowlisted.
         env = {
-            "PATH": "/Users/fovo/.dotnet:/usr/bin:/bin:/usr/sbin:/sbin",
+            "PATH": DOTNET_PATH,
             "HOME": str(owned), "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
             "ASPNETCORE_ENVIRONMENT": "Production", "ASPNETCORE_URLS": base,
             "ConnectionStrings__Default": f"Data Source={db_path}",
@@ -82,7 +87,7 @@ def run():
             "Logging__LogLevel__Default": "Error",
         }
         with open(owned / "api.private.log", "wb") as log:
-            process = subprocess.Popen(["/Users/fovo/.dotnet/dotnet", str(DLL)], cwd=owned,
+            process = subprocess.Popen([DOTNET, str(DLL)], cwd=owned,
                                        env=env, stdout=log, stderr=log)
             try:
                 deadline = time.monotonic() + 30

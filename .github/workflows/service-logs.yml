@@ -153,7 +153,9 @@ jobs:
                         assert len(actual)==1
                         after=actual[0]
                         changes=changed_paths(identity_fields(before),identity_fields(after))
-                        result['originalIdentityDiff'][kind]={'equal':not changes,'changedPaths':changes,'before':safe_identity(before),'after':safe_identity(after)}
+                        result['originalIdentityDiff'][kind]={'equal':not changes,'changedPaths':changes,'before':safe_identity(before),'after':safe_identity(after),
+                            'mountRecordsEqualIgnoringOrder':sorted(json.dumps(item,sort_keys=True,separators=(',',':')) for item in before['Mounts'])==sorted(json.dumps(item,sort_keys=True,separators=(',',':')) for item in after['Mounts']),
+                            'beforeMountCount':len(before['Mounts']),'afterMountCount':len(after['Mounts'])}
                     # Only the identified bounded apt build step may expose whitelisted diagnostics.
                     try:
                         values=json.loads(subprocess.check_output(['docker','inspect','--type','container','2786a7dec984'],stderr=subprocess.DEVNULL,text=True,timeout=15))

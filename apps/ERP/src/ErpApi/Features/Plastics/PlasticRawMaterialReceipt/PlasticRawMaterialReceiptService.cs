@@ -1,4 +1,5 @@
 using Dapper;
+using ErpApi.Engines.Authorization;
 using ErpApi.Engines.DocumentNumber;
 using ErpApi.Features.MasterData;
 using ErpApi.Infrastructure.Db;
@@ -20,6 +21,7 @@ public sealed class PlasticRawMaterialReceiptService(ISqlConnectionFactory facto
         using var c = factory.Create();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
+        var newPolicy = await RawMaterialReceiptPolicy.PrepareCreateAsync(c, tx, dto, user);
         // 保存即拦：入仓数量不得超过原料采购订单订货数量(备品行除外)
         await ValidateOrderQtyAsync(c, tx, dto.订单单号, dto.明细.Select(l => (l.原料编号, l.数量, l.备品)));
 
@@ -38,6 +40,7 @@ VALUES(@单号,@原料编号,@原料名称,@产地,@每包重量,@单价类型,@
                 new { 单号, l.原料编号, l.原料名称, l.产地, l.每包重量, l.单价类型, l.单位, l.数量, l.单价,
                       金额 = l.数量 * (l.单价 ?? 0m), l.备注, 备品 = l.备品 == "1" ? "1" : "0" }, tx);
 
+        if (newPolicy) await new AuditLogger().WriteAsync(DocType,"新增",user,$"单号={单号}",c,tx);
         tx.Commit();
         return 单号;
     }
@@ -73,17 +76,19 @@ FROM [原料入仓明细单] WHERE [单号]=@单号 ORDER BY [ID];", new { 单�
         return new PlasticRawMaterialReceiptDetailDto { 单头 = header, 明细 = lines };
     }
 
-    public async Task<bool> DeleteAsync(string 单号)
+    public async Task<bool> DeleteAsync(string 单号, string? user = null)
     {
         using var c = factory.Create();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
+        var newPolicy = await RawMaterialReceiptPolicy.PrepareDeleteAsync(c,tx,单号,user ?? "");
         var 审核 = await c.ExecuteScalarAsync<string?>(
             "SELECT ISNULL([审核],'0') FROM [原料入仓单] WITH (UPDLOCK, HOLDLOCK) WHERE [单号]=@单号", new { 单号 }, tx);
         if (审核 is null) return false;
         if (审核 == "1") throw new InvalidOperationException("已审核的原料入仓单不能删除，请先反审核。");
         await c.ExecuteAsync("DELETE FROM [原料入仓明细单] WHERE [单号]=@单号", new { 单号 }, tx);
         await c.ExecuteAsync("DELETE FROM [原料入仓单] WHERE [单号]=@单号", new { 单号 }, tx);
+        if (newPolicy) await new AuditLogger().WriteAsync(DocType,"删除",user ?? "",$"单号={单号}",c,tx);
         tx.Commit();
         return true;
     }

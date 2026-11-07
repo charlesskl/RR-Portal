@@ -21,6 +21,7 @@ public class PlasticRawMaterialDemandServiceDbTests(DbFixture fx)
 
     private static void Clean(SqlConnection c)
     {
+        c.Execute("DELETE FROM [c操作记录] WHERE [表名]=N'原料生产需求表' AND [操作记录]=N'单号=P113-RMD-OLD'");
         c.Execute("DELETE FROM [原料生产需求明细单] WHERE [原料编号]=N'RMD-PM'");
         c.Execute("DELETE FROM [原料生产需求表] WHERE [生产车间]=N'RMD测试车间'");
     }
@@ -38,14 +39,24 @@ public class PlasticRawMaterialDemandServiceDbTests(DbFixture fx)
         }
     };
 
+    private static string Legacy(SqlConnection c)
+    {
+        const string number = "P113-RMD-OLD";
+        c.Execute(@"INSERT INTO [原料生产需求表]([单号],[啤机生产单号],[制单人],[生产车间],[数量KG],[数量包],[审核])
+VALUES(@number,N'PJ-RMD',N'张三',N'RMD测试车间',8,2,N'0');
+INSERT INTO [原料生产需求明细单]([单号],[原料编号],[原料名称],[需求数量KG],[需求数量包])
+VALUES(@number,N'RMD-PM',N'ABS粒',5,1),(@number,N'RMD-PM',N'ABS粒',3,1)", new { number });
+        return number;
+    }
+
     [SkippableFact]
-    public async Task Create_then_Get_sums_kg_and_bags()
+    public async Task New_manual_creation_is_rejected_and_historical_demand_remains_readable()
     {
         using var c = fx.Open(); Clean(c);
         try
         {
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
-            Assert.StartsWith("YLX", 单号);
+            Assert.Contains("自动生成", (await Assert.ThrowsAsync<InvalidOperationException>(() => Svc().CreateAsync(MakeDto(), "tester"))).Message);
+            var 单号 = Legacy(c);
             var d = await Svc().GetAsync(单号);
             Assert.NotNull(d);
             Assert.Equal(8m, d!.单头!.数量KG);
@@ -65,7 +76,7 @@ public class PlasticRawMaterialDemandServiceDbTests(DbFixture fx)
         var engine = new PostingEngine(Factory(), new AuditLogger());
         try
         {
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
+            var 单号 = Legacy(c);
             Assert.True(await engine.ApproveAsync("原料生产需求表", 单号, "tester"));
             var d = await Svc().GetAsync(单号);
             Assert.Equal("1", d!.单头!.审核);
@@ -82,7 +93,7 @@ public class PlasticRawMaterialDemandServiceDbTests(DbFixture fx)
         var engine = new PostingEngine(Factory(), new AuditLogger());
         try
         {
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
+            var 单号 = Legacy(c);
             Assert.True(await engine.ApproveAsync("原料生产需求表", 单号, "tester"));
             await Assert.ThrowsAsync<InvalidOperationException>(() => Svc().DeleteAsync(单号));
         }

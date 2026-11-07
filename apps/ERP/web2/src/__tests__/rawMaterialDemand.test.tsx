@@ -3,7 +3,7 @@
 // 选原料带出 原料名称/单位、合计行。
 // 汇总:默认本月 + 列表渲染 + 合计(需求数量KG/包)、双击行弹原料需求表详情(单头+明细+合计)。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { permRowsToMap, renderWithProviders } from "../test/setup";
 import PlasticRawMaterialDemandPage from "@/pages/PlasticRawMaterialDemandPage";
 import PlasticRawMaterialDemandSummaryPage from "@/pages/PlasticRawMaterialDemandSummaryPage";
@@ -24,7 +24,7 @@ const json = (v: unknown, status = 200) =>
   new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
 
 const pickOption = (label: string, option: string) => {
-  fireEvent.click(screen.getByLabelText(label));
+  fireEvent.click(screen.getByLabelText(label, { selector: "button" }));
   fireEvent.click(screen.getByRole("option", { name: option }));
 };
 
@@ -80,7 +80,10 @@ function installFetch(perms: unknown[] = PERMS) {
       const url = String(input);
       calls.push({ url, method: init?.method ?? "GET", body: init?.body as string });
       const p = new URL(url, "http://test").pathname;
+      if (p.endsWith("/plastic-raw-material-stock-issue/access")) return json({ isAdmin: true, canSupervisor: true, canManager: true, canWarehousePost: true, canReverse: true });
+      if (p === "/api/organization/raw-issue-maker-options") return json([{ personnelName: "张三", personnelNumber: "E1" }]);
       if (p.endsWith("/me/permissions")) return json(permRowsToMap(perms));
+      if (p === "/api/plastic-raw-material-demand/molding-sources") return json({ items: [], total: 0 });
       if (p === "/api/plastic-raw-material-demand/summary") return json([SUMMARY_ROW]);
       if (p === "/api/plastic-raw-material-demand") {
         if (init?.method === "POST") return json({ 单号: "D-NEW" });
@@ -111,65 +114,37 @@ afterEach(() => {
 });
 
 describe("PlasticRawMaterialDemandPage(原料生产需求表)", () => {
-  it("保存校验:制单人必填 -> 至少一行有效明细;选原料带出名称/单位后 POST 载荷", async () => {
+  it("新入口只查询自动需求，历史手工单不能继续新建或改写", async () => {
     const calls = installFetch();
     renderWithProviders(<PlasticRawMaterialDemandPage />, "/plastic-raw-material-demand");
-    await screen.findByText("原料生产需求表(新建)");
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    await screen.findByText("请选制单人");
-    // 选制单人(人事档案选择器)
-    const pickBtns = screen.getAllByRole("button", { name: "选择" });
-    fireEvent.click(pickBtns[0]);
-    const dlg = await screen.findByRole("dialog");
-    await waitFor(() => expect(dlg).toHaveTextContent("张三"));
-    fireEvent.click(screen.getByText("张三").closest("tr")!);
-    await waitFor(() => expect(screen.getByLabelText("制单人")).toHaveValue("张三"));
-    // 无明细仍拦截
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    await screen.findByText("请至少录入一行有效明细(原料编号+需求数量)");
-    // 加行 + 选原料 + 填数量
-    fireEvent.click(screen.getByRole("button", { name: "加一行" }));
-    fireEvent.click(screen.getByRole("button", { name: "选原料" }));
-    const matDlg = await screen.findByRole("dialog");
-    await waitFor(() => expect(matDlg).toHaveTextContent("RM-1"));
-    fireEvent.click(screen.getByText("ABS 757").closest("tr")!);
-    await waitFor(() => expect(screen.getByLabelText("原料编号")).toHaveValue("RM-1"));
-    fireEvent.change(screen.getByLabelText("需求数量(KG)"), { target: { value: "50" } });
-    fireEvent.change(screen.getByLabelText("需求数量(包)"), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    await waitFor(() => {
-      const post = calls.find(
-        (c) => c.url.endsWith("/plastic-raw-material-demand") && c.method === "POST",
-      );
-      expect(post).toBeTruthy();
-      const body = JSON.parse(post!.body!);
-      expect(body.制单人).toBe("张三");
-      expect(body.领料备注).toBe("生产领料");
-      expect(body.明细).toEqual([
-        expect.objectContaining({ 原料编号: "RM-1", 原料名称: "ABS 757", 单位: "KG", 需求数量KG: 50, 需求数量包: 2 }),
-      ]);
-    });
-    await screen.findByText("原料生产需求表已创建");
+    await screen.findByText("暂无自动需求");
+    expect(screen.queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "新建" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "历史手工需求" }));
+    await screen.findByText("D-001");
+    fireEvent.click(screen.getByRole("button", { name: "查看原单" }));
+    const dialog = await screen.findByRole("dialog", { name: "历史需求原单 · D-001" });
+    expect(await within(dialog).findByText("ABS 757")).toBeInTheDocument();
+    expect(within(dialog).getByText("50")).toBeInTheDocument();
+    expect(within(dialog).getByText("2")).toBeInTheDocument();
+    expect(calls.every(c => c.method === "GET")).toBe(true);
   });
 
-  it("?open= 直开查看模式:表单回填只读,合计行正确;审核 POST 后刷新", async () => {
+  it("?open= 保留历史原单查询及打印，不调用审核或重算接口", async () => {
     const calls = installFetch();
     renderWithProviders(<PlasticRawMaterialDemandPage />, "/plastic-raw-material-demand?open=D-001");
-    await screen.findByText("原料生产需求表 · D-001");
-    expect(screen.getByLabelText("啤机生产单号")).toHaveValue("PJ-100");
-    expect(screen.getByLabelText("生产车间")).toBeDisabled();
-    expect(screen.getByText("需求数量(KG)合计:")).toHaveTextContent("50");
-    expect(screen.getByText("需求数量(包)合计:")).toHaveTextContent("2");
-    fireEvent.click(screen.getByRole("button", { name: "审核" }));
-    await waitFor(() =>
-      expect(calls.some((c) => c.url.includes("/plastic-raw-material-demand/D-001/approve"))).toBe(true),
-    );
+    const dialog = await screen.findByRole("dialog", { name: "历史需求原单 · D-001" });
+    expect(await within(dialog).findByText("ABS 757")).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("张三"); expect(dialog).toHaveTextContent("一车间");
+    expect(within(dialog).getByRole("button", { name: "打印历史原单" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "审核" })).not.toBeInTheDocument();
+    expect(calls.every(c => c.method === "GET")).toBe(true);
   });
 
   it("无「打开」权限:整页无权提示", async () => {
     installFetch([]);
     renderWithProviders(<PlasticRawMaterialDemandPage />, "/plastic-raw-material-demand");
-    await screen.findByText("无权访问该页面");
+    await screen.findByText(/缺少「原料生产需求表·打开」权限/);
   });
 });
 
@@ -177,6 +152,7 @@ describe("PlasticRawMaterialDemandSummaryPage(原料生产需求汇总)", () => 
   it("列表渲染 + 合计(KG/包);双击行弹原料需求表详情(单头+明细+合计)", async () => {
     const calls = installFetch();
     renderWithProviders(<PlasticRawMaterialDemandSummaryPage />, "/plastic-raw-material-demand-summary");
+    fireEvent.click(screen.getByRole("tab", { name: "历史手工需求汇总" }));
     await screen.findByText("PJ-100");
     expect(screen.getByText("ABS 757")).toBeInTheDocument();
     expect(screen.getAllByText("已审核").length).toBeGreaterThan(0);

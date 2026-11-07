@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace ErpApi.Features.Plastics.PlasticRawMaterialStockIssue;
 
 public sealed class PlasticRawMaterialStockIssueHeaderDto
@@ -23,6 +25,7 @@ public sealed class PlasticRawMaterialStockIssueHeaderDto
 public sealed class PlasticRawMaterialStockIssueLineDto
 {
     public long ID { get; set; }
+    public string? 来源啤机采购单号 { get; set; }
     public string? 啤机生产单号 { get; set; }
     public string? 生产单号 { get; set; }   // 联动生产制单.生产单号(与啤机生产单号并存,语义不同)
     public DateTime? 开单日期 { get; set; }
@@ -44,17 +47,48 @@ public sealed class PlasticRawMaterialStockIssueDetailDto
 
 public sealed class PlasticRawMaterialStockIssueCreateLineDto
 {
+    [MaxLength(80)]
+    public string? 来源啤机采购单号 { get; set; }
     public string? 啤机生产单号 { get; set; }
     public string? 生产单号 { get; set; }   // 联动生产制单.生产单号
     public DateTime? 开单日期 { get; set; }
     public string? 啤机外发单号 { get; set; }
+    [Required, MaxLength(80)]
     public string? 原料编号 { get; set; }
     public string? 原料名称 { get; set; }
     public string? 产地 { get; set; }
     public decimal? 每包重量 { get; set; }
     public string? 单位 { get; set; }
+    [Range(typeof(decimal), "0.00000001", "9999999999.99999999")]
     public decimal 数量 { get; set; }
     public string? 备注 { get; set; }
+}
+
+public sealed class PlasticRawMaterialIssueSourceHeader
+{
+    public string 单号 { get; set; } = "";
+    public DateTime? 订购日期 { get; set; }
+    public string? 供应商名称 { get; set; }
+    public int 原料种数 { get; set; }
+}
+
+public sealed class PlasticRawMaterialIssueSourceDetail
+{
+    public string 单号 { get; set; } = "";
+    public List<PlasticRawMaterialIssueSourceLine> 明细 { get; set; } = [];
+}
+
+public sealed class PlasticRawMaterialIssueSourceLine
+{
+    public string 原料编号 { get; set; } = "";
+    public string 原料名称 { get; set; } = "";
+    public string 单位 { get; set; } = "";
+    public decimal 每包重量 { get; set; }
+    public decimal 每库存单位KG { get; set; }
+    public decimal 需求数量KG { get; set; }
+    public decimal 需求数量 { get; set; }
+    public decimal 已申请数量 { get; set; }
+    public decimal 可申请数量 { get; set; }
 }
 
 public sealed class PlasticRawMaterialStockIssueCreateDto
@@ -69,6 +103,8 @@ public sealed class PlasticRawMaterialStockIssueCreateDto
 
 public sealed class PlasticRawMaterialIssueProgressRow
 {
+    public string 来源类型 { get; set; } = "历史需求表";
+    public string? 来源啤机采购单号 { get; set; }
     public DateTime? 开单日期 { get; set; }
     public string? 需求单号 { get; set; }
     public string? 啤机生产单号 { get; set; }
@@ -87,6 +123,8 @@ public sealed class PlasticRawMaterialIssueProgressRow
 
 public sealed class PlasticRawMaterialIssueProgressDetailRow
 {
+    public string 来源类型 { get; set; } = "历史需求表";
+    public string? 来源啤机采购单号 { get; set; }
     public DateTime? 开单日期 { get; set; }
     public string? 啤机生产单号 { get; set; }
     public string? 领料备注 { get; set; }
@@ -105,6 +143,7 @@ public sealed class PlasticRawMaterialIssueProgressDetailRow
 
 public sealed class PlasticRawMaterialOutsourceShortageRow
 {
+    public string 来源类型 { get; set; } = "历史需求表";
     public string? 供应商编号 { get; set; }
     public string? 供应商名称 { get; set; }
     public string? 供应商类别 { get; set; }

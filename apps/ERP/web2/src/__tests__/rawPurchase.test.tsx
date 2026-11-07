@@ -90,11 +90,13 @@ function installFetch(perms: unknown[] = PERMS) {
           { 原料编号: "RM-1", 原料名称: "ABS 757", 规格: "25KG/包", 物料类别: "ABS", 单位: "KG", 当前库存: 10, 安全库存: 200, 生产需求: 500, 可购数量: 240 },
           { 原料编号: "RM-2", 原料名称: "PP 料", 规格: "", 物料类别: "PP", 单位: "KG", 当前库存: 100, 安全库存: 50, 生产需求: 0, 可购数量: 0 },
         ]);
+      if (p.endsWith("/purchase-limits")) return json([{ 原料编号: "RM-1", 单位: "KG", 常用原料: true, 可购上限: null }]);
       if (p === "/api/plastic-raw-material-purchase-order") {
         if (init?.method === "POST") return json({ 单号: "RPO-NEW" });
         return json({ items: [PO_HEADER], total: 1 });
       }
       if (p === "/api/plastic-raw-material-purchase-order/RPO-1") return json(PO_DETAIL);
+      if (p === "/api/plastic-raw-material-purchase-order/RPO-NEW") return json({ ...PO_DETAIL, 单头: { ...PO_HEADER, 单号: "RPO-NEW" } });
       if (p === "/api/plastic-raw-material-purchase-progress") return json(PROGRESS);
       if (p.endsWith("/supervisor-approve") || p.endsWith("/manager-approve") || p.endsWith("/approve") || p.endsWith("/unapprove"))
         return json({});

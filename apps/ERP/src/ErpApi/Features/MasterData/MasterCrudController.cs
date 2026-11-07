@@ -1,4 +1,5 @@
 using System.Reflection;
+using ErpApi.Features.Plastics;
 using System.Security.Claims;
 using ErpApi.Data.Entities;
 using ErpApi.Engines.Authorization;
@@ -82,6 +83,17 @@ public abstract class MasterCrudController<T>(
             foreach (var p in PriceProps) p.SetValue(entity, null);
         var err = await ValidateForSaveAsync(entity);
         if (err is not null) return BadRequest(new { 消息 = err });
+        if (entity is 塑胶原料资料 raw)
+        {
+            try
+            {
+                var saved = await new RawMaterialMasterWritePolicy(factory, audit).SaveAsync(null, raw, CurrentUser);
+                await MaskPricesAsync(new[] { entity });
+                return CreatedAtAction(nameof(Get), new { id = saved!.ID }, saved);
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
+        }
         T created;
         try
         {
@@ -116,6 +128,16 @@ public abstract class MasterCrudController<T>(
         }
         var err = await ValidateForSaveAsync(entity);
         if (err is not null) return BadRequest(new { 消息 = err });
+        if (entity is 塑胶原料资料 raw)
+        {
+            try
+            {
+                if (await new RawMaterialMasterWritePolicy(factory, audit).SaveAsync(id, raw, CurrentUser) is null) return NotFound();
+                return NoContent();
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
+        }
         try
         {
             if (!await svc.UpdateAsync(id, entity)) return NotFound();
@@ -138,6 +160,16 @@ public abstract class MasterCrudController<T>(
     public async Task<IActionResult> Delete(long id)
     {
         if (!await AllowAsync(PermissionAction.删除)) return Forbid();
+        if (typeof(T) == typeof(塑胶原料资料))
+        {
+            try
+            {
+                if (!await new RawMaterialMasterWritePolicy(factory, audit).DeleteAsync(id, CurrentUser)) return NotFound();
+                return NoContent();
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
+        }
         try
         {
             if (!await svc.DeleteAsync(id)) return NotFound();

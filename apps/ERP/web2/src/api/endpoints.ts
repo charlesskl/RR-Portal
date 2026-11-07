@@ -1190,6 +1190,9 @@ export const messagesApi = {
 };
 
 export const accountApi = {
+  rawWorkflowRole: (user: string) => api<import("./types").RawWorkflowRole>(`/admin/accounts/${enc(user)}/raw-workflow-role`),
+  saveRawWorkflowRole: (user: string, positionCode: import("./types").RawWorkflowPosition | null) =>
+    api<void>(`/admin/accounts/${enc(user)}/raw-workflow-role`, { method: "PUT", body: JSON.stringify({ positionCode }) }),
   list: (keyword = "") => api<AccountRow[]>(`/admin/accounts${qs({ keyword })}`),
   register: (body: { 用户名: string; 初始密码: string }) =>
     api<void>("/admin/accounts", { method: "POST", body: JSON.stringify(body) }),
@@ -1537,6 +1540,10 @@ export const rawPurchaseAnalysisApi = {
 
 // 原料生产需求表(单级审核;查询汇总同资源 /summary)
 export const rawMaterialDemandApi = {
+  moldingSources: (page = 1, size = 20, keyword = "", approvedOnly = false) =>
+    api<Paged<import("./types").RawMoldingDemandSource>>(`/plastic-raw-material-demand/molding-sources${qs({ page, size, keyword, approvedOnly })}`),
+  moldingSource: (number: string) =>
+    api<import("./types").RawMoldingDemandDetail>(`/plastic-raw-material-demand/molding-sources/${enc(number)}`),
   list: (page = 1, size = 10, keyword = "") =>
     api<Paged<RMDHeader>>(`/plastic-raw-material-demand${qs({ page, size, keyword })}`),
   summary: (p: { 起: string; 止: string; keyword?: string; 领料备注?: string; 审核情况?: string }) =>
@@ -1557,6 +1564,8 @@ export const rawMaterialDemandApi = {
 
 // 原料采购订单(三级流转:主管审核 -> 经理审核 -> 审核=下发)
 export const rawPurchaseOrderApi = {
+  purchaseLimits: (keyword = "", excludeOrder?: string) =>
+    api<RawPurchaseAnalysisRow[]>(`/plastic-raw-material-purchase-order/purchase-limits${qs({ keyword, excludeOrder })}`),
   list: (page = 1, size = 10, keyword = "") =>
     api<Paged<RMPOHeader>>(`/plastic-raw-material-purchase-order${qs({ page, size, keyword })}`),
   get: (单号: string) => api<RMPODetail>(`/plastic-raw-material-purchase-order/${enc(单号)}`),
@@ -1612,8 +1621,14 @@ export const rawReceiptApi = {
     api<RawReceiptQuerySummaryRow[]>(`/plastic-raw-material-receipt-query/summary${qs({ ...q })}`),
 };
 
-// 原料出库表(三级流转;「调入清单」数据源=已审核原料生产需求表)
+// 原料出库表：已审核啤机采购快照领料，三级流转后由仓管确认出库。
 export const rawStockIssueApi = {
+  access: () => api<import("./types").RawIssueAccess>("/plastic-raw-material-stock-issue/access"),
+  makerOptions: (keyword?: string) => api<import("./types").RawIssueMakerOption[]>(`/organization/raw-issue-maker-options${qs({ keyword })}`),
+  sources: (page = 1, size = 20, keyword = "") =>
+    api<Paged<import("./types").RawIssueSource>>(`/plastic-raw-material-stock-issue/sources${qs({ page, size, keyword })}`),
+  source: (number: string) =>
+    api<import("./types").RawIssueSourceDetail>(`/plastic-raw-material-stock-issue/sources/${enc(number)}`),
   list: (page = 1, size = 10, keyword = "") =>
     api<Paged<RSIHeader>>(`/plastic-raw-material-stock-issue${qs({ page, size, keyword })}`),
   get: (单号: string) => api<RSIDetail>(`/plastic-raw-material-stock-issue/${enc(单号)}`),

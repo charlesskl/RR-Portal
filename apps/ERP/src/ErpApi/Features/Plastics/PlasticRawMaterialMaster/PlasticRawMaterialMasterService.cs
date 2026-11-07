@@ -1,4 +1,5 @@
 using Dapper;
+using ErpApi.Engines.Inventory;
 using ErpApi.Features.MasterData;
 using ErpApi.Infrastructure.Db;
 namespace ErpApi.Features.Plastics.PlasticRawMaterialMaster;
@@ -6,6 +7,14 @@ namespace ErpApi.Features.Plastics.PlasticRawMaterialMaster;
 // 塑胶原料资料左树 + 右表只读查询。增删改复用 PlasticRawMaterialController(/api/master/plastic-raw-materials)。
 public sealed class PlasticRawMaterialMasterService(ISqlConnectionFactory factory)
 {
+    // 只启用明确配方组分的新台账；其他历史原料保留原主档库存口径。
+    private const string AutomaticStockSql = @"
+SELECT o.[原料编号] AS Code,o.[库存单位] AS Unit,o.[每库存单位KG] AS KgPerUnit,
+       ISNULL(MAX(s.[库存数量]),0) AS Quantity
+FROM [原料自动扣料期初] o
+LEFT JOIN (" + RawMaterialInventorySql.StockRows + @") s ON s.[原料编号]=o.[原料编号]
+GROUP BY o.[原料编号],o.[库存单位],o.[每库存单位KG]";
+
     public async Task<IReadOnlyList<PlasticRawMaterialCategoryNode>> CategoriesAsync()
     {
         using var c = factory.Create();
@@ -26,16 +35,18 @@ ORDER BY [物料类别];");
         var cat = string.IsNullOrWhiteSpace(类别) ? null : 类别.Trim();
         var kw = string.IsNullOrWhiteSpace(keyword) ? null : $"%{keyword.Trim()}%";
         using var c = factory.Create();
-        using var multi = await c.QueryMultipleAsync(@"
+        using var multi = await c.QueryMultipleAsync($@"
 SELECT COUNT(*) FROM [塑胶原料资料]
+LEFT JOIN ({AutomaticStockSql}) automaticStock ON automaticStock.Code=[物料编号]
 WHERE (@cat IS NULL OR [物料类别] = @cat)
   AND (@kw IS NULL OR [物料编号] LIKE @kw OR [物料名称] LIKE @kw OR [规格] LIKE @kw OR [颜色] LIKE @kw OR [供应商名称] LIKE @kw OR [商品名称] LIKE @kw)
-  AND (@onlyStock = 0 OR ISNULL([库存],0) > 0);
-SELECT [ID],[物料类别],[物料编号],[物料名称],[规格],[颜色],[单位],[仓位号],[商品名称],[单价],[销售价],[起订量],[安全库存],[库存],[最低库存],[最高库存],[供应商编号],[供应商名称],[备注]
+  AND (@onlyStock = 0 OR COALESCE(automaticStock.Quantity,[库存],0)>0);
+SELECT [ID],[物料类别],[物料编号],[物料名称],[规格],[颜色],COALESCE(automaticStock.Unit,[单位]) AS 单位,[仓位号],[商品名称],[单价],[销售价],[起订量],[安全库存],[常用原料],[每包重量],COALESCE(automaticStock.Quantity,[库存]) AS 库存,[最低库存],[最高库存],[供应商编号],[供应商名称],[备注]
 FROM [塑胶原料资料]
+LEFT JOIN ({AutomaticStockSql}) automaticStock ON automaticStock.Code=[物料编号]
 WHERE (@cat IS NULL OR [物料类别] = @cat)
   AND (@kw IS NULL OR [物料编号] LIKE @kw OR [物料名称] LIKE @kw OR [规格] LIKE @kw OR [颜色] LIKE @kw OR [供应商名称] LIKE @kw OR [商品名称] LIKE @kw)
-  AND (@onlyStock = 0 OR ISNULL([库存],0) > 0)
+  AND (@onlyStock = 0 OR COALESCE(automaticStock.Quantity,[库存],0)>0)
 ORDER BY [物料编号] OFFSET (@page-1)*@size ROWS FETCH NEXT @size ROWS ONLY;",
             new { cat, kw, page, size, onlyStock = onlyStock ? 1 : 0 });
         var total = await multi.ReadFirstAsync<int>();
@@ -44,47 +55,9 @@ ORDER BY [物料编号] OFFSET (@page-1)*@size ROWS FETCH NEXT @size ROWS ONLY;"
     }
 
     public async Task<IReadOnlyList<PlasticRawMaterialPurchaseRow>> PurchaseAnalysisAsync(
-        string? 物料类别, string? keyword, bool onlyBuy)
+        string? 物料类别, string? keyword, bool onlyBuy, string? excludeOrder = null)
     {
-        var cat = string.IsNullOrWhiteSpace(物料类别) ? null : 物料类别.Trim();
-        var kw = string.IsNullOrWhiteSpace(keyword) ? null : $"%{keyword.Trim()}%";
         using var c = factory.Create();
-        var rows = await c.QueryAsync<PlasticRawMaterialPurchaseRow>(@"
-SELECT m.[物料编号] AS 原料编号, MAX(m.[物料名称]) AS 原料名称, MAX(m.[规格]) AS 规格,
-       MAX(m.[物料类别]) AS 物料类别, MAX(m.[单位]) AS 单位,
-       MAX(ISNULL(m.[库存],0)) AS 当前库存, MAX(ISNULL(m.[安全库存],0)) AS 安全库存,
-       MAX(ISNULL(dm.[生产需求],0)) AS 生产需求,
-       MAX(ISNULL(po.[在途],0)) AS 在途数量,
-       MAX(ISNULL(m.[安全库存],0)) + MAX(ISNULL(dm.[生产需求],0)) - MAX(ISNULL(m.[库存],0)) - MAX(ISNULL(po.[在途],0)) AS 可购数量
-FROM [塑胶原料资料] m
-LEFT JOIN (
-    SELECT d.[原料编号], SUM(d.[需求数量KG]) AS 生产需求
-    FROM [原料生产需求明细单] d
-    JOIN [原料生产需求表] h ON h.[单号] = d.[单号]
-    WHERE ISNULL(h.[审核],'0') = '1'
-    GROUP BY d.[原料编号]
-) dm ON dm.[原料编号] = m.[物料编号]
-LEFT JOIN (
-    SELECT d.[原料编号],
-           SUM(CASE WHEN ISNULL(d.[订货数量],0) - ISNULL(r.[入仓数量],0) > 0
-                    THEN ISNULL(d.[订货数量],0) - ISNULL(r.[入仓数量],0) ELSE 0 END) AS 在途
-    FROM [原料采购订单明细] d
-    JOIN [原料采购订单] o ON o.[单号] = d.[单号]
-    LEFT JOIN (
-        SELECT h.[订单单号], d2.[原料编号], SUM(ISNULL(d2.[数量],0)) AS 入仓数量
-        FROM [原料入仓明细单] d2
-        JOIN [原料入仓单] h ON h.[单号] = d2.[单号]
-        WHERE ISNULL(h.[审核],'0') = '1'
-        GROUP BY h.[订单单号], d2.[原料编号]
-    ) r ON r.[订单单号] = o.[单号] AND r.[原料编号] = d.[原料编号]
-    WHERE ISNULL(o.[审核],'0') = '1'
-    GROUP BY d.[原料编号]
-) po ON po.[原料编号] = m.[物料编号]
-WHERE (@cat IS NULL OR m.[物料类别] = @cat)
-  AND (@kw IS NULL OR m.[物料编号] LIKE @kw OR m.[物料名称] LIKE @kw)
-GROUP BY m.[物料编号]
-HAVING (@onlyBuy = 0 OR (MAX(ISNULL(m.[安全库存],0)) + MAX(ISNULL(dm.[生产需求],0)) - MAX(ISNULL(m.[库存],0)) - MAX(ISNULL(po.[在途],0))) > 0)
-ORDER BY m.[物料编号]", new { cat, kw, onlyBuy = onlyBuy ? 1 : 0 });
-        return rows.AsList();
+        return await RawMaterialProcurementPolicy.ReadAnalysisAsync(c, null, 物料类别, keyword, onlyBuy, excludeOrder);
     }
 }

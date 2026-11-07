@@ -11,6 +11,7 @@ import { plasticRawMaterialMasterApi, rawPurchaseAnalysisApi } from "@/api/endpo
 import type { RawPurchaseAnalysisRow } from "@/api/types";
 import { downloadCsv, printTable, type ExportCol } from "@/lib/tableExport";
 import { usePerms } from "@/hooks/usePerms";
+import { rawPurchaseLimitLabel } from "@/lib/rawPurchasePolicy";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -28,6 +29,7 @@ const numCls = "f-mono px-3 py-2 text-right text-[#1a2330]";
 const col = createColumnHelper<RawPurchaseAnalysisRow>();
 
 const columns: ColumnDef<RawPurchaseAnalysisRow, any>[] = [
+  col.accessor("常用原料", { header: "采购分类", cell: c => c.getValue() === true ? "常用" : "非常用", size: 8 }),
   col.accessor("原料编号", {
     header: "原料编号",
     size: 9,
@@ -50,7 +52,7 @@ const columns: ColumnDef<RawPurchaseAnalysisRow, any>[] = [
     meta: { align: "right", tdClass: numCls },
   }),
   col.accessor("生产需求", {
-    header: "生产需求(KG)",
+    header: "待领生产需求",
     size: 8,
     cell: (c) => c.getValue() ?? "",
     meta: { align: "right", tdClass: numCls },
@@ -62,7 +64,7 @@ const columns: ColumnDef<RawPurchaseAnalysisRow, any>[] = [
     meta: { align: "right", tdClass: numCls },
   }),
   col.accessor("可购数量", {
-    header: "可购数量",
+    header: "需订数量",
     size: 8,
     // 可购数量>0 红(对照老系统 render)
     cell: (c) => (
@@ -76,6 +78,8 @@ const columns: ColumnDef<RawPurchaseAnalysisRow, any>[] = [
   }),
 ];
 
+columns.push(col.accessor("可购上限", { header: "本次采购上限", cell: c => rawPurchaseLimitLabel(c.row.original), size: 24 }));
+
 // 导出列(对照老系统 exportCols 逐字)
 const EXPORT_COLS: ExportCol[] = [
   { title: "原料编号", key: "原料编号" },
@@ -85,9 +89,15 @@ const EXPORT_COLS: ExportCol[] = [
   { title: "单位", key: "单位" },
   { title: "当前库存", key: "当前库存" },
   { title: "安全库存", key: "安全库存" },
-  { title: "生产需求(KG)", key: "生产需求" },
+  { title: "待领生产需求", key: "生产需求" },
   { title: "在途未到", key: "在途数量" },
-  { title: "可购数量", key: "可购数量" },
+  { title: "需订数量", key: "可购数量" },
+  { title: "冻结需求(KG)", key: "需求数量KG" },
+  { title: "已领(KG)", key: "已领数量KG" },
+  { title: "待领(KG)", key: "待领数量KG" },
+  { title: "缺口(KG)", key: "缺口数量KG" },
+  { title: "上限(KG)", key: "可购上限KG" },
+  { title: "采购限制原因", key: "采购限制原因" },
 ];
 
 export default function PlasticRawMaterialPurchaseAnalysisPage() {
@@ -143,6 +153,7 @@ export default function PlasticRawMaterialPurchaseAnalysisPage() {
         <DensitySwitch className="ml-auto" />
       </div>
 
+      <p className="px-1 text-sm text-[#5f6b7d]">先抵扣现有库存及已购未到数量，再按缺口下单；表内数量使用各原料的库存单位。非常用原料最多在实际缺口上额外购买 2 包，采购余量不进入领料净量。</p>
       <div className="f-panel flex shrink-0 flex-wrap items-end gap-3 p-5">
         <div className="w-44 space-y-1.5">
           <label className="f-label block">物料类别</label>

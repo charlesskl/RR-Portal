@@ -2974,6 +2974,7 @@ export interface PlasticRawMaterialCategoryNode {
 }
 
 export interface PlasticRawMaterialRow {
+  常用原料?: boolean | null;
   ID: number;
   物料类别?: string;
   物料编号?: string;
@@ -3027,6 +3028,17 @@ export interface RawMaterialMonthlyRow {
 
 // 原料采购分析表行(可购数量>0 红)
 export interface RawPurchaseAnalysisRow {
+  常用原料?: boolean | null;
+  每包重量?: number | null;
+  需求数量KG?: number | null;
+  已领数量KG?: number | null;
+  待领数量KG?: number | null;
+  当前库存KG?: number | null;
+  在途数量KG?: number | null;
+  缺口数量KG?: number | null;
+  可购上限KG?: number | null;
+  可购上限?: number | null;
+  采购限制原因?: string | null;
   原料编号?: string;
   原料名称?: string;
   规格?: string;
@@ -3090,6 +3102,9 @@ export interface RMDSummaryRow {
 
 // 原料采购订单(权限菜单「原料采购订单」;三级流转:主管审核 -> 经理审核 -> 审核=下发)
 export interface RMPOLine {
+  每库存单位KG?: number | null;
+  每包重量?: number | null;
+  采购政策版本?: number | null;
   id?: number;
   原料编号?: string;
   原料名称?: string;
@@ -3211,6 +3226,7 @@ export interface RawReceiptQueryDetailRow {
 
 // 原料出库表(权限菜单「原料出库表」;三级流转:主管审核 -> 经理审核 -> 审核=下发)
 export interface RSILine {
+  来源啤机采购单号?: string | null;
   id?: number;
   啤机生产单号?: string;
   生产单号?: string; // 联动生产制单.生产单号(与啤机生产单号并存,语义不同)
@@ -3391,4 +3407,80 @@ export interface InjectionMachineRateRow {
   啤机机型?: string;
   啤工价?: number | null;
   备注?: string;
+}
+
+
+export interface RawMoldingDemandSource {
+  快照有效?: boolean;
+  单号: string;
+  日期?: string | null;
+  供应商编号?: string | null;
+  供应商名称?: string | null;
+  审核?: string | null;
+  原料扣减版本?: number | null;
+  需求数量KG: number;
+  原料种数: number;
+  可采购: boolean;
+  限制原因?: string | null;
+}
+export interface RawMoldingDemandLine {
+  原料编号: string;
+  原料名称?: string | null;
+  需求数量KG: number;
+  库存单位?: string | null;
+  每库存单位KG?: number | null;
+  需求库存数量?: number | null;
+}
+export interface RawMoldingDemandDetail {
+  单头: RawMoldingDemandSource;
+  明细: RawMoldingDemandLine[];
+}
+export interface RawIssueSource {
+  单号: string;
+  订购日期?: string | null;
+  供应商名称?: string | null;
+  原料种数: number;
+}
+export interface RawIssueSourceLine {
+  每库存单位KG: number;
+  原料编号: string;
+  原料名称?: string | null;
+  单位?: string | null;
+  每包重量?: number | null;
+  需求数量KG: number;
+  需求数量: number;
+  已申请数量: number;
+  可申请数量: number;
+}
+export interface RawIssueSourceDetail {
+  单号: string;
+  明细: RawIssueSourceLine[];
+}
+
+export interface RawIssueAccess {
+  isAdmin: boolean;
+  canSupervisor: boolean;
+  canManager: boolean;
+  canWarehousePost: boolean;
+  canReverse: boolean;
+  departmentCode?: string | null;
+  positionCode?: string | null;
+  warehouse?: string | null;
+}
+export interface RawIssueMakerOption {
+  key?: string;
+  personnelId?: number | null;
+  personnelNumber?: string | null;
+  accountName?: string | null;
+  personnelName?: string | null;
+  departmentCode?: string | null;
+  positionName?: string | null;
+}
+
+export type RawWorkflowPosition = "06-clerk" | "06-supervisor" | "06-manager" | "05-warehouse" | "05-manager";
+export interface RawWorkflowRole {
+  accountName: string;
+  departmentCode: string | null;
+  positionCode: RawWorkflowPosition | null;
+  warehouse: string | null;
 }

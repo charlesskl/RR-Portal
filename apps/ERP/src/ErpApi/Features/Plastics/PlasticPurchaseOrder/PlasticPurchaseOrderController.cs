@@ -31,6 +31,7 @@ public sealed class PlasticPurchaseOrderController(
         if (string.IsNullOrWhiteSpace(生产单号)) return BadRequest(new { 消息 = "请提供生产单号。" });
         try { return Ok(await svc.BasisAsync(生产单号)); }
         catch (KeyNotFoundException ex) { return NotFound(new { 消息 = ex.Message }); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
         catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
     }
 
@@ -79,6 +80,7 @@ public sealed class PlasticPurchaseOrderController(
         if (!await AllowAsync(PermissionAction.保存)) return Forbid();
         try { if (!await svc.UpdateAsync(单号, dto, CurrentUser)) return NotFound(); }
         catch (ArgumentException ex) { return BadRequest(new { 消息 = ex.Message }); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
         catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
         return NoContent();
     }
@@ -87,7 +89,8 @@ public sealed class PlasticPurchaseOrderController(
     public async Task<IActionResult> Delete(string 单号)
     {
         if (!await AllowAsync(PermissionAction.删除)) return Forbid();
-        try { if (!await svc.DeleteAsync(单号)) return NotFound(); }
+        try { if (!await svc.DeleteAsync(单号, CurrentUser)) return NotFound(); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
         catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
         return NoContent();
     }
@@ -99,6 +102,7 @@ public sealed class PlasticPurchaseOrderController(
         if (!await AllowAsync(PermissionAction.审核)) return Forbid();
         try { await chain.SupervisorApproveAsync(Table, 单号, CurrentUser); }
         catch (KeyNotFoundException ex) { return NotFound(new { 消息 = ex.Message }); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
         catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
         return NoContent();
     }
@@ -110,6 +114,7 @@ public sealed class PlasticPurchaseOrderController(
         if (!await AllowAsync(PermissionAction.审核)) return Forbid();
         try { await chain.ManagerApproveAsync(Table, 单号, CurrentUser); }
         catch (KeyNotFoundException ex) { return NotFound(new { 消息 = ex.Message }); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
         catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
         return NoContent();
     }

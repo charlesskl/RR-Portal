@@ -60,4 +60,5 @@ function Button({
   )
 }
 
+// oxlint-disable-next-line react/only-export-components -- 云端既有公共样式工厂与按钮一起导出；保留调用方接口。
 export { Button, buttonVariants }

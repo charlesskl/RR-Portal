@@ -1,13 +1,14 @@
+import { usePageSearchParams } from "@/hooks/usePageSearchParams";
 // 原料出库表(/plastic-raw-material-stock-issue;单据+查询双页签)。对照老系统:
 // web/src/pages/plastics/PlasticRawMaterialStockIssuePage.tsx(单据)
 // + PlasticRawMaterialStockIssueQueryPage.tsx(查询,默认汇总;多 领料备注/制单人 过滤)
 // + PlasticRawMaterialStockIssueQueryDetailDrawer.tsx(双击明细行弹单据详情)。
 // 单据:新建/打开/保存(POST create)/删除/打印;三级流转 主管审核->经理审核->审核(下发)->反审核;
-// 「调入清单」弹已审核原料生产需求表,点单号把明细带入(数量=需求数量包,带出 啤机生产单号/开单日期)
+// 按已审核啤机采购来源带入冻结剩余净量，数量与库存单位一致。
 // 并回填 生产车间/领料备注;制单人走人事档案选择器(必填)。
 // 权限菜单:单据「原料出库表」/查询「原料出库查询」(MenuCatalog.cs:73/85 实证)。
-import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import {
@@ -24,10 +25,9 @@ import {
 } from "@phosphor-icons/react";
 import {
   plasticRawMaterialMasterApi,
-  rawMaterialDemandApi,
   rawStockIssueApi,
 } from "@/api/endpoints";
-import type { PlasticRawMaterialRow, RMDHeader, RSIHeader, RSILine } from "@/api/types";
+import type { PlasticRawMaterialRow, RSIHeader, RSILine } from "@/api/types";
 import { getUser } from "@/lib/auth";
 import { invalidateCrossPage } from "@/lib/crossPage";
 import {
@@ -42,6 +42,7 @@ import {
   type RawDocPrintCfg,
 } from "@/lib/rawDocs";
 import { usePerms } from "@/hooks/usePerms";
+import { rawIssueQuantitySummary } from "@/lib/rawIssueQuantity";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { DocToolbar, type DocAction } from "@/components/doc/DocToolbar";
@@ -67,6 +68,7 @@ const cellInputCls =
 
 interface EditLine extends RSILine {
   key: number;
+  sourceRemaining?: number;
 }
 
 // ---------- 查询页签配置(列序逐字对照老系统 StockIssueQueryPage + DetailDrawer) ----------
@@ -191,6 +193,7 @@ const PRINT_CFG: RawDocPrintCfg = {
     ["啤机生产单号", "啤机生产单号"],
     ["生产单号", "生产单号"],
     ["开单日期", "开单日期"],
+    ["来源啤机采购单号", "来源啤机采购单号"],
     ["啤机外发单号", "啤机外发单号"],
     ["原料编号", "原料编号"],
     ["原料名称", "原料名称"],
@@ -265,6 +268,7 @@ export default function PlasticRawMaterialStockIssuePage() {
   const navigate = useNavigate();
   const { can, loading: permsLoading } = usePerms();
   const canOpen = can(MENU, "打开");
+  const access = useQuery({ queryKey: ["raw-stock-issue", "access", getUser()], queryFn: rawStockIssueApi.access, enabled: !permsLoading && canOpen });
 
   const [tab, setTab] = useState<"doc" | "query">("doc");
   const [opened, setOpened] = useState<{ 单头?: RSIHeader; 明细: RSILine[] } | null>(null);
@@ -282,13 +286,22 @@ export default function PlasticRawMaterialStockIssuePage() {
   const [keyword, setKeyword] = useState("");
   const [empOpen, setEmpOpen] = useState(false);
   const [demandOpen, setDemandOpen] = useState(false);
-  const [demands, setDemands] = useState<RMDHeader[]>([]);
+  const [sourcePage, setSourcePage] = useState(1);
+  const [sourceInput, setSourceInput] = useState("");
+  const [sourceKeyword, setSourceKeyword] = useState("");
+  const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [matPickFor, setMatPickFor] = useState<number | null>(null);
   const [prodPickFor, setProdPickFor] = useState<number | null>(null); // 明细行选生产制单(联动)
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; tone: "ok" | "err" } | null>(null);
+  const readGeneration = useRef(0);
+  const consumedOpen = useRef<string | null>(null);
+  useEffect(() => () => {
+    readGeneration.current += 1;
+    consumedOpen.current = null;
+  }, []);
   useEffect(() => {
-    if (!toast) return;
+    if (!toast || toast.tone === "err") return;
     const t = setTimeout(() => setToast(null), 3200);
     return () => clearTimeout(t);
   }, [toast]);
@@ -296,7 +309,7 @@ export default function PlasticRawMaterialStockIssuePage() {
 
   const header = opened?.单头 ?? null;
   const stage = header ? tripleAuditStage(header) : 0;
-  const readOnly = opened !== null;
+  const readOnly = opened !== null || busy || !can(MENU, "保存");
   const 单号 = header?.单号 ?? "";
 
   const applyDetail = useCallback((d: { 单头?: RSIHeader; 明细: RSILine[] }) => {
@@ -315,71 +328,73 @@ export default function PlasticRawMaterialStockIssuePage() {
 
   const openDoc = useCallback(
     async (no: string) => {
+      const generation = ++readGeneration.current;
+      setDemandOpen(false); setSelectedSource(null);
       setBusy(true);
       try {
-        applyDetail(await rawStockIssueApi.get(no));
+        const detail = await rawStockIssueApi.get(no);
+        if (generation === readGeneration.current) applyDetail(detail);
       } catch (e) {
-        notify(errMsg(e) || "打开原料出库单失败", "err");
+        if (generation === readGeneration.current) notify(errMsg(e) || "打开原料出库单失败", "err");
       } finally {
-        setBusy(false);
+        if (generation === readGeneration.current) setBusy(false);
       }
     },
     [applyDetail, notify],
   );
 
   // ?open=<单号> 直开
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = usePageSearchParams("/plastic-raw-material-stock-issue");
   const openParam = searchParams.get("open");
-  const [consumedOpen, setConsumedOpen] = useState<string | null>(null);
-  if (openParam && openParam !== consumedOpen) {
-    setConsumedOpen(openParam);
-    void openDoc(openParam);
-  }
   useEffect(() => {
-    if (!openParam) return;
+    if (!openParam) {
+      consumedOpen.current = null;
+      return;
+    }
+    if (openParam === consumedOpen.current) return;
+    consumedOpen.current = openParam;
+    void openDoc(openParam);
     const next = new URLSearchParams(searchParams);
     next.delete("open");
     setSearchParams(next, { replace: true });
-  }, [openParam, searchParams, setSearchParams]);
+  }, [openDoc, openParam, searchParams, setSearchParams]);
 
   const reset = () => {
+    readGeneration.current += 1;
+    setDemandOpen(false); setSelectedSource(null);
     setFormState({ 生产车间: "", 制单人: "", 电脑单号: "", 领料备注: "生产领料", 备注: "" });
     setOpened(null);
     setLines([]);
   };
 
-  // 调入清单:弹已审核原料生产需求表,点单号调入明细(数量=需求数量包;对照老系统 pickDemand)
-  const openDemandPicker = async () => {
-    try {
-      const res = await rawMaterialDemandApi.list(1, 50, "");
-      setDemands(res.items.filter((o) => o.审核 === "1"));
-      setDemandOpen(true);
-    } catch (e) {
-      notify(errMsg(e) || "加载原料生产需求表失败", "err");
-    }
+  const sources = useQuery({
+    queryKey: ["raw-stock-issue", "sources", sourcePage, sourceKeyword],
+    queryFn: () => rawStockIssueApi.sources(sourcePage, 20, sourceKeyword),
+    enabled: demandOpen && canOpen && !opened,
+  });
+  const sourceDetail = useQuery({
+    queryKey: ["raw-stock-issue", "source", selectedSource],
+    queryFn: () => rawStockIssueApi.source(selectedSource!),
+    enabled: demandOpen && canOpen && !!selectedSource && !opened,
+  });
+  const openDemandPicker = () => {
+    setSelectedSource(null); setDemandOpen(true);
   };
-  const pickDemand = async (no: string) => {
-    try {
-      const d = await rawMaterialDemandApi.get(no);
-      const h = d.单头 ?? ({} as RMDHeader);
-      const imported: EditLine[] = (d.明细 ?? []).map((l) => ({
-        key: nextRowKey(),
-        啤机生产单号: h.啤机生产单号,
-        开单日期: date10(h.开单日期) || undefined,
-        啤机外发单号: undefined,
-        原料编号: l.原料编号,
-        原料名称: l.原料名称,
-        每包重量: l.每包重量 ?? undefined,
-        单位: l.单位,
-        数量: Number(l.需求数量包 ?? 0),
-      }));
-      setLines(imported);
-      setFormState((f) => ({ ...f, 生产车间: h.生产车间 ?? "", 领料备注: h.领料备注 ?? "生产领料" }));
-      setDemandOpen(false);
-      notify(`已调入需求表 ${no} 的 ${imported.length} 行明细`, "ok");
-    } catch (e) {
-      notify(errMsg(e) || "调入需求表失败", "err");
-    }
+  const importSource = () => {
+    const source = sourceDetail.data;
+    if (readOnly || !source || source.单号 !== selectedSource || sourceDetail.isFetching) return;
+    const imported: EditLine[] = source.明细.filter(l => l.可申请数量 > 0).map(l => ({
+      key: nextRowKey(), 来源啤机采购单号: source.单号, 啤机外发单号: source.单号,
+      原料编号: l.原料编号, 原料名称: l.原料名称 ?? undefined,
+      每包重量: l.每库存单位KG, 单位: l.单位 ?? undefined,
+      数量: l.可申请数量, sourceRemaining: l.可申请数量,
+    }));
+    setLines(current => {
+      const existing = new Set(current.filter(l => l.来源啤机采购单号).map(l => `${l.来源啤机采购单号!.trim().toUpperCase()}\0${l.原料编号?.trim().toUpperCase()}`));
+      return [...current, ...imported.filter(l => !existing.has(`${source.单号.trim().toUpperCase()}\0${l.原料编号?.trim().toUpperCase()}`))];
+    });
+    setDemandOpen(false); setSelectedSource(null);
+    notify(`已带入 ${source.单号} 的可申请净量；已有来源原料行保持不变`, "ok");
   };
 
   const save = async () => {
@@ -388,43 +403,57 @@ export default function PlasticRawMaterialStockIssuePage() {
       notify("请选制单人", "err");
       return;
     }
-    const ok = lines.filter((l) => l.原料编号 && Number(l.数量 ?? 0) > 0);
+    const ok = lines.filter(l => l.原料编号?.trim() || Number(l.数量 ?? 0) !== 0);
+    if (ok.some(l => !l.原料编号?.trim() || !Number.isFinite(Number(l.数量)) || Number(l.数量) <= 0)) { notify("每行须填写真实原料编号及大于 0 的数量", "err"); return; }
+    if (ok.some(l => l.sourceRemaining != null && Number(l.数量) > l.sourceRemaining + 1e-8)) { notify("领料数量超过来源剩余净需求，请减少数量或重新调入来源", "err"); return; }
     if (ok.length === 0) {
       notify("请至少录入一行有效明细(原料编号+数量)", "err");
       return;
     }
+    const generation = readGeneration.current;
     setBusy(true);
     try {
-      await rawStockIssueApi.create({
+      const saved = await rawStockIssueApi.create({
         ...form,
         日期: today(),
         操作员: currentUser(),
-        明细: ok.map(({ key: _key, ...l }) => l),
+        明细: ok.map(({ key: _key, sourceRemaining: _remaining, ...l }) => l),
       });
-      notify("原料出库单已创建", "ok");
-      reset();
+      if (generation !== readGeneration.current) return;
+      applyDetail({ 单头: { id: 0, 单号: saved.单号, ...form, 日期: today() }, 明细: ok });
       void qc.invalidateQueries({ queryKey: ["raw-stock-issue"] });
       invalidateCrossPage(qc);
+      try {
+        const detail = await rawStockIssueApi.get(saved.单号);
+        if (generation !== readGeneration.current) return;
+        applyDetail(detail);
+        notify(`原料出库单 ${saved.单号} 已创建，请继续审批`, "ok");
+      } catch (e) {
+        if (generation === readGeneration.current) notify(`原料出库单 ${saved.单号} 已创建，但读取失败，请重新打开该单：${errMsg(e)}`, "err");
+      }
     } catch (e) {
-      notify(errMsg(e) || "创建失败", "err");
+      if (generation === readGeneration.current) notify(errMsg(e) || "创建失败", "err");
     } finally {
-      setBusy(false);
+      if (generation === readGeneration.current) setBusy(false);
     }
   };
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
-    if (!单号) return;
+    if (!单号 || busy) return;
+    const generation = readGeneration.current;
     setBusy(true);
     try {
       await fn();
+      const detail = await rawStockIssueApi.get(单号);
+      if (generation !== readGeneration.current) return;
       notify(ok, "ok");
-      applyDetail(await rawStockIssueApi.get(单号));
+      applyDetail(detail);
       void qc.invalidateQueries({ queryKey: ["raw-stock-issue"] });
       invalidateCrossPage(qc);
     } catch (e) {
-      notify(errMsg(e) || "操作失败", "err");
+      if (generation === readGeneration.current) notify(errMsg(e) || "操作失败", "err");
     } finally {
-      setBusy(false);
+      if (generation === readGeneration.current) setBusy(false);
     }
   };
 
@@ -447,7 +476,7 @@ export default function PlasticRawMaterialStockIssuePage() {
   const updateLine = (key: number, patch: Partial<EditLine>) =>
     setLines((v) => v.map((x) => (x.key === key ? { ...x, ...patch } : x)));
 
-  const 数量合计 = lines.reduce((s, l) => s + Number(l.数量 ?? 0), 0);
+  const 数量合计 = rawIssueQuantitySummary(lines);
 
   const listQuery = useQuery({
     queryKey: ["raw-stock-issue", "list", page, keyword],
@@ -471,7 +500,7 @@ export default function PlasticRawMaterialStockIssuePage() {
   const editActions: DocAction[] = [
     { key: "new", label: "新建", icon: FilePlus, perm: "保存", success: true, disabled: busy, onClick: reset },
     { key: "open", label: "打开", icon: FolderOpen, primary: true, disabled: busy, onClick: () => setDialogOpen(true) },
-    { key: "import", label: "调入清单", icon: FolderOpen, disabled: readOnly || busy, disabledTitle: readOnly ? "打开的单据为查看态" : undefined, onClick: () => void openDemandPicker() },
+    { key: "import", label: "按啤机采购单领料", icon: FolderOpen, perm: "保存", disabled: readOnly || busy, disabledTitle: readOnly ? "打开的单据为查看态" : undefined, onClick: () => void openDemandPicker() },
     { key: "save", label: "保存", icon: FloppyDisk, perm: "保存", primary: true, disabled: readOnly || busy, disabledTitle: readOnly ? "打开的单据为查看态" : undefined, onClick: () => void save() },
     { key: "del", label: "删除", icon: Trash, perm: "删除", danger: true, disabled: !opened || stage === 3 || busy, disabledTitle: !opened ? "先打开单据" : stage === 3 ? "单据已审核" : undefined, onClick: () => setDeleteOpen(true) },
   ];
@@ -479,26 +508,26 @@ export default function PlasticRawMaterialStockIssuePage() {
   const auditActions: DocAction[] = [
     {
       key: "sup", label: "主管审核", icon: CheckCircle, perm: "审核", success: true,
-      disabled: !opened || stage !== 0 || busy,
-      disabledTitle: !opened ? "先打开单据" : stage !== 0 ? "不在主管审核环节" : undefined,
+      disabled: !opened || stage !== 0 || busy || access.data?.canSupervisor !== true,
+      disabledTitle: !opened ? "先打开单据" : stage !== 0 ? "不在主管审核环节" : access.data?.canSupervisor !== true ? "当前原料岗位无此阶段操作权限" : undefined,
       onClick: () => void act(() => rawStockIssueApi.supervisorApprove(单号), "主管已审核"),
     },
     {
       key: "mgr", label: "经理审核", icon: CheckCircle, perm: "审核", success: true,
-      disabled: !opened || stage !== 1 || busy,
-      disabledTitle: !opened ? "先打开单据" : stage !== 1 ? "不在经理审核环节" : undefined,
-      onClick: () => void act(() => rawStockIssueApi.managerApprove(单号), "经理已审核"),
+      disabled: !opened || stage !== 1 || busy || access.data?.canManager !== true,
+      disabledTitle: !opened ? "先打开单据" : stage !== 1 ? "不在经理审核环节" : access.data?.canManager !== true ? "当前原料岗位无此阶段操作权限" : undefined,
+      onClick: () => void act(() => rawStockIssueApi.managerApprove(单号), "啤机审核完成，已通知原料仓负责人确认出库"),
     },
     {
-      key: "audit", label: "审核(下发)", icon: CheckCircle, perm: "审核", success: true,
-      disabled: !opened || stage !== 2 || busy,
-      disabledTitle: !opened ? "先打开单据" : stage !== 2 ? "不在审核下发环节" : undefined,
-      onClick: () => void act(() => rawStockIssueApi.approve(单号), "已审核"),
+      key: "audit", label: "仓管确认出库", icon: CheckCircle, perm: "审核", success: true,
+      disabled: !opened || stage !== 2 || busy || access.data?.canWarehousePost !== true,
+      disabledTitle: !opened ? "先打开单据" : stage !== 2 ? "不在审核下发环节" : access.data?.canWarehousePost !== true ? "当前原料岗位无此阶段操作权限" : undefined,
+      onClick: () => void act(() => rawStockIssueApi.approve(单号), "已确认出库，库存已扣减"),
     },
     {
       key: "unaudit", label: "反审核", icon: ArrowCounterClockwise, perm: "反审核", danger: true,
-      disabled: !opened || stage !== 3 || busy,
-      disabledTitle: !opened ? "先打开单据" : stage !== 3 ? "单据未审核下发" : undefined,
+      disabled: !opened || stage !== 3 || busy || access.data?.canReverse !== true,
+      disabledTitle: !opened ? "先打开单据" : stage !== 3 ? "单据未审核下发" : access.data?.canReverse !== true ? "当前原料岗位无此阶段操作权限" : undefined,
       onClick: () => void act(() => rawStockIssueApi.unapprove(单号), "已反审核"),
     },
   ];
@@ -550,7 +579,7 @@ export default function PlasticRawMaterialStockIssuePage() {
             ))}
           </div>
           {tab === "doc" && (
-            <FlowSteps steps={["开单", "主管审核", "经理审核", "审核下发"]} current={stage} />
+            <FlowSteps steps={["领料申请", "主管审核", "啤机审核并通知", "仓管确认出库"]} current={stage} />
           )}
         </div>
       </div>
@@ -562,6 +591,7 @@ export default function PlasticRawMaterialStockIssuePage() {
           <div className="flex flex-wrap items-center gap-2.5">
             <DocToolbar actions={editActions} menuKey={MENU} />
             <span className="mx-1 h-8 w-px bg-black/10" />
+            {access.isError && <p role="alert" className="text-sm text-[#dc2626]">原料岗位权限加载失败，审核暂不可用。<button type="button" className="f-btn px-3" onClick={() => void access.refetch()}>重试</button></p>}
             <DocToolbar actions={auditActions} menuKey={MENU} />
             <span className="mx-1 h-8 w-px bg-black/10" />
             <DocToolbar actions={tailActions} menuKey={MENU} />
@@ -653,10 +683,10 @@ export default function PlasticRawMaterialStockIssuePage() {
               <table data-freeze className="w-full min-w-[1500px] text-[15px]">
                 <thead>
                   <tr className="border-b border-black/8">
-                    {["啤机生产单号", "生产单号", "开单日期", "啤机外发单号", "原料编号", "原料名称", "产地", "每包重量", "单位", "数量", "备注", "删除"].map(
+                    {["啤机生产单号", "生产单号", "开单日期", "来源啤机采购单号", "啤机外发单号", "原料编号", "原料名称", "产地", "每包重量", "单位", "数量", "备注", "删除"].map(
                       (h) => (
                         <th
-                          key={h}
+                          key={h} data-column-key={h}
                           className={cn(
                             "f-label sticky top-0 z-10 border-b border-black/8 bg-white px-3 py-2.5 text-left font-medium whitespace-nowrap normal-case",
                             (h === "每包重量" || h === "数量") && "text-right",
@@ -679,6 +709,7 @@ export default function PlasticRawMaterialStockIssuePage() {
                           <input
                             className={cn(cellInputCls, "f-mono")}
                             aria-label="啤机生产单号"
+                            disabled={!!l.来源啤机采购单号}
                             value={l.啤机生产单号 ?? ""}
                             onChange={(e) => updateLine(l.key, { 啤机生产单号: e.target.value })}
                           />
@@ -722,6 +753,7 @@ export default function PlasticRawMaterialStockIssuePage() {
                           />
                         )}
                       </td>
+                      <td className="f-mono px-3 py-1.5 text-[#3d4a5c]">{l.来源啤机采购单号 ?? "—"}</td>
                       <td className="px-2 py-1.5">
                         {readOnly ? (
                           <span className="f-mono text-[#3d4a5c]">{l.啤机外发单号 ?? ""}</span>
@@ -729,6 +761,7 @@ export default function PlasticRawMaterialStockIssuePage() {
                           <input
                             className={cn(cellInputCls, "f-mono")}
                             aria-label="啤机外发单号"
+                            disabled={!!l.来源啤机采购单号}
                             value={l.啤机外发单号 ?? ""}
                             onChange={(e) => updateLine(l.key, { 啤机外发单号: e.target.value })}
                           />
@@ -739,11 +772,11 @@ export default function PlasticRawMaterialStockIssuePage() {
                           <input
                             className={cn(cellInputCls, "f-mono")}
                             aria-label="原料编号"
-                            disabled={readOnly}
+                            disabled={readOnly || !!l.来源啤机采购单号}
                             value={l.原料编号 ?? ""}
                             onChange={(e) => updateLine(l.key, { 原料编号: e.target.value })}
                           />
-                          {!readOnly && (
+                          {!readOnly && !l.来源啤机采购单号 && (
                             <button
                               type="button"
                               aria-label="选原料"
@@ -777,6 +810,7 @@ export default function PlasticRawMaterialStockIssuePage() {
                             aria-label="每包重量"
                             type="number"
                             min={0}
+                            disabled={!!l.来源啤机采购单号}
                             value={l.每包重量 ?? ""}
                             onChange={(e) =>
                               updateLine(l.key, {
@@ -793,6 +827,7 @@ export default function PlasticRawMaterialStockIssuePage() {
                           <input
                             className={cellInputCls}
                             aria-label="单位"
+                            disabled={!!l.来源啤机采购单号}
                             value={l.单位 ?? ""}
                             onChange={(e) => updateLine(l.key, { 单位: e.target.value })}
                           />
@@ -805,6 +840,8 @@ export default function PlasticRawMaterialStockIssuePage() {
                           <input
                             className={cn(cellInputCls, "f-mono text-right")}
                             aria-label="数量"
+                            max={l.sourceRemaining}
+                            title={l.sourceRemaining == null ? undefined : `来源可申请净量：${l.sourceRemaining} ${l.单位 ?? ""}`}
                             type="number"
                             min={0}
                             value={l.数量 ?? 0}
@@ -839,8 +876,8 @@ export default function PlasticRawMaterialStockIssuePage() {
                   ))}
                   {lines.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="px-3 py-6 text-center text-sm text-disabled">
-                        点「加一行」录入,或「调入清单」从已审核生产需求表带入明细
+                      <td colSpan={13} className="px-3 py-6 text-center text-sm text-disabled">
+                        点「按啤机采购单领料」带入已审核来源的剩余净量；无来源手工领料可加行录入
                       </td>
                     </tr>
                   )}
@@ -900,53 +937,22 @@ export default function PlasticRawMaterialStockIssuePage() {
         }
       />
 
-      {/* 调入清单:已审核原料生产需求表(对照老系统选择弹窗) */}
-      <PickerDialog
-        open={demandOpen}
-        onClose={() => setDemandOpen(false)}
-        title="选择已审核原料生产需求表调入明细"
-        width="sm:max-w-[720px]"
-      >
-        <table className="w-full text-sm">
-          <thead>
-            <tr>
-              {["单号", "啤机生产单号", "生产车间", "数量KG"].map((h) => (
-                <th key={h} className={pickerThCls}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {demands.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="px-3 py-8 text-center text-sm text-disabled">
-                  没有已审核的原料生产需求表
-                </td>
-              </tr>
-            ) : (
-              demands.map((d) => (
-                <tr
-                  key={d.单号}
-                  className="cursor-pointer border-b border-black/6 last:border-0 hover:bg-black/[0.04]"
-                  onClick={() => d.单号 && void pickDemand(d.单号)}
-                >
-                  <td className="f-mono px-3 py-2 whitespace-nowrap font-semibold text-[#15803d]">
-                    {d.单号}
-                  </td>
-                  <td className="f-mono px-3 py-2 whitespace-nowrap text-[#3d4a5c]">
-                    {d.啤机生产单号}
-                  </td>
-                  <td className="px-3 py-2 text-[#3d4a5c]">{d.生产车间}</td>
-                  <td className="f-mono px-3 py-2 text-right text-[#1a2330]">{d.数量KG ?? ""}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      <PickerDialog open={demandOpen} onClose={() => { setDemandOpen(false); setSelectedSource(null); }} title="按已审核啤机采购单领料" width="sm:max-w-[1050px]" footer={<><button className="f-btn px-4" onClick={() => { setDemandOpen(false); setSelectedSource(null); }}>取消</button><button className="f-btn f-btn-cyan px-4" disabled={readOnly || !sourceDetail.data || sourceDetail.isFetching || sourceDetail.data.单号 !== selectedSource || !sourceDetail.data.明细.some(l => l.可申请数量 > 0)} onClick={importSource}>带入剩余净量</button></>}>
+        <p className="mb-3 text-sm text-[#5f6b7d]">仅按来源已保存的原料净量领料，扣除所有已保存申请；不带入采购备料包数或 0.5% 发料参考量。</p>
+        <form className="mb-3 flex flex-wrap gap-2" onSubmit={e => { e.preventDefault(); setSourcePage(1); setSourceKeyword(sourceInput.trim()); setSelectedSource(null); }}><input className="f-input" aria-label="领料来源关键字" placeholder="啤机采购单号 / 供应商" value={sourceInput} onChange={e => setSourceInput(e.target.value)} /><button className="f-btn px-4" type="submit">查询来源</button></form>
+        {sources.isLoading && <p role="status">正在读取已审核来源…</p>}
+        {sources.isError && <div role="alert">来源列表加载失败。<button className="f-btn px-3" onClick={() => void sources.refetch()}>重试来源</button></div>}
+        <div className="overflow-auto"><table className="w-full min-w-[650px] text-sm"><thead><tr>{["啤机采购单号", "订购日期", "供应商", "原料种数", "操作"].map(h => <th key={h} className={pickerThCls}>{h}</th>)}</tr></thead><tbody>{(sources.data?.items ?? []).map(d => <tr key={d.单号} className="border-b border-black/6"><td className="px-3 py-2">{d.单号}</td><td>{date10(d.订购日期)}</td><td>{d.供应商名称}</td><td>{d.原料种数}</td><td><button className="f-btn px-3" onClick={() => setSelectedSource(d.单号)}>查看净量</button></td></tr>)}</tbody></table></div>
+        {!sources.isLoading && !sources.isError && sources.data?.items.length === 0 && <p className="py-4 text-sm">没有符合条件的已审核来源。</p>}
+        <div className="my-3 flex items-center gap-3 text-sm"><span>共 {sources.data?.total ?? 0} 单</span><button className="f-btn px-3" disabled={sourcePage <= 1 || sources.isFetching} onClick={() => { setSourcePage(p => p - 1); setSelectedSource(null); }}>上一页</button><span>{sourcePage} / {Math.max(1, Math.ceil((sources.data?.total ?? 0) / 20))}</span><button className="f-btn px-3" disabled={sourcePage * 20 >= (sources.data?.total ?? 0) || sources.isFetching} onClick={() => { setSourcePage(p => p + 1); setSelectedSource(null); }}>下一页</button></div>
+        {selectedSource && <h3 className="mt-4 font-semibold">{selectedSource} · 原料净量</h3>}
+        {sourceDetail.isLoading && <p role="status">正在读取来源净量…</p>}
+        {sourceDetail.isError && <div role="alert">来源净量读取失败。<button className="f-btn px-3" onClick={() => void sourceDetail.refetch()}>重试净量</button></div>}
+        {sourceDetail.data && <div className="overflow-auto"><table className="w-full min-w-[760px] text-sm"><thead><tr>{["原料编号", "原料名称", "净需求（KG）", "单位", "总净量", "已申请", "可申请净量"].map(h => <th className={pickerThCls} key={h}>{h}</th>)}</tr></thead><tbody>{sourceDetail.data.明细.map(l => <tr key={l.原料编号} className="border-t border-black/8"><td className="px-3 py-2">{l.原料编号}</td><td>{l.原料名称}</td><td>{l.需求数量KG}</td><td>{l.单位}</td><td>{l.需求数量}</td><td>{l.已申请数量}</td><td>{l.可申请数量}</td></tr>)}</tbody></table></div>}
       </PickerDialog>
 
       <EmployeePickerDialog
+        purpose="raw-issue-maker"
         open={empOpen}
         onPick={(姓名) => setFormState((f) => ({ ...f, 制单人: 姓名 }))}
         onClose={() => setEmpOpen(false)}

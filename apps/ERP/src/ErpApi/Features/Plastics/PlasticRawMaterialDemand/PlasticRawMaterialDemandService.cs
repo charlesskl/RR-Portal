@@ -10,32 +10,22 @@ public sealed class PlasticRawMaterialDemandService(ISqlConnectionFactory factor
     public const string DocType = "原料生产需求表";
     public const string Prefix = "YLX";   // 原料生产需求单号 = YLX + yyyyMMdd + 3位流水
 
-    public async Task<string> CreateAsync(PlasticRawMaterialDemandCreateDto dto, string user)
+    public Task<string> CreateAsync(PlasticRawMaterialDemandCreateDto dto, string user)
     {
-        if (dto.明细.Count == 0) throw new ArgumentException("原料生产需求表至少要有一行明细");
-        var kg = dto.明细.Sum(l => l.需求数量KG);
-        var bags = dto.明细.Sum(l => l.需求数量包);
-        var now = DateTime.Now;
+        _ = docNo; // 保留既有构造器，历史查询与调用方无需改为另一套服务。
+        throw new InvalidOperationException("原料生产需求现由啤机采购单的已保存原料快照自动生成，请在啤机采购单维护需求；历史手工需求仅供查询。");
+    }
 
+    public async Task<PagedResult<MoldingRawSourceHeader>> MoldingSourcesAsync(int page, int size, string? keyword, bool approvedOnly)
+    {
         using var c = factory.Create();
-        await c.OpenAsync();
-        using var tx = c.BeginTransaction();
-        var 单号 = await docNo.NextAsync(DocType, Prefix, now, c, tx);
+        return await RawMaterialProcurementPolicy.ReadMoldingSourcesAsync(c, null, page, size, keyword, approvedOnly);
+    }
 
-        await c.ExecuteAsync(@"
-INSERT INTO [原料生产需求表]([单号],[啤机生产单号],[开单日期],[制单人],[领料备注],[生产车间],[操作员],[数量KG],[数量包],[审核],[备注])
-VALUES(@单号,@啤机生产单号,@开单日期,@制单人,@领料备注,@生产车间,@操作员,@数量KG,@数量包,'0',@备注)",
-            new { 单号, dto.啤机生产单号, 开单日期 = now, dto.制单人, dto.领料备注, dto.生产车间,
-                  操作员 = user, 数量KG = kg, 数量包 = bags, dto.备注 }, tx);
-
-        foreach (var l in dto.明细)
-            await c.ExecuteAsync(@"
-INSERT INTO [原料生产需求明细单]([单号],[原料编号],[原料名称],[每包重量],[单位],[需求数量KG],[需求数量包],[备注])
-VALUES(@单号,@原料编号,@原料名称,@每包重量,@单位,@需求数量KG,@需求数量包,@备注)",
-                new { 单号, l.原料编号, l.原料名称, l.每包重量, l.单位, l.需求数量KG, l.需求数量包, l.备注 }, tx);
-
-        tx.Commit();
-        return 单号;
+    public async Task<MoldingRawSourceDetail?> MoldingSourceAsync(string number)
+    {
+        using var c = factory.Create();
+        return await RawMaterialProcurementPolicy.ReadMoldingSourceAsync(c, null, number);
     }
 
     public async Task<PagedResult<PlasticRawMaterialDemandHeaderDto>> ListAsync(int page, int size, string? keyword)

@@ -1,3 +1,4 @@
+import { RawMoldingDemandPanel } from "@/components/doc/RawMoldingDemandPanel";
 // 原料生产需求汇总(/plastic-raw-material-demand-summary)。对照老系统
 // web/src/pages/plastics/PlasticRawMaterialDemandSummaryPage.tsx:
 // 上/本/下月 + 起止(默认本月) + 领料备注/审核情况下拉 + 关键字;双击行弹原料需求表详情
@@ -215,7 +216,7 @@ function DemandDetailDialog({ 单号, onClose }: { 单号: string; onClose: () =
   );
 }
 
-export default function PlasticRawMaterialDemandSummaryPage() {
+function HistoricalDemandSummaryPage() {
   const { can, loading: permsLoading } = usePerms();
   const canOpen = can(MENU, "打开");
   const [range, setRange] = useState<{ 起: string; 止: string }>(thisMonthRange);
@@ -391,4 +392,15 @@ export default function PlasticRawMaterialDemandSummaryPage() {
       )}
     </div>
   );
+}
+
+export default function PlasticRawMaterialDemandSummaryPage() {
+  const [history, setHistory] = useState(false);
+  const { can, loading } = usePerms();
+  if (!loading && !can(MENU, "打开")) return <div className="p-7" role="alert">缺少「原料生产需求汇总·打开」权限。</div>;
+  return <div className="f-page space-y-4 p-5">
+    <h1 className="text-2xl font-bold text-[#1a2330]">原料生产需求汇总</h1>
+    <div role="tablist" aria-label="需求汇总来源" className="flex gap-2"><button role="tab" aria-selected={!history} className="f-btn px-4" onClick={() => setHistory(false)}>啤机采购自动需求</button><button role="tab" aria-selected={history} className="f-btn px-4" onClick={() => setHistory(true)}>历史手工需求汇总</button></div>
+    {history ? <HistoricalDemandSummaryPage /> : <RawMoldingDemandPanel menu={MENU} />}
+  </div>;
 }

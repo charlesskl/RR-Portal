@@ -1,3 +1,4 @@
+using System.Data;
 using Dapper;
 using ErpApi.Features.MasterData;
 using ErpApi.Infrastructure.Db;
@@ -29,6 +30,20 @@ public sealed class MessageService(ISqlConnectionFactory factory)
             await c.ExecuteAsync(@"
 INSERT INTO [消息]([接收人],[类型],[单号],[标题],[内容])
 VALUES(@user,@类型,@单号,@标题,@内容)", new { user, 类型, 单号, 标题, 内容 });
+    }
+
+    // 单据与消息同事务提交；相同单据、阶段、账号只发送一次。
+    public static async Task SendAsync(IDbConnection c, IDbTransaction? tx,
+        IEnumerable<string> targets, string 类型, string? 单号, string 标题, string? 内容, bool once = false)
+    {
+        foreach (var user in targets.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))
+            await c.ExecuteAsync(@"
+INSERT INTO [消息]([接收人],[类型],[单号],[标题],[内容])
+SELECT @user,@类型,@单号,@标题,@内容
+WHERE @once=0 OR NOT EXISTS (
+ SELECT 1 FROM [消息] WITH (UPDLOCK,HOLDLOCK)
+ WHERE [接收人]=@user AND [类型]=@类型 AND [单号]=@单号 AND [标题]=@标题
+)", new { user, 类型, 单号, 标题, 内容, once }, tx);
     }
 
     public async Task<PagedResult<MessageRow>> ListAsync(string user, bool onlyUnread, int page, int size)

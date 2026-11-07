@@ -36,6 +36,8 @@ public sealed class MasterCrudService<T>(ErpDbContext db) where T : MasterEntity
         var existing = await db.Set<T>().FirstOrDefaultAsync(e => e.ID == id);
         if (existing is null) return false;
         entity.ID = id;
+        if (entity is 塑胶原料资料 raw && existing is 塑胶原料资料 oldRaw)
+            raw.常用原料 ??= oldRaw.常用原料;
         db.Entry(existing).CurrentValues.SetValues(entity);
         await db.SaveChangesAsync();
         return true;

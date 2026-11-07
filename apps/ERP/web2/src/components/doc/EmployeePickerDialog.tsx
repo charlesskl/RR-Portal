@@ -2,7 +2,7 @@
 // 对照老系统 web/src/pages/materials/EmployeePicker.tsx:人事档案关键字查询,点行返回姓名)。
 import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { employeesApi } from "@/api/endpoints";
+import { employeesApi, rawStockIssueApi } from "@/api/endpoints";
 import { Input } from "@/components/ui/input";
 import { PickerDialog, pickerThCls } from "./PickerDialog";
 
@@ -13,23 +13,30 @@ export function EmployeePickerDialog({
   open,
   onPick,
   onClose,
+  purpose,
 }: {
   open: boolean;
+  purpose?: "raw-issue-maker";
   onPick: (姓名: string) => void;
   onClose: () => void;
 }) {
   const [kwInput, setKwInput] = useState("");
   const [kw, setKw] = useState("");
   const query = useQuery({
-    queryKey: ["employee-picker", kw],
-    queryFn: () => employeesApi.list(1, 200, kw),
+    queryKey: ["employee-picker", purpose ?? "personnel", kw],
+    queryFn: async () => purpose === "raw-issue-maker" ? { items: (await rawStockIssueApi.makerOptions(kw)).map(row => ({
+      编号: row.accountName ?? row.personnelNumber ?? String(row.personnelId ?? ""),
+      姓名: row.personnelName ?? row.accountName ?? "",
+      部门编号: row.departmentCode, 职称: row.positionName,
+      选择值: row.accountName ?? row.personnelName ?? "",
+    })) } : { items: (await employeesApi.list(1, 200, kw)).items.map(row => ({ ...row, 选择值: row.姓名 ?? "" })) },
     placeholderData: keepPreviousData,
     enabled: open,
   });
   const rows = query.data?.items ?? [];
 
   return (
-    <PickerDialog open={open} onClose={onClose} title="选择人员(人事档案)" width="sm:max-w-[560px]">
+    <PickerDialog open={open} onClose={onClose} title={purpose === "raw-issue-maker" ? "选择原料领料制单人" : "选择人员(人事档案)"} width="sm:max-w-[560px]">
       <form
         className="mb-3 flex gap-2"
         onSubmit={(e) => {
@@ -48,6 +55,7 @@ export function EmployeePickerDialog({
           查询
         </button>
       </form>
+      {query.isError && <p role="alert">人员加载失败，请重试。<button type="button" className="f-btn px-3" onClick={() => void query.refetch()}>重试</button></p>}
       <table className="w-full text-[15px]">
         <thead>
           <tr>
@@ -64,7 +72,8 @@ export function EmployeePickerDialog({
               key={emp.编号 ?? i}
               className="h-11 cursor-pointer border-b border-black/6 transition-colors last:border-0 hover:bg-black/[0.04]"
               onClick={() => {
-                onPick(emp.姓名 ?? "");
+                if (query.isFetching || query.isError) return;
+                onPick(emp.选择值);
                 onClose();
               }}
             >

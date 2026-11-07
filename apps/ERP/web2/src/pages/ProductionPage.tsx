@@ -359,6 +359,7 @@ function GoodsViewTable({
     ],
     [],
   );
+  // oxlint-disable-next-line react/incompatible-library -- 云端未启用 React Compiler；保留此既有 TanStack 实例，未另作 memo。
   const table = useReactTable({
     data: rows,
     columns,

@@ -2,6 +2,8 @@ namespace ErpApi.Features.Plastics.PlasticRawMaterialPurchaseOrder;
 
 public sealed class PlasticRawMaterialPurchaseOrderHeaderDto
 {
+    public bool 可修改 { get; set; }
+    public string? 修改限制原因 { get; set; }
     public long ID { get; set; }
     public string 单号 { get; set; } = "";
     public string? 供应商编号 { get; set; }
@@ -19,6 +21,7 @@ public sealed class PlasticRawMaterialPurchaseOrderHeaderDto
     public string? 主管审核人 { get; set; }
     public string? 经理审核 { get; set; }
     public string? 经理审核人 { get; set; }
+    public int? 采购政策版本 { get; set; }
 }
 
 public sealed class PlasticRawMaterialPurchaseOrderLineDto
@@ -33,6 +36,9 @@ public sealed class PlasticRawMaterialPurchaseOrderLineDto
     public decimal? 单价 { get; set; }
     public decimal? 金额 { get; set; }
     public string? 备注 { get; set; }
+    public int? 采购政策版本 { get; set; }
+    public decimal? 每库存单位KG { get; set; }
+    public decimal? 每包重量 { get; set; }
 }
 
 public sealed class PlasticRawMaterialPurchaseOrderDetailDto
@@ -51,6 +57,12 @@ public sealed class PlasticRawMaterialPurchaseOrderCreateLineDto
     public decimal 订货数量 { get; set; }
     public decimal? 单价 { get; set; }
     public string? 备注 { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int? 采购政策版本 { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public decimal? 每库存单位KG { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public decimal? 每包重量 { get; set; }
 }
 
 public sealed class PlasticRawMaterialPurchaseOrderCreateDto
@@ -128,6 +140,8 @@ public sealed class PlasticRawMaterialPurchaseOrderQueryDetailRow
 
 public sealed class PlasticRawMaterialPurchaseProgressRow
 {
+    public string? 交货状态 { get; set; }
+    public string? 订单交货状态 { get; set; }
     public DateTime? 订购日期 { get; set; }
     public DateTime? 交货日期 { get; set; }
     public string? 采购单号 { get; set; }

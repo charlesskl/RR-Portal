@@ -16,6 +16,7 @@ public sealed class 塑胶原料资料 : MasterEntity
     [Column("销售价"), PriceField] public decimal? 销售价 { get; set; }
     [Column("起订量")] public decimal? 起订量 { get; set; }
     [Column("安全库存")] public decimal? 安全库存 { get; set; }
+    [Column("常用原料")] public bool? 常用原料 { get; set; }
     [Column("供应商编号")] public string? 供应商编号 { get; set; }
     [Column("款号")] public string? 款号 { get; set; }
     [Column("货币")] public string? 货币 { get; set; }

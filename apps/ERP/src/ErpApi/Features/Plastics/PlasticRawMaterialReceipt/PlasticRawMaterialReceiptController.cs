@@ -47,6 +47,7 @@ public sealed class PlasticRawMaterialReceiptController(
         if (!await AllowAsync(PermissionAction.保存)) return Forbid();
         string 单号;
         try { 单号 = await svc.CreateAsync(dto, CurrentUser); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
         catch (ArgumentException ex) { return BadRequest(new { 消息 = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
         return CreatedAtAction(nameof(Get), new { 单号 }, new { 单号 });
@@ -56,7 +57,8 @@ public sealed class PlasticRawMaterialReceiptController(
     public async Task<IActionResult> Delete(string 单号)
     {
         if (!await AllowAsync(PermissionAction.删除)) return Forbid();
-        try { if (!await svc.DeleteAsync(单号)) return NotFound(); }
+        try { if (!await svc.DeleteAsync(单号, CurrentUser)) return NotFound(); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
         catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
         return NoContent();
     }
@@ -68,7 +70,9 @@ public sealed class PlasticRawMaterialReceiptController(
         // 审核前再校验订单可入仓数量：防两张未审核入仓单各自不超、先后审核后合计超
         try { await svc.ValidateOrderQtyAsync(单号); }
         catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
-        if (!await posting.ApproveAsync(Table, 单号, CurrentUser)) return Conflict(new { 消息 = "审核失败：单不存在或已审核。" });
+        try { if (!await posting.ApproveAsync(Table, 单号, CurrentUser)) return Conflict(new { 消息 = "审核失败：单不存在或已审核。" }); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
         return NoContent();
     }
 
@@ -76,7 +80,9 @@ public sealed class PlasticRawMaterialReceiptController(
     public async Task<IActionResult> Unapprove(string 单号)
     {
         if (!await AllowAsync(PermissionAction.反审核)) return Forbid();
-        if (!await posting.UnapproveAsync(Table, 单号, CurrentUser)) return Conflict(new { 消息 = "反审核失败：单不存在或未审核。" });
+        try { if (!await posting.UnapproveAsync(Table, 单号, CurrentUser)) return Conflict(new { 消息 = "反审核失败：单不存在或未审核。" }); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
         return NoContent();
     }
 }

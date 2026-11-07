@@ -58,6 +58,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
+// oxlint-disable-next-line react/only-export-components -- 云端既有 Context 与配套 hook 同文件导出；本次保留其模块边界。
 export function useTabs(): TabsState {
   const v = useContext(Ctx);
   if (!v) throw new Error("useTabs must be used within TabsProvider");

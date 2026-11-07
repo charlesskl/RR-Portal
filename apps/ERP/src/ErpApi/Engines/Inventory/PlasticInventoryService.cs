@@ -128,37 +128,9 @@ UNION ALL
 SELECT h.[日期], d.[物料编号],d.[物料名称],d.[规格],d.[单位],d.[仓库], d.[盈亏数量]
     FROM [塑胶盘点明细单] d JOIN [塑胶盘点单] h ON h.[单号]=d.[单号] WHERE ISNULL(h.[审核],'0')='1'";
 
-    private const string RawMaterialLedgerUnion = @"
-SELECT d.[原料编号],d.[原料名称],d.[产地],d.[每包重量],d.[单位], d.[数量] AS 数量
-    FROM [原料入仓明细单] d JOIN [原料入仓单] h ON h.[单号]=d.[单号] WHERE ISNULL(h.[审核],'0')='1'
-UNION ALL
-SELECT d.[原料编号],d.[原料名称],d.[产地],d.[每包重量],d.[单位], d.[数量]*-1
-    FROM [原料退仓明细单] d JOIN [原料退仓单] h ON h.[单号]=d.[单号] WHERE ISNULL(h.[审核],'0')='1'
-UNION ALL
-SELECT d.[原料编号],d.[原料名称],d.[产地],d.[每包重量],d.[单位], d.[数量]*-1
-    FROM [原料出库明细单] d JOIN [原料出库单] h ON h.[单号]=d.[单号] WHERE ISNULL(h.[审核],'0')='1'
-UNION ALL
-SELECT d.[原料编号],d.[原料名称],d.[产地],d.[每包重量],d.[单位], d.[数量]
-    FROM [原料退库明细单] d JOIN [原料退库表] h ON h.[单号]=d.[单号] WHERE ISNULL(h.[审核],'0')='1'
-UNION ALL
-SELECT d.[原料编号],d.[原料名称],d.[产地],d.[每包重量],d.[单位], d.[盈亏数量]
-    FROM [原料盘点明细单] d JOIN [原料盘点单] h ON h.[单号]=d.[单号] WHERE ISNULL(h.[审核],'0')='1'";
+    private const string RawMaterialLedgerUnion = "SELECT [原料编号],[原料名称],[产地],[每包重量],[单位],[数量] FROM (" + RawMaterialInventorySql.Dated + ") r";
 
-    private const string RawMaterialLedgerUnionDated = @"
-SELECT h.[日期] AS 日期, N'入库' AS 方向, d.[原料编号],d.[原料名称],d.[产地],d.[每包重量],d.[单位], d.[数量] AS 数量
-    FROM [原料入仓明细单] d JOIN [原料入仓单] h ON h.[单号]=d.[单号] WHERE ISNULL(h.[审核],'0')='1'
-UNION ALL
-SELECT h.[日期], N'出库', d.[原料编号],d.[原料名称],d.[产地],d.[每包重量],d.[单位], d.[数量]*-1
-    FROM [原料退仓明细单] d JOIN [原料退仓单] h ON h.[单号]=d.[单号] WHERE ISNULL(h.[审核],'0')='1'
-UNION ALL
-SELECT h.[日期], N'出库', d.[原料编号],d.[原料名称],d.[产地],d.[每包重量],d.[单位], d.[数量]*-1
-    FROM [原料出库明细单] d JOIN [原料出库单] h ON h.[单号]=d.[单号] WHERE ISNULL(h.[审核],'0')='1'
-UNION ALL
-SELECT h.[日期], N'入库', d.[原料编号],d.[原料名称],d.[产地],d.[每包重量],d.[单位], d.[数量]
-    FROM [原料退库明细单] d JOIN [原料退库表] h ON h.[单号]=d.[单号] WHERE ISNULL(h.[审核],'0')='1'
-UNION ALL
-SELECT h.[日期], N'盘点', d.[原料编号],d.[原料名称],d.[产地],d.[每包重量],d.[单位], d.[盈亏数量]
-    FROM [原料盘点明细单] d JOIN [原料盘点单] h ON h.[单号]=d.[单号] WHERE ISNULL(h.[审核],'0')='1'";
+    private const string RawMaterialLedgerUnionDated = RawMaterialInventorySql.Dated;
 
     public async Task<decimal> StockOfAsync(string 物料编号, (SqlConnection conn, SqlTransaction tx)? scope)
     {

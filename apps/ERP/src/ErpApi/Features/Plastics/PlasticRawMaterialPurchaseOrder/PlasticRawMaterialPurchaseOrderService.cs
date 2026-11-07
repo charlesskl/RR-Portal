@@ -1,11 +1,15 @@
+using ErpApi.Engines.Authorization;
 using Dapper;
 using ErpApi.Engines.DocumentNumber;
 using ErpApi.Features.MasterData;
 using ErpApi.Infrastructure.Db;
+using ErpApi.Engines.Inventory;
+using ErpApi.Features.Plastics.PlasticRawMaterialMaster;
 namespace ErpApi.Features.Plastics.PlasticRawMaterialPurchaseOrder;
 
 // 原料采购订单(原料仓库·采购计划)。审核 = 纯锁定(走通用过账引擎只翻 审核='1',不动库存)。
-public sealed class PlasticRawMaterialPurchaseOrderService(ISqlConnectionFactory factory, IDocumentNumberGenerator docNo)
+public sealed class PlasticRawMaterialPurchaseOrderService(ISqlConnectionFactory factory, IDocumentNumberGenerator docNo,
+    IAuditLogger? audit = null, IPermissionService? permissions = null)
 {
     public const string DocType = "原料采购订单";
     public const string Prefix = "YCD";   // 原料采购订单号 = YCD + yyyyMMdd + 3位流水
@@ -20,23 +24,70 @@ public sealed class PlasticRawMaterialPurchaseOrderService(ISqlConnectionFactory
         using var c = factory.Create();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
+        await RawMaterialProcurementPolicy.PrepareForSaveAsync(c, tx, dto.明细);
+        await RawMaterialProcurementPolicy.RequirePermissionAsync(c, tx, user, PermissionAction.保存, Permissions);
+        if (!await Permissions.HasAsync(c, tx, user, DocType, PermissionAction.单价)
+            && dto.明细.Any(l => l.单价 is not null))
+            throw new UnauthorizedAccessException("当前账号没有原料采购订单单价权限。");
         var 单号 = await docNo.NextAsync(DocType, Prefix, now, c, tx);
 
         await c.ExecuteAsync(@"
-INSERT INTO [原料采购订单]([单号],[供应商编号],[供应商名称],[订购日期],[交货日期],[数量],[金额],[操作员],[审核],[备注])
-VALUES(@单号,@供应商编号,@供应商名称,@订购日期,@交货日期,@数量,@金额,@操作员,'0',@备注)",
+INSERT INTO [原料采购订单]([单号],[供应商编号],[供应商名称],[订购日期],[交货日期],[数量],[金额],[操作员],[审核],[备注],[采购政策版本])
+VALUES(@单号,@供应商编号,@供应商名称,@订购日期,@交货日期,@数量,@金额,@操作员,'0',@备注,1)",
             new { 单号, dto.供应商编号, dto.供应商名称, 订购日期 = now, dto.交货日期,
                   数量 = 数量合计, 金额 = 金额合计, 操作员 = user, dto.备注 }, tx);
 
         foreach (var l in dto.明细)
             await c.ExecuteAsync(@"
-INSERT INTO [原料采购订单明细]([单号],[原料编号],[原料名称],[规格],[单位],[单价类型],[订货数量],[单价],[金额],[备注])
-VALUES(@单号,@原料编号,@原料名称,@规格,@单位,@单价类型,@订货数量,@单价,@金额,@备注)",
+INSERT INTO [原料采购订单明细]([单号],[原料编号],[原料名称],[规格],[单位],[单价类型],[订货数量],[单价],[金额],[备注],[采购政策版本],[每库存单位KG],[每包重量])
+VALUES(@单号,@原料编号,@原料名称,@规格,@单位,@单价类型,@订货数量,@单价,@金额,@备注,@采购政策版本,@每库存单位KG,@每包重量)",
                 new { 单号, l.原料编号, l.原料名称, l.规格, l.单位, l.单价类型, l.订货数量, l.单价,
-                      金额 = l.订货数量 * (l.单价 ?? 0m), l.备注 }, tx);
+                      金额 = l.订货数量 * (l.单价 ?? 0m), l.备注, l.采购政策版本, l.每库存单位KG, l.每包重量 }, tx);
 
+        await (audit ?? new AuditLogger()).WriteAsync(DocType, "新增", user, $"单号={单号};采购政策版本=1", c, tx);
         tx.Commit();
         return 单号;
+    }
+
+    public async Task<bool> UpdateAsync(string 单号, PlasticRawMaterialPurchaseOrderCreateDto dto, string user, bool canPrice = true)
+    {
+        if (dto.明细.Count == 0) throw new ArgumentException("原料采购订单至少要有一行明细。");
+        using var c = factory.Create();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+        var oldCodes = (await c.QueryAsync<string>("SELECT [原料编号] FROM [原料采购订单明细] WHERE [单号]=@单号", new { 单号 }, tx)).ToArray();
+        await RawMaterialInventorySql.LockCodesAsync(c, tx, oldCodes.Concat(dto.明细.Select(x => x.原料编号).OfType<string>()));
+        var actualCodes = (await c.QueryAsync<string>("SELECT [原料编号] FROM [原料采购订单明细] WHERE [单号]=@单号", new { 单号 }, tx)).ToArray();
+        if (!oldCodes.Order(StringComparer.OrdinalIgnoreCase).SequenceEqual(actualCodes.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("原料采购明细正在修改，请重新打开后再保存。");
+        var status = await c.ExecuteScalarAsync<string?>(
+            "SELECT ISNULL([审核],N'0') FROM [原料采购订单] WITH(UPDLOCK,HOLDLOCK) WHERE [单号]=@单号",new { 单号 },tx);
+        if (status is null) return false;
+        await RawMaterialPurchaseEditPolicy.EnsureMutableAsync(c,tx,DocType,单号);
+        await RawMaterialProcurementPolicy.PrepareForSaveAsync(c, tx, dto.明细, 单号);
+        await RawMaterialProcurementPolicy.RequirePermissionAsync(c, tx, user, PermissionAction.保存, Permissions);
+        var currentCanPrice = await Permissions.HasAsync(c, tx, user, DocType, PermissionAction.单价);
+        if (!canPrice || !currentCanPrice)
+        {
+            var original=await c.QueryAsync<PlasticRawMaterialPurchaseOrderLineDto>(
+                "SELECT [原料编号],[规格],[单位],[单价类型],[单价] FROM [原料采购订单明细] WHERE [单号]=@单号",new { 单号 },tx);
+            RawMaterialPurchaseEditPolicy.PreservePrices(original.Select(l=>(RawMaterialPurchaseEditPolicy.PriceKey(l.原料编号,l.规格,l.单位,l.单价类型),l.单价)),
+                dto.明细,l=>RawMaterialPurchaseEditPolicy.PriceKey(l.原料编号,l.规格,l.单位,l.单价类型),(l,price)=>l.单价=price);
+        }
+        await c.ExecuteAsync(@"UPDATE [原料采购订单] SET [供应商编号]=@供应商编号,[供应商名称]=@供应商名称,
+[交货日期]=@交货日期,[数量]=@quantity,[金额]=@amount,[备注]=@备注,[采购政策版本]=1 WHERE [单号]=@单号",
+            new { 单号,dto.供应商编号,dto.供应商名称,dto.交货日期,dto.备注,
+                quantity=dto.明细.Sum(l=>l.订货数量),amount=dto.明细.Sum(l=>l.订货数量*(l.单价??0)) },tx);
+        await c.ExecuteAsync("DELETE FROM [原料采购订单明细] WHERE [单号]=@单号",new { 单号 },tx);
+        foreach(var l in dto.明细)
+            await c.ExecuteAsync(@"INSERT INTO [原料采购订单明细]
+([单号],[原料编号],[原料名称],[规格],[单位],[单价类型],[订货数量],[单价],[金额],[备注],[采购政策版本],[每库存单位KG],[每包重量])
+VALUES(@单号,@原料编号,@原料名称,@规格,@单位,@单价类型,@订货数量,@单价,@amount,@备注,@采购政策版本,@每库存单位KG,@每包重量)",
+                new { 单号,l.原料编号,l.原料名称,l.规格,l.单位,l.单价类型,l.订货数量,l.单价,amount=l.订货数量*(l.单价??0),l.备注,l.采购政策版本,l.每库存单位KG,l.每包重量 },tx);
+        await RawMaterialPurchaseEditPolicy.ResetApprovalAsync(c,tx,DocType,单号);
+        await (audit??new AuditLogger()).WriteAsync(DocType,"修改",user,$"单号={单号};收货前修改，重新审批",c,tx);
+        tx.Commit();
+        return true;
     }
 
     public async Task<PagedResult<PlasticRawMaterialPurchaseOrderHeaderDto>> ListAsync(int page, int size, string? keyword)
@@ -48,7 +99,7 @@ VALUES(@单号,@原料编号,@原料名称,@规格,@单位,@单价类型,@订货
         using var c = factory.Create();
         using var multi = await c.QueryMultipleAsync(@"
 SELECT COUNT(*) FROM [原料采购订单] WHERE @kw IS NULL OR [单号] LIKE @kw OR [供应商名称] LIKE @kw;
-SELECT [ID],[单号],[供应商编号],[供应商名称],[订购日期],[交货日期],[数量],[金额],[操作员],[审核],[审核人],[备注],[主管审核],[主管审核人],[经理审核],[经理审核人]
+SELECT [ID],[单号],[供应商编号],[供应商名称],[订购日期],[交货日期],[数量],[金额],[操作员],[审核],[审核人],[备注],[主管审核],[主管审核人],[经理审核],[经理审核人],[采购政策版本]
 FROM [原料采购订单] WHERE @kw IS NULL OR [单号] LIKE @kw OR [供应商名称] LIKE @kw
 ORDER BY [ID] DESC OFFSET (@page-1)*@size ROWS FETCH NEXT @size ROWS ONLY;", new { kw, page, size });
         var total = await multi.ReadFirstAsync<int>();
@@ -60,29 +111,43 @@ ORDER BY [ID] DESC OFFSET (@page-1)*@size ROWS FETCH NEXT @size ROWS ONLY;", new
     {
         using var c = factory.Create();
         using var multi = await c.QueryMultipleAsync(@"
-SELECT [ID],[单号],[供应商编号],[供应商名称],[订购日期],[交货日期],[数量],[金额],[操作员],[审核],[审核人],[备注],[主管审核],[主管审核人],[经理审核],[经理审核人]
+SELECT [ID],[单号],[供应商编号],[供应商名称],[订购日期],[交货日期],[数量],[金额],[操作员],[审核],[审核人],[备注],[主管审核],[主管审核人],[经理审核],[经理审核人],[采购政策版本]
 FROM [原料采购订单] WHERE [单号]=@单号;
-SELECT [ID],[原料编号],[原料名称],[规格],[单位],[单价类型],[订货数量],[单价],[金额],[备注]
+SELECT [ID],[原料编号],[原料名称],[规格],[单位],[单价类型],[订货数量],[单价],[金额],[备注],[采购政策版本],[每库存单位KG],[每包重量]
 FROM [原料采购订单明细] WHERE [单号]=@单号 ORDER BY [ID];", new { 单号 });
         var header = await multi.ReadFirstOrDefaultAsync<PlasticRawMaterialPurchaseOrderHeaderDto>();
         if (header is null) return null;
         var lines = (await multi.ReadAsync<PlasticRawMaterialPurchaseOrderLineDto>()).AsList();
+        header.修改限制原因 = await RawMaterialPurchaseEditPolicy.ReasonAsync(c, "原料采购订单", 单号);
+        header.可修改 = header.修改限制原因 is null;
         return new PlasticRawMaterialPurchaseOrderDetailDto { 单头 = header, 明细 = lines };
     }
 
-    public async Task<bool> DeleteAsync(string 单号)
+    public async Task<bool> DeleteAsync(string 单号, string user = "")
     {
         using var c = factory.Create();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
+        await RawMaterialProcurementPolicy.LockPurchaseAsync(c, tx, 单号);
         var 审核 = await c.ExecuteScalarAsync<string?>(
             "SELECT ISNULL([审核],'0') FROM [原料采购订单] WITH (UPDLOCK, HOLDLOCK) WHERE [单号]=@单号", new { 单号 }, tx);
         if (审核 is null) return false;
+        await RawMaterialProcurementPolicy.RequirePermissionAsync(c, tx, user, PermissionAction.删除, Permissions);
         if (审核 == "1") throw new InvalidOperationException("已审核的原料采购订单不能删除，请先反审核。");
+        await RawMaterialPurchaseEditPolicy.EnsureMutableAsync(c, tx, DocType, 单号);
         await c.ExecuteAsync("DELETE FROM [原料采购订单明细] WHERE [单号]=@单号", new { 单号 }, tx);
         await c.ExecuteAsync("DELETE FROM [原料采购订单] WHERE [单号]=@单号", new { 单号 }, tx);
+        await (audit ?? new AuditLogger()).WriteAsync(DocType, "删除", user, $"单号={单号}", c, tx);
         tx.Commit();
         return true;
+    }
+
+    private IPermissionService Permissions => permissions ?? new PermissionService(factory);
+
+    public async Task<IReadOnlyList<PlasticRawMaterialPurchaseRow>> PurchaseLimitsAsync(string? keyword, string? excludeOrder)
+    {
+        using var c = factory.Create();
+        return await RawMaterialProcurementPolicy.ReadAnalysisAsync(c, null, keyword: keyword, excludeOrder: excludeOrder);
     }
 
     public async Task<IReadOnlyList<PlasticRawMaterialOrderReceiptStatRow>> OrderReceiptStatsAsync(

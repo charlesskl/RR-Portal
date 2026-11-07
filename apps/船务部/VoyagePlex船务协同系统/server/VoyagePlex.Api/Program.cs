@@ -121,49 +121,12 @@ using (var scope = app.Services.CreateScope())
     }
     if (!receivedDateColumnExists)
         database.Database.ExecuteSqlRaw("ALTER TABLE ImportBatches ADD COLUMN MailReceivedDate TEXT NOT NULL DEFAULT ''");
-    var historicalMail = database.ImportEmailItems.Include(item => item.ImportBatch)
-        .Where(item => item.MailboxKey != "" && (item.MailReceivedAt == "" || item.MailReceivedDate == "")).ToList();
-    foreach (var item in historicalMail)
-    {
-        try
-        {
-            var parsed = JsonNode.Parse(item.ResultJson);
-            item.MailSubject = parsed?["message"]?["subject"]?.ToString() ?? "";
-            item.MailSender = parsed?["message"]?["sender"]?.ToString() ?? "";
-            item.MailReceivedAt = parsed?["mailbox_received_at"]?.ToString() ?? "";
-            if (item.MailReceivedAt != "") item.MailReceivedDate = MailboxDateRules.ReceivedDate(item.MailReceivedAt);
-            if (item.ImportBatch is not null && item.ImportBatch.MailReceivedDate == "" && item.MailReceivedAt != "")
-                item.ImportBatch.MailReceivedDate = item.MailReceivedDate;
-        }
-        catch (Exception error) when (error is JsonException or FormatException)
-        {
-            // 历史异常邮件保留原记录，供人工核对。
-        }
-    }
-    if (historicalMail.Count > 0) database.SaveChanges();
+    StartupMailboxMaintenance.BackfillMetadata(database);
     EnsureShipmentTaskSchema(database);
     DailyMailboxMigration.Apply(database);
     var mailboxStartDate = database.MailSystemSettings.Single(value => value.Id == 1).StartDate;
-    var mailboxItems = database.ImportEmailItems.Where(item => item.MailboxKey != "" && item.MailReceivedDate.CompareTo(mailboxStartDate) >= 0).ToList();
-    var existingContacts = database.MailContacts.ToDictionary(contact => contact.Email, StringComparer.OrdinalIgnoreCase);
-    foreach (var senderGroup in mailboxItems.GroupBy(item => MailClassificationRules.NormalizeEmail(item.MailSender)).Where(group => group.Key != ""))
-    {
-        if (!existingContacts.TryGetValue(senderGroup.Key, out var contact))
-        {
-            contact = new MailContact { Email = senderGroup.Key, DisplayName = senderGroup.First().MailSender };
-            database.MailContacts.Add(contact); existingContacts[senderGroup.Key] = contact;
-        }
-        contact.MessageCount = senderGroup.Count(); contact.UpdatedAt = DateTime.UtcNow;
-        if (MailContactRules.IsInternal(contact.Email)) { contact.ContactType = "Internal"; contact.IsConfirmed = true; }
-    }
-    foreach (var item in mailboxItems.Where(item => item.ClassificationSource != "Manual"))
-    {
-        var classification = MailClassificationRules.ClassifyStored(item.MailSubject, item.ResultJson);
-        item.ShipmentMode = classification.Mode; item.WorkCategory = classification.Category; item.ClassificationConfidence = classification.Confidence;
-        item.ClassificationSource = classification.Source; item.NeedsClassificationReview = classification.NeedsReview;
-    }
-    if (mailboxItems.Count > 0) database.SaveChanges();
-    BackfillShipmentEmailSubjects(database);
+    StartupMailboxMaintenance.RefreshContactsAndClassification(database, mailboxStartDate);
+    StartupMailboxMaintenance.BackfillShipmentEmailSubjects(database);
     BackfillDestinationCountries(database);
     database.Database.ExecuteSqlRaw("""
         CREATE TABLE IF NOT EXISTS InspectionMappings (
@@ -2495,22 +2458,6 @@ static void EnsureShipmentTaskSchema(AppDbContext db)
     }
     db.Database.ExecuteSqlRaw("DROP INDEX IF EXISTS IX_ShipmentTasks_SourceImportItemId");
     db.Database.ExecuteSqlRaw("CREATE UNIQUE INDEX IF NOT EXISTS IX_ShipmentTasks_SourceImportItemId_SourceGroupKey ON ShipmentTasks (SourceImportItemId, SourceGroupKey) WHERE SourceImportItemId IS NOT NULL");
-}
-
-static void BackfillShipmentEmailSubjects(AppDbContext db)
-{
-    var tasks = db.ShipmentTasks.Where(task => task.EmailSubject == "" && task.SourceImportItemId != null).ToList();
-    if (tasks.Count == 0) return;
-    var sourceIds = tasks.Select(task => task.SourceImportItemId!.Value).ToHashSet();
-    var imports = db.ImportEmailItems.AsNoTracking().Where(item => sourceIds.Contains(item.Id)).ToList()
-        .ToDictionary(item => item.Id);
-    foreach (var task in tasks)
-    {
-        if (!imports.TryGetValue(task.SourceImportItemId!.Value, out var importItem)) continue;
-        var subject = JsonNode.Parse(importItem.ResultJson)?["message"]?["subject"]?.ToString()?.Trim();
-        if (!string.IsNullOrWhiteSpace(subject)) task.EmailSubject = subject;
-    }
-    db.SaveChanges();
 }
 
 static void BackfillDestinationCountries(AppDbContext db)

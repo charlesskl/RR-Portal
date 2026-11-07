@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { qcResultText, qcState, qcSummary, readQcSnapshots, saveQcSnapshots, type QcResult } from "@/lib/qc-display";
+import { MailRecovery } from "@/components/mail-recovery";
 import { DailyMailWorkbench } from "@/components/daily-mail-workbench";
 import { FactoryMappingManagement } from "@/components/factory-mapping-management";
 import { TemplateManagement } from "@/components/template-management";
@@ -341,10 +342,11 @@ function AuthScreen({setupRequired,onAuthenticated}:{setupRequired:boolean;onAut
 
 function AccessDenied(){return <div className="content"><section className="empty-state"><div className="empty-icon"><Users/></div><h2>无权访问</h2><p>当前账号没有此模块的使用权限，请联系管理员调整角色。</p></section></div>;}
 
-type MailSection = { key:"workbench"|"contacts"|"initialization"|"candidates"|"settings"; label:string; description:string; icon:typeof Inbox; temporary:boolean; adminOnly?:boolean };
+type MailSection = { key:"workbench"|"contacts"|"initialization"|"candidates"|"settings"|"recovery"; label:string; description:string; icon:typeof Inbox; temporary:boolean; adminOnly?:boolean; recoveryAdminOnly?:boolean };
 const mailSections:MailSection[] = [
   { key:"workbench", label:"每日邮件确认", description:"查看、分类并处理邮箱中的业务邮件", icon:Inbox, temporary:false },
   { key:"contacts", label:"联系人整理", description:"整理内部人员、客户、货代和车行联系人", icon:ContactRound, temporary:false },
+  { key:"recovery", label:"历史失败补信", description:"核对并重新读取失败邮件", icon:History, temporary:false, recoveryAdminOnly:true },
   { key:"settings", label:"同步与存储设置", description:"管理邮箱同步、保存期限和运行状态", icon:Settings, temporary:false, adminOnly:true },
 ];
 
@@ -359,7 +361,7 @@ function PersonalMailboxChooser({role}:{role:UserRole}) {
 
 function MailWorkspace({route,role}:{route:string;role:UserRole}) {
   const requested=route.split("/")[1]||"workbench";
-  const available=mailSections.filter(section=>!section.adminOnly||role==="admin"||role==="supervisor");
+  const available=mailSections.filter(section=>(!section.adminOnly||role==="admin"||role==="supervisor")&&(!section.recoveryAdminOnly||role==="admin"));
   const active=available.find(section=>section.key===requested)??available[0];
   const ActiveIcon=active.icon;
   return <div className="content mail-module">
@@ -367,7 +369,7 @@ function MailWorkspace({route,role}:{route:string;role:UserRole}) {
     <nav className="mail-section-nav" aria-label="邮件工作台功能">
       {available.map(section=>{const Icon=section.icon;return <Link key={section.key} href={`/mail/${section.key}`} className={section.key===active.key?"active":""}><Icon size={17}/><span>{section.label}</span>{section.temporary&&<small>阶段性</small>}</Link>;})}
     </nav>
-    {active.key==="workbench"?<DailyMailWorkbench route={route}/>:active.key==="contacts"?<MailContactsWorkspace/>:active.key==="candidates"?<MailCandidatesWorkspace/>:active.key==="settings"?<MailSettingsWorkspace/>:active.key==="initialization"?<MailInitializationWorkspace role={role}/>:<section className="panel mail-foundation-panel">
+    {active.key==="workbench"?<DailyMailWorkbench route={route}/>:active.key==="contacts"?<MailContactsWorkspace/>:active.key==="candidates"?<MailCandidatesWorkspace/>:active.key==="recovery"?<MailRecovery/>:active.key==="settings"?<MailSettingsWorkspace/>:active.key==="initialization"?<MailInitializationWorkspace role={role}/>:<section className="panel mail-foundation-panel">
       <div className="mail-foundation-heading"><span><ActiveIcon size={22}/></span><div><h2>{active.label}</h2><p>{active.description}</p></div>{active.temporary&&<b>初始化完成后隐藏</b>}</div>
       <div className="mail-foundation-grid">
         {active.key==="initialization"&&<><article><strong>容量扫描</strong><p>先统计半年邮件数量、附件大小和重复情况。</p></article><article><strong>基准日</strong><p>基准日前仅归档，基准日后生成候选任务。</p></article><article><strong>分批进度</strong><p>分批读取并保存断点，失败邮件单独重试。</p></article></>}

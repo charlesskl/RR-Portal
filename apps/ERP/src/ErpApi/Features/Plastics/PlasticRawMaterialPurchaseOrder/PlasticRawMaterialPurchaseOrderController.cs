@@ -17,13 +17,21 @@ public sealed class PlasticRawMaterialPurchaseOrderController(
     private string CurrentUser => User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub") ?? "";
     private Task<bool> AllowAsync(PermissionAction a) => perms.HasAsync(CurrentUser, Menu, a);
     private Task<bool> CanPrice() => perms.HasAsync(CurrentUser, Menu, PermissionAction.单价);
+    private Task<bool> CanAmount() => perms.HasAsync(CurrentUser, Menu, PermissionAction.金额);
+
+    [HttpGet("purchase-limits")]
+    public async Task<IActionResult> PurchaseLimits(string? keyword = null, string? excludeOrder = null)
+    {
+        if (!await AllowAsync(PermissionAction.打开) && !await AllowAsync(PermissionAction.保存)) return Forbid();
+        return Ok(await svc.PurchaseLimitsAsync(keyword, excludeOrder));
+    }
 
     [HttpGet]
     public async Task<IActionResult> List(int page = 1, int size = 20, string? keyword = null)
     {
         if (!await AllowAsync(PermissionAction.打开)) return Forbid();
         var result = await svc.ListAsync(page, size, keyword);
-        if (!await CanPrice())
+        if (!await CanAmount())
             foreach (var h in result.Items) h.金额 = null;
         return Ok(result);
     }
@@ -34,10 +42,13 @@ public sealed class PlasticRawMaterialPurchaseOrderController(
         if (!await AllowAsync(PermissionAction.打开)) return Forbid();
         var d = await svc.GetAsync(单号);
         if (d is null) return NotFound();
-        if (!await CanPrice())
+        var canPrice=await CanPrice();
+        var canAmount=await CanAmount();
+        if (!canAmount && d.单头 is not null) d.单头.金额=null;
+        foreach(var line in d.明细)
         {
-            if (d.单头 is not null) d.单头.金额 = null;
-            foreach (var l in d.明细) { l.单价 = null; l.金额 = null; }
+            if (!canPrice) line.单价=null;
+            if (!canAmount) line.金额=null;
         }
         return Ok(d);
     }
@@ -48,15 +59,29 @@ public sealed class PlasticRawMaterialPurchaseOrderController(
         if (!await AllowAsync(PermissionAction.保存)) return Forbid();
         string 单号;
         try { 单号 = await svc.CreateAsync(dto, CurrentUser); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
         catch (ArgumentException ex) { return BadRequest(new { 消息 = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
         return CreatedAtAction(nameof(Get), new { 单号 }, new { 单号 });
+    }
+
+    [HttpPut("{单号}")]
+    public async Task<IActionResult> Update(string 单号, [FromBody] PlasticRawMaterialPurchaseOrderCreateDto dto)
+    {
+        if (!await AllowAsync(PermissionAction.保存)) return Forbid();
+        try { if (!await svc.UpdateAsync(单号,dto,CurrentUser,await CanPrice())) return NotFound(); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (ArgumentException ex) { return BadRequest(new { 消息=ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { 消息=ex.Message }); }
+        return NoContent();
     }
 
     [HttpDelete("{单号}")]
     public async Task<IActionResult> Delete(string 单号)
     {
         if (!await AllowAsync(PermissionAction.删除)) return Forbid();
-        try { if (!await svc.DeleteAsync(单号)) return NotFound(); }
+        try { if (!await svc.DeleteAsync(单号, CurrentUser)) return NotFound(); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
         catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
         return NoContent();
     }
@@ -89,7 +114,12 @@ public sealed class PlasticRawMaterialPurchaseOrderController(
         if (!await AllowAsync(PermissionAction.审核)) return Forbid();
         // 门:必须先经主管、经理审核(已审核的历史单不受影响——posting 对它们直接返回 false)
         if (!await chain.IsManagerApprovedAsync(Table, 单号)) return Conflict(new { 消息 = "请先经主管、经理审核。" });
-        if (!await posting.ApproveAsync(Table, 单号, CurrentUser)) return Conflict(new { 消息 = "审核失败：单不存在或已审核。" });
+        try
+        {
+            if (!await posting.ApproveAsync(Table, 单号, CurrentUser)) return Conflict(new { 消息 = "审核失败：单不存在或已审核。" });
+        }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (InvalidOperationException ex) { return Conflict(new { 消息=ex.Message }); }
         return NoContent();
     }
 
@@ -97,7 +127,8 @@ public sealed class PlasticRawMaterialPurchaseOrderController(
     public async Task<IActionResult> Unapprove(string 单号)
     {
         if (!await AllowAsync(PermissionAction.反审核)) return Forbid();
-        if (!await posting.UnapproveAsync(Table, 单号, CurrentUser)) return Conflict(new { 消息 = "反审核失败：单不存在或未审核。" });
+        try { if (!await posting.UnapproveAsync(Table, 单号, CurrentUser)) return Conflict(new { 消息 = "反审核失败：单不存在或未审核。" }); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
         return NoContent();
     }
 }

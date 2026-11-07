@@ -4,7 +4,8 @@
 // 新增/编辑弹窗(编辑先取 /master/plastic-raw-materials/{id} 全量详情);删除带确认;
 // 无「单价」位时 单价/销售价 列显 *** 且编辑弹窗不出价格段。
 // CRUD 走 /master/plastic-raw-materials(同老系统 masterApi),列表/类别走 /plastic-raw-material-master。
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Prohibit, Trash } from "@phosphor-icons/react";
 import { masterDataApi, plasticRawMaterialMasterApi } from "@/api/endpoints";
 import type { PlasticRawMaterialCategoryNode, PlasticRawMaterialRow } from "@/api/types";
@@ -26,6 +27,11 @@ const plasticRaws = masterDataApi("plastic-raw-materials");
 const NUM_FIELDS = new Set(["每包重量", "单价", "销售价", "起订量", "安全库存"]);
 
 export default function PlasticRawMaterialMasterPage() {
+  const qc = useQueryClient();
+  const editGeneration = useRef(0);
+  const listGeneration = useRef(0);
+  useEffect(() => () => { editGeneration.current += 1; listGeneration.current += 1; }, []);
+  const [common, setCommon] = useState<boolean | null>(null);
   const { can, loading: permsLoading } = usePerms();
   const canOpen = can(MENU, "打开");
   const canSave = can(MENU, "保存");
@@ -67,15 +73,18 @@ export default function PlasticRawMaterialMasterPage() {
   const loadRows = useCallback(
     async (p: number) => {
       if (!canOpen) return;
+      const generation = ++listGeneration.current;
       setLoading(true);
       try {
         const r = await plasticRawMaterialMasterApi.list(类别, keyword || undefined, p, PAGE_SIZE);
+        if (generation !== listGeneration.current) return;
         setRows(r.items);
         setTotal(r.total);
       } catch (e) {
+        if (generation !== listGeneration.current) return;
         setToast({ text: errMsg(e) || "加载塑胶原料失败", tone: "err" });
       } finally {
-        setLoading(false);
+        if (generation === listGeneration.current) setLoading(false);
       }
     },
     [canOpen, 类别, keyword],
@@ -90,33 +99,40 @@ export default function PlasticRawMaterialMasterPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canOpen, selKey, keyword]);
 
+  const closeEditor = () => { if (!saving) { editGeneration.current += 1; setEditing(null); } };
   const openCreate = () => {
+    editGeneration.current += 1;
+    setCommon(false);
     const init: PlasticRawMaterialRow = { ID: 0, 物料类别: 类别 };
     setEditing(init);
     setForm({ 物料类别: 类别 ?? "" });
   };
 
   const openEdit = async (r: PlasticRawMaterialRow) => {
+    const generation = ++editGeneration.current;
     try {
       const full = await plasticRaws.get(r.ID);
+      if (generation !== editGeneration.current) return;
+      setCommon(typeof full.常用原料 === "boolean" ? full.常用原料 : null);
       setEditing(r);
       const v: Record<string, string> = {};
       for (const [k, val] of Object.entries(full)) v[k] = val == null ? "" : String(val);
       setForm(v);
     } catch (e) {
+      if (generation !== editGeneration.current) return;
       setToast({ text: errMsg(e) || "加载塑胶原料详情失败", tone: "err" });
     }
   };
 
   const submit = async () => {
-    if (!editing) return;
+    if (!editing || saving || !canSave) return;
     if (!form.物料编号?.trim()) {
       setToast({ text: "请输入物料编号", tone: "err" });
       return;
     }
     setSaving(true);
     try {
-      const body: Record<string, unknown> = { ...form };
+      const body: Record<string, unknown> = { ...form, 常用原料: common };
       for (const k of Object.keys(body)) {
         if (!NUM_FIELDS.has(k)) continue;
         if (body[k] === "") delete body[k];
@@ -124,6 +140,8 @@ export default function PlasticRawMaterialMasterPage() {
       }
       if ((editing.ID ?? 0) > 0) await plasticRaws.update(editing.ID!, body);
       else await plasticRaws.create(body);
+      void qc.invalidateQueries({ queryKey: ["raw-purchase-analysis"] });
+      void qc.invalidateQueries({ queryKey: ["raw-purchase-order", "purchase-limits"] });
       setToast({ text: "已保存", tone: "ok" });
       setEditing(null);
       await loadCats();
@@ -191,6 +209,7 @@ export default function PlasticRawMaterialMasterPage() {
   const COLUMNS: { title: string; key: keyof PlasticRawMaterialRow; money?: boolean; num?: boolean }[] = [
     { title: "物料编号", key: "物料编号" },
     { title: "物料名称", key: "物料名称" },
+    { title: "常用原料", key: "常用原料" },
     { title: "类别", key: "物料类别" },
     { title: "规格", key: "规格" },
     { title: "颜色", key: "颜色" },
@@ -331,7 +350,7 @@ export default function PlasticRawMaterialMasterPage() {
                               c.key === "物料编号" && "f-mono font-semibold",
                             )}
                           >
-                            {v == null ? "" : String(v)}
+                            {c.key === "常用原料" ? (v === true ? "常用" : v === false ? "不常用" : "未标记") : v == null ? "" : String(v)}
                           </td>
                         );
                       })}
@@ -401,12 +420,12 @@ export default function PlasticRawMaterialMasterPage() {
       {/* 新增/编辑塑胶原料(字段对照老系统 Form;价格段按「单价」位裁剪) */}
       <PickerDialog
         open={editing !== null}
-        onClose={() => setEditing(null)}
+        onClose={closeEditor}
         title={editing && (editing.ID ?? 0) > 0 ? "编辑塑胶原料" : "新增塑胶原料"}
         width="sm:max-w-[780px]"
         footer={
           <>
-            <button type="button" className="f-btn h-10 px-4" onClick={() => setEditing(null)}>
+            <button type="button" className="f-btn h-10 px-4" onClick={closeEditor}>
               取消
             </button>
             <button
@@ -423,6 +442,8 @@ export default function PlasticRawMaterialMasterPage() {
         <div className="grid grid-cols-3 gap-x-4 gap-y-3">
           {textField("物料编号", "物料编号")}
           {textField("物料名称", "物料名称")}
+          <label className="col-span-3 flex items-center gap-2 text-sm"><input aria-label="常用原料" type="checkbox" checked={common === true} onChange={e => setCommon(e.target.checked)} disabled={saving} />常用原料（人工确认，可按需补库）</label>
+          <p className="col-span-3 text-sm text-[#5f6b7d]">不常用原料按实际缺口采购，最多额外 2 包；包重须有明确资料。历史未标记项按不常用执行。</p>
           {textField("物料类别", "类别")}
           {textField("规格", "规格")}
           {textField("颜色", "颜色")}

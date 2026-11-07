@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { rawPurchaseOrderApi } from "@/api/endpoints";
 import type { RawPurchaseAnalysisRow, SupplierRow } from "@/api/types";
 import { SupplierPickerDialog } from "@/components/doc/SupplierPickerDialog";
+import { rawPurchaseLimitLabel, validateRawPurchase } from "@/lib/rawPurchasePolicy";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -28,7 +29,7 @@ interface Candidate {
 }
 
 function fmt(n: number): string {
-  return String(Math.round(n * 1000) / 1000);
+  return String(n);
 }
 
 export default function RawPurchaseGenerateDialog({
@@ -46,20 +47,20 @@ export default function RawPurchaseGenerateDialog({
   const candidates = useMemo<Candidate[]>(
     () =>
       rows
-        .filter((r) => Number(r.安全库存 ?? 0) + Number(r.生产需求 ?? 0) > 0)
+        .filter((r) => r.常用原料 === true || Number(r.安全库存 ?? 0) + Number(r.生产需求 ?? 0) > 0)
         .map((r) => {
           const 可购 = Number(r.可购数量 ?? 0);
           const 在途 = Number(r.在途数量 ?? 0);
-          const autoSkip = 可购 <= 0;
+          const autoSkip = 可购 <= 0 || !!r.采购限制原因;
           return {
             row: r,
             可购,
             autoSkip,
-            skipReason: autoSkip
+            skipReason: r.采购限制原因 || (autoSkip
               ? 在途 > 0
                 ? `在途 ${fmt(在途)} 未到,已抵扣`
                 : "库存够用,无需采购"
-              : "",
+              : ""),
           };
         }),
     [rows],
@@ -99,11 +100,13 @@ export default function RawPurchaseGenerateDialog({
       单位: x.row.单位,
       订货数量: Number(qty[key(x.row)] || 0),
     }));
-    const bad = lines.find((l) => !(l.订货数量 > 0));
+    const bad = lines.find((l) => !Number.isFinite(l.订货数量) || !(l.订货数量 > 0));
     if (bad) {
       setError(`「${bad.原料编号}」订货数量必须大于 0`);
       return;
     }
+    const policyError = validateRawPurchase(lines, rows);
+    if (policyError) { setError(policyError); return; }
     setBusy(true);
     setError("");
     try {
@@ -123,7 +126,7 @@ export default function RawPurchaseGenerateDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+    <Dialog open={open} onOpenChange={(v) => !v && !busy && onClose()}>
       <DialogContent className="sm:max-w-[1100px]">
         <DialogHeader>
           <DialogTitle>{confirming ? "确认生成采购单" : "从采购分析生成采购单"}</DialogTitle>
@@ -186,9 +189,9 @@ export default function RawPurchaseGenerateDialog({
                     <th className={cn(thCls, "text-right")}>当前库存</th>
                     <th className={cn(thCls, "text-right")}>生产需求</th>
                     <th className={cn(thCls, "text-right")}>在途未到</th>
-                    <th className={cn(thCls, "text-right")}>可购数量</th>
+                    <th className={cn(thCls, "text-right")}>需订数量</th>
                     <th className={cn(thCls, "text-right")}>订货数量</th>
-                    <th className={thCls}>说明</th>
+                    <th className={thCls}>采购上限与说明</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -207,6 +210,7 @@ export default function RawPurchaseGenerateDialog({
                           <Checkbox
                             aria-label={`勾选 ${k}`}
                             className="h-5 w-5 border-black/20 data-[state=checked]:border-[#16a34a] data-[state=checked]:bg-[#16a34a] data-[state=checked]:text-[#ffffff]"
+                            disabled={!!x.row.采购限制原因 || (x.row.常用原料 !== true && x.row.可购上限 === 0)}
                             checked={on}
                             onCheckedChange={(v) => setChecked({ ...checked, [k]: v === true })}
                           />
@@ -230,12 +234,13 @@ export default function RawPurchaseGenerateDialog({
                           <Input
                             aria-label={`${k} 订货数量`}
                             className="f-mono h-9 w-28 border-black/10 bg-black/[0.04] text-right text-[15px]"
-                            disabled={!on}
+                            disabled={!on || busy}
                             value={qty[k] ?? ""}
                             onChange={(e) => setQty({ ...qty, [k]: e.target.value })}
                           />
                         </td>
-                        <td className="px-3 py-2 text-sm whitespace-nowrap">
+                        <td className="px-3 py-2 text-sm">
+                          <p>{rawPurchaseLimitLabel(x.row)}</p>
                           {x.autoSkip && (
                             <span className="inline-flex rounded-full border border-amber-500/50 bg-amber-500/10 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
                               {x.skipReason}
@@ -275,19 +280,19 @@ export default function RawPurchaseGenerateDialog({
                   ))}
                 </ul>
                 <p className="mt-2 text-xs text-amber-700">
-                  若在途采购单无法到货,请返回手动勾选该行。
+                  如在途采购单无法到货，请先核对并处理原采购单，再刷新采购分析。
                 </p>
               </div>
             )}
           </div>
         )}
 
-        {error && <p className="mt-2 text-sm text-[#dc2626]">{error}</p>}
+        {error && <p role="alert" className="mt-2 text-sm text-[#dc2626]">{error}</p>}
 
         <DialogFooter>
           {!confirming ? (
             <>
-              <button type="button" className="f-btn px-5" onClick={onClose}>
+              <button type="button" className="f-btn px-5" disabled={busy} onClick={onClose}>
                 取消
               </button>
               <button
@@ -305,7 +310,7 @@ export default function RawPurchaseGenerateDialog({
             </>
           ) : (
             <>
-              <button type="button" className="f-btn px-5" onClick={() => setConfirming(false)}>
+              <button type="button" className="f-btn px-5" disabled={busy} onClick={() => setConfirming(false)}>
                 返回修改
               </button>
               <button

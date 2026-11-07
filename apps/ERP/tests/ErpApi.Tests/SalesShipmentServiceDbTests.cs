@@ -21,17 +21,20 @@ public class SalesShipmentServiceDbTests(DbFixture fx)
     {
         Skip.IfNot(fx.Available, "未设置 ERP_TEST_DB");
         using var c = fx.Open();
-        c.Execute("IF NOT EXISTS (SELECT 1 FROM [客户资料] WHERE [客户编号]=N'P6AC1') INSERT INTO [客户资料]([客户编号],[客户名称]) VALUES(N'P6AC1',N'P6A客户')");
-        c.Execute("IF NOT EXISTS (SELECT 1 FROM [物料资料] WHERE [物料编号]=N'P6AM1') INSERT INTO [物料资料]([物料编号],[物料名称]) VALUES(N'P6AM1',N'成品甲')");
+        var prefix = "T6" + Guid.NewGuid().ToString("N")[..8];
+        var customer = prefix + "C";
+        var material = prefix + "M";
         string? no = null;
         try
         {
+            c.Execute("IF NOT EXISTS (SELECT 1 FROM [客户资料] WHERE [客户编号]=@customer) INSERT INTO [客户资料]([客户编号],[客户名称]) VALUES(@customer,N'P6A客户')", new { customer });
+            c.Execute("IF NOT EXISTS (SELECT 1 FROM [物料资料] WHERE [物料编号]=@material) INSERT INTO [物料资料]([物料编号],[物料名称]) VALUES(@material,N'成品甲')", new { material });
             no = await Svc().CreateAsync(new SalesShipmentCreateDto
             {
-                仓库 = "P6A仓", 客户编号 = "P6AC1", 客户名称 = "P6A客户",
+                仓库 = "P6A仓", 客户编号 = customer, 客户名称 = "P6A客户",
                 明细 = [
-                    new SalesShipmentLineDto { 物料编号 = "P6AM1", 物料名称 = "成品甲", 规格 = "M", 颜色 = "黑", 单位 = "件", 数量 = 10, 单价 = 8 },
-                    new SalesShipmentLineDto { 物料编号 = "P6AM1", 物料名称 = "成品甲", 规格 = "L", 颜色 = "白", 单位 = "件", 数量 = 5, 单价 = 8 },
+                    new SalesShipmentLineDto { 物料编号 = material, 物料名称 = "成品甲", 规格 = "M", 颜色 = "黑", 单位 = "件", 数量 = 10, 单价 = 8 },
+                    new SalesShipmentLineDto { 物料编号 = material, 物料名称 = "成品甲", 规格 = "L", 颜色 = "白", 单位 = "件", 数量 = 5, 单价 = 8 },
                 ]
             }, "tester");
             Assert.StartsWith("XS", no);
@@ -49,8 +52,8 @@ public class SalesShipmentServiceDbTests(DbFixture fx)
         finally
         {
             if (no != null) { c.Execute("DELETE FROM [销售出货明细单] WHERE [单号]=@no", new { no }); c.Execute("DELETE FROM [销售出货单] WHERE [单号]=@no", new { no }); }
-            c.Execute("DELETE FROM [客户资料] WHERE [客户编号]=N'P6AC1'");
-            c.Execute("DELETE FROM [物料资料] WHERE [物料编号]=N'P6AM1'");
+            c.Execute("DELETE FROM [客户资料] WHERE [客户编号]=@customer", new { customer });
+            c.Execute("DELETE FROM [物料资料] WHERE [物料编号]=@material", new { material });
         }
     }
 }

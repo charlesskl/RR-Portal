@@ -7,8 +7,8 @@
 //    领料审批 -> /material-issues?doc=单号 直开该领料单
 //    补料审批(单号 BUL 前缀) -> /replenishments;BOM反审核结果 -> /bom-setup
 //    目标页未注册按 MENU_PATHS 裁决:toast 提示并记下关键参数,不静默断链(Task 9 裁决模式)
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowClockwise,
@@ -23,6 +23,8 @@ import {
   stylesApi,
 } from "@/api/endpoints";
 import type { MessageRow } from "@/api/types";
+import { getToken } from "@/lib/auth";
+import { rawIssueMessageTarget } from "@/lib/rawIssueMessage";
 import { MENU_PATHS } from "@/nav/menu";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -60,6 +62,9 @@ const errMsg = (e: unknown, fallback: string) =>
 export default function MessagesPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
+  const viewGeneration = useRef(0);
+  useEffect(() => () => { viewGeneration.current += 1; }, [location.key]);
 
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(20);
@@ -112,14 +117,20 @@ export default function MessagesPage() {
 
   // 查看:未读先标记已读(刷新列表与铃铛),再按类型分流跳对应单据页
   const view = async (r: MessageRow) => {
+    const request = ++viewGeneration.current;
+    const token = getToken();
     const id = rowId(r);
     try {
       if (isUnread(r) && id) await messagesApi.markRead(id);
+      if (request !== viewGeneration.current || token !== getToken()) return;
       refreshAll();
     } catch (e) {
+      if (request !== viewGeneration.current || token !== getToken()) return;
       setToast({ text: errMsg(e, "标记已读失败"), tone: "err" });
       return;
     }
+    const rawTarget = rawIssueMessageTarget(r);
+    if (rawTarget) { navigate(rawTarget); return; }
     const no = (r.单号 ?? "").trim();
     if (!no) return;
     // 审批类消息(反审核申请):开审批弹窗,经理同意/拒绝(老系统抽屉行为)

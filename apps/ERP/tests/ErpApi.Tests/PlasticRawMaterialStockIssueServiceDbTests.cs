@@ -21,8 +21,13 @@ public class PlasticRawMaterialStockIssueServiceDbTests(DbFixture fx)
 
     private static void Clean(SqlConnection c)
     {
+        Assert.Equal("erp_test", c.Database);
+        var numbers = c.Query<string>("SELECT [单号] FROM [原料出库单] WHERE [生产车间]=N'YCK测试车间'").ToArray();
+        foreach (var number in numbers)
+            c.Execute("DELETE FROM [c操作记录] WHERE [表名]=N'原料出库单' AND [操作记录]=@record; DELETE FROM [消息] WHERE [单号]=@number", new { record = "单号=" + number, number });
         c.Execute("DELETE FROM [原料出库明细单] WHERE [原料编号]=N'YCK-PM'");
         c.Execute("DELETE FROM [原料出库单] WHERE [生产车间]=N'YCK测试车间'");
+        c.Execute("DELETE FROM [原料自动扣料期初] WHERE [原料编号]=N'YCK-PM'; DELETE FROM [塑胶原料资料] WHERE [物料编号]=N'YCK-PM'");
     }
 
     private static PlasticRawMaterialStockIssueCreateDto MakeDto() => new()
@@ -42,9 +47,11 @@ public class PlasticRawMaterialStockIssueServiceDbTests(DbFixture fx)
     public async Task Create_then_Get_sums()
     {
         using var c = fx.Open(); Clean(c);
+        using var identity = new CloudRawFixture(c, fx.ConnectionString!);
+        c.Execute("INSERT INTO [塑胶原料资料]([物料编号],[物料名称],[单位],[每包重量],[库存]) VALUES(N'YCK-PM',N'原料出库测试档',N'KG',25,100)");
         try
         {
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
+            var 单号 = await Svc().CreateAsync(MakeDto(), identity.Clerk);
             Assert.StartsWith("YCK", 单号);
             var d = await Svc().GetAsync(单号);
             Assert.NotNull(d);
@@ -68,11 +75,15 @@ public class PlasticRawMaterialStockIssueServiceDbTests(DbFixture fx)
     public async Task Approve_flips_审核_and_writes_审核日期()
     {
         using var c = fx.Open(); Clean(c);
+        using var identity = new CloudRawFixture(c, fx.ConnectionString!);
+        c.Execute("INSERT INTO [塑胶原料资料]([物料编号],[物料名称],[单位],[每包重量],[库存]) VALUES(N'YCK-PM',N'原料出库测试档',N'KG',25,100)");
         var engine = new PostingEngine(Factory(), new AuditLogger());
         try
         {
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
-            Assert.True(await engine.ApproveAsync("原料出库单", 单号, "tester"));
+            var 单号 = await Svc().CreateAsync(MakeDto(), identity.Clerk);
+            // 此专项核对库存过账，夹具先完成两级部门审批。
+            c.Execute("UPDATE [原料出库单] SET [主管审核]=N'1',[经理审核]=N'1' WHERE [单号]=@单号", new { 单号 });
+            Assert.True(await engine.ApproveAsync("原料出库单", 单号, identity.Keeper));
             var d = await Svc().GetAsync(单号);
             Assert.Equal("1", d!.单头!.审核);
             var 审核日期 = c.ExecuteScalar<DateTime?>("SELECT [审核日期] FROM [原料出库单] WHERE [单号]=@单号", new { 单号 });
@@ -85,12 +96,16 @@ public class PlasticRawMaterialStockIssueServiceDbTests(DbFixture fx)
     public async Task Delete_approved_throws()
     {
         using var c = fx.Open(); Clean(c);
+        using var identity = new CloudRawFixture(c, fx.ConnectionString!);
+        c.Execute("INSERT INTO [塑胶原料资料]([物料编号],[物料名称],[单位],[每包重量],[库存]) VALUES(N'YCK-PM',N'原料出库测试档',N'KG',25,100)");
         var engine = new PostingEngine(Factory(), new AuditLogger());
         try
         {
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
-            Assert.True(await engine.ApproveAsync("原料出库单", 单号, "tester"));
-            await Assert.ThrowsAsync<InvalidOperationException>(() => Svc().DeleteAsync(单号));
+            var 单号 = await Svc().CreateAsync(MakeDto(), identity.Clerk);
+            // 此专项核对库存过账，夹具先完成两级部门审批。
+            c.Execute("UPDATE [原料出库单] SET [主管审核]=N'1',[经理审核]=N'1' WHERE [单号]=@单号", new { 单号 });
+            Assert.True(await engine.ApproveAsync("原料出库单", 单号, identity.Keeper));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => Svc().DeleteAsync(单号, identity.Clerk));
         }
         finally { Clean(c); }
     }

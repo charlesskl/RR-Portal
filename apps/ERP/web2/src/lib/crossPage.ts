@@ -7,6 +7,10 @@ import type { QueryClient } from "@tanstack/react-query";
 //  - ["home-production-pending"] / ["home-inventory-negative"]:首页两张统计卡
 // 失效的活跃查询(如常驻挂载的库存页)会立即重取,非活跃(首页)重进时重取。
 export function invalidateCrossPage(qc: QueryClient) {
+  // 原料保存/审批后只刷新相关查询，保留其他页面未保存草稿。
+  for (const queryKey of [["raw-inventory"], ["raw-monthly"], ["raw-purchase-analysis"], ["raw-demand", "molding-sources"], ["raw-demand", "molding-source"], ["raw-stock-issue", "sources"], ["raw-stock-issue", "source"], ["raw-purchase-order", "purchase-limits"]]) {
+    void qc.invalidateQueries({ queryKey });
+  }
   void qc.invalidateQueries({ queryKey: ["material-inventory"] });
   void qc.invalidateQueries({ queryKey: ["home-production-pending"] });
   void qc.invalidateQueries({ queryKey: ["home-inventory-negative"] });

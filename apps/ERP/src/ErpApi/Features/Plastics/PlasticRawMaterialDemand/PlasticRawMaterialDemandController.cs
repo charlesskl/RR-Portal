@@ -19,6 +19,23 @@ public sealed class PlasticRawMaterialDemandController(
     private Task<bool> AllowAsync(PermissionAction a) => perms.HasAsync(CurrentUser, Menu, a);
     private Task<bool> AllowSummaryAsync() => perms.HasAsync(CurrentUser, SummaryMenu, PermissionAction.打开);
 
+    private async Task<bool> AllowMoldingSourcesAsync() => await AllowAsync(PermissionAction.打开) || await AllowSummaryAsync();
+
+    [HttpGet("molding-sources")]
+    public async Task<IActionResult> MoldingSources(int page = 1, int size = 20, string? keyword = null, bool approvedOnly = false)
+    {
+        if (!await AllowMoldingSourcesAsync()) return Forbid();
+        return Ok(await svc.MoldingSourcesAsync(page, size, keyword, approvedOnly));
+    }
+
+    [HttpGet("molding-sources/{number}")]
+    public async Task<IActionResult> MoldingSource(string number)
+    {
+        if (!await AllowMoldingSourcesAsync()) return Forbid();
+        var result = await svc.MoldingSourceAsync(number);
+        return result is null ? NotFound() : Ok(result);
+    }
+
     [HttpGet]
     public async Task<IActionResult> List(int page = 1, int size = 20, string? keyword = null)
     {
@@ -50,6 +67,7 @@ public sealed class PlasticRawMaterialDemandController(
         string 单号;
         try { 单号 = await svc.CreateAsync(dto, CurrentUser); }
         catch (ArgumentException ex) { return BadRequest(new { 消息 = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { 消息 = ex.Message }); }
         return CreatedAtAction(nameof(Get), new { 单号 }, new { 单号 });
     }
 

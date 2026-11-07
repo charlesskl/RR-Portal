@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, Checks } from "@phosphor-icons/react";
 import { messagesApi } from "@/api/endpoints";
 import type { MessageRow } from "@/api/types";
+import { getToken } from "@/lib/auth";
+import { rawIssueMessageTarget } from "@/lib/rawIssueMessage";
 import { cn } from "@/lib/utils";
 
 // 消息铃铛 + 下拉消息面板(接真实 /api/messages 数据):
@@ -26,6 +28,10 @@ export function MessageBell() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
+  const requestGeneration = useRef(0);
+  const [openError, setOpenError] = useState("");
+  useEffect(() => () => { requestGeneration.current += 1; }, [location.key, open]);
 
   const countQuery = useQuery({
     queryKey: ["messages-unread-count"],
@@ -47,6 +53,25 @@ export function MessageBell() {
       queryClient.invalidateQueries({ queryKey: ["messages-panel"] });
     },
   });
+
+  const viewMessage = async (message: MessageRow) => {
+    const request = ++requestGeneration.current;
+    const target = rawIssueMessageTarget(message);
+    if (!target) { if (isUnread(message)) readMutation.mutate(rowId(message)); return; }
+    const token = getToken();
+    setOpenError("");
+    try {
+      if (isUnread(message) && rowId(message)) await messagesApi.markRead(rowId(message));
+      if (request !== requestGeneration.current || token !== getToken()) return;
+      for (const key of ["messages-unread-count", "messages-panel", "messages-page"])
+        void queryClient.invalidateQueries({ queryKey: [key] });
+      setOpen(false);
+      navigate(target);
+    } catch (error) {
+      if (request === requestGeneration.current && token === getToken())
+        setOpenError(error instanceof Error ? error.message : "打开待出库消息失败，请重试");
+    }
+  };
 
   // 点外部 / Esc 关闭
   useEffect(() => {
@@ -107,6 +132,7 @@ export function MessageBell() {
             </button>
           </div>
 
+          {openError && <p role="alert" className="px-4 py-2 text-sm text-[#dc2626]">{openError}</p>}
           {/* 列表 */}
           <div className="min-h-0 flex-1 overflow-auto">
             {listQuery.isLoading ? (
@@ -140,7 +166,7 @@ export function MessageBell() {
                   <button
                     key={rowId(m)}
                     type="button"
-                    onClick={() => un && readMutation.mutate(rowId(m))}
+                    onClick={() => void viewMessage(m)}
                     className="flex w-full items-start gap-2.5 border-b border-black/6 px-4 py-3 text-left transition-colors last:border-0 hover:bg-black/[0.03]"
                   >
                     <span

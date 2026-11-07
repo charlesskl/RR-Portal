@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RawWorkflowRoleDialog } from "@/components/doc/RawWorkflowRoleDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // 账号权限管理(/accounts):功能对齐旧版 web/src/pages/admin/AccountPage.tsx
@@ -71,6 +72,7 @@ function PermDrawer({
 
   useEffect(() => {
     if (!用户) return;
+    // oxlint-disable-next-line react/set-state-in-effect -- 既有权限抽屉切换账号后先清加载态，再请求该账号权限；不改变旧矩阵流程。
     setLoading(true);
     userPermApi
       .get(用户)
@@ -284,6 +286,7 @@ export default function AccountsPage() {
   >(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
 
+  const [rawRoleUser, setRawRoleUser] = useState<string | null>(null);
   const [permUser, setPermUser] = useState<string | null>(null);
 
   const notify = useCallback((text: string, tone: "ok" | "err" = "ok") => {
@@ -469,6 +472,7 @@ export default function AccountsPage() {
                     <td className="px-4 py-2">
                       <div className="flex items-center justify-end gap-1 whitespace-nowrap">
                         <OpButton label="权限" onClick={() => setPermUser(r.用户!)} />
+                        <OpButton label="原料岗位" onClick={() => setRawRoleUser(r.用户!)} />
                         <OpButton
                           label="重置密码"
                           icon={<Key className="h-4 w-4" />}
@@ -629,6 +633,7 @@ export default function AccountsPage() {
         </DialogContent>
       </Dialog>
 
+      {rawRoleUser && <RawWorkflowRoleDialog key={rawRoleUser} account={rawRoleUser} onClose={() => setRawRoleUser(null)} />}
       {/* 权限侧拉面板 */}
       <PermDrawer 用户={permUser} onClose={() => setPermUser(null)} notify={notify} />
 

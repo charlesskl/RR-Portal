@@ -32,6 +32,7 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     private static void Seed(SqlConnection c)
     {
         Clean(c);
+        c.Execute("INSERT INTO [工模表]([工模编号],[工模名称]) VALUES(N'GM-PO-RAW',N'PO-raw-test')");
         c.Execute("IF NOT EXISTS(SELECT 1 FROM [款号总表] WHERE [款号]=N'K-PO') INSERT INTO [款号总表]([款号],[款式]) VALUES(N'K-PO',N'塑胶采购订单测试款')");
         c.Execute("INSERT INTO [生产制单]([生产单号],[款号],[日期],[计划数量],[审核]) VALUES(N'PO-MO',N'K-PO','2026-06-29',100,'1')");
         c.Execute("INSERT INTO [生产制单货号]([生产单号],[货号]) VALUES(N'PO-MO',N'H-PO')");
@@ -43,15 +44,17 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     {
         c.Execute("DELETE FROM [塑胶入仓明细单] WHERE [单号] IN (N'POSTK1',N'POSTK2')");
         c.Execute("DELETE FROM [塑胶入仓单] WHERE [单号] IN (N'POSTK1',N'POSTK2')");
+        c.Execute("DELETE FROM [塑胶采购原料用量] WHERE [采购单号] IN(SELECT [单号] FROM [塑胶采购订单明细] WHERE [物料编号]=N'POPM')");
         c.Execute("DELETE FROM [塑胶采购订单明细] WHERE [物料编号]=N'POPM'");
         c.Execute("DELETE h FROM [塑胶采购订单] h JOIN [塑胶采购订单明细] d ON d.[单号]=h.[单号] WHERE d.[物料编号]=N'POPM'");
-        c.Execute("DELETE FROM [塑胶采购订单] WHERE [客户名称]=N'PO测试客户'");
+        c.Execute("DELETE FROM [塑胶采购订单] WHERE [客户名称] IN(N'PO测试客户',N'PO测试客户-改')");
         c.Execute("DELETE FROM [塑胶共用物料表] WHERE [塑胶货号]=N'H-PO'");
         c.Execute("DELETE FROM [塑胶物料设置] WHERE [物料编号]=N'POPM'");
         c.Execute("DELETE FROM [塑胶物料资料] WHERE [物料编号]=N'POPM'");
         c.Execute("DELETE FROM [生产制单货号] WHERE [生产单号]=N'PO-MO'");
         c.Execute("DELETE FROM [生产制单] WHERE [生产单号]=N'PO-MO'");
         c.Execute("DELETE FROM [款号总表] WHERE [款号]=N'K-PO'");
+        c.Execute("DELETE FROM [工模表] WHERE [工模编号]=N'GM-PO-RAW'; DELETE FROM [塑胶原料资料] WHERE [物料编号]=N'RM-PO'");
     }
 
     // 下单损耗：塑胶物料设置.损耗率 随基准行带出(前端默认数量=计划数量×用量×(1+损耗率/100))。
@@ -59,7 +62,7 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     public async Task Basis_returns_loss_rate()
     {
         Skip.IfNot(fx.Available, "未设置 ERP_TEST_DB");
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         try
         {
             c.Execute("INSERT INTO [塑胶物料设置]([物料编号],[损耗率]) VALUES(N'POPM',6.67)");
@@ -74,7 +77,7 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     public async Task Basis_usage_prefers_audited_bom_then_falls_back_to_common_table()
     {
         Skip.IfNot(fx.Available, "未设置 ERP_TEST_DB");
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         try
         {
             // 已审核 BOM(款号=货号 H-PO) 使用数量=0.5 → 覆盖共用表 用量=2
@@ -101,10 +104,10 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     public async Task Basis_and_Create_carry_raw_material_snapshot()
     {
         Skip.IfNot(fx.Available, "未设置 ERP_TEST_DB");
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         try
         {
-            c.Execute("UPDATE [塑胶物料资料] SET [用料名称]=N'用A',[原胶件单净重]=1.6,[出模数]=8 WHERE [物料编号]=N'POPM'");
+            c.Execute("UPDATE [塑胶物料资料] SET [用料名称]=N'用A',[原胶件单净重]=1.6,[出模数]=8,[整啤净重]=12.8,[工模编号]=N'GM-PO-RAW' WHERE [物料编号]=N'POPM'");
             c.Execute("DELETE FROM [塑胶原料资料] WHERE [物料编号]=N'RM-PO'");
             c.Execute("INSERT INTO [塑胶原料资料]([物料编号],[物料名称],[单位],[每包重量]) VALUES(N'RM-PO',N'用A',N'KG',25)");
             // 原料入仓 100KG(已审核)→ 实时原料库存 100
@@ -118,21 +121,22 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
             Assert.Equal(100m, b.原料库存);
             Assert.Equal(8m, b.出模数);   // 同模分组算啤数用
 
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
+            var initial = MakeDto(); initial.明细[0].数量 = 50; initial.明细[1].数量 = 30;
+            var 单号 = await Svc().CreateAsync(initial, identity.Clerk);
             var d = await Svc().GetAsync(单号);
             Assert.Equal("RM-PO", d!.明细[0].原料编号);
             Assert.Equal("用A", d.明细[0].原料名称);
-            Assert.Equal(0.008m, d.明细[0].原料用量KG);   // 5件×1.6g/1000
-            Assert.Equal(0.0048m, d.明细[1].原料用量KG);  // 3件×1.6g/1000
+            Assert.Equal(0.1m, d.明细.Sum(x => x.原料用量KG)); // 同组80件/8出模=10啤，128g按原料合计圆到0.1KG，只计一次
+            Assert.Single(d.明细.Where(x => x.原料用量KG > 0));
             Assert.Equal(100m, d.明细[0].原料库存);
 
-            // 整单更新(数量改 9)时按新数量重算快照
+            // 整单更新(数量改90)时按新数量重算快照
             var dto = MakeDto();
             dto.明细.RemoveAt(1);
-            dto.明细[0].数量 = 9;
-            Assert.True(await Svc().UpdateAsync(单号, dto, "tester2"));
+            dto.明细[0].数量 = 90;
+            Assert.True(await Svc().UpdateAsync(单号, dto, identity.Manager));
             var d2 = await Svc().GetAsync(单号);
-            Assert.Equal(0.0144m, Assert.Single(d2!.明细).原料用量KG); // 9×1.6/1000
+            Assert.Equal(0.2m, Assert.Single(d2!.明细).原料用量KG); // 90件需要12啤，153.6g按原料合计圆到0.2KG
         }
         finally
         {
@@ -148,10 +152,10 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     public async Task Create_without_raw_material_link_leaves_snapshot_null()
     {
         Skip.IfNot(fx.Available, "未设置 ERP_TEST_DB");
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         try
         {
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
+            var 单号 = await Svc().CreateAsync(MakeDto(), identity.Clerk);
             var l = (await Svc().GetAsync(单号))!.明细[0];
             Assert.Null(l.原料编号);
             Assert.Null(l.原料用量KG);
@@ -165,17 +169,17 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     public async Task Create_skips_raw_material_snapshot_unless_啤机单()
     {
         Skip.IfNot(fx.Available, "未设置 ERP_TEST_DB");
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         try
         {
-            c.Execute("UPDATE [塑胶物料资料] SET [用料名称]=N'用A',[原胶件单净重]=1.6 WHERE [物料编号]=N'POPM'");
+            c.Execute("UPDATE [塑胶物料资料] SET [用料名称]=N'用A',[原胶件单净重]=1.6,[出模数]=8,[整啤净重]=12.8,[工模编号]=N'GM-PO-RAW' WHERE [物料编号]=N'POPM'");
             c.Execute("DELETE FROM [塑胶原料资料] WHERE [物料编号]=N'RM-PO'");
             c.Execute("INSERT INTO [塑胶原料资料]([物料编号],[物料名称],[单位],[每包重量]) VALUES(N'RM-PO',N'用A',N'KG',25)");
 
             // 印喷一次加工单(单头有加工内容)→ 不存原料快照
             var dto = MakeDto();
             dto.加工内容 = "印喷";
-            var 单号 = await Svc().CreateAsync(dto, "tester");
+            var 单号 = await Svc().CreateAsync(dto, identity.Clerk);
             var l = (await Svc().GetAsync(单号))!.明细[0];
             Assert.Null(l.原料编号);
             Assert.Null(l.原料名称);
@@ -183,11 +187,12 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
 
             // 改单清空加工内容(变回啤机单)→ 快照恢复
             dto.加工内容 = null;
-            Assert.True(await Svc().UpdateAsync(单号, dto, "tester"));
+            Assert.True(await Svc().UpdateAsync(单号, dto, identity.Clerk));
             var l2 = (await Svc().GetAsync(单号))!.明细[0];
             Assert.Equal("RM-PO", l2.原料编号);
             Assert.Equal("用A", l2.原料名称);
-            Assert.Equal(0.008m, l2.原料用量KG); // 5件×1.6g/1000
+            Assert.Equal(0.008m, l2.原料用量KG); // NULL版本沿用原云端单件算法，不自动升级
+            Assert.Null(c.ExecuteScalar<int?>("SELECT [原料扣减版本] FROM [塑胶采购订单] WHERE [单号]=@单号",new {单号}));
         }
         finally
         {
@@ -202,23 +207,23 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     public async Task Basis_Create_Update_blocked_when_mo_linked_to_ma()
     {
         Skip.IfNot(fx.Available, "未设置 ERP_TEST_DB");
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         try
         {
             c.Execute("INSERT INTO [款号物料总表]([日期],[款号],[类型],[审核],[MA货号]) VALUES('2026-06-29',N'H-PO',N'明细','1',N'MA-X')");
 
             // 已关联MA单:basis 409 / create 400
             await Assert.ThrowsAsync<InvalidOperationException>(() => Svc().BasisAsync("PO-MO"));
-            await Assert.ThrowsAsync<ArgumentException>(() => Svc().CreateAsync(MakeDto(), "tester"));
+            await Assert.ThrowsAsync<ArgumentException>(() => Svc().CreateAsync(MakeDto(), identity.Clerk));
 
             // 清掉关联:恢复可下单
             c.Execute("UPDATE [款号物料总表] SET [MA货号]=NULL WHERE [款号]=N'H-PO'");
             Assert.Single(await Svc().BasisAsync("PO-MO"));
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
+            var 单号 = await Svc().CreateAsync(MakeDto(), identity.Clerk);
 
             // 建单后再关联MA:update 同样被拦
             c.Execute("UPDATE [款号物料总表] SET [MA货号]=N'MA-X' WHERE [款号]=N'H-PO'");
-            await Assert.ThrowsAsync<ArgumentException>(() => Svc().UpdateAsync(单号, MakeDto(), "tester"));
+            await Assert.ThrowsAsync<ArgumentException>(() => Svc().UpdateAsync(单号, MakeDto(), identity.Clerk));
         }
         finally
         {
@@ -243,12 +248,12 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     [SkippableFact]
     public async Task Basis_and_Create_blocked_when_mo_unapproved()
     {
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         c.Execute("UPDATE [生产制单] SET [审核]='0' WHERE [生产单号]=N'PO-MO'");
         try
         {
             await Assert.ThrowsAsync<InvalidOperationException>(() => Svc().BasisAsync("PO-MO"));
-            await Assert.ThrowsAsync<ArgumentException>(() => Svc().CreateAsync(MakeDto(), "tester"));
+            await Assert.ThrowsAsync<ArgumentException>(() => Svc().CreateAsync(MakeDto(), identity.Clerk));
         }
         finally { Clean(c); }
     }
@@ -257,7 +262,7 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     [SkippableFact]
     public async Task Basis_returns_live_available_stock()
     {
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         c.Execute("INSERT INTO [塑胶入仓单]([单号],[仓库],[审核]) VALUES(N'PORKLIVE',N'塑胶仓','1')");
         c.Execute(@"INSERT INTO [塑胶入仓明细单]([单号],[仓库],[物料编号],[物料名称],[单位],[数量])
                     VALUES(N'PORKLIVE',N'塑胶仓',N'POPM',N'ABS粒',N'kg',500)");
@@ -278,7 +283,7 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     [SkippableFact]
     public async Task Basis_brings_bom_then_Create_then_Get()
     {
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         try
         {
             var basis = await Svc().BasisAsync("PO-MO");
@@ -290,7 +295,7 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
             Assert.Equal("ABS粒", b.物料名称);
             Assert.Equal("移印", b.加工内容);   // basis 带出 加工内容(BOM/物料资料)
 
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
+            var 单号 = await Svc().CreateAsync(MakeDto(), identity.Clerk);
             Assert.StartsWith("SP", 单号);
 
             var d = await Svc().GetAsync(单号);
@@ -310,22 +315,22 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     [SkippableFact]
     public async Task Create_spray_supplier_requires_加工内容()
     {
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         try
         {
             var dto = MakeDto();
             dto.供应商名称 = "PO测试喷油供应商";
             // 喷油供应商不填加工内容 → 拒绝
-            await Assert.ThrowsAsync<ArgumentException>(() => Svc().CreateAsync(dto, "tester"));
+            await Assert.ThrowsAsync<ArgumentException>(() => Svc().CreateAsync(dto, identity.Clerk));
 
             // 填了加工内容正常创建,详情可读回单头 加工内容
             dto.加工内容 = "印喷";
-            var 单号 = await Svc().CreateAsync(dto, "tester");
+            var 单号 = await Svc().CreateAsync(dto, identity.Clerk);
             var d = await Svc().GetAsync(单号);
             Assert.Equal("印喷", d!.单头!.加工内容);
 
             // 非喷油供应商不填加工内容 → 正常创建,单头 加工内容 为空
-            var 单号2 = await Svc().CreateAsync(MakeDto(), "tester");
+            var 单号2 = await Svc().CreateAsync(MakeDto(), identity.Clerk);
             var d2 = await Svc().GetAsync(单号2);
             Assert.Null(d2!.单头!.加工内容);
         }
@@ -335,12 +340,14 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     [SkippableFact]
     public async Task Approve_flips_审核_and_writes_审核日期()
     {
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
+        c.Execute("UPDATE [塑胶物料资料] SET [工模编号]=N'GM-PO-RAW',[用料名称]=N'用A',[出模数]=8,[整啤净重]=12.8 WHERE [物料编号]=N'POPM'; INSERT INTO [塑胶原料资料]([物料编号],[物料名称],[单位]) VALUES(N'RM-PO',N'用A',N'KG')");
         var engine = new PostingEngine(Factory(), new AuditLogger());
         try
         {
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
-            Assert.True(await engine.ApproveAsync("塑胶采购订单", 单号, "tester"));
+            var 单号 = await Svc().CreateAsync(MakeDto(), identity.Clerk);
+            c.Execute("UPDATE [塑胶采购订单] SET [主管审核]=N'1',[经理审核]=N'1' WHERE [单号]=@单号",new {单号});
+            Assert.True(await engine.ApproveAsync("塑胶采购订单", 单号, identity.Clerk));
 
             var d = await Svc().GetAsync(单号);
             Assert.Equal("1", d!.单头!.审核);
@@ -356,11 +363,11 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     public async Task SecondProcessStock_stages_and_validation()
     {
         Skip.IfNot(fx.Available, "未设置 ERP_TEST_DB");
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         try
         {
             // 啤机单(单头无加工内容) + 入仓 100
-            var 啤机单 = await Svc().CreateAsync(MakeDto(), "tester");
+            var 啤机单 = await Svc().CreateAsync(MakeDto(), identity.Clerk);
             c.Execute("INSERT INTO [塑胶入仓单]([单号],[仓库],[审核]) VALUES(N'POSTK1',N'塑胶仓','1')");
             c.Execute(@"INSERT INTO [塑胶入仓明细单]([单号],[仓库],[订单单号],[生产单号],[物料编号],[物料名称],[单位],[数量],[颜色])
                         VALUES(N'POSTK1',N'塑胶仓',@no,N'PO-MO',N'POPM',N'ABS粒',N'kg',100,N'黑')", new { no = 啤机单 });
@@ -381,14 +388,14 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
             二次dto.加工类型 = "二次加工";
             二次dto.加工内容 = "印喷";
             二次dto.库存加工 = true;
-            var ex0 = await Assert.ThrowsAsync<ArgumentException>(() => Svc().CreateAsync(二次dto, "tester"));
+            var ex0 = await Assert.ThrowsAsync<ArgumentException>(() => Svc().CreateAsync(二次dto, identity.Clerk));
             Assert.Contains("未完成一次加工入仓", ex0.Message);
 
             // 完成一次加工(有加工内容,按库存下单 8 ≤ 100 放行)并入仓 50 → 二次加工库存出现
             var 一次dto = MakeDto();
             一次dto.加工内容 = "印喷";
             一次dto.库存加工 = true;
-            var 一次单 = await Svc().CreateAsync(一次dto, "tester");
+            var 一次单 = await Svc().CreateAsync(一次dto, identity.Clerk);
             c.Execute("INSERT INTO [塑胶入仓单]([单号],[仓库],[审核]) VALUES(N'POSTK2',N'塑胶仓','1')");
             c.Execute(@"INSERT INTO [塑胶入仓明细单]([单号],[仓库],[订单单号],[物料编号],[物料名称],[单位],[数量],[颜色],[加工内容])
                         VALUES(N'POSTK2',N'塑胶仓',@no,N'POPM',N'ABS粒',N'kg',50,N'黑',N'印喷')", new { no = 一次单 });
@@ -401,7 +408,7 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
             Assert.Contains(一次库存, r => r.物料编号 == "POPM");
 
             // 现在可以下二次加工(订购 8 ≤ 实时库存 150)
-            var 单号 = await Svc().CreateAsync(二次dto, "tester");
+            var 单号 = await Svc().CreateAsync(二次dto, identity.Clerk);
             Assert.StartsWith("SP", 单号);
 
             // 库存加工单超实时库存 → 拦
@@ -409,7 +416,7 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
             超.加工内容 = "印喷";
             超.库存加工 = true;
             foreach (var l in 超.明细) l.数量 = 99999;
-            var ex = await Assert.ThrowsAsync<ArgumentException>(() => Svc().CreateAsync(超, "tester"));
+            var ex = await Assert.ThrowsAsync<ArgumentException>(() => Svc().CreateAsync(超, identity.Clerk));
             Assert.Contains("超过实时库存", ex.Message);
         }
         finally { Clean(c); }
@@ -421,20 +428,20 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     public async Task Create_mo_based_process_orders_need_no_stock()
     {
         Skip.IfNot(fx.Available, "未设置 ERP_TEST_DB");
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         try
         {
             // 无任何库存、无一次加工入仓:按生产单带料的二次加工单直接下成功
             var 二次 = MakeDto();
             二次.加工类型 = "二次加工";
             二次.加工内容 = "印喷";
-            Assert.StartsWith("SP", await Svc().CreateAsync(二次, "tester"));
+            Assert.StartsWith("SP", await Svc().CreateAsync(二次, identity.Clerk));
 
             // 一次加工(按单带料)同样无库存可下
             var 一次 = MakeDto();
             一次.加工类型 = "一次加工";
             一次.加工内容 = "印喷";
-            Assert.StartsWith("SP", await Svc().CreateAsync(一次, "tester"));
+            Assert.StartsWith("SP", await Svc().CreateAsync(一次, identity.Clerk));
         }
         finally { Clean(c); }
     }
@@ -445,11 +452,11 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     public async Task Basis_splits_ordered_qty_by_stage()
     {
         Skip.IfNot(fx.Available, "未设置 ERP_TEST_DB");
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         try
         {
             // 啤机单(单头无加工内容)订 8 → 已订啤机=8,已订同工序=0(本行加工内容=移印)
-            await Svc().CreateAsync(MakeDto(), "tester");
+            await Svc().CreateAsync(MakeDto(), identity.Clerk);
             var b = Assert.Single(await Svc().BasisAsync("PO-MO"));
             Assert.Equal(8m, b.已订数量);
             Assert.Equal(8m, b.已订啤机数量);
@@ -458,7 +465,7 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
             // 再下同工序(单头加工内容=移印=本行加工内容)单 8 → 已订同工序=8,已订啤机仍 8,总 16
             var 工序dto = MakeDto();
             工序dto.加工内容 = "移印";
-            await Svc().CreateAsync(工序dto, "tester");
+            await Svc().CreateAsync(工序dto, identity.Clerk);
             b = Assert.Single(await Svc().BasisAsync("PO-MO"));
             Assert.Equal(16m, b.已订数量);
             Assert.Equal(8m, b.已订啤机数量);
@@ -473,7 +480,7 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     public async Task Create_stock_process_skips_mo_gate()
     {
         Skip.IfNot(fx.Available, "未设置 ERP_TEST_DB");
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
         try
         {
             // 现货 100(无来源订单号,仅增加实时库存)
@@ -485,12 +492,12 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
             dto.加工内容 = "印喷";
             dto.库存加工 = true;
             foreach (var l in dto.明细) l.生产单号 = "MO-GONE"; // 不存在的老生产单
-            var 单号 = await Svc().CreateAsync(dto, "tester"); // 跳过 MO 门:不再报 生产通知单不存在
+            var 单号 = await Svc().CreateAsync(dto, identity.Clerk); // 跳过 MO 门:不再报 生产通知单不存在
             Assert.StartsWith("SP", 单号);
 
             var dto2 = MakeDto();
             foreach (var l in dto2.明细) l.生产单号 = "MO-GONE";
-            await Assert.ThrowsAsync<ArgumentException>(() => Svc().CreateAsync(dto2, "tester"));
+            await Assert.ThrowsAsync<ArgumentException>(() => Svc().CreateAsync(dto2, identity.Clerk));
         }
         finally { Clean(c); }
     }
@@ -498,13 +505,15 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     [SkippableFact]
     public async Task Delete_approved_throws()
     {
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
+        c.Execute("UPDATE [塑胶物料资料] SET [工模编号]=N'GM-PO-RAW',[用料名称]=N'用A',[出模数]=8,[整啤净重]=12.8 WHERE [物料编号]=N'POPM'; INSERT INTO [塑胶原料资料]([物料编号],[物料名称],[单位]) VALUES(N'RM-PO',N'用A',N'KG')");
         var engine = new PostingEngine(Factory(), new AuditLogger());
         try
         {
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
-            Assert.True(await engine.ApproveAsync("塑胶采购订单", 单号, "tester"));
-            await Assert.ThrowsAsync<InvalidOperationException>(() => Svc().DeleteAsync(单号));
+            var 单号 = await Svc().CreateAsync(MakeDto(), identity.Clerk);
+            c.Execute("UPDATE [塑胶采购订单] SET [主管审核]=N'1',[经理审核]=N'1' WHERE [单号]=@单号",new {单号});
+            Assert.True(await engine.ApproveAsync("塑胶采购订单", 单号, identity.Clerk));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => Svc().DeleteAsync(单号, identity.Clerk));
         }
         finally { Clean(c); }
     }
@@ -512,18 +521,19 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
     [SkippableFact]
     public async Task Update_unapproved_replaces_lines_approved_blocked()
     {
-        using var c = fx.Open(); Seed(c);
+        using var c = fx.Open(); using var identity = new CloudRawFixture(c, fx.ConnectionString!); Seed(c);
+        c.Execute("UPDATE [塑胶物料资料] SET [工模编号]=N'GM-PO-RAW',[用料名称]=N'用A',[出模数]=8,[整啤净重]=12.8 WHERE [物料编号]=N'POPM'; INSERT INTO [塑胶原料资料]([物料编号],[物料名称],[单位]) VALUES(N'RM-PO',N'用A',N'KG')");
         var engine = new PostingEngine(Factory(), new AuditLogger());
         try
         {
-            var 单号 = await Svc().CreateAsync(MakeDto(), "tester");
+            var 单号 = await Svc().CreateAsync(MakeDto(), identity.Clerk);
 
             // 未审核：可改，明细整组替换(2行→1行)，单头同步
             var dto = MakeDto();
             dto.客户名称 = "PO测试客户-改";
             dto.明细.RemoveAt(1);
             dto.明细[0].数量 = 9;
-            Assert.True(await Svc().UpdateAsync(单号, dto, "tester2"));
+            Assert.True(await Svc().UpdateAsync(单号, dto, identity.Manager));
             var d = await Svc().GetAsync(单号);
             Assert.Equal("PO测试客户-改", d!.单头!.客户名称);
             Assert.Equal(9m, d.单头.数量);
@@ -531,11 +541,12 @@ public class PlasticPurchaseOrderServiceDbTests(DbFixture fx)
             Assert.Equal(9m, l.数量);
 
             // 已审核：拒绝修改
-            Assert.True(await engine.ApproveAsync("塑胶采购订单", 单号, "tester"));
-            await Assert.ThrowsAsync<InvalidOperationException>(() => Svc().UpdateAsync(单号, MakeDto(), "tester"));
+            c.Execute("UPDATE [塑胶采购订单] SET [主管审核]=N'1',[经理审核]=N'1' WHERE [单号]=@单号",new {单号});
+            Assert.True(await engine.ApproveAsync("塑胶采购订单", 单号, identity.Clerk));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => Svc().UpdateAsync(单号, MakeDto(), identity.Clerk));
 
             // 不存在：false
-            Assert.False(await Svc().UpdateAsync("SP-NOPE", MakeDto(), "tester"));
+            Assert.False(await Svc().UpdateAsync("SP-NOPE", MakeDto(), identity.Clerk));
         }
         finally { Clean(c); }
     }

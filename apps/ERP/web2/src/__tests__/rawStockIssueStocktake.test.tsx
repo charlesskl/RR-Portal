@@ -5,7 +5,9 @@
 // 盘点:选原料带出系统数量(=库存)、盈亏=盘点-系统(负红)、保存 POST 载荷含 盈亏数量、
 // 审核提示「已审核·库存已校准」;查询:默认汇总 系统数/盘点数/盈亏数,明细双击弹详情。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { StrictMode, Suspense } from "react";
+import { useNavigate } from "react-router";
 import { permRowsToMap, renderWithProviders } from "../test/setup";
 import PlasticRawMaterialStockIssuePage from "@/pages/PlasticRawMaterialStockIssuePage";
 import PlasticRawMaterialStocktakePage from "@/pages/PlasticRawMaterialStocktakePage";
@@ -26,7 +28,7 @@ const json = (v: unknown, status = 200) =>
   new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
 
 const pickOption = (label: string, option: string) => {
-  fireEvent.click(screen.getByLabelText(label));
+  fireEvent.click(screen.getByLabelText(label, { selector: "button" }));
   fireEvent.click(screen.getByRole("option", { name: option }));
 };
 
@@ -72,14 +74,19 @@ const ST_DETAIL = {
 
 type Call = { url: string; method: string; body?: string };
 
-function installFetch(perms: unknown[] = PERMS) {
+function installFetch(perms: unknown[] = PERMS, onCall?: (call: Call) => Response | Promise<Response> | undefined) {
   const calls: Call[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      calls.push({ url, method: init?.method ?? "GET", body: init?.body as string });
+      const call = { url, method: init?.method ?? "GET", body: init?.body as string };
+      calls.push(call);
+      const custom = onCall?.(call);
+      if (custom) return custom;
       const p = new URL(url, "http://test").pathname;
+      if (p.endsWith("/plastic-raw-material-stock-issue/access")) return json({ isAdmin: true, canSupervisor: true, canManager: true, canWarehousePost: true, canReverse: true });
+      if (p === "/api/organization/raw-issue-maker-options") return json([{ personnelName: "张三", personnelNumber: "E1" }]);
       if (p.endsWith("/me/permissions")) return json(permRowsToMap(perms));
       if (p === "/api/plastic-raw-material-master/categories")
         return json([{ 类别: "ABS", 数量: 2 }]);
@@ -92,7 +99,9 @@ function installFetch(perms: unknown[] = PERMS) {
         if (init?.method === "POST") return json({ 单号: "RI-NEW" });
         return json({ items: [SI_HEADER], total: 1 });
       }
-      if (p === "/api/plastic-raw-material-stock-issue/RI-1") return json(SI_DETAIL);
+      if (p === "/api/plastic-raw-material-stock-issue/RI-1" || p === "/api/plastic-raw-material-stock-issue/RI-NEW") return json(SI_DETAIL);
+      if (p === "/api/plastic-raw-material-stock-issue/sources") return json({ items: [{ 单号: "SP-001", 原料种数: 1 }], total: 1 });
+      if (p === "/api/plastic-raw-material-stock-issue/sources/SP-001") return json({ 单号: "SP-001", 明细: [{ 原料编号: "RM-1", 原料名称: "ABS 757", 每包重量: 1, 每库存单位KG: 1, 单位: "KG", 需求数量KG: 50, 需求数量: 50, 已申请数量: 2, 可申请数量: 48 }] });
       if (p === "/api/plastic-raw-material-demand") return json({ items: DEMANDS, total: 2 });
       if (p === "/api/plastic-raw-material-demand/D-001")
         return json({
@@ -140,25 +149,99 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe("PlasticRawMaterialStockIssuePage(原料出库表)", () => {
-  it("调入清单:只列已审核需求表,点单号带入明细(数量=需求数量包)并回填 生产车间/领料备注;保存 POST", async () => {
+  it("暂停提交的渲染不发起直开读单，页面挂载后才读取且不产生未挂载状态更新警告", async () => {
+    const calls = installFetch();
+    const errors = vi.spyOn(console, "error");
+    let committed = false;
+    let commit!: () => void;
+    const pending = new Promise<void>(resolve => { commit = resolve; });
+    function CommitGate() { if (!committed) throw pending; return null; }
+    renderWithProviders(<Suspense fallback={<p>等待页面提交</p>}><PlasticRawMaterialStockIssuePage /><CommitGate /></Suspense>,
+      "/plastic-raw-material-stock-issue?open=RI-1");
+    expect(screen.getByText("等待页面提交")).toBeInTheDocument();
+    expect(calls.some(call => call.url.endsWith("/plastic-raw-material-stock-issue/RI-1"))).toBe(false);
+    committed = true;
+    await act(async () => { commit(); });
+    await screen.findByText("原料出库表 · RI-1");
+    expect(calls.filter(call => call.url.endsWith("/plastic-raw-material-stock-issue/RI-1"))).toHaveLength(1);
+    expect(errors.mock.calls.flatMap(args => args.map(String)).filter(message => message.includes("hasn't mounted yet"))).toEqual([]);
+  });
+
+  it("StrictMode重放生命周期及清除URL参数后，当前直开请求仍正常落入单据", async () => {
+    const calls = installFetch();
+    const errors = vi.spyOn(console, "error");
+    renderWithProviders(<StrictMode><PlasticRawMaterialStockIssuePage /></StrictMode>, "/plastic-raw-material-stock-issue?open=RI-1");
+    await screen.findByText("原料出库表 · RI-1");
+    expect(screen.getByLabelText("生产车间")).toHaveValue("一车间");
+    expect(screen.getByRole("button", { name: "打开" })).toBeEnabled();
+    expect(calls.filter(call => call.url.endsWith("/plastic-raw-material-stock-issue/RI-1")).length).toBeGreaterThan(0);
+    expect(errors.mock.calls.flatMap(args => args.map(String)).filter(message => message.includes("hasn't mounted yet"))).toEqual([]);
+  });
+
+  it.each([200, 500])("新直开及新建草稿不被旧读单的迟到响应%s覆盖，清除URL参数不取消正常读单", async status => {
+    let finishOld!: (response: Response) => void;
+    const calls = installFetch(PERMS, call => {
+      if (call.url.endsWith("/plastic-raw-material-stock-issue/RI-SLOW")) return new Promise(resolve => { finishOld = resolve; });
+      if (call.url.endsWith("/plastic-raw-material-stock-issue/RI-NEXT")) return json({ ...SI_DETAIL, 单头: { ...SI_HEADER, 单号: "RI-NEXT" } });
+      return undefined;
+    });
+    const errors = vi.spyOn(console, "error");
+    function Reopen() {
+      const navigate = useNavigate();
+      return <button onClick={() => navigate("/plastic-raw-material-stock-issue?open=RI-NEXT")}>直开下一张</button>;
+    }
+    renderWithProviders(<><Reopen /><PlasticRawMaterialStockIssuePage /></>, "/plastic-raw-material-stock-issue?open=RI-SLOW");
+    await waitFor(() => expect(calls.some(call => call.url.endsWith("/plastic-raw-material-stock-issue/RI-SLOW"))).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "直开下一张" }));
+    await screen.findByText("原料出库表 · RI-NEXT");
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    fireEvent.change(screen.getByLabelText("备注", { selector: "input" }), { target: { value: "P82本轮未保存草稿" } });
+    await act(async () => { finishOld(status === 200 ? json(SI_DETAIL) : json({ 消息: "P82旧读单失败" }, 500)); });
+    expect(screen.getByText("原料出库表(新建)")).toBeInTheDocument();
+    expect(screen.getByLabelText("备注", { selector: "input" })).toHaveValue("P82本轮未保存草稿");
+    expect(screen.queryByText("P82旧读单失败")).not.toBeInTheDocument();
+    expect(errors.mock.calls.flatMap(args => args.map(String)).filter(message => message.includes("hasn't mounted yet"))).toEqual([]);
+  });
+
+  it("同一路径清掉打开参数后，再次直开同号会重新读取当前单据", async () => {
+    let reads = 0;
+    installFetch(PERMS, call => {
+      if (!call.url.endsWith("/plastic-raw-material-stock-issue/RI-1")) return undefined;
+      reads += 1;
+      return json({ ...SI_DETAIL, 单头: { ...SI_HEADER, 备注: `P82第${reads}次读取` } });
+    });
+    function Reopen() {
+      const navigate = useNavigate();
+      return <button onClick={() => navigate("/plastic-raw-material-stock-issue?open=RI-1")}>重新直开原单</button>;
+    }
+    renderWithProviders(<><Reopen /><PlasticRawMaterialStockIssuePage /></>, "/plastic-raw-material-stock-issue?open=RI-1");
+    await screen.findByDisplayValue("P82第1次读取");
+    fireEvent.click(screen.getByRole("button", { name: "重新直开原单" }));
+    await screen.findByDisplayValue("P82第2次读取");
+    expect(reads).toBe(2);
+  });
+
+  it("已审核SP调入冻结净量及明确来源；制单人必填，保存POST并保留已存单", async () => {
     const calls = installFetch();
     renderWithProviders(<PlasticRawMaterialStockIssuePage />, "/plastic-raw-material-stock-issue");
     await screen.findByText("原料出库表(新建)");
-    fireEvent.click(screen.getByRole("button", { name: "调入清单" }));
+    fireEvent.click(screen.getByRole("button", { name: "按啤机采购单领料" }));
     const dlg = await screen.findByRole("dialog");
-    await waitFor(() => expect(dlg).toHaveTextContent("D-001"));
-    expect(dlg).not.toHaveTextContent("D-002"); // 未审核不列
-    fireEvent.click(screen.getByText("D-001").closest("tr")!);
-    await screen.findByText("已调入需求表 D-001 的 1 行明细");
-    expect(screen.getByLabelText("生产车间")).toHaveValue("一车间");
-    expect(screen.getByLabelText("领料备注")).toHaveTextContent("生产领料");
-    expect(screen.getByLabelText("原料编号")).toHaveValue("RM-1");
-    expect(screen.getByLabelText("数量")).toHaveValue(2);
-    expect(screen.getByLabelText("啤机生产单号")).toHaveValue("PJ-100");
+    await waitFor(() => expect(dlg).toHaveTextContent("SP-001"));
+    expect(dlg).not.toHaveTextContent("D-001");
+    fireEvent.click(screen.getByRole("button", { name: "查看净量" }));
+    await screen.findByText("ABS 757");
+    fireEvent.click(screen.getByRole("button", { name: "带入剩余净量" }));
+    expect(screen.getByLabelText("生产车间")).toHaveValue("");
+    expect(screen.getByLabelText("领料备注", { selector: "button" })).toHaveTextContent("生产领料");
+    expect(screen.getByLabelText("原料编号", { selector: "input" })).toHaveValue("RM-1");
+    expect(screen.getByLabelText("数量", { selector: "input" })).toHaveValue(48);
+    expect(screen.getByLabelText("啤机生产单号", { selector: "input" })).toHaveValue("");
     // 制单人必填
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await screen.findByText("请选制单人");
@@ -175,7 +258,7 @@ describe("PlasticRawMaterialStockIssuePage(原料出库表)", () => {
       const body = JSON.parse(post!.body!);
       expect(body.制单人).toBe("张三");
       expect(body.明细).toEqual([
-        expect.objectContaining({ 原料编号: "RM-1", 数量: 2, 啤机生产单号: "PJ-100" }),
+        expect.objectContaining({ 原料编号: "RM-1", 数量: 48, 来源啤机采购单号: "SP-001", 啤机外发单号: "SP-001", 每包重量: 1 }),
       ]);
     });
   });
@@ -190,10 +273,10 @@ describe("PlasticRawMaterialStockIssuePage(原料出库表)", () => {
     const dlg = await screen.findByRole("dialog");
     await waitFor(() => expect(dlg).toHaveTextContent("SC-1001"));
     fireEvent.click(screen.getByText("SC-1001").closest("tr")!);
-    expect(screen.getByLabelText("生产单号")).toHaveValue("SC-1001");
+    expect(screen.getByLabelText("生产单号", { selector: "input" })).toHaveValue("SC-1001");
     // 手输也行(不与选择器互斥)
-    fireEvent.change(screen.getByLabelText("原料编号"), { target: { value: "RM-1" } });
-    fireEvent.change(screen.getByLabelText("数量"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("原料编号", { selector: "input" }), { target: { value: "RM-1" } });
+    fireEvent.change(screen.getByLabelText("数量", { selector: "input" }), { target: { value: "1" } });
     // 制单人 → 保存 → 载荷带 生产单号
     fireEvent.click(screen.getByRole("button", { name: "选择" }));
     const empDlg = await screen.findByRole("dialog");
@@ -216,9 +299,9 @@ describe("PlasticRawMaterialStockIssuePage(原料出库表)", () => {
     const calls = installFetch();
     renderWithProviders(<PlasticRawMaterialStockIssuePage />, "/plastic-raw-material-stock-issue?open=RI-1");
     await screen.findByText("原料出库表 · RI-1");
-    expect(screen.getByRole("button", { name: "主管审核" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "审核(下发)" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "主管审核" }));
+    expect(await screen.findByRole("button", { name: "主管审核" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "仓管确认出库" })).toBeDisabled();
+    fireEvent.click(await screen.findByRole("button", { name: "主管审核" }));
     await waitFor(() =>
       expect(calls.some((c) => c.url.includes("/RI-1/supervisor-approve"))).toBe(true),
     );
@@ -256,10 +339,10 @@ describe("PlasticRawMaterialStocktakePage(原料盘点单)", () => {
     const dlg = await screen.findByRole("dialog");
     await waitFor(() => expect(dlg).toHaveTextContent("RM-1"));
     fireEvent.click(screen.getByText("ABS 757").closest("tr")!);
-    await waitFor(() => expect(screen.getByLabelText("原料编号")).toHaveValue("RM-1"));
+    await waitFor(() => expect(screen.getByLabelText("原料编号", { selector: "input" })).toHaveValue("RM-1"));
     // 系统数量带出 8
     expect(screen.getByText("系统数量合计:")).toHaveTextContent("8");
-    fireEvent.change(screen.getByLabelText("盘点数量"), { target: { value: "6" } });
+    fireEvent.change(screen.getByLabelText("盘点数量", { selector: "input" }), { target: { value: "6" } });
     await waitFor(() => {
       const diffs = screen.getAllByText("-2");
       expect(diffs.length).toBeGreaterThan(0);

@@ -1,4 +1,5 @@
 using Dapper;
+using ErpApi.Engines.Authorization;
 using ErpApi.Engines.DocumentNumber;
 using ErpApi.Engines.Inventory;
 using ErpApi.Features.MasterData;
@@ -23,7 +24,7 @@ public sealed class PlasticPurchaseOrderService(ISqlConnectionFactory factory, I
     // 套数 BOM 未填时回落 塑胶物料资料.套数。
     // 可用库存=实时塑胶仓库存(库存引擎聚合)：库存够需求(计划数量×用量)时前端默认不勾选下单。
     // 原料关联:塑胶物料资料.用料名称 → 塑胶原料资料.物料名称;单件克重=原胶件单净重(空则整啤净重/出模数),
-    // 原料库存=实时原料仓库存——啤机下单自动扣原料(原料用量KG=数量×单件克重/1000)的数据源。
+    // 原料库存=实时原料仓库存；新啤机单保存整模净用料快照，实际领料终审才扣库。
     public async Task<IReadOnlyList<PlasticPurchaseOrderBasisRow>> BasisAsync(string 生产单号)
     {
         using var c = factory.Create();
@@ -231,9 +232,7 @@ ORDER BY r.[物料编号]", new { kw })).AsList();
         return result;
     }
 
-    // 原料快照解析:物料编号 → 塑胶物料资料.用料名称 → 塑胶原料资料;单件克重=原胶件单净重(空则整啤净重/出模数)。
-    // 原料用量KG=数量(件)×单件克重/1000(4位);克重未知时只存编号/名称,KG 留空。
-    // 只有啤机单(是啤机单)才解析/落原料快照——印喷/二次加工单不消耗原料
+    // Explicit saves of pre-P113 NULL-version documents retain the cloud legacy algorithm and identity.
     private sealed class RawLink
     {
         public string 物料编号 { get; set; } = "";
@@ -257,7 +256,7 @@ WHERE m.[物料编号] IN @codes", new { codes }, tx);
         return rows.ToDictionary(x => x.物料编号, x => x, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static async Task InsertLinesAsync(
+    private static async Task InsertLegacyLinesAsync(
         SqlConnection c, SqlTransaction tx, string 单号, IReadOnlyList<PlasticPurchaseOrderCreateLineDto> 明细,
         bool 扣原料)
     {
@@ -278,6 +277,40 @@ VALUES(@单号,@生产单号,@款号,@物料编号,@物料名称,@模具编号,@
         }
     }
 
+    private static async Task<List<PlasticRawPreviewLine>> PrepareRawAsync(SqlConnection c, SqlTransaction tx,
+        string number, IReadOnlyList<PlasticPurchaseOrderCreateLineDto> lines, bool molding)
+    {
+        if (lines.Any(x => x.数量 <= 0)) throw new ArgumentException("采购数量必须大于0。");
+        var requests = lines.Select(l => new PlasticRawPreviewLineRequest { 物料编号 = l.物料编号 ?? "", 数量 = l.数量,
+            生产单号 = l.生产单号, 款号 = l.款号, 颜色 = l.颜色, 色粉号 = l.色粉号, 套数 = l.套数 }).ToArray();
+        var preview = await PlasticRawConsumptionService.PreviewMoldingGroupsAsync(c, tx, molding ? "一次加工" : "二次加工", null, requests, lockRecipes: false);
+        var codes = preview.SelectMany(x => x.原料组成).Select(x => x.原料编号)
+            .Concat(await PlasticRawConsumptionService.ReadDocumentCodesAsync(c, tx, number)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        await RawMaterialInventorySql.LockCodesAsync(c, tx, codes);
+        await RawMaterialSourceLock.LockDocumentAsync(c, tx, number);
+        await PlasticRawIssueStockPolicy.EnsureOrderHasNoIssuesAsync(c, tx, number);
+        var frozen = await PlasticRawConsumptionService.PreviewMoldingGroupsAsync(c, tx, molding ? "一次加工" : "二次加工", null, requests);
+        if (frozen.SelectMany(x => x.原料组成).Any(x => !codes.Contains(x.原料编号, StringComparer.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("原料配方正在修改，请重新保存采购单。");
+        return frozen;
+    }
+
+    private static async Task InsertLinesAsync(SqlConnection c, SqlTransaction tx, string number,
+        IReadOnlyList<PlasticPurchaseOrderCreateLineDto> lines, IReadOnlyList<PlasticRawPreviewLine> raw)
+    {
+        for (var index = 0; index < lines.Count; index++)
+        {
+            var l = lines[index];
+            var id = await c.ExecuteScalarAsync<long>(@"
+INSERT INTO [塑胶采购订单明细]([单号],[生产单号],[款号],[物料编号],[物料名称],[模具编号],[用量],[套数],[数量],[颜色],[色粉号],[用料名称],[加工内容],[备注])
+OUTPUT INSERTED.[ID]
+VALUES(@number,@生产单号,@款号,@物料编号,@物料名称,@模具编号,@用量,@套数,@数量,@颜色,@色粉号,@用料名称,@加工内容,@备注)",
+                new { number, l.生产单号, l.款号, l.物料编号, l.物料名称, l.模具编号, l.用量, l.套数,
+                    l.数量, l.颜色, l.色粉号, l.用料名称, l.加工内容, l.备注 }, tx);
+            await PlasticRawConsumptionService.InsertAsync(c, tx, number, id, raw[index]);
+        }
+    }
+
     public async Task<string> CreateAsync(PlasticPurchaseOrderCreateDto dto, string user)
     {
         if (dto.明细.Count == 0) throw new ArgumentException("塑胶采购订单至少要有一行物料明细");
@@ -293,6 +326,9 @@ VALUES(@单号,@生产单号,@款号,@物料编号,@物料名称,@模具编号,@
         if (!dto.库存加工) await 校验生产通知单可下单Async(c, dto.明细);
         using var tx = c.BeginTransaction();
         var 单号 = await docNo.NextAsync(DocType, Prefix, now, c, tx);
+        var molding = 是啤机单(dto.加工类型, dto.加工内容);
+        var raw = await PrepareRawAsync(c, tx, 单号, dto.明细, molding);
+        if (molding) await RawMaterialTransactionPermissions.RequireAsync(c, tx, user, DocType, PermissionAction.保存);
 
         await c.ExecuteAsync(@"
 INSERT INTO [塑胶采购订单]([单号],[日期],[交货日期],[供应商编号],[供应商名称],[客户名称],[交货地点],[编号],[数量],[操作员],[审核],[备注],[加工内容],[加工类型])
@@ -301,7 +337,9 @@ VALUES(@单号,@日期,@交货日期,@供应商编号,@供应商名称,@客户�
                   dto.交货地点, dto.编号, 数量 = 数量合计, 操作员 = user, dto.备注, dto.加工内容,
                   加工类型 = string.IsNullOrWhiteSpace(dto.加工类型) ? "一次加工" : dto.加工类型.Trim() }, tx);
 
-        await InsertLinesAsync(c, tx, 单号, dto.明细, 是啤机单(dto.加工类型, dto.加工内容));
+        await c.ExecuteAsync("UPDATE [塑胶采购订单] SET [原料扣减版本]=@version,[原料扣减方式]=@mode WHERE [单号]=@单号", new { 单号, version = molding ? (int?)3 : null, mode = molding ? PlasticRawIssueStockPolicy.IssueMode : null }, tx);
+        await InsertLinesAsync(c, tx, 单号, dto.明细, raw);
+        if (molding) await new AuditLogger().WriteAsync(DocType, "保存原料快照", user, $"单号={单号};原料扣减版本=3;领料出库", c, tx);
 
         tx.Commit();
         return 单号;
@@ -318,6 +356,19 @@ VALUES(@单号,@日期,@交货日期,@供应商编号,@供应商名称,@客户�
         // 同 create:明细引用的生产通知单必须已审核且未关联MA单(防止改单绕过 MA 门);按库存加工单同样跳过
         if (!dto.库存加工) await 校验生产通知单可下单Async(c, dto.明细);
         using var tx = c.BeginTransaction();
+        var molding = 是啤机单(dto.加工类型, dto.加工内容);
+        var savedVersion = await c.ExecuteScalarAsync<int?>("SELECT [原料扣减版本] FROM [塑胶采购订单] WHERE [单号]=@单号",new {单号},tx);
+        List<PlasticRawPreviewLine>? raw = null;
+        if (savedVersion is not null)
+        {
+            raw = await PrepareRawAsync(c, tx, 单号, dto.明细, molding);
+            await RawMaterialTransactionPermissions.RequireAsync(c, tx, user, DocType, PermissionAction.保存);
+        }
+        else
+        {
+            await RawMaterialSourceLock.LockDocumentAsync(c, tx, 单号);
+            await PlasticRawIssueStockPolicy.EnsureOrderHasNoIssuesAsync(c, tx, 单号);
+        }
         var 审核 = await c.ExecuteScalarAsync<string?>(
             "SELECT ISNULL([审核],'0') FROM [塑胶采购订单] WITH (UPDLOCK,HOLDLOCK) WHERE [单号]=@单号", new { 单号 }, tx);
         if (审核 is null) return false;
@@ -331,8 +382,16 @@ WHERE [单号]=@单号",
                   dto.交货地点, dto.编号, 数量 = dto.明细.Sum(l => l.数量), dto.备注, dto.加工内容,
                   加工类型 = string.IsNullOrWhiteSpace(dto.加工类型) ? "一次加工" : dto.加工类型.Trim() }, tx);
 
+        await c.ExecuteAsync("DELETE FROM [塑胶采购原料用量] WHERE [采购单号]=@单号", new { 单号 }, tx);
         await c.ExecuteAsync("DELETE FROM [塑胶采购订单明细] WHERE [单号]=@单号", new { 单号 }, tx);
-        await InsertLinesAsync(c, tx, 单号, dto.明细, 是啤机单(dto.加工类型, dto.加工内容));
+        if (savedVersion is null)
+            await InsertLegacyLinesAsync(c, tx, 单号, dto.明细, molding);
+        else
+        {
+            await c.ExecuteAsync("UPDATE [塑胶采购订单] SET [原料扣减版本]=@version,[原料扣减方式]=@mode,[主管审核]=N'0',[主管审核人]=NULL,[主管审核日期]=NULL,[经理审核]=N'0',[经理审核人]=NULL,[经理审核日期]=NULL WHERE [单号]=@单号",new {单号,version=molding?(int?)3:null,mode=molding?PlasticRawIssueStockPolicy.IssueMode:null},tx);
+            await InsertLinesAsync(c, tx, 单号, dto.明细, raw!);
+            await new AuditLogger().WriteAsync(DocType, "保存原料快照", user, $"单号={单号};重新审批", c, tx);
+        }
 
         tx.Commit();
         return true;
@@ -397,17 +456,24 @@ WHERE d.[单号] = @单号", new { 单号 });
         return new PlasticPurchaseOrderDetailDto { 单头 = header, 明细 = lines };
     }
 
-    public async Task<bool> DeleteAsync(string 单号)
+    public async Task<bool> DeleteAsync(string 单号, string? user = null)
     {
         using var c = factory.Create();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
+        await RawMaterialInventorySql.LockCodesAsync(c, tx, await PlasticRawConsumptionService.ReadDocumentCodesAsync(c, tx, 单号));
+        await RawMaterialSourceLock.LockDocumentAsync(c, tx, 单号);
+        await PlasticRawIssueStockPolicy.EnsureOrderHasNoIssuesAsync(c, tx, 单号);
+        var version = await c.ExecuteScalarAsync<int?>("SELECT [原料扣减版本] FROM [塑胶采购订单] WHERE [单号]=@单号", new { 单号 }, tx);
+        if (version is not null) await RawMaterialTransactionPermissions.RequireAsync(c, tx, user ?? "", DocType, PermissionAction.删除);
         var 审核 = await c.ExecuteScalarAsync<string?>(
             "SELECT ISNULL([审核],'0') FROM [塑胶采购订单] WITH (UPDLOCK, HOLDLOCK) WHERE [单号]=@单号", new { 单号 }, tx);
         if (审核 is null) return false;
         if (审核 == "1") throw new InvalidOperationException("已审核的塑胶采购订单不能删除，请先反审核。");
+        await c.ExecuteAsync("DELETE FROM [塑胶采购原料用量] WHERE [采购单号]=@单号", new { 单号 }, tx);
         await c.ExecuteAsync("DELETE FROM [塑胶采购订单明细] WHERE [单号]=@单号", new { 单号 }, tx);
         await c.ExecuteAsync("DELETE FROM [塑胶采购订单] WHERE [单号]=@单号", new { 单号 }, tx);
+        if (version is not null) await new AuditLogger().WriteAsync(DocType, "删除", user ?? "", $"单号={单号}", c, tx);
         tx.Commit();
         return true;
     }

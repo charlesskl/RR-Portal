@@ -5,8 +5,8 @@
 // 明细行:原料编号(可手输+选原料)/原料名称只读/规格/单位/单价类型(含税/未税)/订货数量/单价/金额/备注;
 // 无「单价」位不出 单价/金额 列与金额合计。
 // 权限菜单=原料采购订单(MenuCatalog.cs:69 实证:原料仓库组)。
-import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import {
@@ -23,6 +23,8 @@ import {
 } from "@phosphor-icons/react";
 import { rawPurchaseOrderApi } from "@/api/endpoints";
 import type { PlasticRawMaterialRow, RMPOHeader, RMPOLine, SupplierRow } from "@/api/types";
+import { usePageSearchParams } from "@/hooks/usePageSearchParams";
+import { rawPolicyKey, rawPurchaseLimitLabel, validateRawPurchase } from "@/lib/rawPurchasePolicy";
 import { getUser } from "@/lib/auth";
 import { invalidateCrossPage } from "@/lib/crossPage";
 import {
@@ -126,6 +128,9 @@ const listColumns: ColumnDef<RMPOHeader, any>[] = [
 
 export default function PlasticRawMaterialPurchaseOrderPage() {
   const qc = useQueryClient();
+  const generation = useRef(0);
+  const consumedOpen = useRef<string | null>(null);
+  useEffect(() => () => { generation.current += 1; consumedOpen.current = null; }, []);
   const navigate = useNavigate();
   const { can, loading: permsLoading } = usePerms();
   const canOpen = can(MENU, "打开");
@@ -148,7 +153,7 @@ export default function PlasticRawMaterialPurchaseOrderPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; tone: "ok" | "err" } | null>(null);
   useEffect(() => {
-    if (!toast) return;
+    if (!toast || toast.tone === "err") return;
     const t = setTimeout(() => setToast(null), 3200);
     return () => clearTimeout(t);
   }, [toast]);
@@ -156,7 +161,9 @@ export default function PlasticRawMaterialPurchaseOrderPage() {
 
   const header = opened?.单头 ?? null;
   const stage = header ? tripleAuditStage(header) : 0;
-  const readOnly = opened !== null;
+  const readOnly = opened !== null || busy || !can(MENU, "保存");
+  const limits = useQuery({ queryKey: ["raw-purchase-order", "purchase-limits"], queryFn: () => rawPurchaseOrderApi.purchaseLimits(), enabled: !permsLoading && canOpen && opened === null });
+  const policyByCode = new Map((limits.data ?? []).map(row => [rawPolicyKey(row.原料编号), row]));
   const 单号 = header?.单号 ?? "";
 
   const applyDetail = useCallback((d: { 单头?: RMPOHeader; 明细: RMPOLine[] }) => {
@@ -173,34 +180,37 @@ export default function PlasticRawMaterialPurchaseOrderPage() {
 
   const openDoc = useCallback(
     async (no: string) => {
+      const request = ++generation.current;
       setBusy(true);
       try {
-        applyDetail(await rawPurchaseOrderApi.get(no));
+        const detail = await rawPurchaseOrderApi.get(no);
+        if (request === generation.current) applyDetail(detail);
       } catch (e) {
+        if (request !== generation.current) return;
         notify(errMsg(e) || "打开原料采购订单失败", "err");
       } finally {
-        setBusy(false);
+        if (request === generation.current) setBusy(false);
       }
     },
     [applyDetail, notify],
   );
 
-  // ?open=<单号> 直开(原料采购进度表跳入)
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = usePageSearchParams("/plastic-raw-material-purchase-order");
   const openParam = searchParams.get("open");
-  const [consumedOpen, setConsumedOpen] = useState<string | null>(null);
-  if (openParam && openParam !== consumedOpen) {
-    setConsumedOpen(openParam);
-    void openDoc(openParam);
-  }
   useEffect(() => {
-    if (!openParam) return;
+    if (!openParam || consumedOpen.current === openParam) return;
+    consumedOpen.current = openParam;
+    void openDoc(openParam);
     const next = new URLSearchParams(searchParams);
     next.delete("open");
     setSearchParams(next, { replace: true });
-  }, [openParam, searchParams, setSearchParams]);
+  }, [openParam, searchParams, setSearchParams, openDoc]);
+  useEffect(() => { if (!openParam) consumedOpen.current = null; }, [openParam]);
 
   const reset = () => {
+    generation.current += 1;
+    setBusy(false);
+    setToast(null);
     setFormState({ 供应商编号: "", 供应商名称: "", 交货日期: "", 备注: "" });
     setOpened(null);
     setLines([]);
@@ -212,60 +222,77 @@ export default function PlasticRawMaterialPurchaseOrderPage() {
       notify("请选供应商", "err");
       return;
     }
-    const ok = lines.filter((l) => l.原料编号 && Number(l.订货数量 ?? 0) > 0);
+    const ok = lines;
     if (ok.length === 0) {
       notify("请至少录入一行有效明细(原料编号+订货数量)", "err");
       return;
     }
+    const request = generation.current;
     setBusy(true);
     try {
-      await rawPurchaseOrderApi.create({
+      const currentLimits = await rawPurchaseOrderApi.purchaseLimits();
+      if (request !== generation.current) return;
+      qc.setQueryData(["raw-purchase-order", "purchase-limits"], currentLimits);
+      const policyError = validateRawPurchase(ok, currentLimits);
+      if (policyError) { notify(policyError, "err"); return; }
+      const payload = {
         ...form,
         交货日期: form.交货日期 || null,
         订购日期: today(),
         操作员: currentUser(),
-        明细: ok.map(({ key: _key, ...l }) => l),
-      });
-      notify("原料采购订单已创建", "ok");
-      reset();
+        明细: ok.map(({ key: _key, ...l }) => ({ ...l, 单价: priceHidden ? null : l.单价 })),
+      };
+      const created = await rawPurchaseOrderApi.create(payload);
       void qc.invalidateQueries({ queryKey: ["raw-purchase-order"] });
       invalidateCrossPage(qc);
+      if (request !== generation.current) return;
+      // POST 成功即转查看态；随后详情请求失败也不能再创建同一草稿。
+      applyDetail({ 单头: { id: 0, 单号: created.单号, ...form, 交货日期: form.交货日期 || undefined, 订购日期: today(), 操作员: currentUser() }, 明细: payload.明细 });
+      notify("原料采购订单已创建", "ok");
+      try { const detail = await rawPurchaseOrderApi.get(created.单号); if (request === generation.current) applyDetail(detail); }
+      catch { if (request === generation.current) notify(`采购订单 ${created.单号} 已保存，详情刷新失败，请重新打开`, "err"); }
     } catch (e) {
-      notify(errMsg(e) || "创建失败", "err");
+      if (request === generation.current) notify(errMsg(e) || "创建失败", "err");
     } finally {
-      setBusy(false);
+      if (request === generation.current) setBusy(false);
     }
   };
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     if (!单号) return;
+    const request = generation.current;
     setBusy(true);
     try {
       await fn();
+      if (request !== generation.current) return;
       notify(ok, "ok");
-      applyDetail(await rawPurchaseOrderApi.get(单号));
+      const detail = await rawPurchaseOrderApi.get(单号);
+      if (request !== generation.current) return;
+      applyDetail(detail);
       void qc.invalidateQueries({ queryKey: ["raw-purchase-order"] });
       invalidateCrossPage(qc);
     } catch (e) {
-      notify(errMsg(e) || "操作失败", "err");
+      if (request === generation.current) notify(errMsg(e) || "操作失败", "err");
     } finally {
-      setBusy(false);
+      if (request === generation.current) setBusy(false);
     }
   };
 
   const remove = async () => {
     if (!单号) return;
+    const request = generation.current;
     setBusy(true);
     try {
       await rawPurchaseOrderApi.remove(单号);
+      if (request !== generation.current) return;
       reset();
       notify("已删除", "ok");
       void qc.invalidateQueries({ queryKey: ["raw-purchase-order"] });
       invalidateCrossPage(qc);
     } catch (e) {
-      notify(errMsg(e) || "删除失败", "err");
+      if (request === generation.current) notify(errMsg(e) || "删除失败", "err");
     } finally {
-      setBusy(false);
+      if (request === generation.current) setBusy(false);
     }
   };
 
@@ -461,6 +488,8 @@ export default function PlasticRawMaterialPurchaseOrderPage() {
             加一行
           </button>
         </div>
+        {!opened && <p className="px-4 py-2 text-sm text-[#5f6b7d]">按后台净缺口与已购数量核实额度；不常用原料最多额外 2 包，采购余量不计入生产需求或领料净量。</p>}
+        {!opened && limits.isError && <p role="alert" className="px-4 py-2 text-sm text-[#dc2626]">采购额度加载失败。<button type="button" className="f-btn px-3" onClick={() => void limits.refetch()}>重试</button></p>}
         <div className="max-h-[40vh] overflow-auto">
           <table data-freeze className="w-full min-w-[1200px] text-[15px]">
             <thead>
@@ -472,6 +501,7 @@ export default function PlasticRawMaterialPurchaseOrderPage() {
                   "单位",
                   "单价类型",
                   "订货数量",
+                  "采购额度",
                   ...(priceHidden ? [] : ["单价", "金额"]),
                   "备注",
                   "删除",
@@ -565,6 +595,7 @@ export default function PlasticRawMaterialPurchaseOrderPage() {
                       />
                     )}
                   </td>
+                  <td className="max-w-72 px-3 py-2 text-sm text-[#5f6b7d]">{opened ? "已保存，审核时由后台复核" : policyByCode.has(rawPolicyKey(l.原料编号)) ? `需订 ${policyByCode.get(rawPolicyKey(l.原料编号))!.可购数量 ?? "—"} ${policyByCode.get(rawPolicyKey(l.原料编号))!.单位 ?? ""}；${rawPurchaseLimitLabel(policyByCode.get(rawPolicyKey(l.原料编号))!)}` : "采购额度待核实"}</td>
                   {!priceHidden && (
                     <td className="px-2 py-1.5">
                       {readOnly ? (
@@ -611,7 +642,7 @@ export default function PlasticRawMaterialPurchaseOrderPage() {
               ))}
               {lines.length === 0 && (
                 <tr>
-                  <td colSpan={priceHidden ? 8 : 10} className="px-3 py-6 text-center text-sm text-disabled">
+                  <td colSpan={priceHidden ? 9 : 11} className="px-3 py-6 text-center text-sm text-disabled">
                     点「加一行」录入明细,原料编号可手输或点「选」从原料资料带出
                   </td>
                 </tr>

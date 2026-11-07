@@ -23,19 +23,27 @@ public class PlasticRawMaterialPurchaseProgressDbTests(DbFixture fx)
 
     private static void Clean(SqlConnection c)
     {
+        c.Execute(@"DELETE FROM [c操作记录] WHERE [表名]=N'原料采购订单' AND EXISTS
+(SELECT 1 FROM [原料采购订单] p WHERE p.[供应商名称]=N'YPP测试供应商' AND [c操作记录].[操作记录] LIKE N'单号='+p.[单号]+N'%');
+DELETE FROM [c操作记录] WHERE [表名]=N'原料入仓单' AND [操作记录] IN
+(SELECT N'单号='+[单号] FROM [原料入仓单] WHERE [供应商名称]=N'YPP测试供应商')");
         c.Execute("DELETE FROM [原料入仓明细单] WHERE [原料编号]=N'YPP-PM'");
         c.Execute("DELETE FROM [原料入仓单] WHERE [供应商名称]=N'YPP测试供应商'");
         c.Execute("DELETE FROM [原料采购订单明细] WHERE [原料编号]=N'YPP-PM'");
         c.Execute("DELETE FROM [原料采购订单] WHERE [供应商名称]=N'YPP测试供应商'");
+        c.Execute("DELETE FROM [原料自动扣料期初] WHERE [原料编号]=N'YPP-PM'");
+        c.Execute("DELETE FROM [塑胶原料资料] WHERE [物料编号]=N'YPP-PM'");
     }
 
     [SkippableFact]
     public async Task Progress_aggregates_receipts_and_computes_owed_and_percent()
     {
         using var c = fx.Open(); Clean(c);
+        using var identity = new CloudRawFixture(c, fx.ConnectionString!);
         var engine = new PostingEngine(Factory(), new AuditLogger());
         try
         {
+            c.Execute("INSERT INTO [塑胶原料资料]([物料编号],[物料名称],[单位],[常用原料]) VALUES(N'YPP-PM',N'ABS粒',N'KG',1)");
             var 订单号 = await OrderSvc().CreateAsync(new()
             {
                 供应商编号 = "S01",
@@ -44,7 +52,11 @@ public class PlasticRawMaterialPurchaseProgressDbTests(DbFixture fx)
                 {
                     new() { 原料编号 = "YPP-PM", 原料名称 = "ABS粒", 规格 = "规X", 单位 = "kg", 单价类型 = "含税", 订货数量 = 10, 单价 = 3 },
                 }
-            }, "tester");
+            }, identity.Clerk);
+
+            // A real dispatched source is required before receipt auditing.
+            c.Execute("UPDATE [原料采购订单] SET [主管审核]=N'1',[经理审核]=N'1' WHERE [单号]=@number",new {number=订单号});
+            Assert.True(await engine.ApproveAsync("原料采购订单", 订单号, identity.Clerk));
 
             var 入仓单号 = await ReceiptSvc().CreateAsync(new()
             {
@@ -55,7 +67,7 @@ public class PlasticRawMaterialPurchaseProgressDbTests(DbFixture fx)
                 {
                     new() { 原料编号 = "YPP-PM", 原料名称 = "ABS粒", 单位 = "kg", 数量 = 4, 单价 = 3 },
                 }
-            }, "tester");
+            }, identity.Clerk);
 
             // 未审核入仓不计入进度
             var rows = await OrderSvc().ProgressAsync("YPP测试", null, null, null, false, null);
@@ -65,7 +77,7 @@ public class PlasticRawMaterialPurchaseProgressDbTests(DbFixture fx)
             Assert.Equal(10m, row.欠数);
             Assert.Equal(0m, row.进度);
 
-            Assert.True(await engine.ApproveAsync("原料入仓单", 入仓单号, "tester"));
+            Assert.True(await engine.ApproveAsync("原料入仓单", 入仓单号, identity.Clerk));
             rows = await OrderSvc().ProgressAsync("YPP测试", null, null, null, false, null);
             row = Assert.Single(rows.Where(r => r.采购单号 == 订单号));
             Assert.Equal(4m, row.入仓数量);
@@ -82,8 +94,8 @@ public class PlasticRawMaterialPurchaseProgressDbTests(DbFixture fx)
                 供应商名称 = "YPP测试供应商",
                 订单单号 = 订单号,
                 明细 = { new() { 原料编号 = "YPP-PM", 原料名称 = "ABS粒", 单位 = "kg", 数量 = 6, 单价 = 3 } }
-            }, "tester");
-            Assert.True(await engine.ApproveAsync("原料入仓单", 入仓单号2, "tester"));
+            }, identity.Clerk);
+            Assert.True(await engine.ApproveAsync("原料入仓单", 入仓单号2, identity.Clerk));
             rows = await OrderSvc().ProgressAsync("YPP测试", null, null, null, true, null);
             Assert.Empty(rows.Where(r => r.采购单号 == 订单号));
             rows = await OrderSvc().ProgressAsync("YPP测试", null, null, null, false, null);

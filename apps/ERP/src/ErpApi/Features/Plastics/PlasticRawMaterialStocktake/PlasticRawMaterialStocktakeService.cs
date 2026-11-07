@@ -3,6 +3,7 @@ using ErpApi.Engines.Authorization;
 using ErpApi.Engines.DocumentNumber;
 using ErpApi.Features.MasterData;
 using ErpApi.Infrastructure.Db;
+using ErpApi.Engines.Inventory;
 namespace ErpApi.Features.Plastics.PlasticRawMaterialStocktake;
 
 // 原料盘点单(原料仓库·以实盘校准账面)。审核 = 自建事务:翻审核位 + UPDATE 塑胶原料资料.库存=盘点数量(按原料编号)。
@@ -22,6 +23,7 @@ public sealed class PlasticRawMaterialStocktakeService(ISqlConnectionFactory fac
         using var c = factory.Create();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
+        await RawMaterialInventorySql.LockCodesAsync(c,tx,dto.明细.Select(l=>l.原料编号).OfType<string>());
         var 单号 = await docNo.NextAsync(DocType, Prefix, now, c, tx);
 
         await c.ExecuteAsync(@"
@@ -32,14 +34,15 @@ VALUES(@单号,@日期,@电脑单号,@操作员,'0',@备注)",
         foreach (var l in dto.明细)
         {
             // 系统数量服务端复算(账面=塑胶原料资料.库存,与审核写回/反审核还原同口径),不信任前端传入值;主档不存在=0
-            var 系统数量 = await c.ExecuteScalarAsync<decimal>(
+            var ledgerCount=await RawMaterialInventorySql.IsEnabledAsync(c,tx,l.原料编号 ?? "");
+            var 系统数量 = ledgerCount ? await RawMaterialInventorySql.StockAsync(c,tx,l.原料编号 ?? "") : await c.ExecuteScalarAsync<decimal>(
                 "SELECT CAST(ISNULL([库存],0) AS decimal(18,4)) FROM [塑胶原料资料] WHERE [物料编号]=@原料编号",
                 new { l.原料编号 }, tx);
             await c.ExecuteAsync(@"
-INSERT INTO [原料盘点明细单]([单号],[原料编号],[原料名称],[产地],[每包重量],[单位],[系统数量],[盘点数量],[盈亏数量],[备注])
-VALUES(@单号,@原料编号,@原料名称,@产地,@每包重量,@单位,@系统数量,@盘点数量,@盈亏数量,@备注)",
+INSERT INTO [原料盘点明细单]([单号],[原料编号],[原料名称],[产地],[每包重量],[单位],[系统数量],[盘点数量],[盈亏数量],[备注],[原料台账盘点])
+VALUES(@单号,@原料编号,@原料名称,@产地,@每包重量,@单位,@系统数量,@盘点数量,@盈亏数量,@备注,@ledgerCount)",
                 new { 单号, l.原料编号, l.原料名称, l.产地, l.每包重量, l.单位, 系统数量, l.盘点数量,
-                      盈亏数量 = l.盘点数量 - 系统数量, l.备注 }, tx);
+                      盈亏数量 = l.盘点数量 - 系统数量, l.备注, ledgerCount }, tx);
         }
 
         tx.Commit();
@@ -83,9 +86,21 @@ FROM [原料盘点明细单] WHERE [单号]=@单号 ORDER BY [ID];", new { 单�
         using var c = factory.Create();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
+        await RawMaterialInventorySql.LockDocumentAsync(c,tx,DocType,单号);
         var 审核 = await c.ExecuteScalarAsync<string?>(
             "SELECT ISNULL([审核],'0') FROM [原料盘点单] WITH (UPDLOCK, HOLDLOCK) WHERE [单号]=@单号", new { 单号 }, tx);
         if (审核 is null || 审核 == "1") return false;
+        var counts=await c.QueryAsync<(string 原料编号,decimal 系统数量,bool 原料台账盘点)>(
+            "SELECT [原料编号],ISNULL([系统数量],0),ISNULL([原料台账盘点],0) FROM [原料盘点明细单] WHERE [单号]=@单号",new { 单号 },tx);
+        foreach (var count in counts)
+        {
+            var enabled=await RawMaterialInventorySql.IsEnabledAsync(c,tx,count.原料编号);
+            if (enabled && !count.原料台账盘点)
+                throw new InvalidOperationException($"原料 {count.原料编号} 已启用原料库存台账，请重新创建盘点单，核对实时库存。");
+            if (count.原料台账盘点 && count.系统数量 != await RawMaterialInventorySql.StockAsync(c,tx,count.原料编号))
+                throw new InvalidOperationException($"原料 {count.原料编号} 的账面库存已变化，请重新盘点后审核。");
+        }
+        await RawMaterialInventorySql.ValidateSavedAsync(c,tx,DocType,单号,"0","1");
         await c.ExecuteAsync(
             "UPDATE [原料盘点单] SET [审核]='1',[审核人]=@user,[审核日期]=@now WHERE [单号]=@单号",
             new { 单号, user, now = DateTime.Now }, tx);
@@ -93,7 +108,8 @@ FROM [原料盘点明细单] WHERE [单号]=@单号 ORDER BY [ID];", new { 单�
 UPDATE m SET m.[库存] = d.[盘点数量]
 FROM [塑胶原料资料] m
 JOIN [原料盘点明细单] d ON d.[原料编号] = m.[物料编号]
-WHERE d.[单号] = @单号 AND d.[原料编号] IS NOT NULL", new { 单号 }, tx);
+WHERE d.[单号] = @单号 AND d.[原料编号] IS NOT NULL AND ISNULL(d.[原料台账盘点],0)=0", new { 单号 }, tx);
+        await audit.WriteAsync(DocType,"审核",user,$"单号={单号}",c,tx);
         tx.Commit();
         return true;
     }
@@ -104,16 +120,18 @@ WHERE d.[单号] = @单号 AND d.[原料编号] IS NOT NULL", new { 单号 }, tx
         using var c = factory.Create();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
+        await RawMaterialInventorySql.LockDocumentAsync(c,tx,DocType,单号);
         var 审核 = await c.ExecuteScalarAsync<string?>(
             "SELECT ISNULL([审核],'0') FROM [原料盘点单] WITH (UPDLOCK, HOLDLOCK) WHERE [单号]=@单号", new { 单号 }, tx);
         if (审核 is null || 审核 != "1") return false;
+        await RawMaterialInventorySql.ValidateSavedAsync(c,tx,DocType,单号,"1","0");
         await c.ExecuteAsync(
             "UPDATE [原料盘点单] SET [审核]='0',[审核人]=NULL,[审核日期]=NULL WHERE [单号]=@单号", new { 单号 }, tx);
         await c.ExecuteAsync(@"
 UPDATE m SET m.[库存] = d.[系统数量]
 FROM [塑胶原料资料] m
 JOIN [原料盘点明细单] d ON d.[原料编号] = m.[物料编号]
-WHERE d.[单号] = @单号 AND d.[原料编号] IS NOT NULL", new { 单号 }, tx);
+WHERE d.[单号] = @单号 AND d.[原料编号] IS NOT NULL AND ISNULL(d.[原料台账盘点],0)=0", new { 单号 }, tx);
         await audit.WriteAsync("原料盘点单", "反审核", user, $"单号={单号}", c, tx);
         tx.Commit();
         return true;

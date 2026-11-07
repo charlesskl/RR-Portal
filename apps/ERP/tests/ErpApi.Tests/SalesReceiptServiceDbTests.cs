@@ -21,15 +21,17 @@ public class SalesReceiptServiceDbTests(DbFixture fx)
     {
         Skip.IfNot(fx.Available, "未设置 ERP_TEST_DB");
         using var c = fx.Open();
-        c.Execute("IF NOT EXISTS (SELECT 1 FROM [客户资料] WHERE [客户编号]=N'P6BC1') INSERT INTO [客户资料]([客户编号],[客户名称]) VALUES(N'P6BC1',N'P6B客户')");
+        var prefix = "T6" + Guid.NewGuid().ToString("N")[..8];
+        var customer = prefix + "C";
         string? no = null;
         try
         {
+            c.Execute("IF NOT EXISTS (SELECT 1 FROM [客户资料] WHERE [客户编号]=@customer) INSERT INTO [客户资料]([客户编号],[客户名称]) VALUES(@customer,N'P6B客户')", new { customer });
             no = await Svc().CreateAsync(new SalesReceiptCreateDto
             {
                 明细 = [
-                    new SalesReceiptLineDto { 客户编号 = "P6BC1", 客户名称 = "P6B客户", 收款金额 = 30 },
-                    new SalesReceiptLineDto { 客户编号 = "P6BC1", 客户名称 = "P6B客户", 收款金额 = 20 },
+                    new SalesReceiptLineDto { 客户编号 = customer, 客户名称 = "P6B客户", 收款金额 = 30 },
+                    new SalesReceiptLineDto { 客户编号 = customer, 客户名称 = "P6B客户", 收款金额 = 20 },
                 ]
             }, "tester");
             Assert.StartsWith("XK", no);
@@ -45,7 +47,7 @@ public class SalesReceiptServiceDbTests(DbFixture fx)
         finally
         {
             if (no != null) { c.Execute("DELETE FROM [销售收款明细单] WHERE [单号]=@no", new { no }); c.Execute("DELETE FROM [销售收款单] WHERE [单号]=@no", new { no }); }
-            c.Execute("DELETE FROM [客户资料] WHERE [客户编号]=N'P6BC1'");
+            c.Execute("DELETE FROM [客户资料] WHERE [客户编号]=@customer", new { customer });
         }
     }
 }

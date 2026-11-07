@@ -21,6 +21,8 @@ public sealed class PlasticRawMaterialRow
     public decimal? 销售价 { get; set; }
     public decimal? 起订量 { get; set; }
     public decimal? 安全库存 { get; set; }
+    public bool? 常用原料 { get; set; }
+    public decimal? 每包重量 { get; set; }
     public decimal? 库存 { get; set; }
     public decimal? 最低库存 { get; set; }
     public decimal? 最高库存 { get; set; }
@@ -41,4 +43,15 @@ public sealed class PlasticRawMaterialPurchaseRow
     public decimal? 生产需求 { get; set; }
     public decimal? 在途数量 { get; set; }
     public decimal? 可购数量 { get; set; }
+    public bool? 常用原料 { get; set; }
+    public decimal? 每包重量 { get; set; }
+    public decimal 需求数量KG { get; set; }
+    public decimal 已领数量KG { get; set; }
+    public decimal 待领数量KG { get; set; }
+    public decimal? 当前库存KG { get; set; }
+    public decimal 在途数量KG { get; set; }
+    public decimal? 缺口数量KG { get; set; }
+    public decimal? 可购上限KG { get; set; }
+    public decimal? 可购上限 { get; set; }
+    public string? 采购限制原因 { get; set; }
 }

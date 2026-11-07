@@ -240,7 +240,7 @@ export const MENU_TREE: MenuGroup[] = [
       M("领料出库", "/material-issues"),
       M("成品库存", "/finished-inventory"),
       // 外部系统(RR-Portal)
-      X("船务管理系统", "/shipping/"),
+      X("VoyagePlex 船务协同系统", "/voyageplex/"),
     ],
   },
   // 品质部(全部为 RR-Portal 外部系统入口)

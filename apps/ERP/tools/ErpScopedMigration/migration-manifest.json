@@ -1,0 +1,17 @@
+{
+  "scope": "P112-P113-cloud-173-174-175",
+  "migrations": [
+    {
+      "file": "173_raw_material_procurement_policy.sql",
+      "sha256": "d7a70d9810abe8344490ea0770c708ffee1637bffbfe2f2574171ee3e34b73f1"
+    },
+    {
+      "file": "174_raw_material_issue_sources.sql",
+      "sha256": "86c36f7e5b21a8ee4f7ac8ee424f92a5b328f7b0fabb36843233213fd475466a"
+    },
+    {
+      "file": "175_cloud_p113_prerequisites.sql",
+      "sha256": "a12649249003bd81da16aa72070fe2bd2ec22410eb35194e42168bdb0dca2af8"
+    }
+  ]
+}

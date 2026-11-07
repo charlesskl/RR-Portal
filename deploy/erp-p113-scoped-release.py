@@ -37,10 +37,10 @@ SQL_IMAGE = 'sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264
 MIGRATIONS = ['173_raw_material_procurement_policy.sql', '174_raw_material_issue_sources.sql', '175_cloud_p113_prerequisites.sql']
 ARCHIVE_PATHS = ['apps/ERP/src/ErpApi', 'apps/ERP/web2', 'apps/ERP/tools/ErpScopedMigration', 'apps/ERP/Dockerfile', 'apps/ERP/.dockerignore'] + ['apps/ERP/db/' + x for x in MIGRATIONS]
 SOURCE_DIRECTORIES = ARCHIVE_PATHS[:3]
-BUILD_MEMORY = 1024 ** 3
+BUILD_MEMORY = 2 * 1024 ** 3
 BUILD_CPU_PERIOD = 100000
 BUILD_CPU_QUOTA = 75000
-BUILD_RESERVE_MEMORY = 512 * 1024 ** 2
+BUILD_RESERVE_MEMORY = 1024 ** 3
 BUILD_FREE_DISK = 3 * 1024 ** 3
 
 
@@ -281,6 +281,8 @@ def prepare(source_sha):
     configs = app / 'runtime-preserved-config'
     config_files = runtime_configs(API_ID, configs)
     dockerfile = (app / 'Dockerfile').read_text()
+    need(dockerfile.splitlines().count('RUN npm run build') == 1, 'Unexpected frontend build command')
+    dockerfile = dockerfile.replace('RUN npm run build', 'RUN NODE_OPTIONS=--max-old-space-size=1536 npm run build', 1)
     marker = 'FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime'
     need(dockerfile.count(marker) == 1, 'Unexpected runtime Dockerfile')
     migration_stage = '\n'.join(['FROM mcr.microsoft.com/dotnet/sdk:8.0 AS migration', 'WORKDIR /src', 'COPY tools/ErpScopedMigration/ tools/ErpScopedMigration/', *['COPY db/' + name + ' db/' for name in MIGRATIONS], 'RUN dotnet publish tools/ErpScopedMigration/ErpScopedMigration.csproj -c Release -o /migration-publish', ''])

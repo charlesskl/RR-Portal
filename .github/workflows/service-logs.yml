@@ -120,6 +120,40 @@ jobs:
                     result['buildLogTail']={'maxLines':120,'redactedLines':sum(line=='[REDACTED sensitive build output]' for line in sanitized),'lines':sanitized}
                 result['resources']={'dockerVersion':subprocess.check_output(['docker','version','--format','{{.Server.Version}}'],text=True).strip(),'availableMemoryKiB':next((x.split()[1] for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemAvailable:')),None)}
                 if source=='8d0a955487883d29a54aed883c66592c24722306':
+                    # Match identity_equal exactly; report JSON-pointer paths, never private values or value hashes.
+                    def identity_fields(item):
+                        value={key:item[key] for key in ['Id','Name','Image','Created','Config','HostConfig','Mounts','NetworkSettings']}
+                        value['State']={key:item['State'][key] for key in ['StartedAt','Running']}
+                        value['RestartCount']=item.get('RestartCount')
+                        return value
+                    def changed_paths(before,after,path=''):
+                        if before==after: return []
+                        if isinstance(before,dict) and isinstance(after,dict):
+                            changes=[]
+                            for key in sorted(before.keys()|after.keys()):
+                                child=path+'/'+key.replace('~','~0').replace('/','~1')
+                                changes.extend([child] if key not in before or key not in after else changed_paths(before[key],after[key],child))
+                            return changes
+                        if isinstance(before,list) and isinstance(after,list):
+                            changes=[]
+                            for index in range(max(len(before),len(after))):
+                                child=path+'/'+str(index)
+                                changes.extend([child] if index>=len(before) or index>=len(after) else changed_paths(before[index],after[index],child))
+                            return changes
+                        return [path]
+                    def safe_identity(item):
+                        value={key:item[key] for key in ['Id','Image','Name']}
+                        value['State']={key:item['State'][key] for key in ['StartedAt','Running']}
+                        value['RestartCount']=item.get('RestartCount')
+                        return value
+                    result['originalIdentityDiff']={}
+                    for kind,name in [('api','rr-portal-erp-api-1'),('sql','rr-portal-erp-sqlserver-1'),('nginx','rr-portal-nginx-1')]:
+                        with regular_file(directory/('original-'+kind+'.private.json')) as handle: before=json.load(handle)
+                        actual=json.loads(subprocess.check_output(['docker','inspect','--type','container',name],stderr=subprocess.DEVNULL,text=True,timeout=15))
+                        assert len(actual)==1
+                        after=actual[0]
+                        changes=changed_paths(identity_fields(before),identity_fields(after))
+                        result['originalIdentityDiff'][kind]={'equal':not changes,'changedPaths':changes,'before':safe_identity(before),'after':safe_identity(after)}
                     # Only the identified bounded apt build step may expose whitelisted diagnostics.
                     try:
                         values=json.loads(subprocess.check_output(['docker','inspect','--type','container','2786a7dec984'],stderr=subprocess.DEVNULL,text=True,timeout=15))

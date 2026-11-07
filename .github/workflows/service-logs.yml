@@ -57,7 +57,8 @@ jobs:
           script: |
             set -euo pipefail
             python3 - <<'P113_OPERATOR'
-            import json,os,re,subprocess,tempfile
+            import json,os,re,stat,subprocess,tempfile
+            from collections import deque
             from pathlib import Path
             source=os.environ['SOURCE_SHA']; revision=os.environ['OPERATOR_SHA']; action=os.environ['RELEASE_ACTION']
             assert re.fullmatch('[a-f0-9]{40}',source) and re.fullmatch('[a-f0-9]{40}',revision)
@@ -66,12 +67,48 @@ jobs:
             root=Path('/opt/rr-portal')
             if action=='status':
                 directory=Path('/opt/erp-p113-releases')/source
+                assert directory.parent.resolve()==directory.parent and not directory.is_symlink()
+                if directory.exists():
+                    info=directory.stat()
+                    assert stat.S_ISDIR(info.st_mode) and info.st_uid==os.geteuid() and not info.st_mode & 0o077
+                def regular_file(path):
+                    info=path.lstat()
+                    assert stat.S_ISREG(info.st_mode) and info.st_uid==os.geteuid() and not info.st_mode & 0o077
+                    descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+                    current=os.fstat(descriptor)
+                    if (current.st_dev,current.st_ino)!=(info.st_dev,info.st_ino):
+                        os.close(descriptor)
+                        raise RuntimeError('Diagnostic file identity changed')
+                    return os.fdopen(descriptor,'r',encoding='utf-8',errors='replace')
                 result={'sourceSha':source,'exists':directory.is_dir()}
                 for filename in ['prepared.private.json','activation-journal.private.json','activation.private.json']:
                     file=directory/filename
                     if file.is_file() and not file.is_symlink():
-                        value=json.loads(file.read_text())
+                        with regular_file(file) as handle: value=json.load(handle)
                         result[filename]={k:value[k] for k in ['prepared','ok','sourceSha','imageId','apiId','candidateId','steps','failureType','rollbackFailureType','runtimeChanges','databaseCommands','sqlIdentityUnchanged','runtimeEnvironmentUnchanged','runtimeConfigurationUnchanged','uploadsMountUnchanged'] if k in value}
+                names=['source','old-static','published','original-api.private.json','original-sql.private.json','original-nginx.private.json','build-budget.private.json','fetch.private.log','source-files.private.json','build-context-files.private.json','build.private.log','prepared.private.json','activation-journal.private.json','activation.private.json']
+                result['staging']={}
+                for name in names:
+                    path=directory/name
+                    try: info=path.lstat()
+                    except FileNotFoundError: result['staging'][name]={'exists':False}; continue
+                    kind='file' if stat.S_ISREG(info.st_mode) else 'directory' if stat.S_ISDIR(info.st_mode) else 'rejected'
+                    result['staging'][name]={'exists':True,'type':kind,'bytes':info.st_size if kind=='file' else None}
+                result['retryPolicy']='Existing release directory is preserved; inspect and review recovery separately. No overwrite or cleanup is performed.'
+                build_log=directory/'build.private.log'
+                if build_log.exists():
+                    # Whole-line redaction is intentionally conservative; no private config is printed.
+                    sensitive=re.compile(r'password|passwd|\bpwd\b|token|secret|credential|authorization|connection[ _-]?strings?|ERP_DB|ERP_JWT|(?:server|data source|user id|uid|accountkey|accesskey)\s*=|api[ _-]?key|client[ _-]?secret|[?&](?:key|sig|signature)=|https?://[^\s/@]+:[^\s/@]+@|BEGIN .*PRIVATE KEY|END .*PRIVATE KEY|[A-Za-z0-9_+/=-]{40,}',re.I)
+                    with regular_file(build_log) as handle: tail=list(deque(handle,maxlen=120))
+                    sanitized=[]; private_key=False
+                    for line in tail:
+                        line=re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]','',line)
+                        line=''.join(char for char in line if char=='\t' or ord(char)>=32).rstrip()
+                        if 'BEGIN ' in line and 'PRIVATE KEY' in line: private_key=True
+                        hidden=private_key or sensitive.search(line) is not None
+                        sanitized.append('[REDACTED sensitive build output]' if hidden else line[:4096])
+                        if 'END ' in line and 'PRIVATE KEY' in line: private_key=False
+                    result['buildLogTail']={'maxLines':120,'redactedLines':sum(line=='[REDACTED sensitive build output]' for line in sanitized),'lines':sanitized}
                 result['resources']={'dockerVersion':subprocess.check_output(['docker','version','--format','{{.Server.Version}}'],text=True).strip(),'availableMemoryKiB':next((x.split()[1] for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemAvailable:')),None)}
                 print(json.dumps(result)); raise SystemExit(0)
             subprocess.run(['git','-C',str(root),'fetch','origin',revision],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

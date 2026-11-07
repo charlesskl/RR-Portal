@@ -58,7 +58,7 @@ jobs:
           script: |
             set -euo pipefail
             python3 - <<'P113_OPERATOR'
-            import hashlib,json,os,re,stat,subprocess,tempfile
+            import hashlib,json,os,re,shutil,stat,subprocess,tempfile
             from collections import deque
             from pathlib import Path
             source=os.environ['SOURCE_SHA']; revision=os.environ['OPERATOR_SHA']; action=os.environ['RELEASE_ACTION']
@@ -97,7 +97,7 @@ jobs:
                     result['staging'][name]={'exists':True,'type':kind,'bytes':info.st_size if kind=='file' else None}
                 result['retryPolicy']='Existing release directory is preserved; inspect and review recovery separately. No overwrite or cleanup is performed.'
                 result['diagnosticSha256']={}
-                for name in ['build.private.log','build-context-files.private.json']:
+                for name in ['build.private.log','build-context-files.private.json','source-files.private.json','original-api.private.json','original-sql.private.json','original-nginx.private.json','build-budget.private.json']:
                     path=directory/name
                     if path.exists():
                         with regular_file(path) as handle:
@@ -156,6 +156,36 @@ jobs:
                         result['originalIdentityDiff'][kind]={'equal':not changes,'changedPaths':changes,'before':safe_identity(before),'after':safe_identity(after),
                             'mountRecordsEqualIgnoringOrder':sorted(json.dumps(item,sort_keys=True,separators=(',',':')) for item in before['Mounts'])==sorted(json.dumps(item,sort_keys=True,separators=(',',':')) for item in after['Mounts']),
                             'beforeMountCount':len(before['Mounts']),'afterMountCount':len(after['Mounts'])}
+                    # Read only fixed build evidence and metadata; never inspect volume contents or delete caches.
+                    docker_root=json.loads(subprocess.check_output(['docker','info','--format','{{json .DockerRootDir}}'],text=True,timeout=15))
+                    assert isinstance(docker_root,str) and Path(docker_root).is_absolute()
+                    result['diskUsage']={name:dict(path=path,**dict(zip(['total','used','free'],shutil.disk_usage(path)))) for name,path in [('opt','/opt'),('dockerRoot',docker_root)]}
+                    df=subprocess.check_output(['docker','system','df','--format','{{json .}}'],text=True,timeout=60)
+                    result['dockerSystemDf']=[]
+                    for line in df.splitlines():
+                        item=json.loads(line)
+                        assert item['Type'] in ['Images','Containers','Local Volumes','Build Cache']
+                        result['dockerSystemDf'].append({key:item[key] for key in ['Type','TotalCount','Active','Size','Reclaimable']})
+                    with regular_file(directory/'build.private.log') as handle:
+                        prefixes=sorted({match.group(1) for line in handle if (match:=re.fullmatch(r'\s*---> ([a-f0-9]{12})\s*',line))})
+                    assert prefixes and 'fcec04803bab' in prefixes
+                    template='{"Id":{{json .Id}},"Parent":{{if index . "Parent"}}{{json (index . "Parent")}}{{else}}""{{end}},"Created":{{json .Created}},"Size":{{json .Size}},"RepoTagsEmpty":{{if .RepoTags}}false{{else}}true{{end}}}'
+                    records=[json.loads(line) for line in subprocess.check_output(['docker','image','inspect','--format',template,*prefixes],text=True,stderr=subprocess.DEVNULL,timeout=60).splitlines()]
+                    assert len(records)==len(prefixes) and {item['Id'][7:19] for item in records}==set(prefixes)
+                    assert all(re.fullmatch(r'sha256:[a-f0-9]{64}',item['Id']) and (item['Parent']=='' or re.fullmatch(r'sha256:[a-f0-9]{64}',item['Parent'])) and isinstance(item['RepoTagsEmpty'],bool) for item in records)
+                    selected_ids={item['Id'] for item in records}
+                    container_ids=subprocess.check_output(['docker','container','ls','--all','--quiet','--no-trunc'],text=True,timeout=15).splitlines()
+                    assert all(re.fullmatch(r'[a-f0-9]{64}',value) for value in container_ids)
+                    references=subprocess.check_output(['docker','container','inspect','--format','{{.Image}}',*container_ids],text=True,stderr=subprocess.DEVNULL,timeout=60).splitlines() if container_ids else []
+                    assert len(references)==len(container_ids) and all(re.fullmatch(r'sha256:[a-f0-9]{64}',value) for value in references)
+                    all_ids=sorted(set(subprocess.check_output(['docker','image','ls','--all','--quiet','--no-trunc'],text=True,timeout=15).splitlines()))
+                    assert selected_ids.issubset(all_ids) and all(re.fullmatch(r'sha256:[a-f0-9]{64}',value) for value in all_ids)
+                    parents=[json.loads(line) for line in subprocess.check_output(['docker','image','inspect','--format','{"Id":{{json .Id}},"Parent":{{if index . "Parent"}}{{json (index . "Parent")}}{{else}}""{{end}}}',*all_ids],text=True,stderr=subprocess.DEVNULL,timeout=60).splitlines()]
+                    assert len(parents)==len(all_ids) and {item['Id'] for item in parents}==set(all_ids)
+                    protected={item[side]['Image'] for item in result['originalIdentityDiff'].values() for side in ['before','after']}
+                    protected.update(item['Id'] for item in records if item['Id'].startswith('sha256:fcec04803bab'))
+                    result['buildImageDiagnostics']={'sourceSha':source,'protectedImageIds':sorted(protected),'images':[
+                        dict({key:item[key] for key in ['Id','Parent','Created','Size','RepoTagsEmpty']},containerReferenceCount=references.count(item['Id']),outsideSetChildImageCount=sum(child['Parent']==item['Id'] and child['Id'] not in selected_ids for child in parents),protected=item['Id'] in protected) for item in records]}
                     # Only the identified bounded apt build step may expose whitelisted diagnostics.
                     try:
                         values=json.loads(subprocess.check_output(['docker','inspect','--type','container','2786a7dec984'],stderr=subprocess.DEVNULL,text=True,timeout=15))

@@ -119,6 +119,20 @@ jobs:
                         if 'END ' in line and 'PRIVATE KEY' in line: private_key=False
                     result['buildLogTail']={'maxLines':120,'redactedLines':sum(line=='[REDACTED sensitive build output]' for line in sanitized),'lines':sanitized}
                 result['resources']={'dockerVersion':subprocess.check_output(['docker','version','--format','{{.Server.Version}}'],text=True).strip(),'availableMemoryKiB':next((x.split()[1] for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemAvailable:')),None)}
+                if source=='8d0a955487883d29a54aed883c66592c24722306':
+                    # Only the identified bounded apt build step may expose whitelisted diagnostics.
+                    try:
+                        values=json.loads(subprocess.check_output(['docker','inspect','--type','container','2786a7dec984'],stderr=subprocess.DEVNULL,text=True,timeout=15))
+                        assert len(values)==1
+                        item=values[0]; limits=item['HostConfig']; state=item['State']
+                        assert re.fullmatch(r'2786a7dec984[a-f0-9]{52}',item['Id']) and item['Mounts']==[]
+                        assert limits['Memory']==2*1024**3 and limits['MemorySwap']==2*1024**3 and limits['CpuQuota']==75000 and limits['CpuPeriod']==100000
+                        assert item['Config']['Cmd']==['/bin/sh','-c','apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*']
+                        assert state['Running'] and state['Status']=='running'
+                        sample=json.loads(subprocess.check_output(['docker','stats','--no-stream','--format','{{json .}}',item['Id']],stderr=subprocess.DEVNULL,text=True,timeout=20))
+                        result['knownBuildContainer']={'ID':item['Id'],'Status':state['Status'],'StartedAt':state['StartedAt'],'Image':item['Image'],'Memory':limits['Memory'],'CpuQuota':limits['CpuQuota'],'CPU':sample['CPUPerc'],'Mem':sample['MemUsage'],'NetIO':sample['NetIO'],'PIDs':sample['PIDs']}
+                    except (AssertionError,KeyError,ValueError,subprocess.SubprocessError):
+                        result['knownBuildContainer']={'available':False}
                 print(json.dumps(result)); raise SystemExit(0)
             subprocess.run(['git','-C',str(root),'fetch','origin',revision],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             with tempfile.TemporaryDirectory(prefix='erp-p113-reviewed-') as scratch:

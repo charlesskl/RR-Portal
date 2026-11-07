@@ -266,7 +266,8 @@ app.Use(async (context, next) =>
             else db.MailOwnerId = owner.Id;
         }
         // Candidate browsing is read-only, including when this mailbox has no settings yet.
-        if (!(HttpMethods.IsGet(context.Request.Method) && path == "/api/imports/email/mailbox/failed") &&
+        if (!(HttpMethods.IsGet(context.Request.Method) &&
+              path.TrimEnd('/').Equals("/api/imports/email/mailbox/failed", StringComparison.OrdinalIgnoreCase)) &&
             !await db.MailSystemSettings.AnyAsync())
         {
             db.MailSystemSettings.Add(new MailSystemSetting { Id = db.CompanySettingId, DailyWorkflowVersion = DailyMailRules.WorkflowVersion });

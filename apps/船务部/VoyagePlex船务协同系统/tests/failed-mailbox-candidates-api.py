@@ -185,6 +185,12 @@ def run():
                 with sqlite3.connect(database) as db: db.execute("DELETE FROM MailSystemSettings WHERE Id=?", (1000+owners[0],))
                 before = snapshot(); request(LIST, company="Huadeng", owner=owners[0]); request(LIST, company="Huadeng", expected=400)
                 check("candidate GET does not initialize missing personal or unselected settings", snapshot() == before)
+                # ASP.NET matches these as the same GET endpoint; middleware must stay read-only too.
+                for alias in (LIST + "/", LIST.upper(), LIST.upper() + "/"):
+                    page = request(alias, company="Huadeng", owner=owners[0])
+                    request(alias, company="Huadeng", expected=400)
+                    check("equivalent candidate path stays read-only: " + alias, snapshot() == before and
+                        page["ownerId"] == owners[0] and page["total"] == 7)
                 with sqlite3.connect(database) as db:
                     db.execute("UPDATE Users SET MailboxAddress='unbound@example.invalid' WHERE Id=?", (owners[0],))
                 unavailable = request(LIST, company="Huadeng", owner=owners[0])

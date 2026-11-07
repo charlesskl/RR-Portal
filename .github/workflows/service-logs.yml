@@ -1,28 +1,19 @@
-name: Service Logs
+name: ERP P112 P113 Scoped Release
 
-# 通用服务日志诊断（手动触发）：查看任意 compose 服务的容器状态、健康检查结果与日志。
-# 背景：2026-09-15 voyageplex 上线时 api 容器 unhealthy，仓库里没有一个能看任意服务日志的
-# 入口，只能靠猜。此 workflow 填补该空缺。
-#   service —— compose 服务名（如 voyageplex-api）；容器名按 rr-portal-<service>-1 推导
-#   tail    —— 日志行数，默认 100
-
+# This workflow exists only on the dedicated ops branch. It does not replace
+# main's service diagnostics or run the portal's legacy compose/db-init deploy.
 on:
   workflow_dispatch:
     inputs:
-      service:
-        description: "compose 服务名（如 voyageplex-api）"
+      action:
+        description: "Prepare beside the live ERP, activate a verified release, or inspect its evidence"
+        type: choice
+        required: true
+        options: [prepare, activate, status]
+      source_sha:
+        description: "Exact reviewed ERP source commit (40 lowercase hexadecimal characters)"
         type: string
         required: true
-      tail:
-        description: "日志行数"
-        type: string
-        required: false
-        default: "100"
-      tomy_smoke:
-        description: "仅 TOMY：使用合成文件验证上传核对及 ZIP 下载"
-        type: boolean
-        required: false
-        default: false
 
 permissions:
   contents: read
@@ -33,73 +24,67 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  logs:
+  scoped-erp:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 60
     steps:
-      - name: Validate SSH host fingerprint
+      - name: Validate SSH host fingerprint and immutable inputs
         shell: bash
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_ACTION: ${{ inputs.action }}
         run: |
           set -euo pipefail
-          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
-            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
-            exit 1
-          fi
+          [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$RELEASE_ACTION" =~ ^(prepare|activate|status)$ ]]
 
-      - name: Fetch service logs via SSH
+      - name: Run reviewed ERP-only operator through verified SSH
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          OPS_SERVICE: ${{ inputs.service }}
-          OPS_TAIL: ${{ inputs.tail }}
-          TOMY_SMOKE: ${{ inputs.tomy_smoke }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_ACTION: ${{ inputs.action }}
+          OPERATOR_SHA: ${{ github.sha }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
-          command_timeout: 5m
-          envs: OPS_SERVICE,OPS_TAIL,TOMY_SMOKE
+          command_timeout: 55m
+          envs: SOURCE_SHA,RELEASE_ACTION,OPERATOR_SHA
           script: |
             set -euo pipefail
-            [ "${OPS_SERVICE}" = "erp-api" ] || { echo "ERP-only preflight" >&2; exit 1; }
-            python3 - <<'P113_PREFLIGHT_PY'
-            import hashlib,json,subprocess,sys,os
+            python3 - <<'P113_OPERATOR'
+            import json,os,re,subprocess,tempfile
             from pathlib import Path
-
-            def cmd(args,**kw):
-                return subprocess.run(args,check=True,capture_output=True,**kw).stdout
-
-            def inspect(name):
-                a=json.loads(cmd(['docker','inspect',name]))
-                assert len(a)==1
-                return a[0]
-
-            result={'operation':'erp-p112-p113-readonly-preflight','sqlWrites':0,'processChanges':0,'containers':{}}
-            for name in ['rr-portal-erp-api-1','rr-portal-erp-sqlserver-1','rr-portal-nginx-1']:
-                a=inspect(name)
-                result['containers'][name]={'id':a['Id'],'image':a['Image'],'created':a['Created'],'started':a['State']['StartedAt'],'running':a['State']['Running'],'health':a['State'].get('Health',{}).get('Status'),'mounts':[{'type':x['Type'],'source':x['Source'],'destination':x['Destination'],'rw':x['RW']} for x in a['Mounts']],'environmentSha256':hashlib.sha256(json.dumps(sorted(a['Config']['Env']),separators=(',',':')).encode()).hexdigest(),'environmentKeys':[x.split('=',1)[0] for x in a['Config']['Env']],'networks':list(a['NetworkSettings']['Networks'])}
-            result['checkoutHead']=cmd(['git','-C','/opt/rr-portal','rev-parse','HEAD']).decode().strip()
-            result['erpLastCommit']=cmd(['git','-C','/opt/rr-portal','log','-1','--format=%H','--','apps/ERP']).decode().strip()
-            result['apiBinarySha256']=cmd(['docker','exec','rr-portal-erp-api-1','sha256sum','/app/ErpApi.dll']).decode().split()[0]
-            result['sqlDatabaseMountIdentity']=result['containers']['rr-portal-erp-sqlserver-1']['mounts']
-            print('P113_PREFLIGHT_IDENTITY='+json.dumps(result,ensure_ascii=False,separators=(',',':')))
-            assert result['containers']['rr-portal-erp-api-1']['running']
-            assert result['containers']['rr-portal-erp-sqlserver-1']['running']
-            assert any(x['destination']=='/var/opt/mssql' and x['type']=='bind' for x in result['sqlDatabaseMountIdentity'])
-
-            sql='LS0gUDExMi9QMTEzIGNsb3VkIHByZWZsaWdodDogbWV0YWRhdGEgYW5kIGFnZ3JlZ2F0ZXMgb25seS4KLS0gRG9lcyBub3QgY3JlYXRlL2FsdGVyL2Ryb3AgYnVzaW5lc3Mgb2JqZWN0cyBvciByZWFkIG5hbWVzLCBjcmVkZW50aWFscyBvciBwcmljZXMuCi0tIFJ1biBhZ2FpbnN0IHRoZSBhbHJlYWR5LWlkZW50aWZpZWQgY2xvdWQgZXJwIGRhdGFiYXNlOyBkbyBub3QgaW52b2tlIGRiLWluaXQuClNFVCBOT0NPVU5UIE9OOwpTRVQgWEFDVF9BQk9SVCBPTjsKU0VUIExPQ0tfVElNRU9VVCAxNTAwMDsKCklGIERCX05BTUUoKSA8PiBOJ2VycCcKICAgIFRIUk9XIDUxMDAwLCBOJ1AxMTMgcHJlZmxpZ2h0IHJlcXVpcmVzIHRoZSBleGlzdGluZyBlcnAgZGF0YWJhc2UuJywgMTsKClNFTEVDVCBOJ2lkZW50aXR5JyBBUyBbc2VjdGlvbl0sCiAgICBDT05WRVJUKG52YXJjaGFyKDEyOCksIFNFUlZFUlBST1BFUlRZKCdTZXJ2ZXJOYW1lJykpIEFTIFtzZXJ2ZXJdLAogICAgREJfTkFNRSgpIEFTIFtkYXRhYmFzZV0sCiAgICBDT05WRVJUKG52YXJjaGFyKDEyOCksIFNFUlZFUlBST1BFUlRZKCdQcm9kdWN0VmVyc2lvbicpKSBBUyBbcHJvZHVjdF92ZXJzaW9uXSwKICAgIENPTlZFUlQobnZhcmNoYXIoMTI4KSwgU0VSVkVSUFJPUEVSVFkoJ0VkaXRpb24nKSkgQVMgW2VkaXRpb25dLAogICAgZC5bc3RhdGVfZGVzY10sIGQuW3JlY292ZXJ5X21vZGVsX2Rlc2NdLCBkLltjb2xsYXRpb25fbmFtZV0sIGQuW2NvbXBhdGliaWxpdHlfbGV2ZWxdCkZST00gc3lzLmRhdGFiYXNlcyBBUyBkIFdIRVJFIGQuW2RhdGFiYXNlX2lkXSA9IERCX0lEKCk7CgpERUNMQVJFIEB0YWJsZXMgVEFCTEUgKFtuYW1lXSBzeXNuYW1lIFBSSU1BUlkgS0VZLCBbcHVycG9zZV0gbnZhcmNoYXIoNjApKTsKSU5TRVJUIElOVE8gQHRhYmxlcyBWQUxVRVMKIChOJ+WhkeiDtuWOn+aWmei1hOaWmScsTidleGlzdGluZyByYXcgbWFzdGVyIC8gMTczJyksCiAoTifljp/mlpnph4fotK3orqLljZUnLE4nZXhpc3RpbmcgcmF3IHB1cmNoYXNlIGhlYWRlciAvIDE3MycpLAogKE4n5Y6f5paZ6YeH6LSt6K6i5Y2V5piO57uGJyxOJ2V4aXN0aW5nIHJhdyBwdXJjaGFzZSBsaW5lcyAvIDE3MycpLAogKE4n5Y6f5paZ5Ye65bqT5Y2VJyxOJ2V4aXN0aW5nIHJhdyBpc3N1ZSBoZWFkZXIgLyAxNzQnKSwKIChOJ+WOn+aWmeWHuuW6k+aYjue7huWNlScsTidleGlzdGluZyByYXcgaXNzdWUgbGluZXMgLyAxNzQnKSwKIChOJ+WhkeiDtumHh+i0reiuouWNlScsTidleGlzdGluZyBTUCBoZWFkZXIgLyAxNzUnKSwKIChOJ+WhkeiDtumHh+i0reiuouWNleaYjue7hicsTidleGlzdGluZyBTUCBsaW5lcyAvIDE3NScpLAogKE4n5Y6f5paZ55uY54K55piO57uG5Y2VJyxOJ2V4aXN0aW5nIHJhdyBzdG9ja3Rha2UgLyAxNzUnKSwKIChOJ+WOn+aWmeWFpeS7k+WNlScsTidleGlzdGluZyByYXcgcmVjZWlwdCBwcmVzZXJ2YXRpb24nKSwKIChOJ+WOn+aWmeWFpeS7k+aYjue7huWNlScsTidleGlzdGluZyByYXcgcmVjZWlwdCBwcmVzZXJ2YXRpb24nKSwKIChOJ+WOn+aWmemAgOS7k+WNlScsTidleGlzdGluZyByYXcgcHVyY2hhc2UgcmV0dXJuIHByZXNlcnZhdGlvbicpLAogKE4n5Y6f5paZ6YCA5LuT5piO57uG5Y2VJyxOJ2V4aXN0aW5nIHJhdyBwdXJjaGFzZSByZXR1cm4gcHJlc2VydmF0aW9uJyksCiAoTifljp/mlpnpgIDlupPooagnLE4nZXhpc3RpbmcgcmF3IHN0b2NrIHJldHVybiBwcmVzZXJ2YXRpb24nKSwKIChOJ+WOn+aWmemAgOW6k+aYjue7huWNlScsTidleGlzdGluZyByYXcgc3RvY2sgcmV0dXJuIHByZXNlcnZhdGlvbicpLAogKE4n5Y6f5paZ55Sf5Lqn6ZyA5rGC6KGoJyxOJ2xlZ2FjeSBkZW1hbmQgcHJlc2VydmF0aW9uJyksCiAoTifljp/mlpnnlJ/kuqfpnIDmsYLmmI7nu4bljZUnLE4nbGVnYWN5IGRlbWFuZCBwcmVzZXJ2YXRpb24nKSwKIChOJ+WhkeiDtuWOn+aWmemFjeaWuScsTidvcHRpb25hbCBleGlzdGluZyAvIG90aGVyd2lzZSBlbXB0eSBuZXcgdGFibGUnKSwKIChOJ+WhkeiDtuWOn+aWmemFjeaWueaYjue7hicsTidvcHRpb25hbCBleGlzdGluZyAvIG90aGVyd2lzZSBlbXB0eSBuZXcgdGFibGUnKSwKIChOJ+WhkeiDtumHh+i0reWOn+aWmeeUqOmHjycsTidmcm96ZW4gU1AgY29tcG9uZW50IHByZXNlcnZhdGlvbiAvIGVtcHR5IG5ldyB0YWJsZScpLAogKE4n5Y6f5paZ6Ieq5Yqo5omj5paZ5pyf5YidJyxOJ2Zyb3plbiBvcGVuaW5nIHByZXNlcnZhdGlvbiAvIGVtcHR5IG5ldyB0YWJsZScpLAogKE4n5Y6f5paZ5rWB56iL5bKX5L2N57uR5a6aJyxOJ25ldyBlbXB0eSByYXctd29ya2Zsb3ctb25seSByb2xlIGJpbmRpbmdzOyBubyBzZWVkcycpLAogKE4n6YOo6Zeo5bKX5L2N55uu5b2VJyxOJ21ldGFkYXRhIG9ubHk7IG5vdCBjaGFuZ2VkIGJ5IHNjb3BlZCBkZXBsb3ltZW50JyksCiAoTifotKblj7fkurrkuovlspfkvY3nu5HlrponLE4nbWV0YWRhdGEgb25seTsgbm90IGNoYW5nZWQgYnkgc2NvcGVkIGRlcGxveW1lbnQnKSwKIChOJ+S6uuS6i+aho+ahiCcsTidhY2NvdW50IHJvbGUgbWV0YWRhdGEgb25seScpLAogKE4n6YOo6Zeo5L+h5oGvJyxOJ2RlcGFydG1lbnQgcHJlc2VydmF0aW9uJyksCiAoTidzeXNmaWxldXNlcicsTidhY2NvdW50IHByZXNlcnZhdGlvbjsgbmV2ZXIgZXhwb3NlIHJvdyB2YWx1ZXMnKSwKIChOJ3VzZXJicXJwb3dlcicsTidwZXJtaXNzaW9uIHByZXNlcnZhdGlvbjsgbmV2ZXIgZXhwb3NlIHJvdyB2YWx1ZXMnKTsKClNFTEVDVCBOJ3RhYmxlX3ByZXNlbmNlJyBBUyBbc2VjdGlvbl0sIHQuW25hbWVdLCB0LltwdXJwb3NlXSwKICAgIENPTlZFUlQoYml0LCBDQVNFIFdIRU4gby5bb2JqZWN0X2lkXSBJUyBOVUxMIFRIRU4gMCBFTFNFIDEgRU5EKSBBUyBbZXhpc3RzXSwKICAgIG8uW3R5cGVfZGVzY10KRlJPTSBAdGFibGVzIEFTIHQKTEVGVCBKT0lOIHN5cy5vYmplY3RzIEFTIG8gT04gby5bb2JqZWN0X2lkXSA9IE9CSkVDVF9JRChOJ2Riby4nICsgUVVPVEVOQU1FKHQuW25hbWVdKSkKT1JERVIgQlkgdC5bbmFtZV07CgpTRUxFQ1QgTidjb2x1bW5zJyBBUyBbc2VjdGlvbl0sIHQuW25hbWVdIEFTIFt0YWJsZV0sIGMuW2NvbHVtbl9pZF0sIGMuW25hbWVdIEFTIFtjb2x1bW5dLAogICAgdHkuW25hbWVdIEFTIFt0eXBlXSwgYy5bbWF4X2xlbmd0aF0sIGMuW3ByZWNpc2lvbl0sIGMuW3NjYWxlXSwgYy5baXNfbnVsbGFibGVdLAogICAgYy5baXNfaWRlbnRpdHldLCBjLltpc19jb21wdXRlZF0sIGMuW2NvbGxhdGlvbl9uYW1lXSwgZGMuW25hbWVdIEFTIFtkZWZhdWx0X2NvbnN0cmFpbnRdCkZST00gQHRhYmxlcyBBUyB0CkpPSU4gc3lzLmNvbHVtbnMgQVMgYyBPTiBjLltvYmplY3RfaWRdID0gT0JKRUNUX0lEKE4nZGJvLicgKyBRVU9URU5BTUUodC5bbmFtZV0pLCBOJ1UnKQpKT0lOIHN5cy50eXBlcyBBUyB0eSBPTiB0eS5bdXNlcl90eXBlX2lkXSA9IGMuW3VzZXJfdHlwZV9pZF0KTEVGVCBKT0lOIHN5cy5kZWZhdWx0X2NvbnN0cmFpbnRzIEFTIGRjIE9OIGRjLltvYmplY3RfaWRdID0gYy5bZGVmYXVsdF9vYmplY3RfaWRdCk9SREVSIEJZIHQuW25hbWVdLCBjLltjb2x1bW5faWRdOwoKU0VMRUNUIE4naW5kZXhlcycgQVMgW3NlY3Rpb25dLCB0LltuYW1lXSBBUyBbdGFibGVdLCBpLltuYW1lXSBBUyBbaW5kZXhdLAogICAgaS5bdHlwZV9kZXNjXSwgaS5baXNfdW5pcXVlXSwgaS5baXNfcHJpbWFyeV9rZXldLCBpLltpc191bmlxdWVfY29uc3RyYWludF0sCiAgICBpLltpc19kaXNhYmxlZF0sIGkuW2hhc19maWx0ZXJdLCBpLltmaWx0ZXJfZGVmaW5pdGlvbl0sCiAgICBpYy5ba2V5X29yZGluYWxdLCBpYy5baW5kZXhfY29sdW1uX2lkXSwgaWMuW2lzX2luY2x1ZGVkX2NvbHVtbl0sIGljLltpc19kZXNjZW5kaW5nX2tleV0sCiAgICBjLltuYW1lXSBBUyBbY29sdW1uXQpGUk9NIEB0YWJsZXMgQVMgdApKT0lOIHN5cy5pbmRleGVzIEFTIGkgT04gaS5bb2JqZWN0X2lkXSA9IE9CSkVDVF9JRChOJ2Riby4nICsgUVVPVEVOQU1FKHQuW25hbWVdKSwgTidVJykKTEVGVCBKT0lOIHN5cy5pbmRleF9jb2x1bW5zIEFTIGljIE9OIGljLltvYmplY3RfaWRdID0gaS5bb2JqZWN0X2lkXSBBTkQgaWMuW2luZGV4X2lkXSA9IGkuW2luZGV4X2lkXQpMRUZUIEpPSU4gc3lzLmNvbHVtbnMgQVMgYyBPTiBjLltvYmplY3RfaWRdID0gaWMuW29iamVjdF9pZF0gQU5EIGMuW2NvbHVtbl9pZF0gPSBpYy5bY29sdW1uX2lkXQpPUkRFUiBCWSB0LltuYW1lXSwgaS5baW5kZXhfaWRdLCBpYy5baW5kZXhfY29sdW1uX2lkXTsKClNFTEVDVCBOJ2NoZWNrX2NvbnN0cmFpbnRzJyBBUyBbc2VjdGlvbl0sIHQuW25hbWVdIEFTIFt0YWJsZV0sIGNjLltuYW1lXSwKICAgIGNjLltkZWZpbml0aW9uXSwgY2MuW2lzX2Rpc2FibGVkXSwgY2MuW2lzX25vdF90cnVzdGVkXSwgY2MuW3VzZXNfZGF0YWJhc2VfY29sbGF0aW9uXQpGUk9NIEB0YWJsZXMgQVMgdApKT0lOIHN5cy5jaGVja19jb25zdHJhaW50cyBBUyBjYyBPTiBjYy5bcGFyZW50X29iamVjdF9pZF0gPSBPQkpFQ1RfSUQoTidkYm8uJyArIFFVT1RFTkFNRSh0LltuYW1lXSksIE4nVScpCk9SREVSIEJZIHQuW25hbWVdLCBjYy5bbmFtZV07CgpTRUxFQ1QgTidmb3JlaWduX2tleXMnIEFTIFtzZWN0aW9uXSwgZmsuW25hbWVdLAogICAgT0JKRUNUX1NDSEVNQV9OQU1FKGZrLltwYXJlbnRfb2JqZWN0X2lkXSkgQVMgW3BhcmVudF9zY2hlbWFdLCBPQkpFQ1RfTkFNRShmay5bcGFyZW50X29iamVjdF9pZF0pIEFTIFtwYXJlbnRfdGFibGVdLCBwYy5bbmFtZV0gQVMgW3BhcmVudF9jb2x1bW5dLAogICAgT0JKRUNUX1NDSEVNQV9OQU1FKGZrLltyZWZlcmVuY2VkX29iamVjdF9pZF0pIEFTIFtyZWZlcmVuY2VkX3NjaGVtYV0sIE9CSkVDVF9OQU1FKGZrLltyZWZlcmVuY2VkX29iamVjdF9pZF0pIEFTIFtyZWZlcmVuY2VkX3RhYmxlXSwgcmMuW25hbWVdIEFTIFtyZWZlcmVuY2VkX2NvbHVtbl0sCiAgICBmay5bZGVsZXRlX3JlZmVyZW50aWFsX2FjdGlvbl9kZXNjXSwgZmsuW3VwZGF0ZV9yZWZlcmVudGlhbF9hY3Rpb25fZGVzY10sIGZrLltpc19kaXNhYmxlZF0sIGZrLltpc19ub3RfdHJ1c3RlZF0KRlJPTSBzeXMuZm9yZWlnbl9rZXlzIEFTIGZrCkpPSU4gc3lzLmZvcmVpZ25fa2V5X2NvbHVtbnMgQVMgZmtjIE9OIGZrYy5bY29uc3RyYWludF9vYmplY3RfaWRdID0gZmsuW29iamVjdF9pZF0KSk9JTiBzeXMuY29sdW1ucyBBUyBwYyBPTiBwYy5bb2JqZWN0X2lkXSA9IGZrYy5bcGFyZW50X29iamVjdF9pZF0gQU5EIHBjLltjb2x1bW5faWRdID0gZmtjLltwYXJlbnRfY29sdW1uX2lkXQpKT0lOIHN5cy5jb2x1bW5zIEFTIHJjIE9OIHJjLltvYmplY3RfaWRdID0gZmtjLltyZWZlcmVuY2VkX29iamVjdF9pZF0gQU5EIHJjLltjb2x1bW5faWRdID0gZmtjLltyZWZlcmVuY2VkX2NvbHVtbl9pZF0KV0hFUkUgRVhJU1RTIChTRUxFQ1QgMSBGUk9NIEB0YWJsZXMgQVMgdCBXSEVSRSBPQkpFQ1RfSUQoTidkYm8uJyArIFFVT1RFTkFNRSh0LltuYW1lXSksIE4nVScpIElOIChmay5bcGFyZW50X29iamVjdF9pZF0sIGZrLltyZWZlcmVuY2VkX29iamVjdF9pZF0pKQpPUkRFUiBCWSBmay5bbmFtZV0sIGZrYy5bY29uc3RyYWludF9jb2x1bW5faWRdOwoKU0VMRUNUIE4nY29tcHV0ZWRfY29sdW1ucycgQVMgW3NlY3Rpb25dLCB0LltuYW1lXSBBUyBbdGFibGVdLCBjLltuYW1lXSwgYy5bZGVmaW5pdGlvbl0sIGMuW2lzX3BlcnNpc3RlZF0KRlJPTSBAdGFibGVzIEFTIHQgSk9JTiBzeXMuY29tcHV0ZWRfY29sdW1ucyBBUyBjIE9OIGMuW29iamVjdF9pZF0gPSBPQkpFQ1RfSUQoTidkYm8uJyArIFFVT1RFTkFNRSh0LltuYW1lXSksIE4nVScpCk9SREVSIEJZIHQuW25hbWVdLCBjLltjb2x1bW5faWRdOwoKU0VMRUNUIE4nZXhwcmVzc2lvbl9kZXBlbmRlbmNpZXMnIEFTIFtzZWN0aW9uXSwgT0JKRUNUX1NDSEVNQV9OQU1FKGQuW3JlZmVyZW5jaW5nX2lkXSkgQVMgW3JlZmVyZW5jaW5nX3NjaGVtYV0sCiAgICBPQkpFQ1RfTkFNRShkLltyZWZlcmVuY2luZ19pZF0pIEFTIFtyZWZlcmVuY2luZ19vYmplY3RdLCBkLltyZWZlcmVuY2luZ19taW5vcl9pZF0sCiAgICBkLltyZWZlcmVuY2VkX3NjaGVtYV9uYW1lXSwgZC5bcmVmZXJlbmNlZF9lbnRpdHlfbmFtZV0sIENPTF9OQU1FKGQuW3JlZmVyZW5jZWRfaWRdLCBkLltyZWZlcmVuY2VkX21pbm9yX2lkXSkgQVMgW3JlZmVyZW5jZWRfY29sdW1uXSwKICAgIGQuW2lzX3NjaGVtYV9ib3VuZF9yZWZlcmVuY2VdCkZST00gc3lzLnNxbF9leHByZXNzaW9uX2RlcGVuZGVuY2llcyBBUyBkCldIRVJFIEVYSVNUUyAoU0VMRUNUIDEgRlJPTSBAdGFibGVzIEFTIHQgV0hFUkUgT0JKRUNUX0lEKE4nZGJvLicgKyBRVU9URU5BTUUodC5bbmFtZV0pLCBOJ1UnKSA9IGQuW3JlZmVyZW5jZWRfaWRdKQpPUkRFUiBCWSBkLltyZWZlcmVuY2VkX2VudGl0eV9uYW1lXSwgW3JlZmVyZW5jaW5nX29iamVjdF0sIGQuW3JlZmVyZW5jaW5nX21pbm9yX2lkXTsKClNFTEVDVCBOJ3RyaWdnZXJzJyBBUyBbc2VjdGlvbl0sIHQuW25hbWVdIEFTIFt0YWJsZV0sIHRyLltuYW1lXSwgdHIuW2lzX2Rpc2FibGVkXSwgdHIuW2lzX2luc3RlYWRfb2ZfdHJpZ2dlcl0KRlJPTSBAdGFibGVzIEFTIHQgSk9JTiBzeXMudHJpZ2dlcnMgQVMgdHIgT04gdHIuW3BhcmVudF9pZF0gPSBPQkpFQ1RfSUQoTidkYm8uJyArIFFVT1RFTkFNRSh0LltuYW1lXSksIE4nVScpCk9SREVSIEJZIHQuW25hbWVdLCB0ci5bbmFtZV07CgpERUNMQVJFIEB0YWJsZSBzeXNuYW1lLCBAY29sdW1uIHN5c25hbWUsIEBzcWwgbnZhcmNoYXIobWF4KTsKREVDTEFSRSB0YWJsZV9jb3VudHMgQ1VSU09SIExPQ0FMIEZBU1RfRk9SV0FSRCBGT1IgU0VMRUNUIFtuYW1lXSBGUk9NIEB0YWJsZXMgT1JERVIgQlkgW25hbWVdOwpPUEVOIHRhYmxlX2NvdW50czsKRkVUQ0ggTkVYVCBGUk9NIHRhYmxlX2NvdW50cyBJTlRPIEB0YWJsZTsKV0hJTEUgQEBGRVRDSF9TVEFUVVMgPSAwCkJFR0lOCiAgICBJRiBPQkpFQ1RfSUQoTidkYm8uJyArIFFVT1RFTkFNRShAdGFibGUpLCBOJ1UnKSBJUyBOT1QgTlVMTAogICAgQkVHSU4KICAgICAgICBTRVQgQHNxbCA9IE4nU0VMRUNUIE4nJ2V4YWN0X3Jvd19jb3VudCcnIEFTIFtzZWN0aW9uXSwgQHRhYmxlIEFTIFt0YWJsZV0sIENPVU5UX0JJRygqKSBBUyBbcm93c10gRlJPTSBbZGJvXS4nICsgUVVPVEVOQU1FKEB0YWJsZSkgKyBOJzsnOwogICAgICAgIEVYRUMgc3lzLnNwX2V4ZWN1dGVzcWwgQHNxbCwgTidAdGFibGUgc3lzbmFtZScsIEB0YWJsZTsKICAgIEVORDsKICAgIEZFVENIIE5FWFQgRlJPTSB0YWJsZV9jb3VudHMgSU5UTyBAdGFibGU7CkVORDsKQ0xPU0UgdGFibGVfY291bnRzOwpERUFMTE9DQVRFIHRhYmxlX2NvdW50czsKCi0tIDE3NCB3aWRlbnMgdGhyZWUgZXhpc3RpbmcgaXNzdWUgY29sdW1ucy4gMTc1IHVzZXMgdGhlIHNhbWUgc2FmZSB0YXJnZXQgZm9yCi0tIHRoZSB0aHJlZSBzdG9ja3Rha2UgY29sdW1ucyBpbnN0ZWFkIG9mIDE1NidzIG5hcnJvd2VyIGRlY2ltYWwoMTgsOCkuCkRFQ0xBUkUgQGRlY2ltYWxzIFRBQkxFIChbdGFibGVdIHN5c25hbWUsIFtjb2x1bW5dIHN5c25hbWUsIFBSSU1BUlkgS0VZKFt0YWJsZV0sW2NvbHVtbl0pKTsKSU5TRVJUIElOVE8gQGRlY2ltYWxzIFZBTFVFUwogKE4n5Y6f5paZ5Ye65bqT5Y2VJyxOJ+aVsOmHjycpLCAoTifljp/mlpnlh7rlupPmmI7nu4bljZUnLE4n5pWw6YePJyksIChOJ+WOn+aWmeWHuuW6k+aYjue7huWNlScsTifmr4/ljIXph43ph48nKSwKIChOJ+WOn+aWmeebmOeCueaYjue7huWNlScsTifns7vnu5/mlbDph48nKSwgKE4n5Y6f5paZ55uY54K55piO57uG5Y2VJyxOJ+ebmOeCueaVsOmHjycpLCAoTifljp/mlpnnm5jngrnmmI7nu4bljZUnLE4n55uI5LqP5pWw6YePJyk7CkRFQ0xBUkUgZGVjaW1hbF9jaGVja3MgQ1VSU09SIExPQ0FMIEZBU1RfRk9SV0FSRCBGT1IgU0VMRUNUIFt0YWJsZV0sIFtjb2x1bW5dIEZST00gQGRlY2ltYWxzIE9SREVSIEJZIFt0YWJsZV0sIFtjb2x1bW5dOwpPUEVOIGRlY2ltYWxfY2hlY2tzOwpGRVRDSCBORVhUIEZST00gZGVjaW1hbF9jaGVja3MgSU5UTyBAdGFibGUsIEBjb2x1bW47CldISUxFIEBARkVUQ0hfU1RBVFVTID0gMApCRUdJTgogICAgSUYgQ09MX0xFTkdUSChOJ2Riby4nICsgUVVPVEVOQU1FKEB0YWJsZSksIEBjb2x1bW4pIElTIE5VTEwKICAgICAgICBTRUxFQ1QgTidkZWNpbWFsX2NvbnZlcnNpb24nIEFTIFtzZWN0aW9uXSwgQHRhYmxlIEFTIFt0YWJsZV0sIEBjb2x1bW4gQVMgW2NvbHVtbl0sIE4nTUlTU0lOR19DT0xVTU4nIEFTIFtzdGF0dXNdOwogICAgRUxTRSBJRiBOT1QgRVhJU1RTIChTRUxFQ1QgMSBGUk9NIHN5cy5jb2x1bW5zIGMgSk9JTiBzeXMudHlwZXMgdHkgT04gdHkuW3VzZXJfdHlwZV9pZF09Yy5bdXNlcl90eXBlX2lkXQogICAgICAgIFdIRVJFIGMuW29iamVjdF9pZF09T0JKRUNUX0lEKE4nZGJvLicrUVVPVEVOQU1FKEB0YWJsZSksTidVJykgQU5EIGMuW25hbWVdPUBjb2x1bW4gQU5EIHR5LltuYW1lXSBJTihOJ2RlY2ltYWwnLE4nbnVtZXJpYycpKQogICAgICAgIFNFTEVDVCBOJ2RlY2ltYWxfY29udmVyc2lvbicgQVMgW3NlY3Rpb25dLCBAdGFibGUgQVMgW3RhYmxlXSwgQGNvbHVtbiBBUyBbY29sdW1uXSwgTidVTkVYUEVDVEVEX1RZUEVfUkVRVUlSRVNfUkVWSUVXJyBBUyBbc3RhdHVzXTsKICAgIEVMU0UKICAgIEJFR0lOCiAgICAgICAgU0VUIEBzcWwgPSBOJ1NFTEVDVCBOJydkZWNpbWFsX2NvbnZlcnNpb24nJyBBUyBbc2VjdGlvbl0sIEB0YWJsZSBBUyBbdGFibGVdLCBAY29sdW1uIEFTIFtjb2x1bW5dLCBOJydkZWNpbWFsKDI4LDgpJycgQVMgW3RhcmdldF0sJwogICAgICAgICAgKyBOJyBDT1VOVF9CSUcoKikgQVMgW3Jvd3NdLCBDT1VOVF9CSUcoKiktQ09VTlRfQklHKCcrUVVPVEVOQU1FKEBjb2x1bW4pK04nKSBBUyBbbnVsbF9yb3dzXSwnCiAgICAgICAgICArIE4nIENPQUxFU0NFKFNVTShDT05WRVJUKGJpZ2ludCxDQVNFIFdIRU4gJytRVU9URU5BTUUoQGNvbHVtbikrTicgSVMgTk9UIE5VTEwgQU5EIFRSWV9DT05WRVJUKGRlY2ltYWwoMjgsOCksJytRVU9URU5BTUUoQGNvbHVtbikrTicpIElTIE5VTEwgVEhFTiAxIEVMU0UgMCBFTkQpKSwwKSBBUyBbY29udmVyc2lvbl9mYWlsdXJlc10sJwogICAgICAgICAgKyBOJyBDT0FMRVNDRShTVU0oQ09OVkVSVChiaWdpbnQsQ0FTRSBXSEVOIFRSWV9DT05WRVJUKGRlY2ltYWwoMjgsOCksJytRVU9URU5BTUUoQGNvbHVtbikrTicpIDw+ICcrUVVPVEVOQU1FKEBjb2x1bW4pK04nIFRIRU4gMSBFTFNFIDAgRU5EKSksMCkgQVMgW2NoYW5nZWRfdmFsdWVzXScKICAgICAgICAgICsgTicgRlJPTSBbZGJvXS4nK1FVT1RFTkFNRShAdGFibGUpK04nOyc7CiAgICAgICAgRVhFQyBzeXMuc3BfZXhlY3V0ZXNxbCBAc3FsLCBOJ0B0YWJsZSBzeXNuYW1lLCBAY29sdW1uIHN5c25hbWUnLCBAdGFibGUsIEBjb2x1bW47CiAgICBFTkQ7CiAgICBGRVRDSCBORVhUIEZST00gZGVjaW1hbF9jaGVja3MgSU5UTyBAdGFibGUsIEBjb2x1bW47CkVORDsKQ0xPU0UgZGVjaW1hbF9jaGVja3M7CkRFQUxMT0NBVEUgZGVjaW1hbF9jaGVja3M7CgotLSBUaGVzZSBhcmUgZXhpc3RlbmNlL05VTEwgYWdncmVnYXRlcywgbmV2ZXIgYWNjb3VudCBpZGVudGl0eSBvciBwZXJtaXNzaW9uIGJpdHMuCkRFQ0xBUkUgQG51bGxhYmxlIFRBQkxFIChbdGFibGVdIHN5c25hbWUsIFtjb2x1bW5dIHN5c25hbWUsIFBSSU1BUlkgS0VZKFt0YWJsZV0sW2NvbHVtbl0pKTsKSU5TRVJUIElOVE8gQG51bGxhYmxlIFZBTFVFUwogKE4n5aGR6IO25Y6f5paZ6LWE5paZJyxOJ+W4uOeUqOWOn+aWmScpLCAoTifljp/mlpnph4fotK3orqLljZUnLE4n6YeH6LSt5pS/562W54mI5pysJyksCiAoTifljp/mlpnph4fotK3orqLljZXmmI7nu4YnLE4n6YeH6LSt5pS/562W54mI5pysJyksIChOJ+WOn+aWmemHh+i0reiuouWNleaYjue7hicsTifmr4/lupPlrZjljZXkvY1LRycpLCAoTifljp/mlpnph4fotK3orqLljZXmmI7nu4YnLE4n5q+P5YyF6YeN6YePJyksCiAoTifljp/mlpnlh7rlupPmmI7nu4bljZUnLE4n5p2l5rqQ5ZWk5py66YeH6LSt5Y2V5Y+3JyksIChOJ+WhkeiDtumHh+i0reiuouWNlScsTifljp/mlpnmiaPlh4/niYjmnKwnKSwgKE4n5aGR6IO26YeH6LSt6K6i5Y2VJyxOJ+WOn+aWmeaJo+WHj+aWueW8jycpLAogKE4n6LSm5Y+35Lq65LqL5bKX5L2N57uR5a6aJyxOJ+S6uuS6i0lEJyksIChOJ+i0puWPt+S6uuS6i+Wyl+S9jee7keWumicsTifmqKHlvI8nKSwgKE4n6LSm5Y+35Lq65LqL5bKX5L2N57uR5a6aJyxOJ+Wyl+S9jeS7o+eggScpLCAoTifotKblj7fkurrkuovlspfkvY3nu5HlrponLE4n5omA5bGe5LuT5bqTJyksCiAoTifljp/mlpnmtYHnqIvlspfkvY3nu5HlrponLE4n55So5oi3SUQnKSwgKE4n5Y6f5paZ5rWB56iL5bKX5L2N57uR5a6aJyxOJ+mDqOmXqOe8luWPtycpLCAoTifljp/mlpnmtYHnqIvlspfkvY3nu5HlrponLE4n5bKX5L2N5Luj56CBJyksIChOJ+WOn+aWmea1geeoi+Wyl+S9jee7keWumicsTifmiYDlsZ7ku5PlupMnKSwKIChOJ+S6uuS6i+aho+ahiCcsTifpg6jpl6jnvJblj7cnKSwgKE4n5Lq65LqL5qGj5qGIJyxOJ+iBjOensCcpLCAoTifkurrkuovmoaPmoYgnLE4n5omA5bGe5LuT5bqTJyk7CkRFQ0xBUkUgbnVsbGFibGVfY2hlY2tzIENVUlNPUiBMT0NBTCBGQVNUX0ZPUldBUkQgRk9SIFNFTEVDVCBbdGFibGVdLCBbY29sdW1uXSBGUk9NIEBudWxsYWJsZSBPUkRFUiBCWSBbdGFibGVdLCBbY29sdW1uXTsKT1BFTiBudWxsYWJsZV9jaGVja3M7CkZFVENIIE5FWFQgRlJPTSBudWxsYWJsZV9jaGVja3MgSU5UTyBAdGFibGUsIEBjb2x1bW47CldISUxFIEBARkVUQ0hfU1RBVFVTID0gMApCRUdJTgogICAgSUYgQ09MX0xFTkdUSChOJ2Riby4nICsgUVVPVEVOQU1FKEB0YWJsZSksIEBjb2x1bW4pIElTIE5VTEwKICAgICAgICBTRUxFQ1QgTidwb2xpY3lfcm9sZV9wcmVzZW5jZScgQVMgW3NlY3Rpb25dLCBAdGFibGUgQVMgW3RhYmxlXSwgQGNvbHVtbiBBUyBbY29sdW1uXSwgTidNSVNTSU5HX0NPTFVNTicgQVMgW3N0YXR1c107CiAgICBFTFNFCiAgICBCRUdJTgogICAgICAgIFNFVCBAc3FsPU4nU0VMRUNUIE4nJ3BvbGljeV9yb2xlX3ByZXNlbmNlJycgQVMgW3NlY3Rpb25dLCBAdGFibGUgQVMgW3RhYmxlXSwgQGNvbHVtbiBBUyBbY29sdW1uXSwnCiAgICAgICAgICArIE4nIENPVU5UX0JJRygqKSBBUyBbcm93c10sIENPVU5UX0JJRygnK1FVT1RFTkFNRShAY29sdW1uKStOJykgQVMgW25vbl9udWxsX3Jvd3NdIEZST00gW2Rib10uJytRVU9URU5BTUUoQHRhYmxlKStOJzsnOwogICAgICAgIEVYRUMgc3lzLnNwX2V4ZWN1dGVzcWwgQHNxbCwgTidAdGFibGUgc3lzbmFtZSwgQGNvbHVtbiBzeXNuYW1lJywgQHRhYmxlLCBAY29sdW1uOwogICAgRU5EOwogICAgRkVUQ0ggTkVYVCBGUk9NIG51bGxhYmxlX2NoZWNrcyBJTlRPIEB0YWJsZSwgQGNvbHVtbjsKRU5EOwpDTE9TRSBudWxsYWJsZV9jaGVja3M7CkRFQUxMT0NBVEUgbnVsbGFibGVfY2hlY2tzOwoKU0VMRUNUIE4ncHJlZmxpZ2h0X2NvbXBsZXRlJyBBUyBbc2VjdGlvbl0sIE4nTWV0YWRhdGEgYW5kIGFnZ3JlZ2F0ZXMgb25seTsgbm8gYnVzaW5lc3Mgb2JqZWN0cyBvciByb3dzIG1vZGlmaWVkLicgQVMgW3N0YXR1c107Cg=='
-            import base64
-            client_command = 'set -eu; export SQLCMDPASSWORD="$MSSQL_SA_PASSWORD"; if [ -x /opt/mssql-tools18/bin/sqlcmd ]; then client=/opt/mssql-tools18/bin/sqlcmd; else client=/opt/mssql-tools/bin/sqlcmd; fi; exec "$client" -C -S 127.0.0.1 -U sa -d erp -b -r1 -h -1 -W -w 65535 -s "|"'
-            r=subprocess.run(['docker','exec','-i','rr-portal-erp-sqlserver-1','sh','-c',client_command],input=base64.b64decode(sql),capture_output=True)
-            print('P113_PREFLIGHT_SQL_BEGIN')
-            sys.stdout.write(r.stdout.decode('utf-8',errors='replace'))
-            print('P113_PREFLIGHT_SQL_END')
-            if r.returncode:
-                sys.stderr.write(r.stderr.decode('utf-8',errors='replace'))
-                raise RuntimeError('Read-only SQL preflight failed: '+str(r.returncode))
-            print('P113_PREFLIGHT_COMPLETE=true')
-
-            P113_PREFLIGHT_PY
+            source=os.environ['SOURCE_SHA']; revision=os.environ['OPERATOR_SHA']; action=os.environ['RELEASE_ACTION']
+            assert re.fullmatch('[a-f0-9]{40}',source) and re.fullmatch('[a-f0-9]{40}',revision)
+            assert action in ['prepare','activate','status']
+            os.umask(0o077)
+            root=Path('/opt/rr-portal')
+            if action=='status':
+                directory=Path('/opt/erp-p113-releases')/source
+                result={'sourceSha':source,'exists':directory.is_dir()}
+                for filename in ['prepared.private.json','activation-journal.private.json','activation.private.json']:
+                    file=directory/filename
+                    if file.is_file() and not file.is_symlink():
+                        value=json.loads(file.read_text())
+                        result[filename]={k:value[k] for k in ['prepared','ok','sourceSha','imageId','apiId','candidateId','steps','failureType','rollbackFailureType','runtimeChanges','databaseCommands','sqlIdentityUnchanged','runtimeEnvironmentUnchanged','runtimeConfigurationUnchanged','uploadsMountUnchanged'] if k in value}
+                result['resources']={'dockerVersion':subprocess.check_output(['docker','version','--format','{{.Server.Version}}'],text=True).strip(),'availableMemoryKiB':next((x.split()[1] for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemAvailable:')),None)}
+                print(json.dumps(result)); raise SystemExit(0)
+            subprocess.run(['git','-C',str(root),'fetch','origin',revision],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            with tempfile.TemporaryDirectory(prefix='erp-p113-reviewed-') as scratch:
+                directory=Path(scratch)
+                names=['erp-p113-scoped-release.py','erp-p113-activate.py']
+                if action=='activate': names.append('erp-p113-ready.json')
+                for name in names:
+                    content=subprocess.check_output(['git','-C',str(root),'show',revision+':deploy/'+name])
+                    (directory/name).write_bytes(content)
+                if action=='prepare':
+                    command=['python3',str(directory/'erp-p113-scoped-release.py'),'prepare','--source-sha',source]
+                else:
+                    command=['python3',str(directory/'erp-p113-activate.py'),'--source-sha',source,'--ready',str(directory/'erp-p113-ready.json')]
+                subprocess.run(command,check=True)
+            P113_OPERATOR

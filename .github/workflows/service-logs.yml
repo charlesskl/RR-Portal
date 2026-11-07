@@ -6,10 +6,10 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "Prepare beside the live ERP, activate a verified release, or inspect its evidence"
+        description: "Prepare, verify the fixed completed 8d build, activate a verified release, or inspect evidence"
         type: choice
         required: true
-        options: [prepare, activate, status]
+        options: [prepare, verify-built, activate, status]
       source_sha:
         description: "Exact reviewed ERP source commit (40 lowercase hexadecimal characters)"
         type: string
@@ -39,7 +39,10 @@ jobs:
           set -euo pipefail
           [[ "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]
           [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$RELEASE_ACTION" =~ ^(prepare|activate|status)$ ]]
+          [[ "$RELEASE_ACTION" =~ ^(prepare|verify-built|activate|status)$ ]]
+          if [[ "$RELEASE_ACTION" == "verify-built" ]]; then
+            [[ "$SOURCE_SHA" == "8d0a955487883d29a54aed883c66592c24722306" ]]
+          fi
 
       - name: Run reviewed ERP-only operator through verified SSH
         env:
@@ -63,7 +66,8 @@ jobs:
             from pathlib import Path
             source=os.environ['SOURCE_SHA']; revision=os.environ['OPERATOR_SHA']; action=os.environ['RELEASE_ACTION']
             assert re.fullmatch('[a-f0-9]{40}',source) and re.fullmatch('[a-f0-9]{40}',revision)
-            assert action in ['prepare','activate','status']
+            assert action in ['prepare','verify-built','activate','status']
+            assert action!='verify-built' or source=='8d0a955487883d29a54aed883c66592c24722306'
             os.umask(0o077)
             root=Path('/opt/rr-portal')
             if action=='status':
@@ -203,13 +207,15 @@ jobs:
             subprocess.run(['git','-C',str(root),'fetch','origin',revision],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             with tempfile.TemporaryDirectory(prefix='erp-p113-reviewed-') as scratch:
                 directory=Path(scratch)
-                names=['erp-p113-scoped-release.py','erp-p113-activate.py']
+                names=['erp-p113-scoped-release.py','erp-p113-verify-built.py' if action=='verify-built' else 'erp-p113-activate.py']
                 if action=='activate': names.append('erp-p113-ready.json')
                 for name in names:
                     content=subprocess.check_output(['git','-C',str(root),'show',revision+':deploy/'+name])
                     (directory/name).write_bytes(content)
                 if action=='prepare':
                     command=['python3',str(directory/'erp-p113-scoped-release.py'),'prepare','--source-sha',source]
+                elif action=='verify-built':
+                    command=['python3',str(directory/'erp-p113-verify-built.py'),'--source-sha',source]
                 else:
                     command=['python3',str(directory/'erp-p113-activate.py'),'--source-sha',source,'--ready',str(directory/'erp-p113-ready.json')]
                 subprocess.run(command,check=True)

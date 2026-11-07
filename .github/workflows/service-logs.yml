@@ -57,7 +57,7 @@ jobs:
           script: |
             set -euo pipefail
             python3 - <<'P113_OPERATOR'
-            import json,os,re,stat,subprocess,tempfile
+            import hashlib,json,os,re,stat,subprocess,tempfile
             from collections import deque
             from pathlib import Path
             source=os.environ['SOURCE_SHA']; revision=os.environ['OPERATOR_SHA']; action=os.environ['RELEASE_ACTION']
@@ -95,6 +95,14 @@ jobs:
                     kind='file' if stat.S_ISREG(info.st_mode) else 'directory' if stat.S_ISDIR(info.st_mode) else 'rejected'
                     result['staging'][name]={'exists':True,'type':kind,'bytes':info.st_size if kind=='file' else None}
                 result['retryPolicy']='Existing release directory is preserved; inspect and review recovery separately. No overwrite or cleanup is performed.'
+                result['diagnosticSha256']={}
+                for name in ['build.private.log','build-context-files.private.json']:
+                    path=directory/name
+                    if path.exists():
+                        with regular_file(path) as handle:
+                            digest=hashlib.sha256()
+                            for chunk in iter(lambda:handle.buffer.read(1024*1024),b''): digest.update(chunk)
+                            result['diagnosticSha256'][name]=digest.hexdigest()
                 build_log=directory/'build.private.log'
                 if build_log.exists():
                     # Whole-line redaction is intentionally conservative; no private config is printed.

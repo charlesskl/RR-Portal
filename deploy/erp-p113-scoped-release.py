@@ -226,7 +226,13 @@ def original_identity(api=None, sql=None):
 
 
 def identity_equal(actual, saved):
-    return (all(actual[key] == saved[key] for key in ['Id', 'Name', 'Image', 'Created', 'Config', 'HostConfig', 'Mounts', 'NetworkSettings'])
+    actual_mounts, saved_mounts = actual.get('Mounts'), saved.get('Mounts')
+    if not all(isinstance(mounts, list) and all(isinstance(mount, dict) for mount in mounts)
+               for mounts in [actual_mounts, saved_mounts]):
+        return False
+    # Docker inspect may reorder Mounts; retain every field and duplicate record.
+    return (sorted(canonical(mount) for mount in actual_mounts) == sorted(canonical(mount) for mount in saved_mounts)
+            and all(actual[key] == saved[key] for key in ['Id', 'Name', 'Image', 'Created', 'Config', 'HostConfig', 'NetworkSettings'])
             and actual['State']['StartedAt'] == saved['State']['StartedAt']
             and actual['State']['Running'] == saved['State']['Running']
             and actual.get('RestartCount') == saved.get('RestartCount'))

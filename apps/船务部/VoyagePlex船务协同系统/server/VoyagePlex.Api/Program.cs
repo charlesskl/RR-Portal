@@ -265,7 +265,10 @@ app.Use(async (context, next) =>
             if (owner is null) context.Response.Cookies.Delete("voyageplex_mail_owner", new CookieOptions { Path = "/" });
             else db.MailOwnerId = owner.Id;
         }
-        if (!await db.MailSystemSettings.AnyAsync())
+        // Candidate browsing is read-only, including when this mailbox has no settings yet.
+        if (!(HttpMethods.IsGet(context.Request.Method) &&
+              path.TrimEnd('/').Equals("/api/imports/email/mailbox/failed", StringComparison.OrdinalIgnoreCase)) &&
+            !await db.MailSystemSettings.AnyAsync())
         {
             db.MailSystemSettings.Add(new MailSystemSetting { Id = db.CompanySettingId, DailyWorkflowVersion = DailyMailRules.WorkflowVersion });
             await db.SaveChangesAsync();
@@ -1095,6 +1098,16 @@ app.MapPost("/api/imports/email/mailbox/sync", async (HttpContext context, Mailb
     { return Results.Json(new { error = "邮箱解析请求超时，已保留同步断点，请稍后重试" }, statusCode: 504); }
     catch (Exception) when (!cancellationToken.IsCancellationRequested)
     { return Results.Json(new { error = "邮箱同步失败，已保留同步断点，请稍后重试或联系管理员" }, statusCode: 502); }
+});
+
+app.MapGet("/api/imports/email/mailbox/failed", async (int? page, HttpContext context,
+    AppDbContext db, CancellationToken cancellationToken) =>
+{
+    if (context.Items["CurrentUser"] is not AppUser { Role: "admin" } actor)
+        return Results.Json(new { error = "只有管理员可以查看失败邮件补信候选" }, statusCode: 403);
+    try { return Results.Ok(await FailedMailboxCandidates.ReadAsync(db, actor.Id, page ?? 1, cancellationToken)); }
+    catch (MailboxRetryRejectedException error)
+    { return Results.Json(new { error = error.Message }, statusCode: error.StatusCode); }
 });
 
 app.MapPost("/api/imports/email/mailbox/retry-failed", async (JsonObject payload, HttpContext context,

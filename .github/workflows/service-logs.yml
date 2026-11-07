@@ -19,7 +19,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-cloud
+  # Read-only diagnostics may inspect a running build; mutations retain the portal lock.
+  group: ${{ inputs.action == 'status' && 'erp-p113-readonly-status' || 'deploy-cloud' }}
   queue: max
   cancel-in-progress: false
 

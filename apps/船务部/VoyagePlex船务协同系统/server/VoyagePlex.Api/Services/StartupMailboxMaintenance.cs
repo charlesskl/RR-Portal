@@ -11,13 +11,18 @@ public static class StartupMailboxMaintenance
 {
     private const int PageSize = 8;
 
+    // These keyset pages must walk the INTEGER PRIMARY KEY. A company/date index
+    // otherwise rescans all matching historical mail and sorts it on every page.
+    // FromSqlRaw stays composable: EF still adds company/owner filters and binds
+    // their parameters. NOT INDEXED permits SQLite's rowid/INTEGER PRIMARY KEY.
+
     public static void BackfillMetadata(AppDbContext db)
     {
         using var transaction = db.Database.BeginTransaction();
         long lastId = 0;
         while (true)
         {
-            var page = db.ImportEmailItems.Include(item => item.ImportBatch)
+            var page = db.ImportEmailItems.FromSqlRaw("SELECT * FROM \"ImportEmailItems\" NOT INDEXED").Include(item => item.ImportBatch)
                 .Where(item => item.Id > lastId && item.MailboxKey != "" &&
                     (item.MailReceivedAt == "" || item.MailReceivedDate == ""))
                 .OrderBy(item => item.Id).Take(PageSize).ToList();
@@ -82,7 +87,7 @@ public static class StartupMailboxMaintenance
         long lastId = 0;
         while (true)
         {
-            var page = db.ImportEmailItems.Where(item => item.Id > lastId && item.MailboxKey != "" &&
+            var page = db.ImportEmailItems.FromSqlRaw("SELECT * FROM \"ImportEmailItems\" NOT INDEXED").Where(item => item.Id > lastId && item.MailboxKey != "" &&
                     item.MailReceivedDate.CompareTo(startDate) >= 0 && item.ClassificationSource != "Manual")
                 .OrderBy(item => item.Id).Take(PageSize).ToList();
             if (page.Count == 0) break;
@@ -109,7 +114,7 @@ public static class StartupMailboxMaintenance
         long lastId = 0;
         while (true)
         {
-            var page = db.ShipmentTasks.Where(task => task.Id > lastId &&
+            var page = db.ShipmentTasks.FromSqlRaw("SELECT * FROM \"ShipmentTasks\" NOT INDEXED").Where(task => task.Id > lastId &&
                     task.EmailSubject == "" && task.SourceImportItemId != null)
                 .OrderBy(task => task.Id).Take(PageSize).ToList();
             if (page.Count == 0) break;

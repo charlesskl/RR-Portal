@@ -352,19 +352,15 @@ test('a prior packing equation cannot decide whether a later bare number is deli
 });
 
 const paperHeading = '订单号 产品名称 规格型号 数量 单价 金额 重量 备注';
-test('paper sheets map code-like product names and textual specifications without using weight as quantity', () => {
+test('flat paper rows retain complete source because blank numeric columns are no longer positioned', () => {
   const descriptions = ['甲贴纸','LED灯箱贴纸','UV贴纸（紫色）','UV贴纸 （绿色）','UV贴纸（黄色）','UV贴纸（白色）','UV贴纸（粉色）'];
   const raw = [paperHeading,...descriptions.map(name=>'PO-26001 30721 '+name+' 80 1.5'),
     '备注：','制单人：合成人员 司机：','客户收货人： 收货日期：4/11(三)','合成公司','(收貨章)','收貨人：'].join('\n');
   const fields = runtime().parse(raw);
-  assert.equal(fields.items.length,7);
-  assert.deepEqual(fields.items.map(i=>i.productName),descriptions);
-  for (const item of fields.items) {
-    assert.equal(item.orderNo,'PO-26001'); assert.equal(item.productNo,'30721');
-    assert.equal(item.qty,'80'); assert.equal(item.unit,'');
-    assert.match(item.remark,/右侧原文.*1\.5$/);
-  }
-  assert.equal(fields.manualReviewRequired,true);
+  assert.equal(fields.items.length,8);
+  assert.deepEqual(fields.items.slice(0,7).map(i=>i.productName),descriptions.map(name=>'待核对原文：PO-26001 30721 '+name+' 80 1.5'));
+  assert.equal(fields.items[7].productName,'待核对原文：合成公司');
+  assert.ok(fields.items.every(i=>i.qty==='' && i.quantityNeedsReview===true));
 });
 
 test('positioned paper cells preserve empty price/amount, actual weight and original remark', () => {
@@ -391,4 +387,58 @@ test('a blank positioned paper quantity never borrows price amount or weight, an
   const raw='|'+paperHeading.split(' ').join('|')+'|\n|PO-26001|30721|甲贴纸||0.2|18|1.8||\n|PO-26001|30721|乙贴纸|0.2|18|1.8||';
   const fields=runtime().parse(raw);
   assert.equal(fields.items.length,2); assert.ok(fields.items.every(i=>i.quantityNeedsReview && i.qty===''));
+});
+
+for (const row of ['PO-26001 30721 合成贴纸 2', 'PO-26001 30721 合成贴纸 2 80']) {
+  test('an unpositioned integer weight or numeric specification is never promoted to paper quantity: '+row,()=>{
+    const fields=runtime().parse(paperHeading+'\n'+row);
+    assert.equal(fields.items.length,1); assert.equal(fields.items[0].qty,'');
+    assert.equal(fields.items[0].quantityNeedsReview,true);
+    assert.equal(fields.items[0].productName,'待核对原文：'+row);
+  });
+}
+
+test('paper footer does not discard the next page when its column heading is omitted',()=>{
+  const raw='|'+paperHeading.split(' ').join('|')+'|\n|PO-26001|30721|甲贴纸|80|||1.5||\n备注：第一页无备注\n|PO-26002|30722|乙贴纸|90|||2||';
+  const fields=runtime().parse(raw);
+  assert.deepEqual(fields.items.map(i=>[i.orderNo,i.productNo,i.productName,i.qty]),[
+    ['PO-26001','30721','甲贴纸','80'],['PO-26002','30722','乙贴纸','90']]);
+  assert.equal(fields.orderNo,'');
+});
+
+test('a different table after a paper footer retains all unrecognized source rows for review',()=>{
+  const foreignHeading='|订单号|货号|品名|数量|单位|', foreignRow='|PO-26002|30722|乙贴纸|90|PCS|';
+  const raw=['|'+paperHeading.split(' ').join('|')+'|','|PO-26001|30721|甲贴纸|80|||1.5||',
+    '备注：第一页无备注',foreignHeading,foreignRow].join('\n');
+  const fields=runtime().parse(raw);
+  assert.equal(fields.items.length,3); assert.equal(fields.items[0].qty,'80');
+  assert.deepEqual(fields.items.slice(1).map(i=>i.productName),[foreignHeading,foreignRow].map(row=>'待核对原文：'+row));
+  assert.ok(fields.items.slice(1).every(i=>i.qty==='' && i.quantityNeedsReview===true));
+});
+
+test('explicit paper totals with or without a colon are omitted only on their own row',()=>{
+  const raw=['|'+paperHeading.split(' ').join('|')+'|','|PO-26001|30721|甲贴纸|80|||1.5||',
+    '|合计|||80|||1.5||','合计：80','|PO-26002|30722|乙贴纸|90|||2||'].join('\n');
+  assert.deepEqual(runtime().parse(raw).items.map(i=>i.qty),['80','90']);
+});
+
+test('a later paper heading cannot consume goods in an earlier ordinary table',()=>{
+  const raw=['合成公司','日期：2026-11-11','|订单号|货号|品名|数量|单位|',
+    '|PO-FIRST|SKU001|前页合成零件|50|PCS|', '|'+paperHeading.split(' ').join('|')+'|',
+    '|PO-26001|30721|后页贴纸|80|||1.5||'].join('\n');
+  const fields=runtime().parse(raw);
+  assert.ok(fields.items.some(i=>i.orderNo==='PO-FIRST' && i.productNo==='SKU001' && i.productName==='前页合成零件' && i.qty==='50'));
+  assert.ok(!fields.items.some(i=>/合成公司|日期：2026/.test(i.productName||'')));
+});
+
+test('a subsequent reordered eight-column heading cannot reuse the earlier paper quantity position',()=>{
+  const otherHeading='|订单号|产品名称|规格型号|单价|数量|金额|重量|备注|';
+  const otherRow='|PO-26002|30722|乙贴纸|2|90|180|1.8||';
+  const raw=['|'+paperHeading.split(' ').join('|')+'|','|PO-26001|30721|甲贴纸|80|||1.5||',
+    '备注：第一页',otherHeading,otherRow,'|'+paperHeading.split(' ').join('|')+'|',
+    '|PO-26003|30723|丙贴纸|100|||2||'].join('\n');
+  const fields=runtime().parse(raw);
+  assert.equal(fields.items.length,4);
+  assert.deepEqual(fields.items.map(i=>i.qty),['80','','','100']);
+  assert.deepEqual(fields.items.slice(1,3).map(i=>i.productName),[otherHeading,otherRow].map(row=>'待核对原文：'+row));
 });

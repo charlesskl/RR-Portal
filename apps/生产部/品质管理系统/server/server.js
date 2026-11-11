@@ -349,17 +349,27 @@ function parseDeliveryNote(text, options = {}) {
      只匹配这组完整表头，避免改变其它单据的名称/规格含义。 */
   const paperHeader = '订单号产品名称规格型号数量单价金额重量备注';
   const paperHeading = line => (line.includes('|') ? splitRow(line) : line.trim().split(/\s+/)).join('').replace(/\s/g, '') === paperHeader;
+  const goodsHeading = line => {
+    const cells = line.includes('|') ? splitRow(line) : line.trim().split(/\s+/);
+    return cells.some(cell => /^(?:数量|數量|交货数量|交貨數量|送货数量|送貨數量|QTY)$/i.test(cell)) &&
+      cells.some(cell => /^(?:货号|貨號|物料编号|物料編號|产品名称|產品名稱|品名|货品名称|貨品名稱|规格型号|規格型號|名称|名稱|Description)$/i.test(cell));
+  };
   const paperAt = lines.findIndex(paperHeading);
-  if (paperAt >= 0) {
+  // A later paper heading must not replace goods already present in another table.
+  if (paperAt >= 0 && !lines.slice(0, paperAt).some(goodsHeading)) {
     let positioned = lines[paperAt].includes('|');
-    const footer = /^(?:备注|制单人|製單人|司机|司機|客户收货人|客戶收貨人|收货人|收貨人|收货日期|收貨日期|合计|合計)[：:]|^[（(]?(?:代香港|收貨章|收货章)|^細數未點/;
+    const footer = /^(?:备注|制单人|製單人|司机|司機|客户收货人|客戶收貨人|收货人|收貨人|收货日期|收貨日期|合计|合計)(?:[：:]|$)|^[（(]?(?:代香港|收貨章|收货章)|^細數未點/;
     const code = value => value.replace(/[‐‑‒–—−﹘﹣－]/g, '-');
     const codePattern = /^[A-Za-z0-9][A-Za-z0-9._/#-]*\d[A-Za-z0-9._/#-]*$/;
-    let inFooter = false;
     for (const line of lines.slice(paperAt + 1)) {
-      if (paperHeading(line)) { positioned = line.includes('|'); inFooter = false; continue; }
-      if (footer.test(positioned ? splitRow(line)[0] || '' : line)) { inFooter = true; continue; }
-      if (inFooter || /^\|?(?:\s*:?-+:?\s*\|)+/.test(line)) continue;
+      if (paperHeading(line)) { positioned = line.includes('|'); continue; }
+      if (goodsHeading(line)) {
+        positioned = false;
+        fields.items.push(_pendingOcrItem(line)); continue;
+      }
+      // A footer ends only its own line: later pages may omit a repeated heading.
+      if (footer.test(line.includes('|') ? splitRow(line)[0] || '' : line)) continue;
+      if (/^\|?(?:\s*:?-+:?\s*\|)+/.test(line)) continue;
       let order, sku, name, qty, remark;
       if (positioned) {
         const cells = splitRow(line);
@@ -371,17 +381,9 @@ function parseDeliveryNote(text, options = {}) {
         remark = [['单价',cells[4]],['金额',cells[5]],['重量',cells[6]],['原单备注',cells[7]]]
           .filter(pair => pair[1]).map(pair => pair[0] + '：' + pair[1]).join('；');
       } else {
-        // Require all three leading fields and one integer quantity. A bare
-        // numeric description token makes the boundary ambiguous; keep source.
-        const match = /^(\S+)\s+(\S+)\s+(.+?)\s+((?:\d{1,3}(?:[,，]\d{3})+|\d+))(?:\s+(.*))?$/.exec(line);
-        if (!match || !codePattern.test(code(match[1])) || !codePattern.test(code(match[2])) ||
-            !/[一-鿿]/.test(match[3]) || /(?:^|\s)\d+(?:[.,]\d+)?(?:\s|$)/.test(match[3]) ||
-            match[5] && !/^\d+(?:\.\d+)?$/.test(match[5])) {
-          fields.items.push(_pendingOcrItem(line)); continue;
-        }
-        [, order, sku, name, qty] = match;
-        remark = match[5] ? '右侧原文（单价/金额/重量/备注列待核对）：' + match[5] : '';
-        if (remark) fields.manualReviewRequired = true;
+        // Without retained columns, an integer may be a specification, price,
+        // amount or weight. Keep the entire row; never infer the quantity.
+        fields.items.push(_pendingOcrItem(line)); continue;
       }
       fields.items.push({orderNo:code(order),productNo:code(sku),productName:name,
         qty:quantityText(qty,''),unit:'',remark});

@@ -6067,48 +6067,7 @@ function _backupImportFile(file) {
       const text = ev.target.result.replace(/^\uFEFF/, '');
       const parsed = JSON.parse(text);
 
-      /* 校验格式 */
-      const validationError = _backupValidate(parsed);
-      if (validationError) {
-        showToast('备份文件格式不正确：' + validationError, 'error');
-        _backupLog('导入失败：' + validationError, 'error');
-        return;
-      }
-
-      const source = _backupReadPackage(parsed);
-      const incoming = source.records;
-      const exportedAt = parsed.exportedAt
-        ? _esc(new Date(parsed.exportedAt).toLocaleString('zh-CN'))
-        : '未知时间';
-      const description = source.isDraft
-        ? `<div style="font-size:12px;margin-top:8px">未同步草稿 · 原账号：${_esc(source.owner)} · 公司：${_esc(source.company)}</div>
-           <div style="font-size:12px;color:var(--text-dim);margin-top:8px">${source.versions ? '按原始版本恢复实际修改，未修改记录采用现有数据；同一记录的版本冲突时暂停恢复。' : '仅追加恢复，相同记录跳过，同编号内容不同则暂停整批导入。'}草稿中的删除和覆盖操作不会执行。</div>`
-        : `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">导出时间：${exportedAt}</div>
-          <div class="backup-mode-radios">
-            <label class="backup-mode-label">
-              <input type="radio" name="bkMode" value="append" checked />
-              <div><b>追加到现有数据</b><div style="font-size:11px;color:var(--text-dim)">保留原编号；相同记录跳过，编号内容冲突时暂停整批导入</div></div>
-            </label>
-            <label class="backup-mode-label">
-              <input type="radio" name="bkMode" value="replace" />
-              <div><b>覆盖当前数据</b><div style="font-size:11px;color:var(--red)">⚠ 当前 ${state.records.length} 条记录将被清空</div></div>
-            </label>
-          </div>`;
-
-      /* 弹出确认，让用户选择导入模式 */
-      _backupConfirm({
-        icon:         '⬆',
-        title:        source.isDraft ? '恢复未同步验货草稿' : '导入 JSON 备份',
-        body:         `
-          <div>文件包含 <strong>${incoming.length}</strong> 条验货记录</div>
-          ${description}`,
-        confirmLabel:  source.isDraft ? source.versions ? '确认恢复修改' : '确认追加恢复' : '确认导入',
-        confirmClass:  'btn-primary',
-        onConfirm:    () => {
-          const mode = source.isDraft ? 'append' : document.querySelector('input[name="bkMode"]:checked')?.value || 'append';
-          return _backupDoImport(parsed, mode);
-        },
-      });
+      _backupImportPackage(parsed);
 
     } catch(e) {
       showToast('备份文件格式不正确：' + e.message, 'error');
@@ -6116,6 +6075,53 @@ function _backupImportFile(file) {
     }
   };
   reader.readAsText(file, 'UTF-8');
+}
+
+function _backupImportPackage(parsed) {
+  _backupRequireImport();
+  /* 校验格式 */
+  const validationError = _backupValidate(parsed);
+  if (validationError) {
+    showToast('备份文件格式不正确：' + validationError, 'error');
+    _backupLog('导入失败：' + validationError, 'error');
+    return;
+  }
+
+  const source = _backupReadPackage(parsed);
+  const incoming = source.records;
+  const exportedAt = parsed.exportedAt
+    ? _esc(new Date(parsed.exportedAt).toLocaleString('zh-CN'))
+    : '未知时间';
+  const description = source.isDraft
+    ? `<div style="font-size:12px;margin-top:8px">未同步草稿 · 原账号：${_esc(source.owner)} · 公司：${_esc(source.company)}</div>
+       <div style="font-size:12px;color:var(--text-dim);margin-top:8px">${source.versions ? '按原始版本恢复实际修改，未修改记录采用现有数据；同一记录的版本冲突时暂停恢复。' : '仅追加恢复，相同记录跳过，同编号内容不同则暂停整批导入。'}草稿中的删除和覆盖操作不会执行。</div>`
+    : `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">导出时间：${exportedAt}</div>
+      <div class="backup-mode-radios">
+        <label class="backup-mode-label">
+          <input type="radio" name="bkMode" value="append" checked />
+          <div><b>追加到现有数据</b><div style="font-size:11px;color:var(--text-dim)">保留原编号；相同记录跳过，编号内容冲突时暂停整批导入</div></div>
+        </label>
+        <label class="backup-mode-label">
+          <input type="radio" name="bkMode" value="replace" />
+          <div><b>覆盖当前数据</b><div style="font-size:11px;color:var(--red)">⚠ 当前 ${state.records.length} 条记录将被清空</div></div>
+        </label>
+      </div>`;
+
+  /* 弹出确认，让用户选择导入模式 */
+  _backupConfirm({
+    icon:         '⬆',
+    title:        source.isDraft ? '恢复未同步验货草稿' : '导入 JSON 备份',
+    body:         `
+      <div>文件包含 <strong>${incoming.length}</strong> 条验货记录</div>
+      ${description}`,
+    confirmLabel:  source.isDraft ? source.versions ? '确认恢复修改' : '确认追加恢复' : '确认导入',
+    confirmClass:  'btn-primary',
+    onConfirm:    () => {
+      const mode = source.isDraft ? 'append' : document.querySelector('input[name="bkMode"]:checked')?.value || 'append';
+      return _backupDoImport(parsed, mode);
+    },
+  });
+
 }
 
 /* 执行实际写入 */
@@ -6574,6 +6580,14 @@ function _startImport(file) {
         cellText:  false,
         raw:       true,
       });
+
+      if (!window.__QC_DRAFT_EXCEL && wb.Sheets._QMS草稿恢复) throw new Error('Excel草稿恢复组件未加载，请刷新页面后重试');
+      const draftPackage = window.__QC_DRAFT_EXCEL ? window.__QC_DRAFT_EXCEL.decode(wb, XLSX) : null;
+      if (draftPackage) {
+        importReset();
+        _backupImportPackage(draftPackage);
+        return;
+      }
 
       _setProgress(50, '正在识别表头…');
       const sheetName = _pickBestSheet(wb);

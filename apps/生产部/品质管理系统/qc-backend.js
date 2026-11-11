@@ -200,6 +200,22 @@
       return sorted;
     });
   }
+  function committedReviewRetry(record, current) {
+    if (!current || ['approved', 'rejected'].indexOf(record.status) === -1 || record.status !== current.status ||
+        typeof record.updatedAt !== 'string' || !Number.isFinite(Date.parse(record.updatedAt)) ||
+        record.updatedAt !== current.updatedAt) return false;
+    var actorField = record.status === 'approved' ? 'reviewBy' : 'rejectBy';
+    var timeField = record.status === 'approved' ? 'reviewAt' : 'rejectAt';
+    var user = window.__QC_AUTH && window.__QC_AUTH.user;
+    var actor = user && (user.name || user.username);
+    if (!actor || record[actorField] !== actor || current[actorField] !== actor ||
+        typeof record[timeField] !== 'string' || !Number.isFinite(Date.parse(record[timeField])) ||
+        typeof current[timeField] !== 'string' || !Number.isFinite(Date.parse(current[timeField])) ||
+        record[timeField] === current[timeField]) return false;
+    var expected = Object.assign({}, record);
+    expected[timeField] = current[timeField];
+    return recordSignature(expected) === recordSignature(current);
+  }
   function pendingRecordChanges(st) {
     var versions = recordBaseline && recordBaseline.versions || Object.create(null);
     return (st.records || []).filter(function (row) {
@@ -381,6 +397,9 @@
               recordSignature(r) !== recordSignature(current)) conflict = true;
           return;
         }
+        // Keep the submitted review pending until the API rechecks permissions
+        // and confirms the canonical server audit; bootstrap alone is not an ACK.
+        if (committedReviewRetry(r, current)) { changes.push(r); return; }
         if (current && recordSignature(r, !hasBaseline, true) === recordSignature(current, false, true)) return;
         if (hasBaseline && (!current || baseline[r.id] !== (current.updatedAt == null ? null : current.updatedAt)) ||
             !hasBaseline && current) { conflict = true; return; }

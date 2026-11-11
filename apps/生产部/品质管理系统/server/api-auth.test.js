@@ -733,3 +733,54 @@ test('an empty versioned change can be confirmed without changing records', asyn
   assert.deepEqual(result.json.confirmedDeletedIds, []);
   assert.equal(snapshot(), before);
 });
+
+for (const status of ['approved', 'rejected']) test('lost ' + status + ' response retries only confirm server audit without rewriting any record', async () => {
+  const session = await login();
+  const audit = status === 'approved'
+    ? { status, reviewBy: 'jc display', reviewAt: '2026-10-21T11:59:59.999Z', rejectBy: '', rejectAt: '', rejectReason: '' }
+    : { status, rejectBy: 'jc display', rejectAt: '2026-10-21T11:59:59.999Z', rejectReason: 'Synthetic reason', reviewBy: '', reviewAt: '' };
+  const body = { records: [changed(2, audit)], baseVersions: { 2: '2026-01-01T00:00:00.000Z' } };
+  const first = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(first.status, 200, first.text);
+  const timeField = status === 'approved' ? 'reviewAt' : 'rejectAt';
+  assert.notEqual(first.json.confirmedRecords[0][timeField], body.records[0][timeField]);
+  const before = snapshot();
+  for (const baseVersions of [body.baseVersions, { 2: body.records[0].updatedAt }]) {
+    const retry = await request('/api/records', { method: 'POST', session, body: { ...body, baseVersions } });
+    assert.equal(retry.status, 200, retry.text); assert.equal(retry.json.accepted, 0);
+    assert.deepEqual(retry.json.confirmedRecords, first.json.confirmedRecords);
+    assert.equal(snapshot(), before);
+  }
+  for (const extra of [{ productName: 'Not the committed business' }, { updatedAt: '2026-10-21T12:00:00.001Z' },
+    { [status === 'approved' ? 'reviewBy' : 'rejectBy']: 'another actor' }, { [timeField]: 'invalid' },
+    { rejectReason: 'Different reason' }, { [status === 'approved' ? 'rejectAt' : 'reviewAt']: '2026-01-01T00:00:00.000Z' }]) {
+    const denied = await request('/api/records', { method: 'POST', session, body: { ...body, records: [{ ...body.records[0], ...extra }] } });
+    assert.equal(denied.status, 409, denied.text); assert.equal(snapshot(), before);
+  }
+  const otherSession = await login('manager'), beforeOtherActor = snapshot();
+  const otherActor = await request('/api/records', { method: 'POST', session: otherSession, body });
+  assert.equal(otherActor.status, 409, otherActor.text); assert.equal(snapshot(), beforeOtherActor);
+});
+
+for (const status of ['approved', 'rejected']) test('lost ' + status + ' creation response is idempotent without replacing server audit', async () => {
+  const session = await login();
+  const audit = status === 'approved'
+    ? { status, reviewBy: 'jc display', reviewAt: '2026-10-21T11:59:59.999Z', rejectBy: '', rejectAt: '', rejectReason: '' }
+    : { status, rejectBy: 'jc display', rejectAt: '2026-10-21T11:59:59.999Z', rejectReason: 'Synthetic reason', reviewBy: '', reviewAt: '' };
+  const body = { records: [fresh(954, audit)], newIds: [954], baseVersions: {} };
+  const first = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(first.status, 200, first.text); const before = snapshot();
+  const retry = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(retry.status, 200, retry.text); assert.equal(retry.json.accepted, 0);
+  assert.deepEqual(retry.json.confirmedRecords, first.json.confirmedRecords); assert.equal(snapshot(), before);
+});
+
+test('server-normalized review retry rechecks revoked approval permission for the same actor', async () => {
+  const session = await login('manager');
+  const body = { records: [changed(2, { status: 'approved', reviewBy: 'manager display', reviewAt: '2026-10-21T11:59:59.999Z' })],
+    baseVersions: { 2: '2026-01-01T00:00:00.000Z' } };
+  assert.equal((await request('/api/records', { method: 'POST', session, body })).status, 200);
+  sql(A, db => db.prepare('UPDATE users SET perms=? WHERE username=?').run(JSON.stringify({ review: { a: 0 } }), 'manager'));
+  const before = snapshot(), retry = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(retry.status, 403, retry.text); assert.equal(snapshot(), before);
+});

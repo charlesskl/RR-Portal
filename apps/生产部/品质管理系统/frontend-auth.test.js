@@ -797,3 +797,39 @@ test('a newer volatile draft retains confirmed server defaults after its next wr
   assert.deepEqual(retry.records, [extra]);
   assert.deepEqual(retry.newIds, [extra.id]);
 });
+
+for (const status of ['approved', 'rejected']) test('reopened lost ' + status + ' response keeps the review pending until explicit canonical API confirmation', async () => {
+  const initial = [{ ...versioned(1, 'review-fixture'), status: 'pending', reviewBy: '', reviewAt: '', rejectBy: '', rejectAt: '', rejectReason: '' }];
+  const actorField = status === 'approved' ? 'reviewBy' : 'rejectBy', timeField = status === 'approved' ? 'reviewAt' : 'rejectAt';
+  const local = { ...initial[0], status, updatedAt: '2026-11-03T03:00:00Z', [actorField]: admin.name,
+    [timeField]: '2026-11-03T02:59:59.999Z', rejectReason: status === 'rejected' ? 'Synthetic reason' : '' };
+  const saved = { ...local, [timeField]: '2026-11-03T03:00:01Z' };
+  let confirm = false;
+  const b = browser({ handler: url => url.includes('/api/records') ? confirm
+    ? { ok: true, status: 200, json: async () => ({ ok: true, confirmedRecords: [saved], confirmedDeletedIds: [] }) }
+    : { ok: false, status: 500 } : undefined });
+  b.setBootstrap({ ...bootstrap(), records: initial }); b.ctx.__QC_BOOTSTRAP();
+  b.store.set(prefix + 'records', JSON.stringify({ records: [local], nextId: 501 }));
+  await b.ctx.__QC_SYNC_NOW();
+  const key = prefix + 'pending_records_qc-admin', raw = b.store.get(key);
+  b.setBootstrap({ ...bootstrap(), records: [saved] }); b.ctx.__QC_BOOTSTRAP(); b.ctx.initData();
+  assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED, false);
+  assert.equal(b.store.get(key), raw); assert.deepEqual(plain(b.run('state.records')), [local]);
+  assert.equal(await b.ctx.__QC_SYNC_NOW(), false);
+  assert.equal(b.store.has(key), true);
+  const submitted = b.calls.filter(call => call.method === 'POST').at(-1).parsed;
+  assert.deepEqual(submitted.records, [local]); assert.deepEqual(submitted.baseVersions, { 1: saved.updatedAt });
+  confirm = true; assert.equal(await b.ctx.__QC_SYNC_NOW(), true);
+  assert.deepEqual(plain(b.run('state.records')), [saved]); assert.equal(b.store.has(key), false);
+});
+
+for (const kind of ['actor', 'business', 'version', 'other-audit', 'reason', 'invalid-time']) test('review normalization cannot recover a draft with changed ' + kind, async () => {
+  const initial = [{ ...versioned(1, 'review-fixture'), status: 'pending', reviewBy: '', reviewAt: '', rejectBy: '', rejectAt: '', rejectReason: '' }];
+  const local = { ...initial[0], status: 'approved', updatedAt: '2026-11-03T03:00:00Z', reviewBy: admin.name, reviewAt: '2026-11-03T02:59:59.999Z' };
+  const extra = { actor: { reviewBy: 'other-user' }, business: { productNo: 'different' }, version: { updatedAt: '2026-11-03T04:00:00Z' },
+    'other-audit': { rejectBy: 'different' }, reason: { rejectReason: 'different' }, 'invalid-time': { reviewAt: 'invalid' } }[kind];
+  const saved = { ...local, reviewAt: '2026-11-03T03:00:01Z', ...extra };
+  const { b, key, original } = await recoveryDraft({ initial, local: [local], server: [saved] });
+  assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED, true); assert.equal(b.store.get(key), original);
+  assert.deepEqual(plain(b.run('state.records')), [saved]);
+});

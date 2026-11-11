@@ -91,6 +91,52 @@ test('markdown cell break tags are normalized without becoming literal PO or pro
   assert.equal(fields.items[0].qty, '34');
 });
 
+test('tab-preserved packaging cells with actual internal newlines keep PO SKU name quantity and blank SKU boundaries', () => {
+  const raw = ['订单编号\t物料编号\t品名/规格\t单位\t数量\t单价\t备品\t包装明细',
+    'FDHA202505\n51-01\t92104(无手脚\n版)\t合成收缩膜\n0.07*205开口*148mm\t个\t1000\t\t4000个*6件+5000个\n+1000个*2件',
+    'FDHA202602\n68-01\t92104(无手脚\n版)\t合成收缩膜\n0.07*205开口*148mm\t个\t200\t\t300',
+    'FDHA202604\n55-01\t92104\t合成膜\t个\t30000\t\t包装内容',
+    'FDHA202602\n34-01\t11050097\t合成中蛋膜\n0.07*68.5开口*52mm\t个\t20000\t\t100个*2件',
+    'FDHA2026/S\n041\t\t合成手链膜\n0.07*88开口*76mm\t个\t10000\t\t合计：',
+    '注：合成说明', '经手人：合成人员'].join('\n');
+  const fields = runtime().parse(raw);
+  assert.equal(fields.items.length, 5);
+  assert.deepEqual(fields.items.map(row => row.qty), ['1000','200','30000','20000','10000']);
+  assert.deepEqual(fields.items.map(row => row.orderNo), ['FDHA20250551-01','FDHA20260268-01','FDHA20260455-01','FDHA20260234-01','FDHA2026/S041']);
+  assert.equal(fields.items[0].productNo, '92104(无手脚版)');
+  assert.equal(fields.items[4].productNo, '');
+  assert.match(fields.items[0].productName, /合成收缩膜 0.07/);
+  assert.ok(fields.items.every(row => !row.quantityNeedsReview));
+  assert.match(fields.items[0].remark, /4000个\*6件\+5000个\+1000个\*2件/);
+  assert.equal(fields.items[4].remark, '');
+});
+
+test('malformed tab cells remain whole-source review instead of shifting a price into quantity', () => {
+  const raw = '订单编号\t物料编号\t品名/规格\t单位\t数量\t单价\t备品\t包装明细\nFDHA202505\n51-01\tSKU001\t合成零件\t个\tunknown\t9.5\t100\t包装';
+  const fields = runtime().parse(raw);
+  assert.equal(fields.items.length, 1); assert.equal(fields.items[0].qty, '');
+  assert.equal(fields.items[0].quantityNeedsReview, true);
+});
+
+test('space-separated packaging rows use the explicit unit-quantity header contract and retain blank final SKU', () => {
+  const raw = ['订单编号 物料编号 品名/规格 单位 数量 单价 备品 包装明细',
+    'FDHA202505 51-01 92104(无手脚版) 合成收缩膜 0.07*205开口*148mm 个 1000 4000个*6件+5000个',
+    '+1000个*2件+300个+200个',
+    'FDHA202602 68-01 92104(无手脚版) 合成收缩膜 0.07*205开口*148mm 个 200',
+    'FDHA202604 55-01 92104 合成膜 个 30000 300',
+    'FDHA202602 34-01 11050097 合成中蛋膜 0.07*68.5开口*52mm 个 20000 32000个*1件',
+    'FDHA2026/S 041 合成手链膜SR1033-PROXY版 0.07*88开口*76mm 个 10000 10100个*1件',
+    '注：合成说明'].join('\n');
+  const fields = runtime().parse(raw);
+  assert.equal(fields.items.length, 5);
+  assert.deepEqual(fields.items.map(row => row.qty), ['1000','200','30000','20000','10000']);
+  assert.deepEqual(fields.items.map(row => row.productNo), ['92104(无手脚版)','92104(无手脚版)','92104','11050097','']);
+  assert.equal(fields.items[0].orderNo, 'FDHA20250551-01');
+  assert.equal(fields.items[4].orderNo, 'FDHA2026/S041');
+  assert.ok(fields.items.every(row => !row.quantityNeedsReview));
+  assert.match(fields.items[0].remark, /4000个\*6件/);
+});
+
 test('component markdown and flattened packing rows resolve the same carton and remark columns', () => {
   const rows = [['PO-26001','SKU1093','甲身体','','40','PCS','','4','4*10'],
     ['','','乙身体','','16','PCS','','1',''], ['','','丙身体','','42','PCS','','3','2*16+10']];

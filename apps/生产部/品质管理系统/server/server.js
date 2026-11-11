@@ -347,6 +347,61 @@ function parseDeliveryNote(text, options = {}) {
     if (m) fields.orderNo = m[1];
   }
 
+  /* Tab-preserved packaging sheets can contain real newlines inside cells.
+     Keep those cells together instead of treating every physical line as goods. */
+  const tabLines = rawText.split(/\r?\n/);
+  const tabHeader = tabLines.findIndex(line => {
+    const cells = (line.includes('\t') ? line.split('\t') : line.trim().split(/\s+/)).map(value => value.replace(/\s/g, ''));
+    return /^(订单编号|訂單編號)$/.test(cells[0]) && /^(物料编号|物料編號)$/.test(cells[1]) &&
+      /^(品名[/／]规格|品名[/／]規格)$/.test(cells[2]) && /^(单位|單位)$/.test(cells[3]) && /^(数量|數量)$/.test(cells[4]);
+  });
+  if (tabHeader !== -1) {
+    const tabPreserved = tabLines[tabHeader].includes('\t');
+    const headers = tabPreserved ? tabLines[tabHeader].split('\t') : tabLines[tabHeader].trim().split(/\s+/);
+    const packagingColumn = headers.findIndex(value => /包装明细|包裝明細/.test(value));
+    let block = [];
+    function finishTabRow() {
+      if (!block.length) return;
+      const source = block.join('\n'); block = [];
+      let cells = source.split('\t').map(value => decodeHtml(value).replace(/<br\s*\/?>/gi, '\n').trim());
+      if (!tabPreserved) {
+        const flat = source.replace(/\s+/g, ' ').trim();
+        const match = /^(?<order>[A-Za-z]{2,}\d{4,}(?:[\/_-][A-Za-z0-9]+)*)(?:\s+(?<suffix>\d{2,3}-\d{2}|\d{3}))?\s+(?<goods>.+?)\s+(?<unit>个|個|PCS|件|套|张|張|卷|KG|G)\s+(?<qty>(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)*)(?:\s+(?<tail>.*))?$/i.exec(flat);
+        if (!match) { fields.items.push(_pendingOcrItem(source)); return; }
+        const row = match.groups;
+        const sku = /^([A-Za-z0-9._/-]+(?:[（(][^）)]*[）)])?)\s+(.+)$/.exec(row.goods);
+        const name = sku ? sku[2] : row.goods;
+        if (!/[一-鿿]/.test(name)) { fields.items.push(_pendingOcrItem(source)); return; }
+        cells = [row.order + (row.suffix || ''), sku ? sku[1] : '', name, row.unit, row.qty, row.tail || ''];
+      }
+      const order = (cells[0] || '').replace(/\s/g, '');
+      if (cells.length < 5 || !/^[A-Za-z][A-Za-z0-9/_-]*\d[A-Za-z0-9/_-]*$/.test(order) ||
+          !cells[2] || !/^(个|個|PCS|件|套|张|張|卷|KG|G)$/i.test(cells[3]) ||
+          !/^(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)*$/.test(cells[4])) {
+        fields.items.push(_pendingOcrItem(source)); return;
+      }
+      const positioned = tabPreserved && cells.length === headers.length;
+      const tail = cells.slice(5).filter(value => value && !/^(合计|合計)[：:]?$/.test(value));
+      fields.items.push({ orderNo: order, productNo: cells[1].replace(/\s*\n\s*/g, ''),
+        productName: cells[2].replace(/\s*\n\s*/g, ' '), qty: quantityText(cells[4], cells[3]), unit: cells[3],
+        remark: positioned && packagingColumn >= 0 ? cells[packagingColumn].replace(/\s*\n\s*/g, '') :
+          tail.length ? '原单右侧内容：' + tail.join('；').replace(/\s*\n\s*/g, '') : '' });
+      if (!positioned && tail.length) fields.manualReviewRequired = true;
+    }
+    for (let i = tabHeader + 1; i < tabLines.length; i++) {
+      const line = tabLines[i];
+      if (/^(?:合计|合計|注|经手人|經手人|客户签收|客戶簽收)[：:]|^出货专用章\s*$/.test(line.trim())) { finishTabRow(); break; }
+      const start = /^[A-Za-z]{2,}\d{4,}(?:[\/_-][A-Za-z0-9]+)*(?:\s|$)/.test(line.trim());
+      if (start) finishTabRow();
+      if (start || block.length) block.push(line);
+    }
+    finishTabRow();
+    if (!fields.items.length) fields.items.push(_pendingOcrItem(rawText));
+    const orders = fields.items.map(item => item.orderNo || '');
+    fields.orderNo = orders.length && orders.every(order => order && order === orders[0]) ? orders[0] : '';
+    return fields;
+  }
+
   /* markdown 表格 → items（列按表头关键词映射）；不以 | 开头但含 ≥3 个竖线的行也算（恒新昌单行表格） */
   const tbl = lines.filter(l => l.startsWith('|') || (l.match(/\|/g) || []).length >= 3);
   if (tbl.length >= 2) {

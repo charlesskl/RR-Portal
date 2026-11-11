@@ -93,9 +93,13 @@ test('isolated real OCR HTTP, explicit save, SQLite and reopen retain rows and p
   const paperRaw = '订单号 产品名称 规格型号 数量 单价 金额 重量 备注\nPO-26001 30721 甲贴纸 80 1.5\nPO-26001 30721 LED贴纸 80 1.5\n备注：\n制单人：合成人员';
   const paper = await request('/api/ai/ocr-parse', 'POST', {text:paperRaw}, admin);
   assert.equal(paper.status,200); assert.equal(paper.json.fields.items.length,2);
-  assert.deepEqual(paper.json.fields.items.map(i=>[i.orderNo,i.productNo,i.productName,i.qty]),
-    [['PO-26001','30721','甲贴纸','80'],['PO-26001','30721','LED贴纸','80']]);
-  assert.ok(paper.json.fields.items.every(i=>/右侧原文.*1\.5$/.test(i.remark)));
+  assert.deepEqual(paper.json.fields.items.map(i=>i.qty), ['', '']);
+  assert.ok(paper.json.fields.items[0].productName.includes('PO-26001 30721 甲贴纸 80 1.5'));
+  assert.ok(paper.json.fields.items[1].productName.includes('PO-26001 30721 LED贴纸 80 1.5'));
+  assert.ok(paper.json.fields.items.every(i=>i.quantityNeedsReview===true));
+  const paperPositioned = await request('/api/ai/ocr-parse', 'POST', {text:'|订单号|产品名称|规格型号|数量|单价|金额|重量|备注|\n|PO-26001|0030721|甲贴纸|80|||1.5||'}, admin);
+  assert.equal(paperPositioned.status,200);
+  assert.deepEqual(paperPositioned.json.fields.items.map(i=>[i.orderNo,i.productNo,i.productName,i.qty]),[['PO-26001','0030721','甲贴纸','80']]);
   assert.equal(modelCalls, 0);
   const ocr = await request('/api/ai/ocr-extract', 'POST', image, admin);
   assert.equal(ocr.status, 200); assert.equal(ocr.json.ok, true); assert.equal(modelCalls, 2);

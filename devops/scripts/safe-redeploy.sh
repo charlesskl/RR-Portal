@@ -78,15 +78,17 @@ fi
 ok "服务名合法"
 
 # ─── Step 2: 扫僵尸容器 ───
-log "扫僵尸容器（Created/Restarting）"
-ORPHANS=$(ssh "$SSH_ALIAS" "docker ps -a --filter status=created --filter status=restarting --format '{{.Names}}' 2>/dev/null" || true)
-if [[ -n "$ORPHANS" ]]; then
-  warn "发现僵尸容器，清理中:"
-  echo "$ORPHANS" | sed 's/^/    /'
-  ssh "$SSH_ALIAS" "docker ps -a --filter status=created --filter status=restarting -q | xargs -r docker rm"
-  ok "僵尸清理完成"
-else
-  ok "无僵尸"
+if [[ "$SERVICE" != qc ]]; then
+  log "扫僵尸容器（Created/Restarting）"
+  ORPHANS=$(ssh "$SSH_ALIAS" "docker ps -a --filter status=created --filter status=restarting --format '{{.Names}}' 2>/dev/null" || true)
+  if [[ -n "$ORPHANS" ]]; then
+    warn "发现僵尸容器，清理中:"
+    echo "$ORPHANS" | sed 's/^/    /'
+    ssh "$SSH_ALIAS" "docker ps -a --filter status=created --filter status=restarting -q | xargs -r docker rm"
+    ok "僵尸清理完成"
+  else
+    ok "无僵尸"
+  fi
 fi
 
 # ─── Step 3: 内存检查 ───
@@ -107,6 +109,35 @@ log "当前 $SERVICE 状态"
 ssh "$SSH_ALIAS" "docker ps --filter name=rr-portal-$SERVICE --format '  {{.Names}} | {{.Status}}'" || true
 
 # ─── Step 5: 执行部署 ───
+if [[ "$SERVICE" == qc ]]; then
+  log "仅切换品质服务，网关验证通过后开放"
+  ssh "$SSH_ALIAS" bash -s -- "$RESTART_ONLY" <<'REMOTE' || fail "品质发布未完成，请查看上面的切换和网关检查结果"
+set -euo pipefail
+cd /opt/rr-portal
+COMPOSE_FILE=docker-compose.cloud.yml
+ENV_FILE=.env.cloud.production
+MAINT_FLAG_DIR=/opt/rr-portal/deploy/maintenance
+MAINT_COMPOSE_SERVICES=qc
+source deploy/service-maintenance.sh
+if ! declare -F deploy_qc_service >/dev/null; then
+  echo '服务器尚未安装品质发布保护脚本' >&2
+  exit 1
+fi
+mkdir -p "$MAINT_FLAG_DIR"
+exec 9>"$MAINT_FLAG_DIR/rollout.lock"
+flock -w 30 9 || { echo '另一轮发布仍在运行，品质重启未开始' >&2; exit 1; }
+if [[ "$1" == 1 ]]; then
+  deploy_qc_service restart
+else
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build qc
+  deploy_qc_service up
+fi
+require_maintenance_cleared qc
+REMOTE
+  ok "品质服务已通过网关检查，发布完成"
+  exit 0
+fi
+
 if [[ "$RESTART_ONLY" -eq 1 ]]; then
   log "执行 restart（不 recreate 容器，保持 IP 不变）"
   ssh "$SSH_ALIAS" "cd $PROJECT_DIR && docker compose -f $COMPOSE_FILE --env-file $ENV_FILE restart $SERVICE" \

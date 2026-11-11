@@ -45,7 +45,11 @@ if a[0] == 'inspect':
 elif 'config' in a:
     if '--format' in a: print((p / 'compose.json').read_text())
     else: print(os.environ['FIXTURE_SERVICES'])
+elif 'port' in a:
+    if os.environ.get('NGINX_STOPPED') == '1' and not (p / 'nginx-started').exists(): sys.exit(1)
+    print('0.0.0.0:' + os.environ.get('QC_GATEWAY_PORT', '80'))
 elif 'ps' in a:
+    if a[-1] == 'nginx' and os.environ.get('NGINX_STOPPED') == '1' and not (p / 'nginx-started').exists(): sys.exit(0)
     if a[0] == 'ps' and '--filter' not in a: print('rr-portal-internal-quote-1')
     elif a[-1] in json.loads((p / 'states.json').read_text()): print(a[-1])
 elif 'build' in a:
@@ -53,17 +57,48 @@ elif 'build' in a:
     key = os.environ.get('EXPECTED_KEY', 'voyageplex' if a[-1].startswith('voyageplex-') else a[-1])
     assert not (p / 'flags/services' / key).exists(), 'maintenance started during build'
     if os.environ.get('FAIL_BUILD') == '1': sys.exit(2)
-elif 'up' in a:
+elif 'up' in a or 'restart' in a:
     key = os.environ.get('EXPECTED_KEY', 'voyageplex' if a[-1].startswith('voyageplex-') else a[-1])
     if a[-1] not in ('db', 'redis', 'nginx', 'autoheal'):
         assert (p / 'flags/services' / key).exists(), 'missing scoped maintenance flag'
         if os.environ.get('FULL_SCRIPT') == '1':
             assert [x.name for x in (p / 'flags/services').iterdir()] == [key], 'previous system still blocked'
     assert not (p / 'flags/ON').exists(), 'global maintenance flag created'
-    assert '--no-deps' in a and '--no-build' in a
+    if 'up' in a:
+        assert '--no-deps' in a and '--no-build' in a
     if os.environ.get('FAIL_UP') == '1': sys.exit(3)
+    if a[-1] == 'nginx': (p / 'nginx-started').touch()
 ''')
         docker.chmod(0o755)
+        curl = self.path / 'curl'
+        curl.write_text('''#!/usr/bin/env python3
+import json, os, pathlib, sys
+p = pathlib.Path(os.environ['FIXTURE_DIR'])
+url = sys.argv[-1]
+calls = p / 'calls'
+with calls.open('a') as f: f.write(json.dumps(['curl', url]) + '\\n')
+if url.endswith('/qc/'):
+    assert (p / 'flags/services/qc').exists()
+    print('Retry-After: 60')
+    print(os.environ.get('QC_GATE_STATUS', '503'), end='')
+elif url.endswith('/qc/api/health'):
+    assert (p / 'flags/services/qc').exists(), 'probe ran after releasing maintenance'
+    if os.environ.get('OLD_QC_HEALTH_BLOCKED'):
+        assert any('up' in a and a[-1] == 'nginx' for a in map(json.loads, calls.read_text().splitlines()))
+    if os.environ.get('QC_GATEWAY_DOWN') == '1': sys.exit(22)
+    if os.environ.get('QC_GATEWAY_DOWN_AFTER_SWITCH') == '1' and any(('up' in a or 'restart' in a) and a[-1] == 'qc' for a in map(json.loads, calls.read_text().splitlines())): sys.exit(22)
+    print(os.environ.get('QC_GATEWAY_BODY', '{"ok":true}'))
+    print(os.environ.get('QC_GATEWAY_HEALTH_STATUS', '200'), end='')
+''')
+        curl.chmod(0o755)
+        if not shutil.which('flock'):
+            flock = self.path / 'flock'
+            flock.write_text('''#!/usr/bin/env python3
+import fcntl, sys
+try: fcntl.flock(int(sys.argv[-1]), fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError: sys.exit(1)
+''')
+            flock.chmod(0o755)
 
     def run_shell(self, command, services='paiji', **env):
         script = '''set -euo pipefail
@@ -140,10 +175,64 @@ ensure_service_base_images() { :; }
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([p.name for p in self.flags.iterdir()], ['paiji'])
 
+    def test_qc_aborts_before_switch_if_gateway_does_not_honor_maintenance(self):
+        result = self.run_shell('deploy_qc_service restart', 'qc', QC_GATE_STATUS='200')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('已停止容器切换', result.stderr)
+        self.assertFalse((self.flags / 'qc').exists())
+        calls = list(map(json.loads, (self.path / 'calls').read_text().splitlines()))
+        self.assertFalse(any('restart' in a or 'up' in a for a in calls))
+
+    def test_qc_gateway_failure_retains_flag_even_if_container_is_healthy(self):
+        self.states.write_text(json.dumps({'qc': 'running/0/unless-stopped/healthy'}))
+        result = self.run_shell('deploy_service qc 0', 'qc', QC_GATEWAY_DOWN_AFTER_SWITCH='1', MAINT_HEALTH_TIMEOUT_SECONDS='1')
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.flags / 'qc').exists())
+        result = self.run_shell('recover_maintenance_flags', 'qc', QC_GATEWAY_BODY='{"ok":false}')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.flags / 'qc').exists())
+        result = self.run_shell('recover_maintenance_flags', 'qc', QC_GATEWAY_HEALTH_STATUS='302')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.flags / 'qc').exists())
+        result = self.run_shell('recover_maintenance_flags', 'qc')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.flags / 'qc').exists())
+
+    def test_qc_restart_only_runs_under_maintenance_and_checks_gateway_before_release(self):
+        self.states.write_text(json.dumps({'qc': 'running/0/unless-stopped/healthy'}))
+        install = self.path / 'remote-install'
+        (install / 'deploy').mkdir(parents=True)
+        (install / 'deploy/maintenance').symlink_to(self.path / 'flags', target_is_directory=True)
+        shutil.copy(ROOT / 'deploy/service-maintenance.sh', install / 'deploy')
+        ssh = self.path / 'ssh'
+        ssh.write_text('''#!/usr/bin/env python3
+import os, pathlib, subprocess, sys
+args = sys.argv[2:]
+if args[:3] == ['bash', '-s', '--']:
+    directory = pathlib.Path(os.environ['FIXTURE_DIR']) / 'remote-install'
+    script = sys.stdin.read().replace('/opt/rr-portal', str(directory))
+    sys.exit(subprocess.run(args, input=script, text=True).returncode)
+command = args[-1]
+if command.startswith('free -m'): print('4096')
+elif not (command.startswith('test -f ') or 'config --services' in command or command.startswith('docker ps --filter name=rr-portal-qc')):
+    sys.exit('unexpected SSH command: ' + command)
+''')
+        ssh.chmod(0o755)
+        result = self.run_shell('bash "' + str(ROOT / 'devops/scripts/safe-redeploy.sh') + '" qc --restart-only',
+                                'qc', MAINT_HEALTH_TIMEOUT_SECONDS='2')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.flags / 'qc').exists())
+        calls = list(map(json.loads, (self.path / 'calls').read_text().splitlines()))
+        gate = calls.index(['curl', 'http://127.0.0.1:80/qc/'])
+        restart = next(i for i, a in enumerate(calls) if 'restart' in a)
+        health = calls.index(['curl', 'http://127.0.0.1:80/qc/api/health'], restart)
+        self.assertLess(gate, restart)
+        self.assertLess(restart, health)
+        self.assertFalse(any('up' in a for a in calls))
 
     def run_update_script(self, before_compose=b'services: {}\n', after_compose=b'services: {}\n',
                           changed_files='docker-compose.cloud.yml', services_config=None,
-                          include_helper=True, force=False, fail_paiji_backup=False):
+                          include_helper=True, force=False, fail_paiji_backup=False, **env):
         install = self.path / 'install'
         (install / 'deploy').mkdir(parents=True)
         (install / 'apps').mkdir()
@@ -185,16 +274,13 @@ PY
                        "    filename='before-compose.yml' if a[-1].startswith('1' * 40 + ':') else 'after-compose.yml'\n"
                        "    sys.stdout.buffer.write((p/filename).read_bytes())\n")
         git.chmod(0o755)
-        curl = self.path / 'curl'
-        curl.write_text('#!/usr/bin/env bash\nexit 0\n')
-        curl.chmod(0o755)
         # Share the server fixture's maintenance path with the fake docker assertions.
         shutil.rmtree(install / 'deploy' / 'maintenance', ignore_errors=True)
         (install / 'deploy' / 'maintenance').symlink_to(self.path / 'flags', target_is_directory=True)
         result = self.run_shell('bash "' + str(install / 'deploy/update-server.sh') + '"',
                                 '\n'.join(services_config), BEFORE_COMMIT='1' * 40, FULL_SCRIPT='1',
                                 FAIL_PAIJI_BACKUP='1' if fail_paiji_backup else '',
-                                FORCE_FULL_REBUILD='1' if force else '0', MAINT_HEALTH_TIMEOUT_SECONDS='2')
+                                FORCE_FULL_REBUILD='1' if force else '0', MAINT_HEALTH_TIMEOUT_SECONDS='2', **env)
         calls_path = self.path / 'calls'
         calls = [json.loads(line) for line in calls_path.read_text().splitlines()] if calls_path.exists() else []
         return result, calls
@@ -219,6 +305,52 @@ PY
         self.assertEqual([a[-1] for a in calls if 'build' in a], ['xingxin-invoice'])
         self.assertEqual([a[-1] for a in calls if 'up' in a], ['xingxin-invoice'])
         self.assertEqual(list(self.flags.iterdir()), [])
+
+    @unittest.skipUnless(BASH_MAJOR >= 4, 'full server script requires Bash 4+; covered on Linux CI')
+    def test_qc_maintains_protection_until_new_gateway_configuration_is_loaded(self):
+        result, calls = self.run_update_script(
+            changed_files='apps/生产部/品质管理系统/maintenance.js\nnginx/nginx.cloud.conf',
+            services_config={'qc': {}, 'nginx': {}}, OLD_QC_HEALTH_BLOCKED='1',
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([a[-1] for a in calls if 'up' in a], ['qc', 'nginx'])
+        self.assertIn(['curl', 'http://127.0.0.1:80/qc/api/health'], calls)
+        self.assertFalse((self.flags / 'qc').exists())
+
+    @unittest.skipUnless(BASH_MAJOR >= 4, 'full server script requires Bash 4+; covered on Linux CI')
+    def test_gateway_only_update_can_release_a_previous_qc_marker(self):
+        (self.flags / 'qc').touch()
+        result, calls = self.run_update_script(
+            changed_files='nginx/nginx.cloud.conf',
+            services_config={'qc': {}, 'nginx': {}}, OLD_QC_HEALTH_BLOCKED='1',
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([a[-1] for a in calls if 'up' in a], ['nginx'])
+        self.assertFalse((self.flags / 'qc').exists())
+
+    @unittest.skipUnless(BASH_MAJOR >= 4, 'full server script requires Bash 4+; covered on Linux CI')
+    def test_qc_bootstrap_waits_for_gateway_startup_before_releasing(self):
+        result, calls = self.run_update_script(
+            services_config={'qc': {}, 'nginx': {}}, NGINX_STOPPED='1',
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([a[-1] for a in calls if 'up' in a], ['qc', 'nginx'])
+        self.assertFalse((self.flags / 'qc').exists())
+
+    def test_qc_old_gateway_configuration_stops_before_restart(self):
+        self.states.write_text(json.dumps({'qc': 'running/0/unless-stopped/healthy'}))
+        result = self.run_shell('deploy_qc_service restart', 'qc', QC_GATEWAY_HEALTH_STATUS='503')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.flags / 'qc').exists())
+        calls = list(map(json.loads, (self.path / 'calls').read_text().splitlines()))
+        self.assertFalse(any('restart' in a for a in calls))
+
+    def test_qc_ingress_probe_uses_the_published_gateway_port(self):
+        self.states.write_text(json.dumps({'qc': 'running/0/unless-stopped/healthy'}))
+        result = self.run_shell('deploy_qc_service restart', 'qc', QC_GATEWAY_PORT='8088', MAINT_HEALTH_TIMEOUT_SECONDS='2')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = list(map(json.loads, (self.path / 'calls').read_text().splitlines()))
+        self.assertIn(['curl', 'http://127.0.0.1:8088/qc/api/health'], calls)
 
     @unittest.skipUnless(BASH_MAJOR >= 4, 'full server script requires Bash 4+; covered on Linux CI')
     def test_paiji_secret_reference_only_backs_up_then_deploys_paiji(self):
@@ -360,7 +492,12 @@ PY
 
 
 class Backend(BaseHTTPRequestHandler):
+    health_ready = True
+
     def do_GET(self):
+        if self.path == '/api/health' and not self.health_ready:
+            self.send_error(502)
+            return
         self.send_response(200)
         self.send_header('X-Fixture-Path', self.path)
         self.end_headers()
@@ -489,7 +626,7 @@ class NginxTests(unittest.TestCase):
     def test_group_routes_bare_paths_assets_and_normalized_uris(self):
         cases = {
             'rr-production': ['/rr', '/rr/api/orders', '/api/injection', '/api/material-prices'],
-            'qc': ['/qc', '/qc/api/health', '/q%63/assets/app.js'],
+            'qc': ['/qc', '/qc/api/maintenance', '/q%63/assets/app.js'],
             'qc-plan': ['/qc-plan', '/qc-plan/api/health', '/qc-plan/_next/static/test.js'],
             'voyageplex': ['/voyageplex', '/voyageplex/api/auth/me'],
             'shipping-management': ['/shipping', '/shipping/api/orders'],
@@ -510,6 +647,23 @@ class NginxTests(unittest.TestCase):
                 self.assertEqual(self.fetch('/')[0], 200)
                 self.assertEqual(self.fetch('/peise/health')[0], 200)
                 (self.flags / key).unlink()
+
+    def test_qc_health_probe_can_reach_upstream_while_business_requests_are_blocked(self):
+        (self.flags / 'qc').touch()
+        status, _, headers = self.fetch('/qc/api/health', auth=False)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers['X-Fixture-Path'], '/api/health')
+        self.assertEqual(self.fetch('/qc/api/health', auth=False, method='POST')[0], 403)
+        self.assertEqual(self.fetch('/qc/', auth=False)[0], 503)
+        self.assertEqual(self.fetch('/qc/api/records', auth=False, method='POST')[0], 503)
+        self.assertEqual(self.fetch('/')[0], 200)
+        Backend.health_ready = False
+        try:
+            self.assertEqual(self.fetch('/qc/api/health', auth=False)[0], 502)
+            self.assertEqual(self.fetch('/qc/', auth=False)[0], 503)
+            self.assertEqual(self.fetch('/qc/api/records', auth=False, method='POST')[0], 503)
+        finally:
+            Backend.health_ready = True
 
     def test_route_prefixes_do_not_bleed_into_other_systems(self):
         for key, sibling in [('qc', '/qc-plan/api/health'), ('huadeng', '/huadeng-maorong/health'),

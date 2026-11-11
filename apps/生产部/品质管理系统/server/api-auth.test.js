@@ -590,3 +590,197 @@ test('creation intent requires entry permission before revealing whether an ID i
     assert.equal(r.status,403,r.text);assert.equal(snapshot(),before);
   }
 });
+
+test('versioned changes confirm only the edited row while preserving unrelated remote updates', async () => {
+  const session = await login();
+  const original = changed(2), baseVersion = sql(A, db => db.prepare('SELECT updatedAt FROM records WHERE id=2').get().updatedAt);
+  sql(A, db => db.prepare('UPDATE records SET productName=?,updatedAt=? WHERE id=1').run('Other browser change', '2026-11-10T00:00:00.000Z'));
+  const result = await request('/api/records', { method: 'POST', session, body: {
+    records: [{ ...original, productName: 'Local change' }], baseVersions: { 2: baseVersion },
+  } });
+  assert.equal(result.status, 200, result.text);
+  assert.deepEqual(result.json.confirmedRecords.map(row => row.id), [2]);
+  assert.equal(result.json.confirmedRecords[0].productName, 'Local change');
+  assert.deepEqual(result.json.confirmedDeletedIds, []);
+  assert.equal(sql(A, db => db.prepare('SELECT productName FROM records WHERE id=1').get().productName), 'Other browser change');
+});
+
+test('a version conflict rolls back the whole create-edit-delete batch even with a future client clock', async () => {
+  const session = await login(), local = changed(2, { productName: 'Local stale edit', updatedAt: '2099-01-01T00:00:00.000Z' });
+  const oldVersion = sql(A, db => db.prepare('SELECT updatedAt FROM records WHERE id=2').get().updatedAt);
+  sql(A, db => db.prepare('UPDATE records SET productName=?,updatedAt=? WHERE id=2').run('Remote winner', '2026-11-10T00:00:00.000Z'));
+  const before = snapshot();
+  const result = await request('/api/records', { method: 'POST', session, body: {
+    records: [fresh(951, { status: 'pending' }), local], newIds: [951], deletedIds: [3], baseVersions: { 2: oldVersion, 3: oldVersion },
+  } });
+  assert.equal(result.status, 409, result.text);
+  assert.equal(snapshot(), before);
+});
+
+test('versioned identical edit retries confirm the existing server row without overwriting it', async () => {
+  const session = await login(), local = changed(2, { productName: 'Saved once' });
+  const body = { records: [local], baseVersions: { 2: '2026-01-01T00:00:00.000Z' } };
+  const first = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(first.status, 200, first.text);
+  const before = snapshot();
+  const retry = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(retry.status, 200, retry.text);
+  assert.equal(retry.json.accepted, 0);
+  assert.deepEqual(retry.json.confirmedRecords, first.json.confirmedRecords);
+  assert.equal(snapshot(), before);
+});
+
+test('versioned identical creation retries return the same confirmed row', async () => {
+  const session = await login();
+  const body = { records: [fresh(952, { status: 'pending' })], newIds: [952], baseVersions: {} };
+  const first = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(first.status, 200, first.text);
+  const before = snapshot();
+  const retry = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(retry.status, 200, retry.text);
+  assert.deepEqual(retry.json.confirmedRecords, first.json.confirmedRecords);
+  assert.equal(retry.json.accepted, 0);
+  assert.equal(snapshot(), before);
+});
+
+test('versioned edits and creations cannot resurrect a deleted row', async () => {
+  const session = await login(), local = changed(2, { productName: 'Old offline edit' });
+  assert.equal((await request('/api/records/delete', { method: 'POST', session, body: { ids: [2] } })).status, 200);
+  const before = snapshot();
+  for (const body of [
+    { records: [local], baseVersions: { 2: '2026-01-01T00:00:00.000Z' } },
+    { records: [local], newIds: [2], baseVersions: {} },
+  ]) {
+    const result = await request('/api/records', { method: 'POST', session, body });
+    assert.equal(result.status, 409, result.text);
+    assert.equal(snapshot(), before);
+  }
+});
+
+test('versioned deletion retries confirm absent rows while changed live rows conflict', async () => {
+  const session = await login(), body = { records: [], deletedIds: [2], baseVersions: { 2: '2026-01-01T00:00:00.000Z' } };
+  const first = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(first.status, 200, first.text);
+  assert.deepEqual(first.json.confirmedDeletedIds, [2]);
+  const retry = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(retry.status, 200, retry.text);
+  assert.deepEqual(retry.json.confirmedRecords, []);
+  assert.deepEqual(retry.json.confirmedDeletedIds, [2]);
+  sql(A, db => db.prepare('UPDATE records SET updatedAt=? WHERE id=3').run('2026-11-10T00:00:00.000Z'));
+  const before = snapshot();
+  const conflict = await request('/api/records', { method: 'POST', session, body: { ...body, deletedIds: [3], baseVersions: { 3: '2026-01-01T00:00:00.000Z' } } });
+  assert.equal(conflict.status, 409, conflict.text);
+  assert.equal(snapshot(), before);
+});
+
+test('a stale timestamp that prevents an intended write cannot receive a success confirmation', async () => {
+  const session = await login(), before = snapshot();
+  const result = await request('/api/records', { method: 'POST', session, body: {
+    records: [fresh(953, { status: 'pending' }), changed(2, { productName: 'Must remain pending', updatedAt: '2025-01-01T00:00:00.000Z' })],
+    newIds: [953], deletedIds: [3], baseVersions: { 2: '2026-01-01T00:00:00.000Z', 3: '2026-01-01T00:00:00.000Z' },
+  } });
+  assert.equal(result.status, 409, result.text);
+  assert.equal(snapshot(), before);
+});
+
+test('versioned requests require an exact version map and reject ambiguous edit-delete intent', async () => {
+  const session = await login(), before = snapshot();
+  for (const baseVersions of [null, [], {}, { 2: 3 }, { 2: true }, { 2: null, 3: null }, { '02': null }]) {
+    const result = await request('/api/records', { method: 'POST', session, body: { records: [changed(2)], baseVersions } });
+    assert.equal(result.status, 400, result.text);
+    assert.equal(snapshot(), before);
+  }
+  const overlap = await request('/api/records', { method: 'POST', session, body: {
+    records: [changed(2)], deletedIds: [2], baseVersions: { 2: '2026-01-01T00:00:00.000Z' },
+  } });
+  assert.equal(overlap.status, 400, overlap.text);
+  assert.equal(snapshot(), before);
+});
+
+test('versioned changes retain permission checks and return server-attributed review details', async () => {
+  const session = await login('restricted');
+  const local = changed(2, { productName: 'Entry permission required' }), before = snapshot();
+  const denied = await request('/api/records', { method: 'POST', session, body: {
+    records: [local], baseVersions: { 2: '2026-01-01T00:00:00.000Z' },
+  } });
+  assert.equal(denied.status, 403, denied.text);
+  assert.equal(snapshot(), before);
+  const approved = await request('/api/records', { method: 'POST', session: await login(), body: {
+    records: [changed(2, { status: 'approved', reviewBy: 'Untrusted local reviewer', reviewAt: '1900-01-01T00:00:00.000Z' })],
+    baseVersions: { 2: '2026-01-01T00:00:00.000Z' },
+  } });
+  assert.equal(approved.status, 200, approved.text);
+  assert.equal(approved.json.confirmedRecords[0].reviewBy, 'jc display');
+  assert.notEqual(approved.json.confirmedRecords[0].reviewAt, '1900-01-01T00:00:00.000Z');
+});
+
+test('two versioned HTTP writers using the same base cannot overwrite each other', async () => {
+  const session = await login(), baseVersions = { 2: '2026-01-01T00:00:00.000Z' };
+  const versions = ['LEFT', 'RIGHT'].map(productName => changed(2, { productName }));
+  const results = await Promise.all(versions.map(record => request('/api/records', {
+    method: 'POST', session, body: { records: [record], baseVersions },
+  })));
+  assert.deepEqual(results.map(result => result.status).sort(), [200, 409]);
+  const winner = results.find(result => result.status === 200).json.confirmedRecords[0];
+  assert.equal(sql(A, db => db.prepare('SELECT productName FROM records WHERE id=2').get().productName), winner.productName);
+});
+
+test('an empty versioned change can be confirmed without changing records', async () => {
+  const session = await login(), before = snapshot();
+  const result = await request('/api/records', { method: 'POST', session, body: { records: [], baseVersions: {} } });
+  assert.equal(result.status, 200, result.text);
+  assert.deepEqual(result.json.confirmedRecords, []);
+  assert.deepEqual(result.json.confirmedDeletedIds, []);
+  assert.equal(snapshot(), before);
+});
+
+for (const status of ['approved', 'rejected']) test('lost ' + status + ' response retries only confirm server audit without rewriting any record', async () => {
+  const session = await login();
+  const audit = status === 'approved'
+    ? { status, reviewBy: 'jc display', reviewAt: '2026-10-21T11:59:59.999Z', rejectBy: '', rejectAt: '', rejectReason: '' }
+    : { status, rejectBy: 'jc display', rejectAt: '2026-10-21T11:59:59.999Z', rejectReason: 'Synthetic reason', reviewBy: '', reviewAt: '' };
+  const body = { records: [changed(2, audit)], baseVersions: { 2: '2026-01-01T00:00:00.000Z' } };
+  const first = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(first.status, 200, first.text);
+  const timeField = status === 'approved' ? 'reviewAt' : 'rejectAt';
+  assert.notEqual(first.json.confirmedRecords[0][timeField], body.records[0][timeField]);
+  const before = snapshot();
+  for (const baseVersions of [body.baseVersions, { 2: body.records[0].updatedAt }]) {
+    const retry = await request('/api/records', { method: 'POST', session, body: { ...body, baseVersions } });
+    assert.equal(retry.status, 200, retry.text); assert.equal(retry.json.accepted, 0);
+    assert.deepEqual(retry.json.confirmedRecords, first.json.confirmedRecords);
+    assert.equal(snapshot(), before);
+  }
+  for (const extra of [{ productName: 'Not the committed business' }, { updatedAt: '2026-10-21T12:00:00.001Z' },
+    { [status === 'approved' ? 'reviewBy' : 'rejectBy']: 'another actor' }, { [timeField]: 'invalid' },
+    { rejectReason: 'Different reason' }, { [status === 'approved' ? 'rejectAt' : 'reviewAt']: '2026-01-01T00:00:00.000Z' }]) {
+    const denied = await request('/api/records', { method: 'POST', session, body: { ...body, records: [{ ...body.records[0], ...extra }] } });
+    assert.equal(denied.status, 409, denied.text); assert.equal(snapshot(), before);
+  }
+  const otherSession = await login('manager'), beforeOtherActor = snapshot();
+  const otherActor = await request('/api/records', { method: 'POST', session: otherSession, body });
+  assert.equal(otherActor.status, 409, otherActor.text); assert.equal(snapshot(), beforeOtherActor);
+});
+
+for (const status of ['approved', 'rejected']) test('lost ' + status + ' creation response is idempotent without replacing server audit', async () => {
+  const session = await login();
+  const audit = status === 'approved'
+    ? { status, reviewBy: 'jc display', reviewAt: '2026-10-21T11:59:59.999Z', rejectBy: '', rejectAt: '', rejectReason: '' }
+    : { status, rejectBy: 'jc display', rejectAt: '2026-10-21T11:59:59.999Z', rejectReason: 'Synthetic reason', reviewBy: '', reviewAt: '' };
+  const body = { records: [fresh(954, audit)], newIds: [954], baseVersions: {} };
+  const first = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(first.status, 200, first.text); const before = snapshot();
+  const retry = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(retry.status, 200, retry.text); assert.equal(retry.json.accepted, 0);
+  assert.deepEqual(retry.json.confirmedRecords, first.json.confirmedRecords); assert.equal(snapshot(), before);
+});
+
+test('server-normalized review retry rechecks revoked approval permission for the same actor', async () => {
+  const session = await login('manager');
+  const body = { records: [changed(2, { status: 'approved', reviewBy: 'manager display', reviewAt: '2026-10-21T11:59:59.999Z' })],
+    baseVersions: { 2: '2026-01-01T00:00:00.000Z' } };
+  assert.equal((await request('/api/records', { method: 'POST', session, body })).status, 200);
+  sql(A, db => db.prepare('UPDATE users SET perms=? WHERE username=?').run(JSON.stringify({ review: { a: 0 } }), 'manager'));
+  const before = snapshot(), retry = await request('/api/records', { method: 'POST', session, body });
+  assert.equal(retry.status, 403, retry.text); assert.equal(snapshot(), before);
+});

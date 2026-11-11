@@ -1184,6 +1184,24 @@ function validIds(ids) {
     return id;
   });
 }
+/* An acknowledged review uses the server clock. If its response was lost, only
+   that generated audit time may differ from the same submitted operation. */
+function committedReviewRetry(current, submitted, user) {
+  if (!current || !['approved', 'rejected'].includes(submitted.status) || current.status !== submitted.status ||
+      typeof submitted.updatedAt !== 'string' || !Number.isFinite(Date.parse(submitted.updatedAt)) ||
+      current.updatedAt !== submitted.updatedAt) return false;
+  const actorField = submitted.status === 'approved' ? 'reviewBy' : 'rejectBy';
+  const timeField = submitted.status === 'approved' ? 'reviewAt' : 'rejectAt';
+  const actor = user.name || user.username;
+  if (!actor || submitted[actorField] !== actor || current[actorField] !== actor ||
+      typeof submitted[timeField] !== 'string' || !Number.isFinite(Date.parse(submitted[timeField])) ||
+      typeof current[timeField] !== 'string' || !Number.isFinite(Date.parse(current[timeField])) ||
+      current[timeField] === submitted[timeField]) return false;
+  const expected = canonicalValues({ ...submitted, [timeField]: current[timeField] });
+  if (!canonicalValues(current).every((value, index) => value === expected[index])) return false;
+  Auth.requirePermission(user, 'review', 'a');
+  return true;
+}
 function authorizeRecordBatch(db, input, ids, user, replace = false, newIds = []) {
   if (!Array.isArray(input)) Auth.fail(400, 'records须为数组');
   const deleted = validIds(ids), seen = new Set();
@@ -1219,6 +1237,7 @@ function authorizeRecordBatch(db, input, ids, user, replace = false, newIds = []
       if (current) {
         const retry = { ...raw, id, status: raw.status || 'pending' };
         if (retry.status === 'pending') for (const col of REVIEW_FIELDS.slice(1)) if (retry[col] == null) retry[col] = '';
+        if (committedReviewRetry(current, retry, user)) return null;
         const before = canonicalValues(current), after = canonicalValues(retry);
         if (!before.every((value, index) => value === after[index])) {
           Auth.fail(409, '新记录编号已被占用，整批修改未保存；请保留草稿并核对');
@@ -1269,6 +1288,68 @@ function authorizeRecordBatch(db, input, ids, user, replace = false, newIds = []
   });
   return { records: output.filter(Boolean), deletedIds: deleted, newIds };
 }
+
+/* New clients submit only their changes and the versions they edited. Keep the
+   precondition checks, authorization and confirmation in the same transaction. */
+function syncRecordChanges(db, input, ids, newIds, baseVersions, user) {
+  if (!baseVersions || typeof baseVersions !== 'object' || Array.isArray(baseVersions)) {
+    Auth.fail(400, '记录原始版本格式不正确');
+  }
+  const sameContent = (left, right) => {
+    const before = canonicalValues(left), after = canonicalValues(right);
+    return before.every((value, i) => RECORD_COLS[i] === 'updatedAt' || value === after[i]);
+  };
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const allowed = authorizeRecordBatch(db, input, ids, user, false, newIds);
+    const created = new Set(allowed.newIds), deleted = new Set(allowed.deletedIds);
+    const required = new Set(allowed.deletedIds);
+    for (const record of input) {
+      const id = Number(record.id);
+      if (deleted.has(id)) Auth.fail(400, '同一记录不能同时修改和删除');
+      if (!created.has(id)) required.add(id);
+    }
+    const keys = Object.keys(baseVersions);
+    if (keys.length !== required.size || keys.some(key => String(Number(key)) !== key || !required.has(Number(key)) ||
+        baseVersions[key] !== null && typeof baseVersions[key] !== 'string')) {
+      Auth.fail(400, '每条修改和删除记录均须提供对应原始版本');
+    }
+    const get = db.prepare('SELECT * FROM records WHERE id=?');
+    const tomb = db.prepare('SELECT id FROM record_tombstones WHERE id=?');
+    const reviewRetries = new Set();
+    for (const record of input) {
+      const id = Number(record.id);
+      if (created.has(id)) continue;
+      const row = get.get(id);
+      if (row && !tomb.get(id) && committedReviewRetry(rowToRecord(row), record, user)) {
+        reviewRetries.add(id); continue;
+      }
+      if (!row || tomb.get(id) || row.updatedAt !== baseVersions[id] && !sameContent(rowToRecord(row), record)) {
+        Auth.fail(409, '记录已被其他人修改或删除，整批修改未保存；原草稿已保留，请核对');
+      }
+    }
+    for (const id of deleted) {
+      const row = get.get(id);
+      if (row && row.updatedAt !== baseVersions[id]) {
+        Auth.fail(409, '待删除记录已被其他人修改，整批修改未保存；原草稿已保留，请核对');
+      }
+    }
+    const deletedCount = deleteRecords(db, allowed.deletedIds, false);
+    const writes = allowed.records.filter(record => !reviewRetries.has(Number(record.id)));
+    const result = upsertRecords(db, writes, false);
+    const written = new Map(writes.map(record => [Number(record.id), record]));
+    const confirmedRecords = input.map(record => {
+      const row = get.get(Number(record.id));
+      if (!row || written.has(Number(record.id)) && !sameContent(rowToRecord(row), written.get(Number(record.id)))) {
+        Auth.fail(409, '部分记录尚未保存，整批修改已撤回；原草稿已保留，请核对');
+      }
+      return rowToRecord(row);
+    });
+    db.exec('COMMIT');
+    return { ...result, deleted: deletedCount, confirmedRecords, confirmedDeletedIds: [...deleted] };
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+}
+
 function validatedUsers(db, input) {
   if (!Array.isArray(input)) Auth.fail(400, 'users须为数组');
   const old = new Map(db.prepare('SELECT * FROM users').all().map(user => [user.username, user]));
@@ -1589,8 +1670,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/records' && req.method === 'POST') {
       const body = await readBody(req);
-      const allowed = authorizeRecordBatch(db, body.records, body.deletedIds || [], user, false, body.newIds === undefined ? [] : body.newIds);
-      const r = mergeRecordChanges(db, allowed.records, allowed.deletedIds, allowed.newIds);
+      let r;
+      if (Object.hasOwn(body, 'baseVersions')) {
+        r = syncRecordChanges(db, body.records, body.deletedIds || [], body.newIds === undefined ? [] : body.newIds, body.baseVersions, user);
+      } else {
+        const allowed = authorizeRecordBatch(db, body.records, body.deletedIds || [], user, false, body.newIds === undefined ? [] : body.newIds);
+        r = mergeRecordChanges(db, allowed.records, allowed.deletedIds, allowed.newIds);
+      }
       return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM records').get().c,
         ...r });
     }

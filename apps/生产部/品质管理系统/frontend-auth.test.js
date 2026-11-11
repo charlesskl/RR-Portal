@@ -38,8 +38,17 @@ function browser({ authenticated = true, pathname = '/qc/', cached = [], handler
     } },
     fetch(url, options = {}) {
       calls.push({ url, ...options, parsed: options.body && JSON.parse(options.body) });
-      if (handler) { const result = handler(url, options, calls); if (result !== undefined) return result; }
-      const value = url.includes('/api/session') || url.includes('/api/login') ? auth() : url.includes('/api/ai/status') ? { ready: false } : { ok: true };
+      const recordSync = url.includes('/api/records?');
+      const request = options.body && JSON.parse(options.body);
+      const confirmation = () => ({ ok: true, confirmedRecords: request.records, confirmedDeletedIds: request.deletedIds });
+      if (handler) {
+        const result = handler(url, options, calls);
+        if (result !== undefined) return Promise.resolve(result).then(response => {
+          if (recordSync && response.ok && !Object.hasOwn(response, 'json')) return { ...response, json: async () => confirmation() };
+          return response;
+        });
+      }
+      const value = recordSync ? confirmation() : url.includes('/api/session') || url.includes('/api/login') ? auth() : url.includes('/api/ai/status') ? { ready: false } : { ok: true };
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(value) });
     }, confirm: () => true,
   };
@@ -414,7 +423,7 @@ test('quota fallback stays private across authenticated users and retries only f
   assert.equal(b.run('state.records[0].productNo'), 'alice-server');
   assert.equal(b.calls.filter(c => c.method === 'POST').length, posts);
   reject = false; assert.equal(await b.ctx.__QC_SYNC_NOW(), true);
-  assert.equal(b.calls.filter(c => c.method === 'POST').at(-1).parsed.records[0].productNo, 'alice-server');
+  assert.deepEqual(b.calls.filter(c => c.method === 'POST').at(-1).parsed.records, []);
   assert.equal(b.unloadListeners.size, 1); // Original owner's unprotected data remains in memory.
   b.setBootstrap(bootstrap()); b.ctx.__QC_BOOTSTRAP(); b.ctx.initData();
   assert.equal(b.run('state.records[0].productNo'), 'quota-draft');
@@ -540,6 +549,108 @@ test('provable local edits and new rows recover alongside unrelated fresh server
   assert.equal(b.calls.filter(c => c.method === 'POST').length, 1);
 });
 
+test('recovery preserves unrelated remote updates and deletions while retrying only a local edit', async () => {
+  const initial = [versioned(1, 'original'), versioned(2, 'other-original'), versioned(3, 'remote-deleted')];
+  const local = [{ ...initial[0], productNo: 'local-edit', updatedAt: '2026-11-03T03:00:00Z' }, ...initial.slice(1)];
+  const server = [initial[0], versioned(2, 'remote-update', '2026-11-03T04:00:00Z')];
+  const { b, key, original } = await recoveryDraft({ initial, local, server });
+  assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED, false);
+  assert.equal(b.store.get(key), original);
+  assert.deepEqual(plain(b.run('state.records')).map(row => [row.id, row.productNo]), [[1, 'local-edit'], [2, 'remote-update']]);
+  await b.ctx.__QC_SYNC_NOW();
+  const request = b.calls.filter(call => call.method === 'POST').at(-1).parsed;
+  assert.deepEqual(request.records, [local[0]]);
+  assert.deepEqual(request.baseVersions, { 1: initial[0].updatedAt });
+  assert.deepEqual(request.newIds, []);
+});
+
+test('an edit already saved before its response was lost recovers as a confirmed empty retry', async () => {
+  const initial = [versioned(1, 'original')];
+  const local = [versioned(1, 'saved-edit', '2026-11-03T03:00:00Z')];
+  const { b, key } = await recoveryDraft({ initial, local, server: local });
+  assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED, false);
+  assert.deepEqual(plain(b.run('state.records')), local);
+  // The failed test transport keeps the draft until a successful explicit retry.
+  await b.ctx.__QC_SYNC_NOW();
+  assert.deepEqual(b.calls.filter(call => call.method === 'POST').at(-1).parsed.records, []);
+  assert.equal(b.store.has(key), true);
+});
+
+test('an identical created record with server defaults is recognized after a lost response', async () => {
+  const local = [versioned(501, 'new')];
+  const saved = { ...local[0], status: 'pending', reviewBy: '', reviewAt: '', rejectBy: '', rejectAt: '', rejectReason: '', qty: null, defects: [], measurements: [] };
+  const { b } = await recoveryDraft({ local, server: [saved] });
+  assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED, false);
+  assert.deepEqual(plain(b.run('state.records')), [saved]);
+});
+
+for (const response of [
+  { ok: true, status: 200, json: undefined },
+  { ok: true, status: 200, json: async () => ({ ok: true, skippedStale: 1 }) },
+  { ok: true, status: 200, json: async () => ({ ok: true, confirmedRecords: [], confirmedDeletedIds: [] }) },
+]) test('an HTTP success without complete record confirmation retains the pending draft', async () => {
+  const b = browser({ handler: url => url.includes('/api/records') ? Promise.resolve(response) : undefined });
+  setPendingRecord(b);
+  assert.equal(await b.ctx.__QC_SYNC_NOW(), false);
+  assert.equal(b.store.has(prefix + 'pending_records_qc-admin'), true);
+  assert.match(b.ctx.__QC_SYNC_NOTICE, /服务器尚未保存/);
+  assert.equal(b.ctx.__QC_LAST_SYNC.ok, false);
+});
+
+test('confirmed server normalization updates unchanged local data and subsequent retries send no old rows', async () => {
+  let count = 0;
+  const saved = { ...pendingRecord, status: 'pending', reviewBy: '', reviewAt: '' };
+  const b = browser({ handler: url => {
+    if (url.includes('/api/records') && count++ === 0) return Promise.resolve({
+      ok: true, status: 200, json: async () => ({ ok: true, confirmedRecords: [saved], confirmedDeletedIds: [] }),
+    });
+  } });
+  setPendingRecord(b); b.ctx.initData();
+  assert.equal(await b.ctx.__QC_SYNC_NOW(), true);
+  assert.deepEqual(plain(b.run('state.records')), [saved]);
+  assert.deepEqual(JSON.parse(b.store.get(prefix + 'records')).records, [saved]);
+  assert.equal(await b.ctx.__QC_SYNC_NOW(), true);
+  assert.deepEqual(b.calls.filter(call => call.method === 'POST').at(-1).parsed.records, []);
+});
+
+test('an account change while confirmation JSON is pending cannot acknowledge the old draft', async () => {
+  let finish;
+  const b = browser({ handler: url => url.includes('/api/records') ? Promise.resolve({
+    ok: true, status: 200, json: () => new Promise(resolve => { finish = resolve; }),
+  }) : undefined });
+  setPendingRecord(b);
+  const pending = b.ctx.__QC_SYNC_NOW(); await tick();
+  const key = prefix + 'pending_records_qc-admin', original = b.store.get(key);
+  b.setBootstrap(bootstrap({ username: 'alice', role: 'viewer', enabled: true })); b.ctx.__QC_BOOTSTRAP();
+  finish({ ok: true, confirmedRecords: [pendingRecord], confirmedDeletedIds: [] });
+  assert.equal(await pending, false);
+  assert.equal(b.store.get(key), original);
+  assert.equal(b.ctx.getCurrentUser().username, 'alice');
+});
+
+test('optional provided legacy draft recovers its changed row alongside unrelated remote changes', {
+  skip: !process.env.QC_DRAFT_FILE,
+}, async () => {
+  const payload = JSON.parse(fs.readFileSync(process.env.QC_DRAFT_FILE, 'utf8').replace(/^\uFEFF/, ''));
+  const draft = payload.draftRecovery ? JSON.parse(payload.draftRecovery.originalRaw) : payload;
+  const baseline = draft.baseline.versions;
+  const dirty = draft.state.records.filter(row => baseline[row.id] !== (row.updatedAt == null ? null : row.updatedAt));
+  assert.ok(dirty.length > 0);
+  const server = draft.state.records.map(row => ({ ...row, updatedAt: baseline[row.id] }));
+  for (const row of server) if (dirty.some(changed => changed.id === row.id)) row.remark = 'synthetic original value';
+  const unrelated = server.find(row => !dirty.some(changed => changed.id === row.id));
+  unrelated.updatedAt = '2099-01-01T00:00:00Z'; unrelated.remark = 'synthetic unrelated update';
+  const key = prefix + 'pending_records_' + encodeURIComponent(draft.owner);
+  const b = browser({ authenticated: false, cached: [[key, JSON.stringify(draft)]] });
+  b.setBootstrap({ ...bootstrap({ ...admin, username: draft.owner }), records: server, nextId: draft.state.nextId });
+  b.ctx.__QC_BOOTSTRAP(); b.ctx.initData();
+  assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED, false);
+  assert.equal(b.run('state.records.length'), server.length);
+  assert.equal(await b.ctx.__QC_SYNC_NOW(), true);
+  assert.deepEqual(b.calls.filter(call => call.method === 'POST').at(-1).parsed.records, dirty);
+  assert.equal(b.store.has(key), false);
+});
+
 test('replacement recovery never restores a deleted row after the server baseline changed', async () => {
   const { b, key, original } = await recoveryDraft({ initial: [versioned(1,'original')], local: [versioned(1,'stale')], server: [], replacement: 1 });
   assert.deepEqual(plain(b.run('state.records')), []); assert.equal(b.ctx.__QC_FORCE_REPLACE, false);
@@ -650,5 +761,75 @@ test('a low unused random draft restores alongside another creator without autom
 
 test('normal HTML selects all matching modern creation-intent and OCR scripts without changing their load order',()=>{
   const html=source('index.html');const scripts=[...html.matchAll(/<script src="(qc-backend|app|ai-ocr)\.js\?v=([^"]+)"/g)].map(m=>[m[1],m[2]]);
-  assert.deepEqual(scripts,[['qc-backend','20261110-connection-notice-r1'],['app','20261110-connection-notice-r2'],['ai-ocr','20261109-ocr-mapping-r4']]);
+  assert.deepEqual(scripts,[['qc-backend','20261111-draft-recovery'],['app','20261111-draft-file-recovery'],['ai-ocr','20261109-ocr-mapping-r4']]);
+});
+
+test('a newer volatile draft retains confirmed server defaults after its next write fails', async () => {
+  let finishFirstRequest;
+  let requestCount = 0;
+  const saved = { ...pendingRecord, status: 'pending', reviewBy: '', reviewAt: '',
+    rejectBy: '', rejectAt: '', rejectReason: '' };
+  const extra = { ...pendingRecord, id: 502, productNo: 'second-quota-new' };
+  const b = browser({ handler: url => {
+    if (!url.includes('/api/records')) return;
+    requestCount++;
+    if (requestCount === 1) return new Promise(resolve => { finishFirstRequest = resolve; });
+    return Promise.resolve({ ok: false, status: 500 });
+  } });
+  setPendingRecord(b);
+  failDraftStorage(b);
+  const first = b.ctx.__QC_SYNC_NOW();
+  await tick();
+  setPendingRecord(b, [pendingRecord, extra]);
+  const second = b.ctx.__QC_SYNC_NOW();
+  finishFirstRequest({ ok: true, status: 200,
+    json: async () => ({ ok: true, confirmedRecords: [saved], confirmedDeletedIds: [] }) });
+  assert.equal(await first, true);
+  assert.equal(await second, false);
+  b.setBootstrap({ ...bootstrap(), records: [saved], nextId: 503 });
+  b.ctx.__QC_BOOTSTRAP();
+  b.ctx.initData();
+  assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED, false);
+  assert.deepEqual(plain(b.run('state.records')), [saved, extra]);
+  assert.equal(b.unloadListeners.size, 1);
+  assert.equal(await b.ctx.__QC_SYNC_NOW(), false);
+  const retry = b.calls.filter(call => call.method === 'POST').at(-1).parsed;
+  assert.deepEqual(retry.records, [extra]);
+  assert.deepEqual(retry.newIds, [extra.id]);
+});
+
+for (const status of ['approved', 'rejected']) test('reopened lost ' + status + ' response keeps the review pending until explicit canonical API confirmation', async () => {
+  const initial = [{ ...versioned(1, 'review-fixture'), status: 'pending', reviewBy: '', reviewAt: '', rejectBy: '', rejectAt: '', rejectReason: '' }];
+  const actorField = status === 'approved' ? 'reviewBy' : 'rejectBy', timeField = status === 'approved' ? 'reviewAt' : 'rejectAt';
+  const local = { ...initial[0], status, updatedAt: '2026-11-03T03:00:00Z', [actorField]: admin.name,
+    [timeField]: '2026-11-03T02:59:59.999Z', rejectReason: status === 'rejected' ? 'Synthetic reason' : '' };
+  const saved = { ...local, [timeField]: '2026-11-03T03:00:01Z' };
+  let confirm = false;
+  const b = browser({ handler: url => url.includes('/api/records') ? confirm
+    ? { ok: true, status: 200, json: async () => ({ ok: true, confirmedRecords: [saved], confirmedDeletedIds: [] }) }
+    : { ok: false, status: 500 } : undefined });
+  b.setBootstrap({ ...bootstrap(), records: initial }); b.ctx.__QC_BOOTSTRAP();
+  b.store.set(prefix + 'records', JSON.stringify({ records: [local], nextId: 501 }));
+  await b.ctx.__QC_SYNC_NOW();
+  const key = prefix + 'pending_records_qc-admin', raw = b.store.get(key);
+  b.setBootstrap({ ...bootstrap(), records: [saved] }); b.ctx.__QC_BOOTSTRAP(); b.ctx.initData();
+  assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED, false);
+  assert.equal(b.store.get(key), raw); assert.deepEqual(plain(b.run('state.records')), [local]);
+  assert.equal(await b.ctx.__QC_SYNC_NOW(), false);
+  assert.equal(b.store.has(key), true);
+  const submitted = b.calls.filter(call => call.method === 'POST').at(-1).parsed;
+  assert.deepEqual(submitted.records, [local]); assert.deepEqual(submitted.baseVersions, { 1: saved.updatedAt });
+  confirm = true; assert.equal(await b.ctx.__QC_SYNC_NOW(), true);
+  assert.deepEqual(plain(b.run('state.records')), [saved]); assert.equal(b.store.has(key), false);
+});
+
+for (const kind of ['actor', 'business', 'version', 'other-audit', 'reason', 'invalid-time']) test('review normalization cannot recover a draft with changed ' + kind, async () => {
+  const initial = [{ ...versioned(1, 'review-fixture'), status: 'pending', reviewBy: '', reviewAt: '', rejectBy: '', rejectAt: '', rejectReason: '' }];
+  const local = { ...initial[0], status: 'approved', updatedAt: '2026-11-03T03:00:00Z', reviewBy: admin.name, reviewAt: '2026-11-03T02:59:59.999Z' };
+  const extra = { actor: { reviewBy: 'other-user' }, business: { productNo: 'different' }, version: { updatedAt: '2026-11-03T04:00:00Z' },
+    'other-audit': { rejectBy: 'different' }, reason: { rejectReason: 'different' }, 'invalid-time': { reviewAt: 'invalid' } }[kind];
+  const saved = { ...local, reviewAt: '2026-11-03T03:00:01Z', ...extra };
+  const { b, key, original } = await recoveryDraft({ initial, local: [local], server: [saved] });
+  assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED, true); assert.equal(b.store.get(key), original);
+  assert.deepEqual(plain(b.run('state.records')), [saved]);
 });

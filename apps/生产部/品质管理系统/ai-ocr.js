@@ -397,16 +397,41 @@
       .finally(function () { if (revision === textRevision) controlsBusy(false); });
   };
 
+  /* A stalled status, model response or response body must release the UI.
+     Invalidate via the existing operation context so late replies cannot apply. */
+  function boundedOperation(op, work) {
+    return new Promise(function (resolve, reject) {
+      var settled = false, timer;
+      var signal = op.controller && op.controller.signal;
+      function finish(callback, value) {
+        if (settled) return;
+        settled = true; clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', aborted);
+        callback(value);
+      }
+      function aborted() { finish(reject, obsolete()); }
+      if (signal) signal.addEventListener('abort', aborted, { once: true });
+      timer = setTimeout(function () {
+        finish(reject, new Error('识别等待超时，请重试；图片与已填内容已保留'));
+        if (op.controller) op.controller.abort();
+      }, 90000);
+      try {
+        requireCurrent(op);
+        Promise.resolve(work()).then(function (value) { finish(resolve, value); }, function (error) { finish(reject, error); });
+      } catch (error) { finish(reject, error); }
+    });
+  }
+
   function aiDispatch() {
     var op = beginOperation();
     if (!op) return Promise.resolve();
     setT('ocrStatus', '正在检查识别服务...');
-    return checkAiStatus(true, op).then(function (ready) {
+    return boundedOperation(op, function () { return checkAiStatus(true, op).then(function (ready) {
       requireCurrent(op);
       if (ready) return aiStartOcr(op);
       if (!aiStatus || aiStatus.error) throw new Error('无法检查 AI 识别服务状态，请稍后重试；已填内容已保留');
       throw new Error('识别服务暂不可用，请稍后重试；图片与已填内容已保留');
-    }).catch(function (error) { operationFailure(op, error, 'AI 识别失败'); })
+    }); }).catch(function (error) { operationFailure(op, error, 'AI 识别失败'); })
       .finally(function () { endOperation(op); });
   }
 

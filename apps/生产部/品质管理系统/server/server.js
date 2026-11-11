@@ -898,15 +898,27 @@ async function aiVisionExtract(dataUrl) {
       ] },
     ],
   };
+  const deadline = Date.now() + 60000;
   async function callModel(model, signal) {
+    const timeoutError = () => {
+      const error = new Error('识别服务响应超时，请稍后重试');
+      error.code = 'OCR_TIMEOUT'; return error;
+    };
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw timeoutError();
+    const bounded = AbortSignal.any([AbortSignal.timeout(Math.min(30000, remaining)), ...(signal ? [signal] : [])]);
     payload.model = model;
-    const resp = await fetch(AI.baseURL.replace(/\/$/, '') + '/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI.apiKey },
-      body: JSON.stringify(payload),
-      ...(signal ? { signal } : {}),
-    });
-    return { status: resp.status, raw: await resp.text() };
+    try {
+      const resp = await fetch(AI.baseURL.replace(/\/$/, '') + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI.apiKey },
+        body: JSON.stringify(payload), signal: bounded,
+      });
+      return { status: resp.status, raw: await resp.text() };
+    } catch (error) {
+      if (bounded.aborted) throw timeoutError();
+      throw error;
+    }
   }
   /* 该密钥的模型权限存在随机抖动（同一请求约 40~60% 概率返回 403 AccessDenied），
      因此对 403 做同模型重试（最多 6 次，间隔 1.5s）；仍失败再回退 qwen3.5-ocr */
@@ -1929,7 +1941,7 @@ const server = http.createServer(async (req, res) => {
         const r = await aiVisionExtract(body.image);
         return sendJson(res, 200, { ok: true, fields: r.fields, usage: r.usage, rawText: r.rawText, needRotate: r.needRotate || 0, needsManualReview: r.needsManualReview === true });
       } catch (e) {
-        const code = e.code === 'NO_AI' ? 503 : 502;
+        const code = e.code === 'NO_AI' ? 503 : e.code === 'OCR_TIMEOUT' ? 504 : 502;
         return sendJson(res, code, { ok: false, error: String(e && e.message || e), code: e.code || 'ERR' });
       }
     }

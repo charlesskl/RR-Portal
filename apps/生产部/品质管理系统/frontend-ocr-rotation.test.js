@@ -571,3 +571,36 @@ test('different browser engine availability renders identical server columns for
   }
   assert.equal(previews[0],previews[1]);
 });
+
+for(const stalledAt of ['status','fetch','body']) {
+  test('a stalled '+stalledAt+' times out, preserves edits and queue, and ignores late completion after a retry', async()=>{
+    const x=fixture(); x.upload(); let timeout, finish;
+    const image=x.preview(), queue={items:[{productNo:'QUEUED'}],idx:0};
+    x.b.ctx.__qcQueue=queue; x.b.elements.get('ocrProductNo').value='MANUAL';
+    x.b.elements.get('ocrRawText').value='KEEP RAW';
+    x.b.ctx.setTimeout=(fn,delay)=>{if(delay===90000)timeout=fn;};
+    if(stalledAt==='status') {
+      const request=x.b.ctx.__QC_REQUEST;
+      x.b.ctx.__QC_REQUEST=(route,options)=>route==='/api/ai/status'
+        ?new Promise(resolve=>{finish=resolve;}):request(route,options);
+    } else x.config.post=stalledAt==='fetch'
+      ?()=>new Promise(resolve=>{finish=resolve;})
+      :async()=>({ok:true,status:200,json:()=>new Promise(resolve=>{finish=resolve;})});
+    const request=x.b.ctx.__QC_REQUEST;
+    const pending=x.b.ctx.startOcr(); await tick(); assert.equal(typeof timeout,'function');
+    timeout(); await pending;
+    assert.match(x.status(),/等待超时/); assert.deepEqual(x.controls(),[false,false,false]);
+    assert.equal(x.preview(),image); assert.equal(x.value('ocrProductNo'),'MANUAL');
+    assert.equal(x.value('ocrRawText'),'KEEP RAW'); assert.equal(x.b.ctx.__qcQueue,queue);
+    if(stalledAt==='status') {
+      x.b.ctx.__QC_REQUEST=async(route,options)=>route==='/api/ai/status'
+        ?{ok:true,status:200,json:async()=>({ready:true})}:request(route,options);
+    }
+    x.config.post=null; x.responses.push(valid('RETRIED-SKU')); await x.b.ctx.startOcr();
+    assert.equal(x.value('ocrProductNo'),'RETRIED-SKU');
+    finish(stalledAt==='status'?{ok:true,json:async()=>({ready:true})}:
+      stalledAt==='fetch'?{ok:true,status:200,json:async()=>valid('STALE-SKU')}:valid('STALE-SKU'));
+    await tick(); assert.equal(x.value('ocrProductNo'),'RETRIED-SKU');
+    assert.deepEqual(x.controls(),[false,false,false]);
+  });
+}

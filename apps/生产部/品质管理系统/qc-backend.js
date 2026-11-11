@@ -169,12 +169,44 @@
   var recordQueueEpoch = 0;
   var draftOwner = null;
   var recordBaseline = null;
+  var recordBaselineSignatures = Object.create(null);
   var blockedRecovery = null;
   window.__QC_DRAFT_RECOVERY_BLOCKED = false;
   function baselineOf(st) {
     var versions = Object.create(null);
     (st.records || []).forEach(function (r) { versions[r.id] = r.updatedAt == null ? null : r.updatedAt; });
     return { versions: versions, nextId: st.nextId };
+  }
+  // Match the persisted columns, including SQLite's numeric and nullable values.
+  function recordSignature(record, creation, ignoreVersion) {
+    var fields = ['id','date','inspDate','supplier','client','processType','productNo','productName',
+      'deliveryNo','orderNo','type','qty','sampleQty','pass','fail','defectRate','result','result2',
+      'defect','defects','measurements','qc','confirmBy','remark','orderQty','updatedAt',
+      'status','reviewBy','reviewAt','rejectReason','rejectBy','rejectAt','aqlLevel'];
+    var numeric = ['id','qty','sampleQty','pass','fail','orderQty'];
+    return JSON.stringify(fields.map(function (key) {
+      var value = record[key];
+      if (key === 'updatedAt' && ignoreVersion) return null;
+      if (key === 'status' && creation) return value || 'pending';
+      if (creation && (!record.status || record.status === 'pending') &&
+          ['reviewBy','reviewAt','rejectReason','rejectBy','rejectAt'].indexOf(key) !== -1) return value == null ? '' : String(value);
+      if (key === 'defects' || key === 'measurements') return Array.isArray(value) ? value : value ? [value] : [];
+      if (numeric.indexOf(key) !== -1) return value == null || value === '' ? null : Number(value);
+      return value == null ? null : String(value);
+    }), function (key, value) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+      var sorted = Object.create(null);
+      Object.keys(value).sort().forEach(function (name) { sorted[name] = value[name]; });
+      return sorted;
+    });
+  }
+  function pendingRecordChanges(st) {
+    var versions = recordBaseline && recordBaseline.versions || Object.create(null);
+    return (st.records || []).filter(function (row) {
+      return !Object.prototype.hasOwnProperty.call(versions, row.id) ||
+        versions[row.id] !== (row.updatedAt == null ? null : row.updatedAt) ||
+        recordBaselineSignatures[row.id] !== recordSignature(row);
+    });
   }
   function sameBaseline(baseline, st, replacement) {
     if (!baseline || !baseline.versions || typeof baseline.versions !== 'object') return false;
@@ -287,8 +319,9 @@
     if (!owner || !window.__QC_AUTH || window.__QC_AUTH.user.username !== owner) return false;
     var draft, previous;
     try {
+      var state = JSON.parse(localStorage.getItem(KEY.records) || '{}');
       draft = { owner: owner, company: COMPANY, revision: recordRevision, token: recordToken,
-        state: JSON.parse(localStorage.getItem(KEY.records) || '{}'), baseline: recordBaseline, deletedIds: window.__QC_PENDING_DELETES.slice(),
+        state: state, baseline: recordBaseline, changedIds: pendingRecordChanges(state).map(function (row) { return row.id; }), deletedIds: window.__QC_PENDING_DELETES.slice(),
         deleteRevisions: Object.assign({}, deleteRevisions), nextDeleteRevision: nextDeleteRevision, replacement: window.__QC_FORCE_REPLACE || false };
       try { previous = JSON.parse(localStorage.getItem(draftKey(owner)) || 'null'); } catch (_) {}
       localStorage.setItem(draftKey(owner), JSON.stringify(draft));
@@ -317,31 +350,54 @@
       var originalRaw = volatile ? JSON.stringify(volatile.draft) : localStorage.getItem(draftKey(owner));
       var draft = originalRaw ? JSON.parse(originalRaw) : null;
       recordBaseline = baselineOf(serverState);
+      recordBaselineSignatures = Object.create(null);
+      serverState.records.forEach(function (row) { recordBaselineSignatures[row.id] = recordSignature(row); });
       if (!draft || draft.owner !== owner || draft.company !== COMPANY) return;
       if (!draft.state || !Array.isArray(draft.state.records)) { blockDraftRecovery(draft, originalRaw); return; }
       var serverById = Object.create(null), indexOfId = Object.create(null), merged = serverState.records.slice();
       merged.forEach(function (r, i) { serverById[r.id] = r; indexOfId[r.id] = i; });
-      var conflict = !sameBaseline(draft.baseline, serverState, !!draft.replacement);
+      var conflict = !draft.baseline || !draft.baseline.versions ||
+        typeof draft.baseline.versions !== 'object' || Array.isArray(draft.baseline.versions);
+      if (draft.replacement && !sameBaseline(draft.baseline, serverState, true)) conflict = true;
       var baseline = draft.baseline && draft.baseline.versions || Object.create(null);
+      var changedIds = draft.changedIds === undefined ? [] : draft.changedIds;
+      if (!Array.isArray(changedIds) || changedIds.some(function (id) { return !Number.isSafeInteger(id) || id <= 0; })) {
+        conflict = true; changedIds = [];
+      }
+      var deleted = (Array.isArray(draft.deletedIds) ? draft.deletedIds : []).filter(function (id) { return Number.isSafeInteger(id) && id > 0; });
+      var changes = [];
       var seen = new Set();
       draft.state.records.forEach(function (r) {
         if (!Number.isSafeInteger(r.id) || r.id <= 0 || seen.has(r.id)) { conflict = true; return; }
         seen.add(r.id);
-        // Random IDs are not an allocation sequence. Only an actual existing
-        // server row proves this new draft ID is occupied; tombstones remain
-        // authoritative when the server checks the explicit creation intent.
-        if (!Object.prototype.hasOwnProperty.call(baseline, r.id) && serverById[r.id]) conflict = true;
+        if (draft.replacement || deleted.indexOf(r.id) !== -1) return;
+        var hasBaseline = Object.prototype.hasOwnProperty.call(baseline, r.id);
+        var current = serverById[r.id];
+        var changed = !hasBaseline || baseline[r.id] !== (r.updatedAt == null ? null : r.updatedAt) || changedIds.indexOf(r.id) !== -1;
+        if (!changed) {
+          // Old drafts have only timestamps. A same-version content difference
+          // cannot safely be interpreted as either a saved row or a local edit.
+          if (current && baseline[r.id] === (current.updatedAt == null ? null : current.updatedAt) &&
+              recordSignature(r) !== recordSignature(current)) conflict = true;
+          return;
+        }
+        if (current && recordSignature(r, !hasBaseline, true) === recordSignature(current, false, true)) return;
+        if (hasBaseline && (!current || baseline[r.id] !== (current.updatedAt == null ? null : current.updatedAt)) ||
+            !hasBaseline && current) { conflict = true; return; }
+        changes.push(r);
       });
-      var deleted = (Array.isArray(draft.deletedIds) ? draft.deletedIds : []).filter(function (id) { return Number.isSafeInteger(id) && id > 0; });
+      if (changedIds.some(function (id) { return !seen.has(id); })) conflict = true;
       if (!draft.replacement) deleted.forEach(function (id) {
-        if (serverById[id] && !Object.prototype.hasOwnProperty.call(baseline, id)) conflict = true;
+        var current = serverById[id];
+        if (current && (!Object.prototype.hasOwnProperty.call(baseline, id) ||
+            baseline[id] !== (current.updatedAt == null ? null : current.updatedAt))) conflict = true;
       });
       if (conflict) { blockDraftRecovery(draft, originalRaw); return; }
       // Baseline IDs and exact server revisions prove these edits are still applicable.
       // An absent baseline row is never interpreted as a new unsynced record.
       if (draft.replacement) merged = draft.state.records.slice();
       else {
-        draft.state.records.forEach(function (r) {
+        changes.forEach(function (r) {
           if (Object.prototype.hasOwnProperty.call(indexOfId, r.id)) merged[indexOfId[r.id]] = r;
           else merged.push(r);
         });
@@ -421,7 +477,7 @@
   window.__QC_BOOTSTRAP = syncBootstrap;
 
   /* ── 写穿透：把本地写入推回后端 ── */
-  function post(url, body) {
+  function post(url, body, confirmResponse) {
     if (window.__QC_MAINTENANCE && window.__QC_MAINTENANCE.blocked) return Promise.resolve(false);
     function completed(ok, status, error) {
       window.__QC_LAST_SYNC = { url: url, ok: ok, status: status, error: error, time: new Date().toISOString() };
@@ -445,6 +501,14 @@
         if (r.headers && r.headers.get('X-QC-Maintenance') === '1' && window.__QC_MAINTENANCE) window.__QC_MAINTENANCE.activate();
         if (window.__QC_AUTH !== requestAuth) return false;
         if (r.status === 401) clearAuth('登录已失效，请重新登录；未同步修改仍保留在本地');
+        if (r.ok && confirmResponse) {
+          if (typeof r.json !== 'function') return completed(false, r.status, '服务器未返回逐条保存确认');
+          return r.json().then(function (data) {
+            if (window.__QC_AUTH !== requestAuth) return false;
+            var confirmed = confirmResponse(data);
+            return completed(confirmed, r.status, confirmed ? undefined : '服务器未确认全部修改，草稿已保留');
+          });
+        }
         return completed(r.ok, r.status);
       }).catch(function () { return window.__QC_AUTH === requestAuth ? completed(false, 0, '网络连接失败') : false; });
     } catch (_) { return Promise.resolve(completed(false, 0, '网络连接失败')); }
@@ -483,15 +547,73 @@
       var revisions = deleted.map(function (id) { return deleteRevisions[id]; });
       var replacement = window.__QC_FORCE_REPLACE;
       var baselineVersions = recordBaseline && recordBaseline.versions || Object.create(null);
-      var createdIds = (st.records || []).filter(function (row) {
+      var changes = pendingRecordChanges(st).filter(function (row) { return deleted.indexOf(row.id) === -1; });
+      var createdIds = changes.filter(function (row) {
         return !Object.prototype.hasOwnProperty.call(baselineVersions, row.id);
       }).map(function (row) { return row.id; });
+      var baseVersions = Object.create(null);
+      changes.forEach(function (row) {
+        if (createdIds.indexOf(row.id) === -1) baseVersions[row.id] = baselineVersions[row.id];
+      });
+      deleted.forEach(function (id) { baseVersions[id] = Object.prototype.hasOwnProperty.call(baselineVersions, id) ? baselineVersions[id] : null; });
+      var confirmation = null;
+      var requestAuth = window.__QC_AUTH;
+      function confirmRows(data) {
+        if (!data || data.ok !== true || !Array.isArray(data.confirmedRecords) || !Array.isArray(data.confirmedDeletedIds)) return false;
+        var rowIds = data.confirmedRecords.map(function (row) { return row && row.id; });
+        var deleteIds = data.confirmedDeletedIds;
+        if (rowIds.length !== changes.length || new Set(rowIds).size !== rowIds.length ||
+            changes.some(function (row) { return rowIds.indexOf(row.id) === -1; }) ||
+            data.confirmedRecords.some(function (row) { return !row || typeof row !== 'object' || Array.isArray(row); }) ||
+            deleteIds.length !== deleted.length || new Set(deleteIds).size !== deleteIds.length ||
+            deleted.some(function (id) { return deleteIds.indexOf(id) === -1; })) return false;
+        confirmation = data;
+        return true;
+      }
       function acknowledge(ok) {
         // A response from an old actor/session must never clear another actor's draft.
-        if (!ok || !window.__QC_AUTH || window.__QC_AUTH.user.username !== owner || draftOwner !== owner || epoch !== recordQueueEpoch) return ok;
-        // Advance only to this exact acknowledged snapshot, not to later local
-        // edits which may have happened while this request was in flight.
-        recordBaseline = baselineOf(st);
+        if (!ok || window.__QC_AUTH !== requestAuth || !window.__QC_AUTH || window.__QC_AUTH.user.username !== owner || draftOwner !== owner || epoch !== recordQueueEpoch) return false;
+        if (replacement) {
+          recordBaseline = baselineOf(st);
+          recordBaselineSignatures = Object.create(null);
+          (st.records || []).forEach(function (row) { recordBaselineSignatures[row.id] = recordSignature(row); });
+        }
+        else {
+          var confirmed = Object.create(null), sent = Object.create(null);
+          confirmation.confirmedRecords.forEach(function (row) { confirmed[row.id] = row; });
+          changes.forEach(function (row) { sent[row.id] = row; });
+          function applyConfirmedRows(rows) {
+            return rows.map(function (row) {
+              return confirmed[row.id] && recordSignature(row) === recordSignature(sent[row.id]) ? confirmed[row.id] : row;
+            });
+          }
+          try {
+            var current = JSON.parse(localStorage.getItem(KEY.records) || '{}');
+            var updated = applyConfirmedRows(current.records || []);
+            if (JSON.stringify(updated) !== JSON.stringify(current.records)) {
+              current.records = updated;
+              localStorage.setItem(KEY.records, JSON.stringify(current));
+            }
+            if (typeof state !== 'undefined' && state && Array.isArray(state.records)) state.records = applyConfirmedRows(state.records);
+          } catch (_) {
+            failedWrites[apiUrl('/api/records')] = true;
+            notice('服务器已确认保存，本地状态尚未更新，草稿已保留；请保留页面后重试同步。', true);
+            return false;
+          }
+          // Only confirmed rows advance the baseline. Unrelated rows and later
+          // local edits retain their own versions while this request completes.
+          confirmation.confirmedRecords.forEach(function (row) {
+            recordBaseline.versions[row.id] = row.updatedAt == null ? null : row.updatedAt;
+            recordBaselineSignatures[row.id] = recordSignature(row);
+          });
+          confirmation.confirmedDeletedIds.forEach(function (id) {
+            delete recordBaseline.versions[id]; delete recordBaselineSignatures[id];
+          });
+          var pendingVolatile = volatileRecordDrafts[owner];
+          if (pendingVolatile && pendingVolatile.draft.token === recordToken && pendingVolatile.draft.revision === recordRevision) {
+            pendingVolatile.draft.state.records = applyConfirmedRows(pendingVolatile.draft.state.records);
+          }
+        }
         window.__QC_PENDING_DELETES = window.__QC_PENDING_DELETES.filter(function (id) {
           var index = deleted.indexOf(id);
           return index === -1 || deleteRevisions[id] !== revisions[index];
@@ -514,7 +636,7 @@
         return ok;
       }
       if (replacement) return post(apiUrl('/api/records/replace'), { records: st.records || [] }).then(acknowledge);
-      return post(apiUrl('/api/records'), { records: st.records || [], deletedIds: deleted, newIds: createdIds }).then(acknowledge);
+      return post(apiUrl('/api/records'), { records: changes, deletedIds: deleted, newIds: createdIds, baseVersions: baseVersions }, confirmRows).then(acknowledge);
     } catch (e) { console.warn('[QC后端] 读本地记录失败', e); }
     return Promise.resolve(false);
   }

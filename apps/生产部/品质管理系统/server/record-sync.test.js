@@ -74,10 +74,13 @@ function browser() {
 const tick = () => new Promise(resolve => setImmediate(resolve));
 test('in-flight success only acknowledges the deletion revisions actually sent', async () => {
   const { window: w, requests } = browser(); w.__QC_MARK_DELETED([1]); const first = w.__QC_SYNC_NOW(); await tick();
-  w.__QC_MARK_DELETED([1, 2]); requests[0].resolve({ ok: true, status: 200 }); await first;
+  w.__QC_MARK_DELETED([1, 2]);
+  requests[0].resolve({ ok: true, status: 200, json: async () => ({ ok: true, confirmedRecords: [], confirmedDeletedIds: [1] }) });
+  await first;
   assert.deepEqual(Array.from(w.__QC_PENDING_DELETES), [1, 2]);
   const second = w.__QC_SYNC_NOW(); await tick(); assert.deepEqual(requests[1].body.deletedIds, [1, 2]);
-  requests[1].resolve({ ok: true, status: 200 }); await second; assert.equal(w.__QC_PENDING_DELETES.length, 0);
+  requests[1].resolve({ ok: true, status: 200, json: async () => ({ ok: true, confirmedRecords: [], confirmedDeletedIds: [1, 2] }) });
+  await second; assert.equal(w.__QC_PENDING_DELETES.length, 0);
 });
 test('overlapping replacements remain serialized and the later generation is retained', async () => {
   const { window: w, requests } = browser(); w.__QC_FORCE_REPLACE = 1; const first = w.__QC_SYNC_NOW(); await tick();

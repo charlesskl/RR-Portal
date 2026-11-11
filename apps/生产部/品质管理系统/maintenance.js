@@ -3,7 +3,7 @@
   'use strict';
   var activated = false, inFlight = false, pending = null;
   var base = location.pathname.replace(/[^/]*$/, '').replace(/\/$/, '');
-  var guard = window.__QC_MAINTENANCE = { blocked: false, activate: activate };
+  var guard = window.__QC_MAINTENANCE = { blocked: true, message: '正在检查连接，暂未提交，请稍后重试', activate: activate };
   function updatePageLock() {
     var overlay = document.getElementById('qcMaintenance');
     if (overlay) overlay.hidden = !activated;

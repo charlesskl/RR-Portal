@@ -350,3 +350,45 @@ test('a prior packing equation cannot decide whether a later bare number is deli
   assert.equal(ambiguous.items[1].deliveryBalance, ''); assert.equal(ambiguous.items[1].qty, '16');
   assert.match(ambiguous.items[1].remark, /右侧原文（列位置待核对）：1$/); assert.equal(ambiguous.manualReviewRequired, true);
 });
+
+const paperHeading = '订单号 产品名称 规格型号 数量 单价 金额 重量 备注';
+test('paper sheets map code-like product names and textual specifications without using weight as quantity', () => {
+  const descriptions = ['甲贴纸','LED灯箱贴纸','UV贴纸（紫色）','UV贴纸 （绿色）','UV贴纸（黄色）','UV贴纸（白色）','UV贴纸（粉色）'];
+  const raw = [paperHeading,...descriptions.map(name=>'PO-26001 30721 '+name+' 80 1.5'),
+    '备注：','制单人：合成人员 司机：','客户收货人： 收货日期：4/11(三)','合成公司','(收貨章)','收貨人：'].join('\n');
+  const fields = runtime().parse(raw);
+  assert.equal(fields.items.length,7);
+  assert.deepEqual(fields.items.map(i=>i.productName),descriptions);
+  for (const item of fields.items) {
+    assert.equal(item.orderNo,'PO-26001'); assert.equal(item.productNo,'30721');
+    assert.equal(item.qty,'80'); assert.equal(item.unit,'');
+    assert.match(item.remark,/右侧原文.*1\.5$/);
+  }
+  assert.equal(fields.manualReviewRequired,true);
+});
+
+test('positioned paper cells preserve empty price/amount, actual weight and original remark', () => {
+  const raw = '|'+paperHeading.split(' ').join('|')+'|\n|---|---|---|---|---|---|---|---|\n'+
+    '|PO-26001|30721|主机贴纸|80|||1.5|加急|\n|PO-26001|30721|UV贴纸 （紫色）|90|0.2|18|1.8||';
+  const fields = runtime().parse(raw);
+  assert.deepEqual(fields.items.map(i=>[i.orderNo,i.productNo,i.productName,i.qty,i.remark]),[
+    ['PO-26001','30721','主机贴纸','80','重量：1.5；原单备注：加急'],
+    ['PO-26001','30721','UV贴纸 （紫色）','90','单价：0.2；金额：18；重量：1.8']]);
+  assert.ok(fields.items.every(i=>!i.quantityNeedsReview));
+  assert.ok(!fields.manualReviewRequired);
+});
+
+for(const row of ['PO-26001 30721 主机贴纸 1.5', 'PO-26001 30721 主机贴纸 20 80 1.5',
+  'PO-26001 30721 80 1.5', 'PO-26001 主机贴纸 80 1.5']) {
+  test('ambiguous paper prefixes or competing numeric columns keep the complete row: '+row,()=>{
+    const fields=runtime().parse(paperHeading+'\n'+row);
+    assert.equal(fields.items.length,1); assert.equal(fields.items[0].qty,'');
+    assert.equal(fields.items[0].quantityNeedsReview,true); assert.match(fields.items[0].productName,/待核对原文/);
+  });
+}
+
+test('a blank positioned paper quantity never borrows price amount or weight, and a short row never shifts columns',()=>{
+  const raw='|'+paperHeading.split(' ').join('|')+'|\n|PO-26001|30721|甲贴纸||0.2|18|1.8||\n|PO-26001|30721|乙贴纸|0.2|18|1.8||';
+  const fields=runtime().parse(raw);
+  assert.equal(fields.items.length,2); assert.ok(fields.items.every(i=>i.quantityNeedsReview && i.qty===''));
+});

@@ -345,6 +345,53 @@ function parseDeliveryNote(text, options = {}) {
     if (m) fields.orderNo = m[1];
   }
 
+  /* 纸品单的「产品名称」为代码，「规格型号」为描述。
+     只匹配这组完整表头，避免改变其它单据的名称/规格含义。 */
+  const paperHeader = '订单号产品名称规格型号数量单价金额重量备注';
+  const paperHeading = line => (line.includes('|') ? splitRow(line) : line.trim().split(/\s+/)).join('').replace(/\s/g, '') === paperHeader;
+  const paperAt = lines.findIndex(paperHeading);
+  if (paperAt >= 0) {
+    let positioned = lines[paperAt].includes('|');
+    const footer = /^(?:备注|制单人|製單人|司机|司機|客户收货人|客戶收貨人|收货人|收貨人|收货日期|收貨日期|合计|合計)[：:]|^[（(]?(?:代香港|收貨章|收货章)|^細數未點/;
+    const code = value => value.replace(/[‐‑‒–—−﹘﹣－]/g, '-');
+    const codePattern = /^[A-Za-z0-9][A-Za-z0-9._/#-]*\d[A-Za-z0-9._/#-]*$/;
+    let inFooter = false;
+    for (const line of lines.slice(paperAt + 1)) {
+      if (paperHeading(line)) { positioned = line.includes('|'); inFooter = false; continue; }
+      if (footer.test(positioned ? splitRow(line)[0] || '' : line)) { inFooter = true; continue; }
+      if (inFooter || /^\|?(?:\s*:?-+:?\s*\|)+/.test(line)) continue;
+      let order, sku, name, qty, remark;
+      if (positioned) {
+        const cells = splitRow(line);
+        if (cells.length !== 8 || !codePattern.test(code(cells[0])) || !codePattern.test(code(cells[1])) ||
+            !cells[2] || !/^(?:\d{1,3}(?:[,，]\d{3})+|\d+)$/.test(cells[3])) {
+          fields.items.push(_pendingOcrItem(line)); continue;
+        }
+        [order, sku, name, qty] = cells;
+        remark = [['单价',cells[4]],['金额',cells[5]],['重量',cells[6]],['原单备注',cells[7]]]
+          .filter(pair => pair[1]).map(pair => pair[0] + '：' + pair[1]).join('；');
+      } else {
+        // Require all three leading fields and one integer quantity. A bare
+        // numeric description token makes the boundary ambiguous; keep source.
+        const match = /^(\S+)\s+(\S+)\s+(.+?)\s+((?:\d{1,3}(?:[,，]\d{3})+|\d+))(?:\s+(.*))?$/.exec(line);
+        if (!match || !codePattern.test(code(match[1])) || !codePattern.test(code(match[2])) ||
+            !/[一-鿿]/.test(match[3]) || /(?:^|\s)\d+(?:[.,]\d+)?(?:\s|$)/.test(match[3]) ||
+            match[5] && !/^\d+(?:\.\d+)?$/.test(match[5])) {
+          fields.items.push(_pendingOcrItem(line)); continue;
+        }
+        [, order, sku, name, qty] = match;
+        remark = match[5] ? '右侧原文（单价/金额/重量/备注列待核对）：' + match[5] : '';
+        if (remark) fields.manualReviewRequired = true;
+      }
+      fields.items.push({orderNo:code(order),productNo:code(sku),productName:name,
+        qty:quantityText(qty,''),unit:'',remark});
+    }
+    if (!fields.items.length) fields.items.push(_pendingOcrItem(rawText));
+    const orders = fields.items.map(item => item.orderNo || '');
+    fields.orderNo = orders.length && orders.every(order => order && order === orders[0]) ? orders[0] : '';
+    return fields;
+  }
+
   /* Tab-preserved packaging sheets can contain real newlines inside cells.
      Keep those cells together instead of treating every physical line as goods. */
   const tabLines = rawText.split(/\r?\n/);

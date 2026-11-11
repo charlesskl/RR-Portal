@@ -90,6 +90,12 @@ test('isolated real OCR HTTP, explicit save, SQLite and reopen retain rows and p
   assert.deepEqual(left.json.fields.items.map(row => [row.orderNo,row.productNo,row.productName,row.qty,row.cartons,row.remark]),
     [['PO-SYNTH','SKU001','甲身体','40','4','4*10'], ['PO-SYNTH','SKU001','乙身体','16','1',''], ['PO-SYNTH','SKU001','丙身体','42','3','2*16+10']]);
   assert.equal((await request('/api/ai/ocr-parse', 'POST', {text:componentRaw}, viewer)).status,403);
+  const paperRaw = '订单号 产品名称 规格型号 数量 单价 金额 重量 备注\nPO-26001 30721 甲贴纸 80 1.5\nPO-26001 30721 LED贴纸 80 1.5\n备注：\n制单人：合成人员';
+  const paper = await request('/api/ai/ocr-parse', 'POST', {text:paperRaw}, admin);
+  assert.equal(paper.status,200); assert.equal(paper.json.fields.items.length,2);
+  assert.deepEqual(paper.json.fields.items.map(i=>[i.orderNo,i.productNo,i.productName,i.qty]),
+    [['PO-26001','30721','甲贴纸','80'],['PO-26001','30721','LED贴纸','80']]);
+  assert.ok(paper.json.fields.items.every(i=>/右侧原文.*1\.5$/.test(i.remark)));
   assert.equal(modelCalls, 0);
   const ocr = await request('/api/ai/ocr-extract', 'POST', image, admin);
   assert.equal(ocr.status, 200); assert.equal(ocr.json.ok, true); assert.equal(modelCalls, 2);

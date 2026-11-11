@@ -178,7 +178,8 @@ function parseDeliveryNote(text, options = {}) {
     const point = /^#x/i.test(code) ? parseInt(code.slice(2), 16) : Number(code.slice(1));
     return point > 0 && point <= 0x10ffff ? String.fromCodePoint(point) : entity;
   });
-  const splitRow = l => l.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => decodeHtml(c.trim()));
+  const splitRow = l => l.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c =>
+    decodeHtml(c.trim()).replace(/<br\s*\/?>/gi, ' ').replace(/\s+/g, ' ').trim());
   /* 模型偶发输出 HTML 表格：仅在表格内部合并单元格，保留表外全文和其他 markdown 行。 */
   if (/<table[\s>]/i.test(rawText) && !/<\/table\s*>/i.test(rawText)) rawText += '\n</table>';   /* 被 max_tokens 截断没闭合时补闭合 */
   if (/<table[\s>]/i.test(rawText)) {
@@ -370,6 +371,9 @@ function parseDeliveryNote(text, options = {}) {
       /* 新增的订单/货号/货品名称/单位布局只接受真实保列来源。
          精确唯一的本次交货列优先，订单/总交货/累计/未交数量都不能作兜底。 */
       const headKeys = head.map(value => value.replace(/\s+/g, ''));
+      const componentColumnsLayout = componentHeader.test(headKeys.join(''));
+      const cColor = find(/^[颜顏]色$/), cCartons = find(/^箱[数數]$/), cRemark = find(/^(备注|備註|備注)$/);
+      const cBalance = find(/^本[单單]送[货貨][数數]/), cModel = find(/^[型模][号號]$/);
       const deliveryLayoutHeaders = [/^(序号|序號|序|NO\.?)$/i, /^(订单编号|订单号|訂單編號|訂單號)$/,
         /^(货号|貨號)$/, /^(货品名称|貨品名稱|品名|名称|名稱)$/, /^(单位|單位)$/];
       const deliveryColumnsLayout = deliveryLayoutHeaders.every((pattern, index) => pattern.test(headKeys[index] || ''));
@@ -390,6 +394,7 @@ function parseDeliveryNote(text, options = {}) {
         if (cells.every(c => !c)) continue;   /* 空白可能是分页间隔，不能截断后续真实明细 */
         // Only a complete repeated header is non-business text; keep partial and ambiguous rows.
         if (cells.length === head.length && cells.every((value, index) => value.replace(/\s+/g, '') === headKeys[index])) continue;
+        if (componentColumnsLayout && cells.length !== head.length) { fields.items.push(_pendingOcrItem(row)); continue; }
         if (deliveryColumnsLayout) {
           if (/^(合计|合計|总计|總計|TOTAL)(?:[：:]|$)/i.test(cells[0] || '')) continue;
           const quantity = cells[cQty] || '', unit = cells[4] || '';
@@ -399,7 +404,7 @@ function parseDeliveryNote(text, options = {}) {
             fields.items.push(_pendingOcrItem(row));
           } else {
             fields.items.push({ productNo: cells[2], productName: cells[3], qty: quantityText(quantity, unit),
-              unit, orderNo: cells[1], _seq: cells[0] });
+              unit, orderNo: cells[1].replace(/\s+/g, ''), _seq: cells[0] });
           }
           continue;
         }
@@ -485,6 +490,7 @@ function parseDeliveryNote(text, options = {}) {
         if (rowOrder) lastOrder = rowOrder;
         if (!fields.orderNo && rowOrder && rowOrder !== no && rowOrder.length >= 6) fields.orderNo = rowOrder;
         fields.items.push({ productNo: no, productName: name, qty, unit, _seq: sequence,
+          ...(componentColumnsLayout ? { color: get(cColor), deliveryBalance: get(cBalance), cartons: get(cCartons), remark: get(cRemark), ...(cModel >= 0 ? { model: get(cModel) } : {}) } : {}),
           ...(rowOrder && rowOrder !== no ? { orderNo: rowOrder } : {}) });
       }
       if (deliveryColumnsLayout) {
@@ -540,12 +546,27 @@ function parseDeliveryNote(text, options = {}) {
           (hasModel ? '(?<model>\\S+)\\s+' : '') + '(?<name>.+?)\\s+(?<color>\\S+)\\s+(?<qty>' + num + ')\\s*(?<unit>PCS|个|個|件|套|条|條)\\s+(?<delivered>' + num + ')(?:\\s*[/／]\\s*(?<owed>' + num + '))?\\s+(?<cartons>\\d+)(?:\\s+(?<remark>.*))?$', 'i');
         const sparsePattern = new RegExp('^(?:(?<order>[A-Za-z][A-Za-z0-9._/\\-]+)\\s+(?<sku>[A-Za-z0-9][A-Za-z0-9._/\\-]*)\\s+)?' +
           '(?<name>\\S*[一-鿿]\\S*)\\s+(?<qty>' + num + ')\\s*(?<unit>PCS|个|個|件|套|条|條)' +
-          '(?:\\s+(?<tail>\\d+(?:\\s+[\\d+*xX×.,，/()\\-]+)?))?$', 'i');
-        let previousItem = null;
+          '(?:\\s+(?<tail>\\d+(?:\\s+.*)?))?$', 'i');
+        function packingMatches(item, tail) {
+          if (!tail || !/[+*xX×]/.test(tail.remark)) return false;
+          const terms = tail.remark.replace(/\s/g, '').split('+');
+          let pieces = 0, cartons = 0;
+          for (const term of terms) {
+            const match = /^(\d+)(?:[*xX×](\d+))?$/.exec(term);
+            if (!match) return false;
+            const count = match[2] ? Number(match[1]) : 1;
+            pieces += match[2] ? count * Number(match[2]) : Number(match[1]);
+            cartons += count;
+          }
+          return Number.isSafeInteger(pieces) && Number.isSafeInteger(cartons) &&
+            pieces === Number(item.qty) && cartons === Number(tail.cartons);
+        }
+        const sparseGroups = [];
+        let previousItem = null, sparseGroup = null;
         for (const line of lines.slice(hiP + 1)) {
           // A footer ends a page, not the delivery note: keep scanning later pages.
-          if (/^(?:胶箱|膠箱|胶袋|膠袋|钙箱|鈣箱|纸箱|紙箱|平卡|卡板|吸塑|QC|Q[.]C[.]?|收货人|收貨人|送货人|送貨人|合计|合計|总计|總計)[：:\s]/i.test(line)) { previousItem = null; continue; }
-          if (componentHeader.test(line.replace(/\s+/g, ''))) { previousItem = null; continue; }
+          if (/^(?:胶箱|膠箱|胶袋|膠袋|钙箱|鈣箱|纸箱|紙箱|平卡|卡板|吸塑|QC|Q[.]C[.]?|收货人|收貨人|送货人|送貨人|合计|合計|总计|總計)[：:\s]/i.test(line)) { previousItem = null; sparseGroup = null; continue; }
+          if (componentHeader.test(line.replace(/\s+/g, ''))) { previousItem = null; sparseGroup = null; continue; }
           if (/^[\d\s+*xX×.,，/()\-]+$/.test(line)) continue; // 备注换行数字不构成新的货品。
           const match = rowPattern.exec(line), row = match && match.groups;
           const code = value => value.replace(/[‐‑‒–—−﹘﹣－]/g, '-');
@@ -557,24 +578,40 @@ function parseDeliveryNote(text, options = {}) {
             const sparse = sparseMatch && sparseMatch.groups;
             if (sparse && (sparse.order || previousItem)) {
               const inherited = !sparse.order;
+              if (!sparseGroup || sparse.order && (sparse.order !== previousItem?.orderNo || sparse.sku !== previousItem?.productNo)) {
+                sparseGroup = []; sparseGroups.push(sparseGroup);
+              }
               fields.items.push({ orderNo: sparse.order || previousItem.orderNo,
                 productNo: sparse.sku || previousItem.productNo, productName: sparse.name,
                 qty: quantityText(sparse.qty, sparse.unit), unit: sparse.unit,
                 color: '', deliveryBalance: '', cartons: '',
                 remark: [inherited ? '订单号及货号承接上一明细，请核对' : '', sparse.tail ? '右侧原文（列位置待核对）：' + sparse.tail : ''].filter(Boolean).join('；') });
               previousItem = fields.items.at(-1);
-              fields.manualReviewRequired = true;
+              const tail = /^(\d+)(?:\s+(.*))?$/.exec(sparse.tail || '');
+              sparseGroup.push({ item: previousItem, tail: tail && { cartons: tail[1], remark: tail[2] || '' } });
               continue;
             }
           }
           if (!row || !/^[A-Za-z0-9][A-Za-z0-9._/\-]*$/.test(row.order) || row.owed !== undefined && Number(row.qty.replace(/[,，]/g, '')) !== Number(row.delivered.replace(/[,，]/g, ''))) {
             previousItem = null;
+            sparseGroup = null;
             fields.items.push(_pendingOcrItem(line));
             continue;
           }
           fields.items.push({ orderNo: row.order, productNo: row.sku, productName: row.name,
             qty: quantityText(row.qty, row.unit), unit: row.unit, color: row.color, deliveryBalance: row.delivered + (row.owed === undefined ? '' : '/' + row.owed), cartons: row.cartons, remark: row.remark || '', ...(hasModel ? { model: row.model } : {}) });
           previousItem = fields.items.at(-1);
+          sparseGroup = null;
+        }
+        for (const group of sparseGroups) {
+          // A packing equation independently confirms both pieces and cartons.
+          // Only use this layout for its contiguous rows when no extra numeric
+          // column can be confused with the carton count.
+          const positioned = group.some(entry => packingMatches(entry.item, entry.tail)) &&
+            group.every(({ item, tail }) => tail && Number.isSafeInteger(Number(tail.cartons)) &&
+              Number(tail.cartons) <= Number(item.qty) && !/^\d+(?:\.\d+)?(?:\s|$)/.test(tail.remark));
+          if (!positioned) { fields.manualReviewRequired = true; continue; }
+          for (const { item, tail } of group) { item.cartons = tail.cartons; item.remark = tail.remark; }
         }
         const orders = fields.items.map(item => item.orderNo || '');
         fields.orderNo = orders.length && orders.every(order => order && order === orders[0]) ? orders[0] : '';

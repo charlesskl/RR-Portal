@@ -59,10 +59,46 @@ test('flattened component rows retain positioned names and quantities despite em
   assert.deepEqual(fields.items.map(row => row.qty), ['40','16','42','51','12','27']);
   assert.ok(fields.items.every(row => row.productNo === 'SKU1093' && row.orderNo === 'PO-26001'));
   assert.equal(fields.items[1].productName, '2#浅蓝色乙身体');
-  assert.ok(fields.items.every(row => row.color === '' && row.deliveryBalance === '' && row.cartons === ''));
-  assert.match(fields.items[0].remark, /4 4\*10/);
-  assert.match(fields.items[1].remark, /承接上一明细/);
-  assert.equal(fields.manualReviewRequired, true);
+  assert.ok(fields.items.every(row => row.color === '' && row.deliveryBalance === ''));
+  assert.deepEqual(fields.items.map(row => row.cartons), ['4','1','3','6','1','2']);
+  assert.deepEqual(fields.items.map(row => row.remark), ['4*10','','2*16+10','5*9+6','','16+11']);
+  assert.notEqual(fields.manualReviewRequired, true);
+});
+
+test('unverified carton columns and packing equations never convert delivered quantities to carton counts', () => {
+  for (const lines of [
+    ['PO-26001 SKU1093 甲身体 40 PCS 4 4*11', '乙身体 16 PCS 1'],
+    ['PO-26001 SKU1093 甲身体 40 PCS 40 4 4*10', '乙身体 16 PCS 16 1'],
+    ['PO-26001 SKU1093 甲身体 40 PCS 4', '乙身体 16 PCS 1'],
+  ]) {
+    const fields = runtime().parse([sparseHeading, ...lines].join('\n'));
+    assert.equal(fields.manualReviewRequired, true);
+    assert.ok(fields.items.every(row => !row.cartons));
+  }
+});
+
+test('packing-confirmed groups preserve free-text remarks and blank remarks in their own columns', () => {
+  const fields = runtime().parse([sparseHeading, 'PO-26001 SKU1093 甲身体 40 PCS 4 4*10',
+    '乙身体 16 PCS 1 加急', '丙身体 12 PCS 1'].join('\n'));
+  assert.deepEqual(fields.items.map(row => [row.cartons,row.remark]), [['4','4*10'],['1','加急'],['1','']]);
+});
+
+test('markdown cell break tags are normalized without becoming literal PO or product text', () => {
+  const raw = table(['订单数量','交货数量'], [['1','PO-<br>26001','SKU001','合成零件<br/>第二行','PCS','100','34']]);
+  const fields = runtime().parse(raw);
+  assert.equal(fields.items[0].orderNo, 'PO-26001');
+  assert.equal(fields.items[0].productName, '合成零件 第二行');
+  assert.equal(fields.items[0].qty, '34');
+});
+
+test('component markdown and flattened packing rows resolve the same carton and remark columns', () => {
+  const rows = [['PO-26001','SKU1093','甲身体','','40','PCS','','4','4*10'],
+    ['','','乙身体','','16','PCS','','1',''], ['','','丙身体','','42','PCS','','3','2*16+10']];
+  const markdown = '|' + sparseHeading.split(' ').join('|') + '|\n' + rows.map(row => '|' + row.join('|') + '|').join('\n');
+  const flat = [sparseHeading, ...rows.map(row => row.filter(Boolean).join(' '))].join('\n');
+  const pick = fields => fields.items.map(row => [row.productNo,row.productName,row.qty,row.unit,row.cartons,row.remark]);
+  assert.deepEqual(pick(runtime().parse(markdown)), pick(runtime().parse(flat)));
+  assert.deepEqual(pick(runtime().parse(flat)).map(row => row.slice(-2)), [['4','4*10'],['1',''],['3','2*16+10']]);
 });
 
 for (const separator of ['胶箱：4', sparseHeading, '无法定位的模糊行']) {

@@ -76,6 +76,31 @@ test('isolated real OCR HTTP, explicit save, SQLite and reopen retain rows and p
   assert.equal((await request('/api/ai/ocr-extract', 'POST', image)).status, 401);
   assert.equal((await request('/api/ai/ocr-extract', 'POST', image, viewer)).status, 403);
   assert.equal(modelCalls, 0);
+  // Two independent browser sessions use the same server parser. No provider call
+  // is needed to reparse text, even when the table has empty continuation cells.
+  const otherComputer = await login('jc');
+  const columns = '|订单号|货号|配件名称|颜色|数量|单位|本单送货数/本单欠数|箱数|备注|';
+  const componentRaw = [columns, '|PO-SYNTH|SKU001|甲身体||40|PCS||4|4*10|',
+    '|||乙身体||16|PCS||1||', '|||丙身体||42|PCS||3|2*16+10|',
+    '胶箱: 8', '收货人: QC: 送货人:合成人员'].join('\n');
+  const left = await request('/api/ai/ocr-parse', 'POST', {text:componentRaw}, admin);
+  const right = await request('/api/ai/ocr-parse', 'POST', {text:componentRaw}, otherComputer);
+  assert.equal(left.status, 200); assert.equal(right.status, 200);
+  assert.deepEqual(left.json, right.json);
+  assert.deepEqual(left.json.fields.items.map(row => [row.orderNo,row.productNo,row.productName,row.qty,row.cartons,row.remark]),
+    [['PO-SYNTH','SKU001','甲身体','40','4','4*10'], ['PO-SYNTH','SKU001','乙身体','16','1',''], ['PO-SYNTH','SKU001','丙身体','42','3','2*16+10']]);
+  assert.equal((await request('/api/ai/ocr-parse', 'POST', {text:componentRaw}, viewer)).status,403);
+  const paperRaw = '订单号 产品名称 规格型号 数量 单价 金额 重量 备注\nPO-26001 30721 甲贴纸 80 1.5\nPO-26001 30721 LED贴纸 80 1.5\n备注：\n制单人：合成人员';
+  const paper = await request('/api/ai/ocr-parse', 'POST', {text:paperRaw}, admin);
+  assert.equal(paper.status,200); assert.equal(paper.json.fields.items.length,2);
+  assert.deepEqual(paper.json.fields.items.map(i=>i.qty), ['', '']);
+  assert.ok(paper.json.fields.items[0].productName.includes('PO-26001 30721 甲贴纸 80 1.5'));
+  assert.ok(paper.json.fields.items[1].productName.includes('PO-26001 30721 LED贴纸 80 1.5'));
+  assert.ok(paper.json.fields.items.every(i=>i.quantityNeedsReview===true));
+  const paperPositioned = await request('/api/ai/ocr-parse', 'POST', {text:'|订单号|产品名称|规格型号|数量|单价|金额|重量|备注|\n|PO-26001|0030721|甲贴纸|80|||1.5||'}, admin);
+  assert.equal(paperPositioned.status,200);
+  assert.deepEqual(paperPositioned.json.fields.items.map(i=>[i.orderNo,i.productNo,i.productName,i.qty]),[['PO-26001','0030721','甲贴纸','80']]);
+  assert.equal(modelCalls, 0);
   const ocr = await request('/api/ai/ocr-extract', 'POST', image, admin);
   assert.equal(ocr.status, 200); assert.equal(ocr.json.ok, true); assert.equal(modelCalls, 2);
   assert.equal(ocr.json.rawText, raw); assert.equal(ocr.json.needsManualReview, false);

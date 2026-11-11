@@ -1,7 +1,7 @@
 /* 兴信 QMS - AI OCR 接入
    加载在 app.js 之后。稳定接管“开始识别”按钮：
    - 后端 AI 就绪时使用 /api/ai/ocr-extract
-   - AI 未配置时才回退到原本 Tesseract
+   - AI 未就绪或连接失败时保留内容，停止识别，不回退浏览器引擎
    - 线上脚本加载顺序变化时也会重复尝试挂载
 */
 (function () {
@@ -27,7 +27,7 @@
   }
   function cancelOperation() {
     textRevision++;
-    // Local Tesseract work cannot be aborted, but its snapshot must become stale too.
+    // Invalidate pending image and text operations together.
     if (imageApi() && typeof imageApi().invalidatePending === 'function') imageApi().invalidatePending();
     var previous = activeOperation;
     activeOperation = null;
@@ -130,7 +130,7 @@
     if (!text || text === '未上传图片' || text.indexOf('AI OCR') === 0 || text.indexOf('本地 OCR') === 0) {
       el.textContent = aiReady
         ? 'AI OCR 已就绪(' + ((aiStatus && aiStatus.ocrModel) || '百炼') + ')'
-        : aiStatus && aiStatus.error ? 'AI OCR 连接失败，请稍后重试' : 'AI OCR 未配置，将使用本地 OCR，请核对明细';
+        : aiStatus && aiStatus.error ? 'AI OCR 连接失败，请稍后重试' : '识别服务暂不可用，请稍后重试';
     }
   }
 
@@ -372,11 +372,6 @@
     loadQueueItem(window.__qcQueue);
   }
 
-  function runOriginalOcr() {
-    if (typeof window.__origStartOcr === 'function') return window.__origStartOcr();
-    toast('本地 OCR 入口未就绪，请刷新页面后重试', 'error');
-  }
-
   window.invalidateOcrText = function () {
     cancelOperation(); window.__qcOcrTextNeedsParsing = true;
     var preview = document.getElementById('ocrItemsPreview'); if (preview) preview.hidden = true;
@@ -402,24 +397,45 @@
       .finally(function () { if (revision === textRevision) controlsBusy(false); });
   };
 
+  /* A stalled status, model response or response body must release the UI.
+     Invalidate via the existing operation context so late replies cannot apply. */
+  function boundedOperation(op, work) {
+    return new Promise(function (resolve, reject) {
+      var settled = false, timer;
+      var signal = op.controller && op.controller.signal;
+      function finish(callback, value) {
+        if (settled) return;
+        settled = true; clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', aborted);
+        callback(value);
+      }
+      function aborted() { finish(reject, obsolete()); }
+      if (signal) signal.addEventListener('abort', aborted, { once: true });
+      timer = setTimeout(function () {
+        finish(reject, new Error('识别等待超时，请重试；图片与已填内容已保留'));
+        if (op.controller) op.controller.abort();
+      }, 90000);
+      try {
+        requireCurrent(op);
+        Promise.resolve(work()).then(function (value) { finish(resolve, value); }, function (error) { finish(reject, error); });
+      } catch (error) { finish(reject, error); }
+    });
+  }
+
   function aiDispatch() {
     var op = beginOperation();
     if (!op) return Promise.resolve();
     setT('ocrStatus', '正在检查识别服务...');
-    return checkAiStatus(true, op).then(function (ready) {
+    return boundedOperation(op, function () { return checkAiStatus(true, op).then(function (ready) {
       requireCurrent(op);
       if (ready) return aiStartOcr(op);
       if (!aiStatus || aiStatus.error) throw new Error('无法检查 AI 识别服务状态，请稍后重试；已填内容已保留');
-      setT('ocrStatus', 'AI OCR 未就绪，正在改用本地 OCR...');
-      return runOriginalOcr();
-    }).catch(function (error) { operationFailure(op, error, 'AI 识别失败'); })
+      throw new Error('识别服务暂不可用，请稍后重试；图片与已填内容已保留');
+    }); }).catch(function (error) { operationFailure(op, error, 'AI 识别失败'); })
       .finally(function () { endOperation(op); });
   }
 
   function patch() {
-    if (typeof window.startOcr === 'function' && window.startOcr !== aiDispatch && window.startOcr !== window.__origStartOcr) {
-      window.__origStartOcr = window.startOcr;
-    }
     window.startOcr = aiDispatch;
 
     var btn = document.getElementById('btnStartOcr');

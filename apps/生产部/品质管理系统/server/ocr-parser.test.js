@@ -499,3 +499,12 @@ test('a malformed or missing sequence under complex columns cannot fall back to 
   const valid = parse(header + '\n1 PO100001 SKU001 合成零件 1000 10*20 650 KG');
   assert.deepEqual(valid.items, [{ ...item('SKU001', '合成零件', '1000', ''), orderNo:'PO100001' }]);
 });
+
+test('the first production recognition request preserves original table columns and empty cells', async () => {
+  const r = runtime(['|货号|品名|数量|单位|\n|SKU001|合成件|12|PCS|']);
+  await r.extract();
+  const prompt = r.calls[0].messages[0].content[0].text;
+  assert.match(prompt, /original column headers and column order/);
+  assert.match(prompt, /every empty cell, including empty leading cells/);
+  assert.match(prompt, /carton counts and remarks/i);
+});

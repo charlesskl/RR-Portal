@@ -40,7 +40,7 @@ test('one supplementary response fills missing document headers without replacin
   const r = runtime([goods, headers + '\n|订单号|货号|品名|数量|单位|\n|PO-OTHER|OTHER|另一零件|999|PCS|']);
   const before = r.parse(goods), result = await r.extract();
   assert.equal(r.calls.length, 2);
-  assert.equal(r.signals[0], undefined);
+  assert.ok(r.signals[0] instanceof AbortSignal, 'primary recognition has a cancellation deadline');
   assert.ok(r.signals[1] instanceof AbortSignal, 'optional recovery has a cancellation deadline');
   assert.deepEqual(result.fields.items, before.items);
   assert.equal(result.rawText, goods);

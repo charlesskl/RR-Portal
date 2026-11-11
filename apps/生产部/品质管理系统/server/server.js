@@ -97,11 +97,9 @@ function loadAiConfig() {
 }
 let AI = loadAiConfig();
 
-/* OCR 识别提示词：qwen3.5-ocr 官方全文识别模式。
-   该模型指令遵循能力差（让它直接输出结构化 JSON 会抄 schema/示例），
-   但它按官方提示词做「全文 OCR」非常准。所以：模型只负责把图变文字，
-   字段提取由下面的 parseDeliveryNote() 确定性完成。 */
-const OCR_READ_PROMPT = 'Read all the text in the image, including the company name, title, serial number, date, customer, and all text outside the table, then the table contents. Skip fully empty table rows.';
+/* 模型读取原文和保留表格空列，字段提取统一由 parseDeliveryNote() 完成。
+   不要求模型输出业务字段 JSON，避免把模型推断当作确定的列位置。 */
+const OCR_READ_PROMPT = 'Read all the text in the image, including the company name, title, serial number, date, customer, and all text outside the table, then the table contents. Output tables as markdown tables using the original column headers and column order. Keep every column and every empty cell, including empty leading cells in continuation rows. Keep carton counts and remarks in their own original columns. Do not merge columns, fill empty cells, infer values, or move footer totals into goods rows. Skip fully empty table rows.';
 /* 表格密集型单据（如台聚）全文 OCR 易乱行/复读，解析不出明细时改用此提示词重试 */
 const OCR_TABLE_PROMPT = 'Read all the text in the image. Output the table contents as a markdown table with every column kept (including the quantity column and empty cells), one row per line.';
 /* 第二次重试仍失败时：只要求输出货品明细表（列名固定，指令简单，命中率最高） */
@@ -345,6 +343,55 @@ function parseDeliveryNote(text, options = {}) {
     const header = lines.slice(0, bodyStart < 0 ? lines.length : bodyStart).join('\n');
     m = header.match(/(?:[订訂]\s*[单單]\s*(?:[号號]|[编編]\s*[号號])|PO\s*[号號#]?\s*[）)]?)\s*[：:]\s*([A-Za-z0-9][A-Za-z0-9.\-\/]{3,})/i);
     if (m) fields.orderNo = m[1];
+  }
+
+  /* 纸品单的「产品名称」为代码，「规格型号」为描述。
+     只匹配这组完整表头，避免改变其它单据的名称/规格含义。 */
+  const paperHeader = '订单号产品名称规格型号数量单价金额重量备注';
+  const paperHeading = line => (line.includes('|') ? splitRow(line) : line.trim().split(/\s+/)).join('').replace(/\s/g, '') === paperHeader;
+  const goodsHeading = line => {
+    const cells = line.includes('|') ? splitRow(line) : line.trim().split(/\s+/);
+    return cells.some(cell => /^(?:数量|數量|交货数量|交貨數量|送货数量|送貨數量|QTY)$/i.test(cell)) &&
+      cells.some(cell => /^(?:货号|貨號|物料编号|物料編號|产品名称|產品名稱|品名|货品名称|貨品名稱|规格型号|規格型號|名称|名稱|Description)$/i.test(cell));
+  };
+  const paperAt = lines.findIndex(paperHeading);
+  // A later paper heading must not replace goods already present in another table.
+  if (paperAt >= 0 && !lines.slice(0, paperAt).some(goodsHeading)) {
+    let positioned = lines[paperAt].includes('|');
+    const footer = /^(?:备注|制单人|製單人|司机|司機|客户收货人|客戶收貨人|收货人|收貨人|收货日期|收貨日期|合计|合計)(?:[：:]|$)|^[（(]?(?:代香港|收貨章|收货章)|^細數未點/;
+    const code = value => value.replace(/[‐‑‒–—−﹘﹣－]/g, '-');
+    const codePattern = /^[A-Za-z0-9][A-Za-z0-9._/#-]*\d[A-Za-z0-9._/#-]*$/;
+    for (const line of lines.slice(paperAt + 1)) {
+      if (paperHeading(line)) { positioned = line.includes('|'); continue; }
+      if (goodsHeading(line)) {
+        positioned = false;
+        fields.items.push(_pendingOcrItem(line)); continue;
+      }
+      // A footer ends only its own line: later pages may omit a repeated heading.
+      if (footer.test(line.includes('|') ? splitRow(line)[0] || '' : line)) continue;
+      if (/^\|?(?:\s*:?-+:?\s*\|)+/.test(line)) continue;
+      let order, sku, name, qty, remark;
+      if (positioned) {
+        const cells = splitRow(line);
+        if (cells.length !== 8 || !codePattern.test(code(cells[0])) || !codePattern.test(code(cells[1])) ||
+            !cells[2] || !/^(?:\d{1,3}(?:[,，]\d{3})+|\d+)$/.test(cells[3])) {
+          fields.items.push(_pendingOcrItem(line)); continue;
+        }
+        [order, sku, name, qty] = cells;
+        remark = [['单价',cells[4]],['金额',cells[5]],['重量',cells[6]],['原单备注',cells[7]]]
+          .filter(pair => pair[1]).map(pair => pair[0] + '：' + pair[1]).join('；');
+      } else {
+        // Without retained columns, an integer may be a specification, price,
+        // amount or weight. Keep the entire row; never infer the quantity.
+        fields.items.push(_pendingOcrItem(line)); continue;
+      }
+      fields.items.push({orderNo:code(order),productNo:code(sku),productName:name,
+        qty:quantityText(qty,''),unit:'',remark});
+    }
+    if (!fields.items.length) fields.items.push(_pendingOcrItem(rawText));
+    const orders = fields.items.map(item => item.orderNo || '');
+    fields.orderNo = orders.length && orders.every(order => order && order === orders[0]) ? orders[0] : '';
+    return fields;
   }
 
   /* Tab-preserved packaging sheets can contain real newlines inside cells.
@@ -853,15 +900,27 @@ async function aiVisionExtract(dataUrl) {
       ] },
     ],
   };
+  const deadline = Date.now() + 60000;
   async function callModel(model, signal) {
+    const timeoutError = () => {
+      const error = new Error('识别服务响应超时，请稍后重试');
+      error.code = 'OCR_TIMEOUT'; return error;
+    };
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw timeoutError();
+    const bounded = AbortSignal.any([AbortSignal.timeout(Math.min(30000, remaining)), ...(signal ? [signal] : [])]);
     payload.model = model;
-    const resp = await fetch(AI.baseURL.replace(/\/$/, '') + '/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI.apiKey },
-      body: JSON.stringify(payload),
-      ...(signal ? { signal } : {}),
-    });
-    return { status: resp.status, raw: await resp.text() };
+    try {
+      const resp = await fetch(AI.baseURL.replace(/\/$/, '') + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI.apiKey },
+        body: JSON.stringify(payload), signal: bounded,
+      });
+      return { status: resp.status, raw: await resp.text() };
+    } catch (error) {
+      if (bounded.aborted) throw timeoutError();
+      throw error;
+    }
   }
   /* 该密钥的模型权限存在随机抖动（同一请求约 40~60% 概率返回 403 AccessDenied），
      因此对 403 做同模型重试（最多 6 次，间隔 1.5s）；仍失败再回退 qwen3.5-ocr */
@@ -1884,7 +1943,7 @@ const server = http.createServer(async (req, res) => {
         const r = await aiVisionExtract(body.image);
         return sendJson(res, 200, { ok: true, fields: r.fields, usage: r.usage, rawText: r.rawText, needRotate: r.needRotate || 0, needsManualReview: r.needsManualReview === true });
       } catch (e) {
-        const code = e.code === 'NO_AI' ? 503 : 502;
+        const code = e.code === 'NO_AI' ? 503 : e.code === 'OCR_TIMEOUT' ? 504 : 502;
         return sendJson(res, code, { ok: false, error: String(e && e.message || e), code: e.code || 'ERR' });
       }
     }

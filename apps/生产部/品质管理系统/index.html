@@ -41,22 +41,15 @@
 #qcMaintenance[hidden] { display:none; }
 #qcMaintenance h1 { margin:0 0 12px;font-size:26px;line-height:1.4; }
 #qcMaintenanceMessage { margin:0;color:#9cacc0;font-size:14px;line-height:1.7; }
-#qcMaintenanceRefresh, #qcMaintenanceRetry { margin-top:22px;padding:10px 20px;border:1px solid #3a526a;border-radius:8px;background:#1c3043;color:#e7edf7;font:14px system-ui,sans-serif;cursor:pointer; }
-#qcMaintenanceRefresh:focus-visible, #qcMaintenanceRetry:focus-visible { outline:2px solid #61d4e0;outline-offset:3px; }
-#qcMaintenanceRetry:disabled { opacity:.6;cursor:wait; }
-#qcConnectionNotice { position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2147483646;max-width:calc(100% - 24px);box-sizing:border-box;display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid #6e5428;border-radius:8px;background:#292319;color:#f2d495;font:14px system-ui,sans-serif; }
-#qcConnectionNotice[hidden] { display:none; }
-#qcConnectionRetry { border:1px solid currentColor;border-radius:5px;background:transparent;color:inherit;padding:4px 10px;font:inherit;cursor:pointer;flex:none; }
-#qcConnectionRetry:disabled { opacity:.6;cursor:wait; }
+#qcMaintenanceRefresh { margin-top:22px;padding:10px 20px;border:1px solid #3a526a;border-radius:8px;background:#1c3043;color:#e7edf7;font:14px system-ui,sans-serif;cursor:pointer; }
+#qcMaintenanceRefresh:focus-visible { outline:2px solid #61d4e0;outline-offset:3px; }
 </style>
-<div id="qcMaintenance" role="alertdialog" aria-modal="true" aria-labelledby="qcMaintenanceTitle" aria-describedby="qcMaintenanceMessage">
-  <div><h1 id="qcMaintenanceTitle">正在检查系统状态</h1>
-    <p id="qcMaintenanceMessage" aria-live="polite">请稍候。</p>
-    <button id="qcMaintenanceRefresh" type="button" hidden>刷新继续</button>
-    <button id="qcMaintenanceRetry" type="button" hidden>重试</button></div>
+<div id="qcMaintenance" role="alertdialog" aria-modal="true" aria-labelledby="qcMaintenanceTitle" aria-describedby="qcMaintenanceMessage" hidden>
+  <div><h1 id="qcMaintenanceTitle">系统修复中</h1>
+    <p id="qcMaintenanceMessage" aria-live="polite">请稍后再试。</p>
+    <button id="qcMaintenanceRefresh" type="button" hidden>刷新继续</button></div>
 </div>
-<div id="qcConnectionNotice" role="status" aria-live="polite" hidden><span>连接中断，保存已暂停</span><button id="qcConnectionRetry" type="button">重试</button></div>
-<script src="maintenance.js?v=20261110-connection-notice-r3"></script>
+<script src="maintenance.js?v=20261111-silent-status"></script>
 <div id="loginScreen" style="display:flex;align-items:center;justify-content:center;
   min-height:100vh;background:var(--bg-body);padding:20px;box-sizing:border-box">
   <div style="width:460px;max-width:100%">

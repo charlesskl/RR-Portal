@@ -60,9 +60,10 @@ test('flattened component rows retain positioned names and quantities despite em
   assert.ok(fields.items.every(row => row.productNo === 'SKU1093' && row.orderNo === 'PO-26001'));
   assert.equal(fields.items[1].productName, '2#浅蓝色乙身体');
   assert.ok(fields.items.every(row => row.color === '' && row.deliveryBalance === ''));
-  assert.deepEqual(fields.items.map(row => row.cartons), ['4','1','3','6','1','2']);
-  assert.deepEqual(fields.items.map(row => row.remark), ['4*10','','2*16+10','5*9+6','','16+11']);
-  assert.notEqual(fields.manualReviewRequired, true);
+  assert.deepEqual(fields.items.map(row => row.cartons), ['4','','3','6','','2']);
+  assert.deepEqual([0,2,3,5].map(i => fields.items[i].remark), ['4*10','2*16+10','5*9+6','16+11']);
+  for (const i of [1,4]) assert.match(fields.items[i].remark, /右侧原文（列位置待核对）：1$/);
+  assert.equal(fields.manualReviewRequired, true);
 });
 
 test('unverified carton columns and packing equations never convert delivered quantities to carton counts', () => {
@@ -77,10 +78,14 @@ test('unverified carton columns and packing equations never convert delivered qu
   }
 });
 
-test('packing-confirmed groups preserve free-text remarks and blank remarks in their own columns', () => {
+test('packing evidence stays row-local while free-text and bare numeric tails remain for review', () => {
   const fields = runtime().parse([sparseHeading, 'PO-26001 SKU1093 甲身体 40 PCS 4 4*10',
     '乙身体 16 PCS 1 加急', '丙身体 12 PCS 1'].join('\n'));
-  assert.deepEqual(fields.items.map(row => [row.cartons,row.remark]), [['4','4*10'],['1','加急'],['1','']]);
+  assert.deepEqual(fields.items.map(row => row.cartons), ['4','','']);
+  assert.equal(fields.items[0].remark, '4*10');
+  assert.match(fields.items[1].remark, /右侧原文（列位置待核对）：1 加急$/);
+  assert.match(fields.items[2].remark, /右侧原文（列位置待核对）：1$/);
+  assert.equal(fields.manualReviewRequired, true);
 });
 
 test('markdown cell break tags are normalized without becoming literal PO or product text', () => {
@@ -136,14 +141,19 @@ test('space-separated ambiguous PO suffix or numeric SKU retains complete source
   assert.match(fields.items[4].productName, /FDHA2026\/S 041/);
 });
 
-test('component markdown and flattened packing rows resolve the same carton and remark columns', () => {
+test('component explicit markdown columns stay exact while flattened ambiguous empty columns require row-local review', () => {
   const rows = [['PO-26001','SKU1093','甲身体','','40','PCS','','4','4*10'],
     ['','','乙身体','','16','PCS','','1',''], ['','','丙身体','','42','PCS','','3','2*16+10']];
   const markdown = '|' + sparseHeading.split(' ').join('|') + '|\n' + rows.map(row => '|' + row.join('|') + '|').join('\n');
   const flat = [sparseHeading, ...rows.map(row => row.filter(Boolean).join(' '))].join('\n');
   const pick = fields => fields.items.map(row => [row.productNo,row.productName,row.qty,row.unit,row.cartons,row.remark]);
-  assert.deepEqual(pick(runtime().parse(markdown)), pick(runtime().parse(flat)));
-  assert.deepEqual(pick(runtime().parse(flat)).map(row => row.slice(-2)), [['4','4*10'],['1',''],['3','2*16+10']]);
+  const structured = runtime().parse(markdown), flattened = runtime().parse(flat);
+  assert.deepEqual(pick(structured).map(row => row.slice(0,4)), pick(flattened).map(row => row.slice(0,4)));
+  assert.deepEqual(pick(structured).map(row => row.slice(-2)), [['4','4*10'],['1',''],['3','2*16+10']]);
+  assert.equal(flattened.items[1].cartons, '');
+  assert.match(flattened.items[1].remark, /右侧原文（列位置待核对）：1$/);
+  assert.equal(flattened.manualReviewRequired, true);
+  assert.deepEqual([0,2].map(i => pick(flattened)[i].slice(-2)), [['4','4*10'],['3','2*16+10']]);
 });
 
 for (const separator of ['胶箱：4', sparseHeading, '无法定位的模糊行']) {
@@ -327,4 +337,16 @@ test('flat packaging never concatenates a three-digit numeric SKU into a hyphena
   assert.equal(fields.items[0].productName, '待核对原文：PO-26001 123 合成包装袋 个 100');
   assert.equal(fields.items[0].quantityNeedsReview, true); assert.equal(fields.items[0].qty, '');
   assert.equal(fields.items[0].productNo, ''); assert.equal(fields.orderNo, '');
+});
+
+test('a prior packing equation cannot decide whether a later bare number is delivery count or cartons', () => {
+  const rows = [['PO-26001','SKU1093','合成甲','','40','PCS','','4','4*10'],
+    ['PO-26001','SKU1093','合成乙','','16','PCS','1','','']];
+  const markdown = '|' + sparseHeading.split(' ').join('|') + '|\n' + rows.map(row => '|' + row.join('|') + '|').join('\n');
+  const flat = [sparseHeading, ...rows.map(row => row.filter(Boolean).join(' '))].join('\n');
+  const explicit = runtime().parse(markdown), ambiguous = runtime().parse(flat);
+  assert.equal(explicit.items[1].deliveryBalance, '1'); assert.equal(explicit.items[1].cartons, '');
+  assert.equal(ambiguous.items[0].cartons, '4'); assert.equal(ambiguous.items[1].cartons, '');
+  assert.equal(ambiguous.items[1].deliveryBalance, ''); assert.equal(ambiguous.items[1].qty, '16');
+  assert.match(ambiguous.items[1].remark, /右侧原文（列位置待核对）：1$/); assert.equal(ambiguous.manualReviewRequired, true);
 });

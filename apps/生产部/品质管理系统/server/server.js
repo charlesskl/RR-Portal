@@ -681,14 +681,12 @@ function parseDeliveryNote(text, options = {}) {
           sparseGroup = null;
         }
         for (const group of sparseGroups) {
-          // A packing equation independently confirms both pieces and cartons.
-          // Only use this layout for its contiguous rows when no extra numeric
-          // column can be confused with the carton count.
-          const positioned = group.some(entry => packingMatches(entry.item, entry.tail)) &&
-            group.every(({ item, tail }) => tail && Number.isSafeInteger(Number(tail.cartons)) &&
-              Number(tail.cartons) <= Number(item.qty) && !/^\d+(?:\.\d+)?(?:\s|$)/.test(tail.remark));
-          if (!positioned) { fields.manualReviewRequired = true; continue; }
-          for (const { item, tail } of group) { item.cartons = tail.cartons; item.remark = tail.remark; }
+          for (const { item, tail } of group) {
+            // A packing equation establishes this row's cartons only. Empty
+            // columns on another row may put the same number under delivery.
+            if (!packingMatches(item, tail)) { fields.manualReviewRequired = true; continue; }
+            item.cartons = tail.cartons; item.remark = tail.remark;
+          }
         }
         const orders = fields.items.map(item => item.orderNo || '');
         fields.orderNo = orders.length && orders.every(order => order && order === orders[0]) ? orders[0] : '';

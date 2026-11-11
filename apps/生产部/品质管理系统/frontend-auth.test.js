@@ -761,7 +761,7 @@ test('a low unused random draft restores alongside another creator without autom
 
 test('normal HTML selects all matching modern creation-intent and OCR scripts without changing their load order',()=>{
   const html=source('index.html');const scripts=[...html.matchAll(/<script src="(qc-backend|app|ai-ocr)\.js\?v=([^"]+)"/g)].map(m=>[m[1],m[2]]);
-  assert.deepEqual(scripts,[['qc-backend','20261111-draft-recovery'],['app','20261110-connection-notice-r2'],['ai-ocr','20261109-ocr-mapping-r4']]);
+  assert.deepEqual(scripts,[['qc-backend','20261111-draft-recovery'],['app','20261111-draft-file-recovery'],['ai-ocr','20261109-ocr-mapping-r4']]);
 });
 
 test('a newer volatile draft retains confirmed server defaults after its next write fails', async () => {

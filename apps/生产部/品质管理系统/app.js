@@ -6016,8 +6016,26 @@ function _backupReadPackage(parsed) {
   }
   const records = hasState ? parsed.state.records : parsed.records;
   if (!Array.isArray(records)) throw new Error('文件不是有效的 JSON 数组或备份包');
+  let recovery = hasState ? parsed : null;
+  if (isDraft && parsed.draftRecovery) {
+    try { recovery = JSON.parse(parsed.draftRecovery.originalRaw); }
+    catch (_) { throw new Error('草稿原始版本资料无效，请保留原文件核对'); }
+    if (!recovery || recovery.owner !== parsed.owner || recovery.company !== parsed.company ||
+        !recovery.state || JSON.stringify(recovery.state.records) !== JSON.stringify(records)) {
+      throw new Error('草稿内容与原始版本资料不一致，请保留原文件核对');
+    }
+  }
+  let versions = null;
+  if (recovery && !recovery.replacement && recovery.baseline) {
+    versions = recovery.baseline.versions;
+    if (!versions || typeof versions !== 'object' || Array.isArray(versions) ||
+        Object.values(versions).some(value => value !== null && typeof value !== 'string')) {
+      throw new Error('草稿原始版本格式无效，请保留原文件核对');
+    }
+  }
   // 草稿的删除队列、整库替换标记和 nextId 不属于人工追加恢复的内容。
-  return { records, isDraft, company: parsed.company, owner: isDraft ? parsed.owner : null };
+  return { records, isDraft, versions, changedIds: recovery && Array.isArray(recovery.changedIds) ? recovery.changedIds : [],
+    company: parsed.company, owner: isDraft ? parsed.owner : null };
 }
 
 function _backupRequireImport() {
@@ -6064,7 +6082,7 @@ function _backupImportFile(file) {
         : '未知时间';
       const description = source.isDraft
         ? `<div style="font-size:12px;margin-top:8px">未同步草稿 · 原账号：${_esc(source.owner)} · 公司：${_esc(source.company)}</div>
-           <div style="font-size:12px;color:var(--text-dim);margin-top:8px">仅追加恢复，保留现有记录及原编号；相同记录跳过，同编号内容不同则暂停整批导入。草稿中的删除和覆盖操作不会执行。</div>`
+           <div style="font-size:12px;color:var(--text-dim);margin-top:8px">${source.versions ? '按原始版本恢复实际修改，未修改记录采用现有数据；同一记录的版本冲突时暂停恢复。' : '仅追加恢复，相同记录跳过，同编号内容不同则暂停整批导入。'}草稿中的删除和覆盖操作不会执行。</div>`
         : `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">导出时间：${exportedAt}</div>
           <div class="backup-mode-radios">
             <label class="backup-mode-label">
@@ -6084,7 +6102,7 @@ function _backupImportFile(file) {
         body:         `
           <div>文件包含 <strong>${incoming.length}</strong> 条验货记录</div>
           ${description}`,
-        confirmLabel:  source.isDraft ? '确认追加恢复' : '确认导入',
+        confirmLabel:  source.isDraft ? source.versions ? '确认恢复修改' : '确认追加恢复' : '确认导入',
         confirmClass:  'btn-primary',
         onConfirm:    () => {
           const mode = source.isDraft ? 'append' : document.querySelector('input[name="bkMode"]:checked')?.value || 'append';
@@ -6203,7 +6221,7 @@ function _backupDoImport(payload, mode) {
       if (existing.has(Number(row.id))) throw new Error('现有资料含重复编号，请先联系管理员核对');
       existing.set(Number(row.id), row);
     }
-    const added = [], seen = new Map();
+    const added = [], updates = new Map(), seen = new Map();
     let skipped = 0;
     for (const raw of incoming) {
       if (source.isDraft && (!raw || !safeId(raw.id))) throw new Error('草稿记录缺少有效原编号，整批恢复已暂停，请先核对原草稿');
@@ -6219,17 +6237,25 @@ function _backupDoImport(payload, mode) {
         skipped++; continue;
       }
       seen.set(id, signature);
+      const baselineRow = source.versions && owns(source.versions, id);
+      if (baselineRow && (raw.updatedAt == null ? null : raw.updatedAt) === source.versions[id] && source.changedIds.indexOf(id) === -1) {
+        skipped++; continue;
+      }
       if (mode === 'append' && existing.has(id)) {
         if (JSON.stringify(normalize(existing.get(id), id)) !== signature) {
+          if (baselineRow && (existing.get(id).updatedAt == null ? null : existing.get(id).updatedAt) === source.versions[id]) {
+            updates.set(id, row); continue;
+          }
           throw new Error('编号 ' + id + ' 与现有内容不同，整批导入已暂停，请先核对备份');
         }
         skipped++; continue;
       }
+      if (baselineRow) throw new Error('编号 ' + id + ' 已不在现有资料中，草稿修改已暂停，请核对删除状态');
       added.push(row);
     }
-    const next = mode === 'replace' ? added : state.records.concat(added);
+    const next = mode === 'replace' ? added : state.records.map(row => updates.get(Number(row.id)) || row).concat(added);
     if (_backupJsonBytes({records:next}, maxBody) > maxBody) throw new Error('合并后资料超过服务器允许的大小，原资料未改动');
-    if (mode === 'replace' || added.length) {
+    if (mode === 'replace' || added.length || updates.size) {
       const previousRecords = state.records, previousNextId = state.nextId;
       const hadReplacement = Object.prototype.hasOwnProperty.call(window, '__QC_FORCE_REPLACE');
       const previousReplacement = window.__QC_FORCE_REPLACE;
@@ -6247,8 +6273,8 @@ function _backupDoImport(payload, mode) {
     }
 
     const modeLabel = mode === 'replace' ? '覆盖' : '追加';
-    showToast(`${added.length} 条备份记录已在本地暂存，跳过 ${skipped} 条重复项；仍须服务器权限核验`, 'info');
-    _backupLog(`${modeLabel}导入备份 ${added.length} 条，跳过 ${skipped} 条重复项`, 'ok');
+    showToast(`新增 ${added.length} 条、修改 ${updates.size} 条已在本地暂存，跳过 ${skipped} 条；仍须服务器确认`, 'info');
+    _backupLog(`${modeLabel}导入新增 ${added.length} 条、修改 ${updates.size} 条，跳过 ${skipped} 条`, 'ok');
     _backupRefreshAll();
     return true;
   } catch(e) {

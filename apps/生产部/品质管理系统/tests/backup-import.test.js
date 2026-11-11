@@ -23,6 +23,7 @@ function namedFunction(name) {
 const importSource = app.slice(start, end) + '\n' + namedFunction('_esc') + '\n' + namedFunction('_startImport');
 const clone = value => JSON.parse(JSON.stringify(value));
 const stamp = '2026-11-09T08:00:00.000Z';
+const laterStamp = '2026-11-10T08:00:00.000Z';
 
 function record(id = 101, changes = {}) {
   return { id, date: '2026-11-09', supplier: '测试供应商', qty: 20,
@@ -34,6 +35,57 @@ function draft(records = [record()], changes = {}) {
     token: 'test-draft', state: { records, nextId: 1000 }, deletedIds: [],
     deleteRevisions: {}, nextDeleteRevision: 0, replacement: false, ...changes };
 }
+
+test('versioned JSON recovery skips unrelated stale snapshots and restores only the actual edit', () => {
+  const original = record(101), untouched = record(102), edited = record(101, { qty: 25, updatedAt: laterStamp });
+  const latest = record(102, { status: 'approved', updatedAt: laterStamp });
+  const payload = draft([edited, untouched], { baseline: { versions: { 101: stamp, 102: stamp } } });
+  const h = harness({ records: [original, latest] });
+  h.load(payload); h.confirm();
+  assert.equal(h.saved, 1);
+  assert.equal(h.records.find(row => row.id === 101).qty, 25);
+  assert.deepEqual(h.records.find(row => row.id === 102), latest);
+});
+
+test('versioned JSON recovery leaves remotely deleted unchanged snapshots absent', () => {
+  const payload = draft([record(101)], { baseline: { versions: { 101: stamp } } });
+  const h = harness(); h.load(payload); h.confirm();
+  assert.deepEqual(h.records, []); assert.equal(h.saved, 0);
+});
+
+for (const records of [[], [record(101, { qty: 99, updatedAt: laterStamp })]]) {
+  test('versioned JSON recovery rejects an edited row whose server base changed or disappeared', () => {
+    const payload = draft([record(101, { qty: 25, updatedAt: laterStamp })], { baseline: { versions: { 101: stamp } } });
+    const h = harness({ records }); h.load(payload); h.confirm();
+    assert.deepEqual(h.records, records); assert.equal(h.saved, 0);
+    assert.ok(h.notices.some(message => message.type === 'error'));
+  });
+}
+
+test('downloaded recovery wrappers validate their original snapshot before restoring', () => {
+  const original = draft([record(101, { qty: 25, updatedAt: laterStamp })], { baseline: { versions: { 101: stamp } } });
+  const payload = { backupType: 'pending-records', company: original.company, owner: original.owner,
+    records: original.state.records, draftRecovery: { originalRaw: JSON.stringify(original) } };
+  const h = harness({ records: [record(101)] }); h.load(payload); h.confirm();
+  assert.equal(h.records[0].qty, 25); assert.equal(h.saved, 1);
+  const bad = harness({ records: [record(101)] });
+  bad.load({ ...payload, records: [record(101, { qty: 100 })] });
+  assert.equal(bad.confirmations.length, 0); assert.equal(bad.saved, 0);
+});
+
+test('optional provided JSON draft imports actual edits while preserving unrelated current records', { skip: !process.env.QC_DRAFT_FILE }, () => {
+  const payload = JSON.parse(fs.readFileSync(process.env.QC_DRAFT_FILE, 'utf8'));
+  const original = JSON.parse(payload.draftRecovery.originalRaw), versions = original.baseline.versions;
+  const changed = payload.records.filter(row => row.updatedAt !== versions[row.id]);
+  const server = payload.records.map(row => ({ ...row, updatedAt: versions[row.id] }));
+  for (const row of server) if (changed.some(local => local.id === row.id)) row.remark = 'synthetic old value';
+  const unrelated = server.find(row => !changed.some(local => local.id === row.id));
+  unrelated.updatedAt = '2099-01-01T00:00:00.000Z'; unrelated.remark = 'synthetic server update';
+  const h = harness({ records: server }); h.load(payload); h.confirm();
+  assert.equal(h.saved, 1); assert.equal(h.records.length, server.length);
+  assert.deepEqual(h.records.find(row => row.id === unrelated.id), unrelated);
+  for (const row of changed) assert.equal(h.records.find(saved => saved.id === row.id).updatedAt, row.updatedAt);
+});
 
 function harness(options = {}) {
   const notices = [], logs = [], confirmations = [];

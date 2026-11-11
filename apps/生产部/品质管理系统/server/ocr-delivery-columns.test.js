@@ -118,7 +118,7 @@ test('malformed tab cells remain whole-source review instead of shifting a price
   assert.equal(fields.items[0].quantityNeedsReview, true);
 });
 
-test('space-separated packaging rows use the explicit unit-quantity header contract and retain blank final SKU', () => {
+test('space-separated ambiguous PO suffix or numeric SKU retains complete source for explicit review', () => {
   const raw = ['订单编号 物料编号 品名/规格 单位 数量 单价 备品 包装明细',
     'FDHA202505 51-01 92104(无手脚版) 合成收缩膜 0.07*205开口*148mm 个 1000 4000个*6件+5000个',
     '+1000个*2件+300个+200个',
@@ -129,12 +129,11 @@ test('space-separated packaging rows use the explicit unit-quantity header contr
     '注：合成说明'].join('\n');
   const fields = runtime().parse(raw);
   assert.equal(fields.items.length, 5);
-  assert.deepEqual(fields.items.map(row => row.qty), ['1000','200','30000','20000','10000']);
-  assert.deepEqual(fields.items.map(row => row.productNo), ['92104(无手脚版)','92104(无手脚版)','92104','11050097','']);
-  assert.equal(fields.items[0].orderNo, 'FDHA20250551-01');
-  assert.equal(fields.items[4].orderNo, 'FDHA2026/S041');
-  assert.ok(fields.items.every(row => !row.quantityNeedsReview));
-  assert.match(fields.items[0].remark, /4000个\*6件/);
+  assert.ok(fields.items.every(row => row.qty === '' && row.quantityNeedsReview));
+  assert.ok(fields.items.every(row => row.productNo === '' && row.productName.startsWith('待核对原文：FDHA')));
+  assert.match(fields.items[0].productName, /FDHA202505 51-01 92104/);
+  assert.match(fields.items[0].productName, /\+1000个\*2件\+300个\+200个/);
+  assert.match(fields.items[4].productName, /FDHA2026\/S 041/);
 });
 
 test('component markdown and flattened packing rows resolve the same carton and remark columns', () => {
@@ -287,4 +286,45 @@ test('unrecognized text between component pages is retained for review instead o
   assert.equal(unresolved.qty, '');
   assert.equal(unresolved.quantityNeedsReview, true);
   assert.equal(fields.orderNo, '');
+});
+
+const packagingHeading = '订单编号\t物料编号\t品名/规格\t单位\t数量\t单价\t备品\t包装明细';
+const packagingRow = (order, qty, name = '合成包装袋') => [order, 'SKU1106', name, '个', String(qty), '', '', qty + '个*1件'].join('\t');
+for (const repeatHeader of [false, true]) test('packaging retains every page after totals and signatures, repeated header=' + repeatHeader, () => {
+  const raw = [packagingHeading, packagingRow('AB2026001', 100), '合计：100', '经手人：合成名字', '出货专用章',
+    ...(repeatHeader ? [packagingHeading] : []), packagingRow('PO-26002', 200), '合计：200'].join('\n');
+  const fields = runtime().parse(raw);
+  assert.deepEqual(fields.items.map(r => [r.orderNo, r.qty, r.productName, r.remark]), [
+    ['AB2026001', '100', '合成包装袋', '100个*1件'], ['PO-26002', '200', '合成包装袋', '200个*1件']]);
+  assert.equal(fields.manualReviewRequired, undefined); assert.equal(fields.orderNo, '');
+});
+for (const order of ['PO-26001', 'X1', 'A/B-123', '12345']) test('positioned packaging rows never disappear for order format ' + order, () => {
+  const raw = [packagingHeading, packagingRow(order, 100), packagingRow('FDHA2026002', 200)].join('\n');
+  const fields = runtime().parse(raw); assert.equal(fields.items.length, 2);
+  if (order === '12345') { assert.equal(fields.items[0].qty, ''); assert.equal(fields.items[0].quantityNeedsReview, true); assert.equal(fields.items[0].productName, '待核对原文：' + packagingRow(order, 100)); }
+  else { assert.equal(fields.items[0].orderNo, order); assert.equal(fields.items[0].qty, '100'); }
+  assert.equal(fields.items[1].orderNo, 'FDHA2026002'); assert.equal(fields.items[1].qty, '200');
+});
+for (const unknown of ['模糊的第二条包装资料必须人工核对', '???\tSKU-UNKNOWN\t模糊数量货品\t个\t不清楚\t\t\t原文必须保留']) {
+  test('ambiguous packaging content is retained separately and never appended as the previous valid remark: ' + unknown, () => {
+    const raw = [packagingHeading, packagingRow('AB2026001', 100), unknown, packagingRow('PO-26002', 200)].join('\n');
+    const fields = runtime().parse(raw); assert.equal(fields.items.length, 3);
+    assert.equal(fields.items[0].remark, '100个*1件'); assert.equal(fields.items[1].productName, '待核对原文：' + unknown);
+    assert.equal(fields.items[1].quantityNeedsReview, true); assert.equal(fields.items[1].qty, ''); assert.equal(fields.items[2].qty, '200');
+  });
+}
+
+test('flat packaging accepts complete hyphenated PO rows on later pages without inheriting previous row fields', () => {
+  const raw = [packagingHeading.replace(/\t/g, ' '), 'AB2026001 SKU1 第一页合成袋 个 100', '合计：100',
+    packagingHeading.replace(/\t/g, ' '), 'PO-26002 SKU2 第二页合成袋 个 200'].join('\n');
+  assert.deepEqual(runtime().parse(raw).items.map(r => [r.orderNo, r.productNo, r.productName, r.qty]), [
+    ['AB2026001', 'SKU1', '第一页合成袋', '100'], ['PO-26002', 'SKU2', '第二页合成袋', '200']]);
+});
+
+test('flat packaging never concatenates a three-digit numeric SKU into a hyphenated PO', () => {
+  const raw = [packagingHeading.replace(/\t/g, ' '), 'PO-26001 123 合成包装袋 个 100'].join('\n');
+  const fields = runtime().parse(raw); assert.equal(fields.items.length, 1);
+  assert.equal(fields.items[0].productName, '待核对原文：PO-26001 123 合成包装袋 个 100');
+  assert.equal(fields.items[0].quantityNeedsReview, true); assert.equal(fields.items[0].qty, '');
+  assert.equal(fields.items[0].productNo, ''); assert.equal(fields.orderNo, '');
 });

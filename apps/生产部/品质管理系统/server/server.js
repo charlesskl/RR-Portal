@@ -350,15 +350,20 @@ function parseDeliveryNote(text, options = {}) {
   /* Tab-preserved packaging sheets can contain real newlines inside cells.
      Keep those cells together instead of treating every physical line as goods. */
   const tabLines = rawText.split(/\r?\n/);
-  const tabHeader = tabLines.findIndex(line => {
+  const isPackagingHeader = line => {
     const cells = (line.includes('\t') ? line.split('\t') : line.trim().split(/\s+/)).map(value => value.replace(/\s/g, ''));
     return /^(订单编号|訂單編號)$/.test(cells[0]) && /^(物料编号|物料編號)$/.test(cells[1]) &&
       /^(品名[/／]规格|品名[/／]規格)$/.test(cells[2]) && /^(单位|單位)$/.test(cells[3]) && /^(数量|數量)$/.test(cells[4]);
-  });
+  };
+  const tabHeader = tabLines.findIndex(isPackagingHeader);
   if (tabHeader !== -1) {
-    const tabPreserved = tabLines[tabHeader].includes('\t');
-    const headers = tabPreserved ? tabLines[tabHeader].split('\t') : tabLines[tabHeader].trim().split(/\s+/);
-    const packagingColumn = headers.findIndex(value => /包装明细|包裝明細/.test(value));
+    let tabPreserved, headers, packagingColumn;
+    function usePackagingHeader(line) {
+      tabPreserved = line.includes('\t');
+      headers = tabPreserved ? line.split('\t') : line.trim().split(/\s+/);
+      packagingColumn = headers.findIndex(value => /包装明细|包裝明細/.test(value));
+    }
+    usePackagingHeader(tabLines[tabHeader]);
     let block = [];
     function finishTabRow() {
       if (!block.length) return;
@@ -366,13 +371,16 @@ function parseDeliveryNote(text, options = {}) {
       let cells = source.split('\t').map(value => decodeHtml(value).replace(/<br\s*\/?>/gi, '\n').trim());
       if (!tabPreserved) {
         const flat = source.replace(/\s+/g, ' ').trim();
-        const match = /^(?<order>[A-Za-z]{2,}\d{4,}(?:[\/_-][A-Za-z0-9]+)*)(?:\s+(?<suffix>\d{2,3}-\d{2}|\d{3}))?\s+(?<goods>.+?)\s+(?<unit>个|個|PCS|件|套|张|張|卷|KG|G)\s+(?<qty>(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)*)(?:\s+(?<tail>.*))?$/i.exec(flat);
+        const match = /^(?<order>[A-Za-z][A-Za-z0-9/_-]*\d[A-Za-z0-9/_-]*)\s+(?<goods>.+?)\s+(?<unit>个|個|PCS|件|套|张|張|卷|KG|G)\s+(?<qty>(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)*)(?:\s+(?<tail>.*))?$/i.exec(flat);
         if (!match) { fields.items.push(_pendingOcrItem(source)); return; }
         const row = match.groups;
+        // Whitespace alone cannot distinguish a wrapped PO suffix from a numeric SKU.
+        // Keep the full source for review instead of joining identifiers by prefix.
+        if (/^\d{2,3}(?:-\d{2})?\s+/.test(row.goods)) { fields.items.push(_pendingOcrItem(source)); return; }
         const sku = /^([A-Za-z0-9._/-]+(?:[（(][^）)]*[）)])?)\s+(.+)$/.exec(row.goods);
         const name = sku ? sku[2] : row.goods;
         if (!/[一-鿿]/.test(name)) { fields.items.push(_pendingOcrItem(source)); return; }
-        cells = [row.order + (row.suffix || ''), sku ? sku[1] : '', name, row.unit, row.qty, row.tail || ''];
+        cells = [row.order, sku ? sku[1] : '', name, row.unit, row.qty, row.tail || ''];
       }
       const order = (cells[0] || '').replace(/\s/g, '');
       if (cells.length < 5 || !/^[A-Za-z][A-Za-z0-9/_-]*\d[A-Za-z0-9/_-]*$/.test(order) ||
@@ -390,10 +398,24 @@ function parseDeliveryNote(text, options = {}) {
     }
     for (let i = tabHeader + 1; i < tabLines.length; i++) {
       const line = tabLines[i];
-      if (/^(?:合计|合計|注|经手人|經手人|客户签收|客戶簽收)[：:]|^出货专用章\s*$/.test(line.trim())) { finishTabRow(); break; }
-      const start = /^[A-Za-z]{2,}\d{4,}(?:[\/_-][A-Za-z0-9]+)*(?:\s|$)/.test(line.trim());
+      if (!line.trim()) continue;
+      if (isPackagingHeader(line)) { finishTabRow(); usePackagingHeader(line); continue; }
+      // A footer ends only this row/page, never the rest of a multi-page document.
+      if (/^(?:合计|合計|注|经手人|經手人|客户签收|客戶簽收)[：:]|^出货专用章\s*$/.test(line.trim())) { finishTabRow(); continue; }
+      const cells = line.split('\t');
+      const blockCells = block.join('\n').split('\t');
+      const complete = tabPreserved ? blockCells.length >= 5 && /^(个|個|PCS|件|套|张|張|卷|KG|G)$/i.test(blockCells[3].trim()) &&
+        /^(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)*$/.test(blockCells[4].trim()) :
+        /(?:^|\s)(?:个|個|PCS|件|套|张|張|卷|KG|G)\s+\d/i.test(block.join(' '));
+      // Explicit columns establish a new row even for an unreadable PO/quantity.
+      // A short physical line inside a still-incomplete cell remains a continuation.
+      const continuingOrder = block.length && blockCells.length === 1 && /^\d[A-Za-z0-9/_-]*$/.test(cells[0].trim());
+      const positionedStart = !continuingOrder && cells.length >= 5 && (!block.length || complete || /^(个|個|PCS|件|套|张|張|卷|KG|G)$/i.test(cells[3].trim()));
+      const start = positionedStart || /^[A-Za-z][A-Za-z0-9/_-]*\d[A-Za-z0-9/_-]*(?:\s|$)/.test(line.trim());
       if (start) finishTabRow();
-      if (start || block.length) block.push(line);
+      if (start || block.length && !complete) block.push(line);
+      else if (block.length && /^\+?\s*\d[\d.,，+*×xX/\s]*(?:个|個|PCS|件|套|张|張|卷|KG|G)/i.test(line.trim())) block.push(line);
+      else { finishTabRow(); fields.items.push(_pendingOcrItem(line)); }
     }
     finishTabRow();
     if (!fields.items.length) fields.items.push(_pendingOcrItem(rawText));

@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { XLSX, codec: draftExcel } = require('./fixtures/draft-excel-runtime');
 
 // Exercise the real import handlers without booting the app or opening its database.
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
@@ -92,10 +93,13 @@ function harness(options = {}) {
   let saved = 0, refreshed = 0, selectedMode = 'append';
   const user = { username: 'jc', role: 'admin', enabled: true };
   const window = { __QC_COMPANY: options.company || 'dg-xingxin',
+    __QC_DRAFT_EXCEL: draftExcel,
     __QC_DRAFT_RECOVERY_BLOCKED: !!options.blocked,
     __QC_AUTH: { company: options.company || 'dg-xingxin', user } };
   const sandbox = {
     window,
+    Uint8Array,
+    importReset() {}, _setProgress() {},
     state: { records: clone(options.records || []), nextId: 31 },
     can: () => options.allowed !== false && !window.__QC_DRAFT_RECOVERY_BLOCKED,
     getCompany: () => window.__QC_COMPANY,
@@ -118,9 +122,10 @@ function harness(options = {}) {
       used.add(id);
       return id;
     },
-    document: { querySelector: () => ({ value: selectedMode }) },
+    document: { querySelector: () => ({ value: selectedMode }), getElementById: () => null },
     FileReader: class {
       readAsText(file) { this.onload({ target: { result: file.text } }); }
+      readAsArrayBuffer(file) { this.onload({ target: { result: file.bytes } }); }
     },
   };
   vm.createContext(sandbox);
@@ -137,6 +142,11 @@ function harness(options = {}) {
     },
     route(payload, name = 'pending.JSON') {
       sandbox._startImport({ name, text: JSON.stringify(payload) });
+    },
+    workbookRoute(payload) {
+      sandbox.XLSX = XLSX;
+      const bytes = XLSX.write(draftExcel.encode(payload, XLSX), { type: 'array', bookType: 'xlsx' });
+      sandbox._startImport({ name: 'draft.xlsx', bytes });
     },
     confirm(mode = 'append') {
       assert.ok(confirmations.length, 'valid input presents a confirmation');
@@ -155,6 +165,19 @@ test('existing array and records-package formats still import, including UTF-8 B
     assert.equal(h.records[0].id, 101);
     assert.equal(h.saved, 1);
   }
+});
+
+test('the main Excel picker restores an identified draft through versioned recovery confirmation', () => {
+  const original = draft([record(101, { qty: 25, updatedAt: laterStamp }), record(102)], { baseline: { versions: { 101: stamp, 102: stamp } } });
+  const payload = { backupType: 'pending-records', company: original.company, owner: original.owner,
+    count: 2, records: original.state.records, draftRecovery: { originalRaw: JSON.stringify(original) } };
+  const h = harness({ records: [record(101), record(102, { qty: 99, updatedAt: laterStamp })] });
+  h.workbookRoute(payload);
+  assert.equal(h.confirmations.length, 1);
+  h.confirm();
+  assert.equal(h.saved, 1);
+  assert.equal(h.records.find(row => row.id === 101).qty, 25);
+  assert.equal(h.records.find(row => row.id === 102).qty, 99);
 });
 
 test('an exported pending draft without a baseline is recognized and appended', () => {

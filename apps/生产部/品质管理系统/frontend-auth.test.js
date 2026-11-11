@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { XLSX, codec: draftExcel } = require('./tests/fixtures/draft-excel-runtime');
 const source = name => fs.readFileSync(path.join(__dirname, name), 'utf8');
 const plain = value => JSON.parse(JSON.stringify(value));
 const company = 'dg-xingxin';
@@ -25,6 +26,7 @@ function browser({ authenticated = true, pathname = '/qc/', cached = [], handler
     'umUsername','umPassword','umPassword2','umRole','umName','umDept']) element(id);
   const button = element('loginButton');
   const ctx = { console: { log() {}, warn() {}, error() {} }, URLSearchParams, URL, Blob, Promise,
+    XLSX, __QC_DRAFT_EXCEL: draftExcel,
     setTimeout() {}, clearTimeout() {}, setInterval() {}, requestAnimationFrame() {},
     addEventListener(event, fn) { if (event === 'beforeunload') unloadListeners.add(fn); },
     removeEventListener(event, fn) { if (event === 'beforeunload') unloadListeners.delete(fn); }, navigator: {},
@@ -536,7 +538,7 @@ for (const kind of ['deleted', 'updated', 'timezone-format', 'collision']) test(
   const before = b.calls.length; assert.equal(await b.ctx.__QC_SYNC_NOW(), false); assert.equal(b.calls.length, before);
   for (const action of ['createRecord','editRecord','deleteRecord','batchDelete','reviewRecord','importData']) assert.equal(b.ctx.can(action), false);
   const banner = [...b.elements.values()].find(el => el.id === 'qcSyncNotice');
-  assert.deepEqual(banner.children.slice(-2).map(el => el.textContent), ['下载原草稿','放弃待恢复草稿']);
+  assert.deepEqual(banner.children.slice(-2).map(el => el.textContent), ['下载草稿 Excel','放弃待恢复草稿']);
   assert.equal(b.ctx.__QC_DOWNLOAD_BLOCKED_DRAFT(), true);
   assert.equal([...b.elements.values()].find(el => el.download).clicked, true);
 });
@@ -761,7 +763,7 @@ test('a low unused random draft restores alongside another creator without autom
 
 test('normal HTML selects all matching modern creation-intent and OCR scripts without changing their load order',()=>{
   const html=source('index.html');const scripts=[...html.matchAll(/<script src="(qc-backend|app|ai-ocr)\.js\?v=([^"]+)"/g)].map(m=>[m[1],m[2]]);
-  assert.deepEqual(scripts,[['qc-backend','20261111-draft-recovery'],['app','20261111-server-ocr'],['ai-ocr','20261111-server-ocr-timeout']]);
+  assert.deepEqual(scripts,[['qc-backend','20261111-excel-draft'],['app','20261111-excel-server-ocr'],['ai-ocr','20261111-server-ocr-timeout']]);
 });
 
 test('a newer volatile draft retains confirmed server defaults after its next write fails', async () => {

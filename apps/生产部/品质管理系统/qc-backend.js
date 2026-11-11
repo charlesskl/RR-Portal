@@ -76,7 +76,7 @@
       banner.style.display = (message && error) ? '' : 'none';
       var hasRecordFailure = Object.keys(failedWrites).some(function (url) { return url.indexOf('/api/records') !== -1; });
       if (error && blockedRecovery && document.createElement) {
-        ['下载原草稿', '放弃待恢复草稿'].forEach(function (label, index) {
+        ['下载草稿 Excel', '放弃待恢复草稿'].forEach(function (label, index) {
           var button = document.createElement('button');
           button.type = 'button'; button.textContent = label; button.className = 'btn-secondary'; button.style.marginLeft = '12px';
           button.onclick = index ? discardBlockedDraft : downloadBlockedDraft;
@@ -274,13 +274,18 @@
     if (!recoveryIsCurrent()) return false;
     try {
       var content = blockedRecovery.raw, converted = false;
+      var packaged = null;
       try {
-        content = JSON.stringify(draftDownloadPackage(content), null, 2);
+        packaged = draftDownloadPackage(content);
         converted = true;
       } catch (_) { /* 损坏草稿仍须允许下载原文，不影响已有备份保护。 */ }
-      var blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+      if (converted) {
+        if (typeof XLSX === 'undefined' || !window.__QC_DRAFT_EXCEL) throw new Error('Excel 引擎未加载，请刷新后重试');
+        content = XLSX.write(window.__QC_DRAFT_EXCEL.encode(packaged, XLSX), { bookType: 'xlsx', type: 'array', compression: true });
+      }
+      var blob = new Blob([content], { type: converted ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/json;charset=utf-8' });
       var url = URL.createObjectURL(blob), link = document.createElement('a');
-      link.href = url; link.download = '品质未同步草稿-' + COMPANY + '-' + blockedRecovery.owner + '.json';
+      link.href = url; link.download = '品质未同步草稿-' + COMPANY + '-' + blockedRecovery.owner + (converted ? '.xlsx' : '.json');
       document.body.appendChild(link); link.click(); link.remove();
       setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
       if (!converted) notice(recoveryMessage() + ' 已下载原始草稿；内容不完整，暂不能作为备份导入。', true);

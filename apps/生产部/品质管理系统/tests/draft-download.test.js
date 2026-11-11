@@ -9,6 +9,7 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const backend = fs.readFileSync(path.join(root, 'qc-backend.js'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const { XLSX, codec: draftExcel } = require('./fixtures/draft-excel-runtime');
 const legacyPath = process.env.QC_LEGACY_APP || path.join(__dirname, 'fixtures', 'legacy-backup-validator.js');
 const clone = value => JSON.parse(JSON.stringify(value));
 
@@ -44,7 +45,8 @@ function harness(raw = JSON.stringify(sampleDraft(), null, 2) + '\r\n', options 
   const context = {
     COMPANY: company,
     blockedRecovery: { owner, raw, backupKey: pending + '_conflict_copy' },
-    window: { __QC_AUTH: { company, user: { username: owner } }, __QC_DRAFT_RECOVERY_BLOCKED: true },
+    window: { __QC_AUTH: { company, user: { username: owner } }, __QC_DRAFT_RECOVERY_BLOCKED: true, __QC_DRAFT_EXCEL: draftExcel },
+    XLSX,
     Blob,
     URL: {
       createObjectURL(blob) { blobs.push(blob); return 'blob:test-download'; },
@@ -95,16 +97,16 @@ test('download package exposes a complete standard records backup and preserves 
   assertUntouched(h);
 });
 
-test('the actual download handler creates a standard JSON Blob while leaving the lock and original draft intact', async () => {
+test('the actual download handler creates a real Excel draft while leaving the lock and original draft intact', async () => {
   const h = harness();
   assert.equal(h.context.downloadBlockedDraft(), true);
   assert.equal(h.blobs.length, 1);
-  assert.match(h.blobs[0].type, /^application\/json/);
-  const result = JSON.parse((await h.blobs[0].text()).replace(/^\uFEFF/, ''));
+  assert.match(h.blobs[0].type, /spreadsheetml/);
+  const result = draftExcel.decode(XLSX.read(Array.from(new Uint8Array(await h.blobs[0].arrayBuffer())), { type: 'array' }), XLSX);
   assert.equal(result.count, 2);
   assert.deepEqual(result.records, JSON.parse(h.raw).state.records);
   assert.equal(result.draftRecovery.originalRaw, h.raw);
-  assert.deepEqual(h.downloads, [{ href: 'blob:test-download', name: '品质未同步草稿-dg-xingxin-测试检验员.json' }]);
+  assert.deepEqual(h.downloads, [{ href: 'blob:test-download', name: '品质未同步草稿-dg-xingxin-测试检验员.xlsx' }]);
   assert.deepEqual(h.revoked, ['blob:test-download']);
   assertUntouched(h);
 });
@@ -137,6 +139,13 @@ test('a different current login cannot download the blocked account draft', () =
   assert.equal(h.downloads.length, 0);
   assert.equal(h.blobs.length, 0);
   assertUntouched(h);
+});
+
+test('a missing Excel engine leaves the pending draft intact and reports the download failure', () => {
+  const h = harness(); delete h.context.XLSX;
+  assert.equal(h.context.downloadBlockedDraft(), false);
+  assert.equal(h.downloads.length, 0); assertUntouched(h);
+  assert.ok(h.notices.some(entry => entry.error));
 });
 
 test('new download files pass the actual legacy importer validator through top-level records', {
@@ -187,7 +196,7 @@ test('optional actual user draft exports every record and preserves the original
   const draft = JSON.parse(raw.replace(/^\uFEFF/, ''));
   const h = harness(raw, { company: draft.company, owner: draft.owner });
   assert.equal(h.context.downloadBlockedDraft(), true);
-  const result = JSON.parse((await h.blobs[0].text()).replace(/^\uFEFF/, ''));
+  const result = draftExcel.decode(XLSX.read(Array.from(new Uint8Array(await h.blobs[0].arrayBuffer())), { type: 'array' }), XLSX);
   assert.equal(result.count, draft.state.records.length);
   assert.deepEqual(result.records, draft.state.records);
   assert.equal(result.draftRecovery.originalRaw, raw);

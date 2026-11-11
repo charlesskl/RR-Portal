@@ -97,11 +97,9 @@ function loadAiConfig() {
 }
 let AI = loadAiConfig();
 
-/* OCR 识别提示词：qwen3.5-ocr 官方全文识别模式。
-   该模型指令遵循能力差（让它直接输出结构化 JSON 会抄 schema/示例），
-   但它按官方提示词做「全文 OCR」非常准。所以：模型只负责把图变文字，
-   字段提取由下面的 parseDeliveryNote() 确定性完成。 */
-const OCR_READ_PROMPT = 'Read all the text in the image, including the company name, title, serial number, date, customer, and all text outside the table, then the table contents. Skip fully empty table rows.';
+/* 模型读取原文和保留表格空列，字段提取统一由 parseDeliveryNote() 完成。
+   不要求模型输出业务字段 JSON，避免把模型推断当作确定的列位置。 */
+const OCR_READ_PROMPT = 'Read all the text in the image, including the company name, title, serial number, date, customer, and all text outside the table, then the table contents. Output tables as markdown tables using the original column headers and column order. Keep every column and every empty cell, including empty leading cells in continuation rows. Keep carton counts and remarks in their own original columns. Do not merge columns, fill empty cells, infer values, or move footer totals into goods rows. Skip fully empty table rows.';
 /* 表格密集型单据（如台聚）全文 OCR 易乱行/复读，解析不出明细时改用此提示词重试 */
 const OCR_TABLE_PROMPT = 'Read all the text in the image. Output the table contents as a markdown table with every column kept (including the quantity column and empty cells), one row per line.';
 /* 第二次重试仍失败时：只要求输出货品明细表（列名固定，指令简单，命中率最高） */

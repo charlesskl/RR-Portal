@@ -2780,11 +2780,10 @@ function recheckNameWhitelist() {
 /* 模式切换（单条 / 批量） */
 
 /* ════════════════════════════════════════
-   §OCR  图片识别录入（Tesseract.js）
+   §OCR  图片上传与服务端识别录入
 ════════════════════════════════════════ */
 
 let _ocrImageFile = null;
-let _ocrWorkerBusy = false;
 let _ocrImageRevision = 0;
 let _ocrOriginalImage = '';
 let _ocrImageAngle = 0;
@@ -2839,7 +2838,7 @@ window.__QC_OCR_IMAGE = {
     if (!_sameOcrImage(snapshot)) return null;
     _ocrImageRevision++;
     _ocrImageAngle = angle;
-    _ocrImageFile = dataUrl; // Tesseract 和 AI 均读取已经提交到预览的同一图片。
+    _ocrImageFile = dataUrl; // 保持预览与提交给服务端的图片一致。
     document.getElementById('ocrPreview').src = dataUrl;
     return _ocrImageSnapshot();
   },
@@ -2931,134 +2930,12 @@ function clearOcr() {
 }
 
 
-/* 小图放大，大图限定 2000px；旋转后直接使用已提交的 data URL。 */
-function preprocessImageForOcr(file) {
-  return new Promise((resolve) => {
-    try {
-      const img = new Image();
-      const isDataUrl = typeof file === 'string';
-      const url = isDataUrl ? file : URL.createObjectURL(file);
-      const release = () => { if (!isDataUrl) URL.revokeObjectURL(url); };
-      img.onload = () => {
-        try {
-          const width = img.naturalWidth === undefined ? img.width : img.naturalWidth;
-          const height = img.naturalHeight === undefined ? img.height : img.naturalHeight;
-          if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) throw new Error('图片尺寸无效');
-          const scale = Math.min(2, 2000 / Math.max(width, height));
-          const canvas = document.createElement('canvas');
-          canvas.width  = Math.max(1, Math.round(width * scale));
-          canvas.height = Math.max(1, Math.round(height * scale));
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-          /* 灰度 + 对比度增强（简单线性拉伸）*/
-          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const d = imgData.data;
-          const contrast = 1.6;     /* 对比度系数 */
-          const mid = 128;
-          for (let i = 0; i < d.length; i += 4) {
-            const gray = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-            let v = (gray - mid) * contrast + mid;
-            v = Math.max(0, Math.min(255, v));
-            d[i] = d[i+1] = d[i+2] = v;
-          }
-          ctx.putImageData(imgData, 0, 0);
-          release();
-          canvasToBlob(canvas).then(blob => resolve(blob || file)).catch(() => resolve(file));
-        } catch (e) {
-          release();
-          resolve(file); /* 预处理失败回退原图 */
-        }
-      };
-      img.onerror = () => { release(); resolve(file); };
-      img.src = url;
-    } catch (e) {
-      resolve(file);
-    }
-  });
-}
-
-/* canvas → blob（PNG）*/
-function canvasToBlob(canvas) {
-  return new Promise((resolve) => {
-    if (canvas.toBlob) {
-      canvas.toBlob(blob => resolve(blob), 'image/png');
-    } else {
-      resolve(null);
-    }
-  });
-}
-
-/* 开始 OCR 识别 */
+/* ai-ocr.js 接管入口前或加载失败时，保留内容并停止识别。
+   不在浏览器调用另一套识别引擎或字段解析规则。 */
 async function startOcr() {
-  if (!_ocrImageFile) {
-    showToast('请先上传图片', 'error');
-    return;
-  }
-  if (typeof Tesseract === 'undefined') {
-    showToast('OCR 引擎未加载成功，请检查网络后重试', 'error');
-    return;
-  }
-  if (_ocrWorkerBusy) {
-    setText('ocrStatus', '上一张图片的本地识别尚未结束，请稍后重试');
-    showToast('本地识别仍在处理上一张图片，请稍后重试', 'info');
-    return;
-  }
-  const snapshot = _ocrImageSnapshot();
-  _ocrWorkerBusy = true;
-  setText('ocrStatus', '正在识别，请稍候...');
-  const btn = document.getElementById('btnStartOcr');
-  if (btn) btn.disabled = true;
-
-  try {
-    /* 有界灰度/对比度预处理，保持已提交图片的方向。 */
-    const ocrInput = await preprocessImageForOcr(_ocrImageFile);
-    if (!_sameOcrImage(snapshot)) return;
-    /* Worker 内 importScripts 不识别相对路径，必须给绝对 URL */
-    const _ocrBase = location.href.replace(/[^/]*$/, '');
-    const result = await Tesseract.recognize(ocrInput, 'chi_sim+eng', {
-      workerPath: _ocrBase + 'vendor/tesseract/worker.min.js',
-      corePath: _ocrBase + 'vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js',
-      langPath: _ocrBase + 'vendor/tesseract/lang',
-      logger: () => {} /* 静默，不输出进度日志 */
-    });
-    const text = (result?.data?.text || '').trim();
-    if (!_sameOcrImage(snapshot)) return;
-    if (!text) {
-      setText('ocrStatus', '识别失败，请重新上传清晰图片');
-      showToast('未识别到文字，请上传更清晰的图片', 'error');
-    } else {
-      const ids = ['ocrDate','ocrSupplier','ocrProductNo','ocrProductName','ocrDeliveryNo','ocrOrderNo','ocrQty','ocrType','ocrRemark'];
-      const previous = ids.map(id => document.getElementById(id)?.value || '');
-      ids.forEach(id => setVal(id, ''));
-      setVal('ocrRawText', text);
-      extractFieldsFromOcrText(text);
-      const quantity = document.getElementById('ocrQty')?.value || '';
-      const identity = (document.getElementById('ocrProductNo')?.value || '').trim() || (document.getElementById('ocrProductName')?.value || '').trim();
-      if (!quantity || !identity) {
-        ids.forEach((id, i) => setVal(id, previous[i]));
-        setText('ocrStatus', '本地 OCR 未读出完整货品明细，原文已保留，请人工核对或重试');
-        showToast('表格文字识别不完整，未自动填入字段；请核对原文，不要按乱码提交', 'error');
-      } else {
-        window.__qcAiResult = null;
-        window.__qcOcrTextActor = null;
-        window.__qcOcrTextNeedsParsing = false;
-        window.__qcOcrResultContext = snapshot;
-        const previewTable = document.getElementById('ocrItemsPreview');
-        if (previewTable) { previewTable.hidden = true; previewTable.innerHTML = ''; }
-        setText('ocrStatus', '本地识别完成，请核对字段');
-        showToast('本地识别完成，请逐项核对货号、名称和数量', 'info');
-      }
-    }
-  } catch (err) {
-    if (!_sameOcrImage(snapshot)) return;
-    console.error('[OCR]', err);
-    setText('ocrStatus', '识别失败，请重新上传清晰图片');
-    showToast('识别失败：' + (err.message || '未知错误'), 'error');
-  } finally {
-    _ocrWorkerBusy = false;
-    if (btn && _sameOcrImage(snapshot)) btn.disabled = false;
-  }
+  const message = '识别服务未加载，请刷新页面后重试';
+  setText('ocrStatus', message);
+  showToast(message, 'error');
 }
 
 /* 日期归一化：支持多种格式，含OCR噪声变体（"号"可能被识别为其它符号）*/

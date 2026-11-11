@@ -76,6 +76,21 @@ test('isolated real OCR HTTP, explicit save, SQLite and reopen retain rows and p
   assert.equal((await request('/api/ai/ocr-extract', 'POST', image)).status, 401);
   assert.equal((await request('/api/ai/ocr-extract', 'POST', image, viewer)).status, 403);
   assert.equal(modelCalls, 0);
+  // Two independent browser sessions use the same server parser. No provider call
+  // is needed to reparse text, even when the table has empty continuation cells.
+  const otherComputer = await login('jc');
+  const columns = '|订单号|货号|配件名称|颜色|数量|单位|本单送货数/本单欠数|箱数|备注|';
+  const componentRaw = [columns, '|PO-SYNTH|SKU001|甲身体||40|PCS||4|4*10|',
+    '|||乙身体||16|PCS||1||', '|||丙身体||42|PCS||3|2*16+10|',
+    '胶箱: 8', '收货人: QC: 送货人:合成人员'].join('\n');
+  const left = await request('/api/ai/ocr-parse', 'POST', {text:componentRaw}, admin);
+  const right = await request('/api/ai/ocr-parse', 'POST', {text:componentRaw}, otherComputer);
+  assert.equal(left.status, 200); assert.equal(right.status, 200);
+  assert.deepEqual(left.json, right.json);
+  assert.deepEqual(left.json.fields.items.map(row => [row.orderNo,row.productNo,row.productName,row.qty,row.cartons,row.remark]),
+    [['PO-SYNTH','SKU001','甲身体','40','4','4*10'], ['PO-SYNTH','SKU001','乙身体','16','1',''], ['PO-SYNTH','SKU001','丙身体','42','3','2*16+10']]);
+  assert.equal((await request('/api/ai/ocr-parse', 'POST', {text:componentRaw}, viewer)).status,403);
+  assert.equal(modelCalls, 0);
   const ocr = await request('/api/ai/ocr-extract', 'POST', image, admin);
   assert.equal(ocr.status, 200); assert.equal(ocr.json.ok, true); assert.equal(modelCalls, 2);
   assert.equal(ocr.json.rawText, raw); assert.equal(ocr.json.needsManualReview, false);

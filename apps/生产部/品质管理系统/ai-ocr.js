@@ -1,7 +1,7 @@
 /* 兴信 QMS - AI OCR 接入
    加载在 app.js 之后。稳定接管“开始识别”按钮：
    - 后端 AI 就绪时使用 /api/ai/ocr-extract
-   - AI 未配置时才回退到原本 Tesseract
+   - AI 未就绪或连接失败时保留内容，停止识别，不回退浏览器引擎
    - 线上脚本加载顺序变化时也会重复尝试挂载
 */
 (function () {
@@ -27,7 +27,7 @@
   }
   function cancelOperation() {
     textRevision++;
-    // Local Tesseract work cannot be aborted, but its snapshot must become stale too.
+    // Invalidate pending image and text operations together.
     if (imageApi() && typeof imageApi().invalidatePending === 'function') imageApi().invalidatePending();
     var previous = activeOperation;
     activeOperation = null;
@@ -130,7 +130,7 @@
     if (!text || text === '未上传图片' || text.indexOf('AI OCR') === 0 || text.indexOf('本地 OCR') === 0) {
       el.textContent = aiReady
         ? 'AI OCR 已就绪(' + ((aiStatus && aiStatus.ocrModel) || '百炼') + ')'
-        : aiStatus && aiStatus.error ? 'AI OCR 连接失败，请稍后重试' : 'AI OCR 未配置，将使用本地 OCR，请核对明细';
+        : aiStatus && aiStatus.error ? 'AI OCR 连接失败，请稍后重试' : '识别服务暂不可用，请稍后重试';
     }
   }
 
@@ -372,11 +372,6 @@
     loadQueueItem(window.__qcQueue);
   }
 
-  function runOriginalOcr() {
-    if (typeof window.__origStartOcr === 'function') return window.__origStartOcr();
-    toast('本地 OCR 入口未就绪，请刷新页面后重试', 'error');
-  }
-
   window.invalidateOcrText = function () {
     cancelOperation(); window.__qcOcrTextNeedsParsing = true;
     var preview = document.getElementById('ocrItemsPreview'); if (preview) preview.hidden = true;
@@ -410,16 +405,12 @@
       requireCurrent(op);
       if (ready) return aiStartOcr(op);
       if (!aiStatus || aiStatus.error) throw new Error('无法检查 AI 识别服务状态，请稍后重试；已填内容已保留');
-      setT('ocrStatus', 'AI OCR 未就绪，正在改用本地 OCR...');
-      return runOriginalOcr();
+      throw new Error('识别服务暂不可用，请稍后重试；图片与已填内容已保留');
     }).catch(function (error) { operationFailure(op, error, 'AI 识别失败'); })
       .finally(function () { endOperation(op); });
   }
 
   function patch() {
-    if (typeof window.startOcr === 'function' && window.startOcr !== aiDispatch && window.startOcr !== window.__origStartOcr) {
-      window.__origStartOcr = window.startOcr;
-    }
     window.startOcr = aiDispatch;
 
     var btn = document.getElementById('btnStartOcr');

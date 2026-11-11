@@ -73,3 +73,19 @@ test('optional user-provided pending draft survives real XLSX export and import 
   assert.deepEqual(decoded, original);
   assert.equal(decoded.records.length, original.count);
 });
+
+test('Excel 1904 date system preserves the edited calendar date through binary roundtrip', () => {
+  const workbook = codec.encode(sample(), XLSX);
+  workbook.Workbook.WBProps = { date1904: true };
+  workbook.Sheets.验货草稿.B2 = { t: 'n', v: 44875, z: 'yyyy-mm-dd' };
+  const decoded = codec.decode(roundtrip(workbook), XLSX);
+  assert.equal(decoded.records[0].date, '2026-11-11');
+});
+
+test('Excel error values cannot silently replace a draft quantity with an empty value', () => {
+  const original = sample(), workbook = codec.encode(original, XLSX);
+  const before = JSON.stringify(original);
+  workbook.Sheets.验货草稿.L2 = { t: 'e', v: 7 };
+  assert.throws(() => codec.decode(roundtrip(workbook), XLSX), /错误单元格/);
+  assert.equal(JSON.stringify(original), before);
+});

@@ -81,11 +81,14 @@
       columns.forEach(([key], col) => {
         const cell = sheet[excel.utils.encode_cell({ r: index + 1, c: col })];
         if (cell && cell.f) throw new Error('Excel草稿明细需填写实际值，第' + (index + 2) + '行包含公式');
+        if (cell && cell.t === 'e') throw new Error('Excel草稿明细含错误单元格，第' + (index + 2) + '行，请先修正后恢复');
         if (key === 'id') return;
         let value = values[col] == null ? '' : values[col];
         if (original && String(value) === display(original, key)) return;
         if ((key === 'date' || key === 'inspDate') && typeof value === 'number') {
-          const date = excel.SSF.parse_date_code(value);
+          const date = excel.SSF.parse_date_code(value, {
+            date1904: !!(workbook.Workbook && workbook.Workbook.WBProps && workbook.Workbook.WBProps.date1904),
+          });
           if (!date) throw new Error('Excel草稿日期无效，第' + (index + 2) + '行');
           value = String(date.y).padStart(4, '0') + '-' + String(date.m).padStart(2, '0') + '-' + String(date.d).padStart(2, '0');
         }

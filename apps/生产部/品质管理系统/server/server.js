@@ -538,20 +538,43 @@ function parseDeliveryNote(text, options = {}) {
         const hasModel = /[型模][号號]/.test(plainHeader);
         const rowPattern = new RegExp('^(?<order>\\S+)\\s+(?<sku>\\S+)\\s+' +
           (hasModel ? '(?<model>\\S+)\\s+' : '') + '(?<name>.+?)\\s+(?<color>\\S+)\\s+(?<qty>' + num + ')\\s*(?<unit>PCS|个|個|件|套|条|條)\\s+(?<delivered>' + num + ')(?:\\s*[/／]\\s*(?<owed>' + num + '))?\\s+(?<cartons>\\d+)(?:\\s+(?<remark>.*))?$', 'i');
+        const sparsePattern = new RegExp('^(?:(?<order>[A-Za-z][A-Za-z0-9._/\\-]+)\\s+(?<sku>[A-Za-z0-9][A-Za-z0-9._/\\-]*)\\s+)?' +
+          '(?<name>\\S*[一-鿿]\\S*)\\s+(?<qty>' + num + ')\\s*(?<unit>PCS|个|個|件|套|条|條)' +
+          '(?:\\s+(?<tail>\\d+(?:\\s+[\\d+*xX×.,，/()\\-]+)?))?$', 'i');
+        let previousItem = null;
         for (const line of lines.slice(hiP + 1)) {
           // A footer ends a page, not the delivery note: keep scanning later pages.
-          if (/^(?:胶箱|膠箱|胶袋|膠袋|钙箱|鈣箱|纸箱|紙箱|平卡|卡板|吸塑|QC|Q[.]C[.]?|收货人|收貨人|送货人|送貨人|合计|合計|总计|總計)[：:\s]/i.test(line)) continue;
-          if (componentHeader.test(line.replace(/\s+/g, ''))) continue;
+          if (/^(?:胶箱|膠箱|胶袋|膠袋|钙箱|鈣箱|纸箱|紙箱|平卡|卡板|吸塑|QC|Q[.]C[.]?|收货人|收貨人|送货人|送貨人|合计|合計|总计|總計)[：:\s]/i.test(line)) { previousItem = null; continue; }
+          if (componentHeader.test(line.replace(/\s+/g, ''))) { previousItem = null; continue; }
           if (/^[\d\s+*xX×.,，/()\-]+$/.test(line)) continue; // 备注换行数字不构成新的货品。
           const match = rowPattern.exec(line), row = match && match.groups;
           const code = value => value.replace(/[‐‑‒–—−﹘﹣－]/g, '-');
           if (row) { row.order = code(row.order); row.sku = code(row.sku); if (row.model) row.model = code(row.model); }
+          // Flattened OCR loses empty columns. Only the adjacent quantity/unit
+          // and a single name token remain positioned; keep the tail verbatim.
+          if (!row && !hasModel) {
+            const sparseMatch = sparsePattern.exec(code(line));
+            const sparse = sparseMatch && sparseMatch.groups;
+            if (sparse && (sparse.order || previousItem)) {
+              const inherited = !sparse.order;
+              fields.items.push({ orderNo: sparse.order || previousItem.orderNo,
+                productNo: sparse.sku || previousItem.productNo, productName: sparse.name,
+                qty: quantityText(sparse.qty, sparse.unit), unit: sparse.unit,
+                color: '', deliveryBalance: '', cartons: '',
+                remark: [inherited ? '订单号及货号承接上一明细，请核对' : '', sparse.tail ? '右侧原文（列位置待核对）：' + sparse.tail : ''].filter(Boolean).join('；') });
+              previousItem = fields.items.at(-1);
+              fields.manualReviewRequired = true;
+              continue;
+            }
+          }
           if (!row || !/^[A-Za-z0-9][A-Za-z0-9._/\-]*$/.test(row.order) || row.owed !== undefined && Number(row.qty.replace(/[,，]/g, '')) !== Number(row.delivered.replace(/[,，]/g, ''))) {
+            previousItem = null;
             fields.items.push(_pendingOcrItem(line));
             continue;
           }
           fields.items.push({ orderNo: row.order, productNo: row.sku, productName: row.name,
             qty: quantityText(row.qty, row.unit), unit: row.unit, color: row.color, deliveryBalance: row.delivered + (row.owed === undefined ? '' : '/' + row.owed), cartons: row.cartons, remark: row.remark || '', ...(hasModel ? { model: row.model } : {}) });
+          previousItem = fields.items.at(-1);
         }
         const orders = fields.items.map(item => item.orderNo || '');
         fields.orderNo = orders.length && orders.every(order => order && order === orders[0]) ? orders[0] : '';

@@ -49,6 +49,37 @@ test('actual line breaks inside a PO remain full manual source, not an invented 
 const header=['序号','订单编号','货号','货品名称','单位'];
 function table(extra,rows){return'|'+header.concat(extra).join('|')+'|\n'+rows.map(row=>'|'+row.join('|')+'|').join('\n');}
 
+const sparseHeading = '订单号 货号 配件名称 颜色 数量 单位 本单送货数/本单欠数 箱数 备注';
+test('flattened component rows retain positioned names and quantities despite empty columns and continuation codes', () => {
+  const raw = [sparseHeading, 'PO-26001 SKU1093 2#浅蓝色甲身体 40 PCS 4 4*10',
+    '2#浅蓝色乙身体 16 PCS 1', '2#浅蓝色丙身体 42 PCS 3 2*16+10',
+    '5#蓝色甲身体 51 PCS 6 5*9+6', '5#蓝色乙身体 12 PCS 1', '5#蓝色丙身体 27 PCS 2 16+11'].join('\n');
+  const fields = runtime().parse(raw);
+  assert.equal(fields.items.length, 6);
+  assert.deepEqual(fields.items.map(row => row.qty), ['40','16','42','51','12','27']);
+  assert.ok(fields.items.every(row => row.productNo === 'SKU1093' && row.orderNo === 'PO-26001'));
+  assert.equal(fields.items[1].productName, '2#浅蓝色乙身体');
+  assert.ok(fields.items.every(row => row.color === '' && row.deliveryBalance === '' && row.cartons === ''));
+  assert.match(fields.items[0].remark, /4 4\*10/);
+  assert.match(fields.items[1].remark, /承接上一明细/);
+  assert.equal(fields.manualReviewRequired, true);
+});
+
+for (const separator of ['胶箱：4', sparseHeading, '无法定位的模糊行']) {
+  test('sparse continuation cannot inherit identifiers across a page or ambiguous row: ' + separator, () => {
+    const fields = runtime().parse([sparseHeading, 'PO-26001 SKU1093 甲身体 40 PCS 4', separator, '乙身体 16 PCS 1'].join('\n'));
+    const row = fields.items.at(-1);
+    assert.equal(row.qty, ''); assert.equal(row.productNo, ''); assert.equal(row.quantityNeedsReview, true);
+  });
+}
+
+test('a sparse row with an explicit new order starts its own continuation group', () => {
+  const fields = runtime().parse([sparseHeading, 'PO-26001 SKU1093 甲身体 40 PCS 4',
+    'PO-26002 SKU2093 乙身体 16 PCS 1', '丙身体 42 PCS 3'].join('\n'));
+  assert.equal(fields.orderNo, '');
+  assert.equal(fields.items[2].orderNo, 'PO-26002'); assert.equal(fields.items[2].productNo, 'SKU2093');
+});
+
 test('positioned delivery columns preserve actual PO/SKU/name and use the exact delivered column despite price/order/total columns',()=>{
   const raw=table(['单价','订单数量','总交货数量','累计交货数量','本次交货数量','金额'],
     [['1','BBC2025285-0','0012','合成零件','PCS','9.50','100','80','90','34','323.00']]);

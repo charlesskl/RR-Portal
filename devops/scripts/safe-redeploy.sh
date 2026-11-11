@@ -118,14 +118,14 @@ COMPOSE_FILE=docker-compose.cloud.yml
 ENV_FILE=.env.cloud.production
 MAINT_FLAG_DIR=/opt/rr-portal/deploy/maintenance
 MAINT_COMPOSE_SERVICES=qc
+mkdir -p "$MAINT_FLAG_DIR"
+exec 9>"$MAINT_FLAG_DIR/rollout.lock"
+flock -w 30 9 || { echo '另一轮发布仍在运行，品质重启未开始' >&2; exit 1; }
 source deploy/service-maintenance.sh
 if ! declare -F deploy_qc_service >/dev/null; then
   echo '服务器尚未安装品质发布保护脚本' >&2
   exit 1
 fi
-mkdir -p "$MAINT_FLAG_DIR"
-exec 9>"$MAINT_FLAG_DIR/rollout.lock"
-flock -w 30 9 || { echo '另一轮发布仍在运行，品质重启未开始' >&2; exit 1; }
 if [[ "$1" == 1 ]]; then
   deploy_qc_service restart
 else

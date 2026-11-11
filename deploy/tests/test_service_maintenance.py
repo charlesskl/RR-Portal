@@ -329,6 +329,17 @@ PY
         self.assertFalse((self.flags / 'qc').exists())
 
     @unittest.skipUnless(BASH_MAJOR >= 4, 'full server script requires Bash 4+; covered on Linux CI')
+    def test_gateway_only_update_cannot_report_success_with_qc_still_blocked(self):
+        (self.flags / 'qc').touch()
+        result, calls = self.run_update_script(
+            changed_files='nginx/nginx.cloud.conf',
+            services_config={'qc': {}, 'nginx': {}}, QC_GATEWAY_DOWN='1',
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual([a[-1] for a in calls if 'up' in a], ['nginx'])
+        self.assertTrue((self.flags / 'qc').exists())
+
+    @unittest.skipUnless(BASH_MAJOR >= 4, 'full server script requires Bash 4+; covered on Linux CI')
     def test_qc_bootstrap_waits_for_gateway_startup_before_releasing(self):
         result, calls = self.run_update_script(
             services_config={'qc': {}, 'nginx': {}}, NGINX_STOPPED='1',

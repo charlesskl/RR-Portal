@@ -585,7 +585,7 @@ if [[ "$MAINT_QC_RELEASE_PENDING" -eq 1 ]]; then
   finish_qc_rollout
 elif [[ "$MAINT_QC_DEFER_RELEASE" -eq 1 && -f "$MAINT_FLAG_DIR/services/qc" ]]; then
   # 新网关已启用健康探测，可重新验证先前保留的品质标记。
-  maintenance_off qc
+  finish_qc_rollout
 fi
 
 # plugin_sdk 变动 → 提示（当前无 plugin_sdk 插件）

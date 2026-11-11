@@ -35,6 +35,9 @@ MAINT_FLAG_DIR="${INSTALL_DIR}/deploy/maintenance"
 cd "$INSTALL_DIR"
 # bind mount 进 nginx 容器，必须保证目录存在（ro mount，容器内只检测不写入）
 mkdir -p "$MAINT_FLAG_DIR"
+# 手动品质重启与自动发布共享这把锁，避免恢复检查提前撤下另一轮维护标记。
+exec 9>"$MAINT_FLAG_DIR/rollout.lock"
+flock -w 30 9 || { echo '  [ERROR] 另一轮发布仍在运行，当前发布未开始' >&2; exit 1; }
 
 # ─── State tracking (supports resume) ───
 save_state() { echo "$1" > "$STATE_FILE"; }
@@ -480,6 +483,14 @@ save_state "deploy"
 echo "[6/6] Deploying..."
 docker compose version | sed 's/^/  /' || true
 
+MAINT_QC_DEFER_RELEASE=0
+MAINT_QC_RELEASE_PENDING=0
+MAINT_QC_GATEWAY_BOOTSTRAP="$COMPOSE_CHANGED"
+if [[ "$NGINX_CHANGED" -eq 1 || "$FRONTEND_CHANGED" -eq 1 ]]; then
+  # 旧网关可能尚未放开品质健康探测，等新配置生效后再解除品质维护。
+  MAINT_QC_DEFER_RELEASE=1
+fi
+
 if [[ "$COMPOSE_CHANGED" -eq 1 ]]; then
   # Compose 变动：可能只是 context path 改了（代码没变），也可能加新服务
   # 策略：先 up -d（无 --build），让 docker 用现有 image 只 recreate 容器
@@ -568,6 +579,13 @@ if [[ "$NGINX_CHANGED" -eq 1 ]] || [[ "$FRONTEND_CHANGED" -eq 1 ]]; then
     echo "  [ERROR] nginx recreate 后 30s 未就绪，请检查 nginx 配置与容器日志"
     exit 1
   fi
+fi
+
+if [[ "$MAINT_QC_RELEASE_PENDING" -eq 1 ]]; then
+  finish_qc_rollout
+elif [[ "$MAINT_QC_DEFER_RELEASE" -eq 1 && -f "$MAINT_FLAG_DIR/services/qc" ]]; then
+  # 新网关已启用健康探测，可重新验证先前保留的品质标记。
+  finish_qc_rollout
 fi
 
 # plugin_sdk 变动 → 提示（当前无 plugin_sdk 插件）

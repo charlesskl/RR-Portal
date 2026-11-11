@@ -34,3 +34,9 @@ npm run maintenance:off
 
 也可设置 `QC_MAINTENANCE=1` 启动；这种方式需清除环境变量并重启才能解除。
 正常部署默认关闭维护；维护标记留在数据目录，不随版本或 PR 发布到生产。
+
+线上版本切换使用 `deploy/update-server.sh`，单独发布或重启使用
+`devops/scripts/safe-redeploy.sh qc` 或其 `--restart-only` 参数。
+两个入口共享主机锁，切换前确认网关已进入品质维护，放行前检查网关转发的
+`/qc/api/health` 返回 200 和 `ok: true`。探测失败会保留品质维护标记。
+首次安装先让新网关配置生效。当前容器健康而旧网关不支持维护期健康探测时，手动入口会在重启前停止。

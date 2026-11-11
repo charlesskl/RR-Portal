@@ -22,14 +22,13 @@ test('a request body cannot pass its write boundary after maintenance is enabled
   await assert.rejects(pending, error => error.status === 503 && /修复中/.test(error.message));
 });
 
-function browser({ legacy = false, initialFailed = false } = {}) {
-  const nodes = Object.fromEntries(['qcMaintenance','qcMaintenanceRetry','qcMaintenanceTitle','qcMaintenanceMessage','qcMaintenanceRefresh','qcConnectionNotice','qcConnectionRetry','appWrapper','loginScreen']
+function browser({ initialFailed = false, initialResponse = null } = {}) {
+  const nodes = Object.fromEntries(['qcMaintenance','qcMaintenanceTitle','qcMaintenanceMessage','qcMaintenanceRefresh','appWrapper','loginScreen']
     .map(id => [id, { id, hidden: false, textContent: '', inert: false }]));
-  if (legacy) ['qcMaintenanceRetry','qcConnectionNotice','qcConnectionRetry'].forEach(id=>delete nodes[id]);
   nodes.qcMaintenance.contains = target => Object.values(nodes).some(node =>
     node === target && node.id.startsWith('qcMaintenance'));
   const events = {}, calls = [], warnings = [], storage = { pendingDraft: 'original draft' };
-  let enabled = false, failed = initialFailed, response = null, held = false, poll, reloads = 0;
+  let enabled = false, failed = initialFailed, response = initialResponse, held = false, poll, reloads = 0;
   const s = { console:{warn:(...args)=>warnings.push(args)},window: { addEventListener() {} }, location: { pathname: '/qc/index.html', reload() { reloads++; } },
     AbortController, setTimeout() { return 1; }, clearTimeout() {}, setInterval(fn) { poll = fn; },
     document: { hidden:false,activeElement: null, getElementById: id => nodes[id] || null, addEventListener(name, fn) { (events[name] ||= []).push(fn); } },
@@ -76,7 +75,6 @@ test('hiding a page cancels its pending check without reporting disconnection an
   b.s.document.hidden=true; b.events.visibilitychange[0](); await tick();
   assert.equal(interrupted.aborted,true);
   assert.equal(b.s.window.__QC_MAINTENANCE.blocked,false);
-  assert.equal(b.nodes.qcConnectionNotice.hidden,true);
   assert.equal(b.warnings.length,0);
   const count=b.calls.length; b.poll(); assert.equal(b.calls.length,count);
   b.held=false; b.s.document.hidden=false; b.events.visibilitychange[0](); await tick();
@@ -91,7 +89,6 @@ test('real HTTP status failures retain a useful diagnostic without logging form 
   assert.equal(b.warnings.length,1);
   assert.equal(b.warnings[0][1],'http-502');
   assert.equal(b.warnings[0][2],'/qc/api/maintenance');
-  assert.equal(b.nodes.qcConnectionNotice.hidden,false);
   assert.equal(b.s.window.__QC_MAINTENANCE.blocked,true);
 });
 
@@ -104,50 +101,26 @@ test('returning before cancellation settles starts a fresh check instead of leav
   assert.equal(b.calls.length,count+1);
   assert.equal(b.warnings.length,0);
   assert.equal(b.s.window.__QC_MAINTENANCE.blocked,false);
-  assert.equal(b.nodes.qcConnectionNotice.hidden,true);
 });
 
-test('retry checks the connection without refreshing or discarding the current form', async () => {
-  const b = browser(); b.events.DOMContentLoaded.forEach(fn=>fn()); await tick();
-  b.failed = true; b.poll(); await tick();
-  assert.equal(b.nodes.qcConnectionNotice.hidden,false);
-  assert.equal(b.nodes.qcMaintenance.hidden,true);
-  assert.equal(b.nodes.qcMaintenanceRefresh.hidden,true);
-  const count=b.calls.length;
-  b.failed=false; b.nodes.qcConnectionRetry.onclick();
-  b.nodes.qcConnectionRetry.onclick(); // A double click must not start another request.
-  assert.equal(b.nodes.qcConnectionRetry.disabled,true);
-  assert.equal(b.s.window.__QC_MAINTENANCE.blocked,true);
-  await tick();
-  assert.equal(b.calls.length,count+1);
-  assert.equal(b.nodes.qcMaintenance.hidden,true);
-  assert.equal(b.nodes.appWrapper.inert,false);
-  assert.equal(b.reloads,0);
-  assert.equal(b.storage.pendingDraft,'original draft');
-});
-
-test('Tab reaches Retry from outside the locked UI without enabling business operations', async () => {
-  const b = browser({ initialFailed: true }); b.events.DOMContentLoaded.forEach(fn => fn()); await tick();
-  let prevented = 0, stopped = 0;
-  const outside = { target: b.nodes.loginScreen, key: 'Tab',
-    preventDefault() { prevented++; }, stopImmediatePropagation() { stopped++; } };
-  b.events.keydown[0](outside);
-  assert.equal(b.s.document.activeElement, b.nodes.qcMaintenanceRetry);
-  assert.equal(prevented, 1); assert.equal(stopped, 1);
-  assert.equal(b.nodes.appWrapper.inert, true);
-  assert.equal(b.s.window.__QC_MAINTENANCE.blocked, true);
-  // The guard must allow the focused control's normal keyboard activation.
-  b.events.keydown[0]({ ...outside, target: b.nodes.qcMaintenanceRetry, key: 'Enter' });
-  assert.equal(prevented, 1); assert.equal(stopped, 1);
-  b.failed = false; b.nodes.qcMaintenanceRetry.onclick();
-  assert.equal(b.nodes.qcMaintenanceRetry.disabled, true);
-  b.s.document.activeElement = null;
-  b.events.keydown[0](outside);
-  assert.equal(b.s.document.activeElement, null, 'a disabled retry must not receive focus');
-  assert.equal(b.s.window.__QC_MAINTENANCE.blocked, true);
+test('startup failures stay in the background and recovery restores available actions without reloading', async () => {
+  const b = browser({ initialFailed: true });
+  assert.equal(b.nodes.qcMaintenance.hidden, true, 'cached HTML is hidden before the first response');
+  b.events.DOMContentLoaded.forEach(fn => fn());
+  let permissionUpdates = 0;
+  b.s.window.applyPermissions = () => {
+    assert.equal(b.s.window.__QC_MAINTENANCE.blocked, false);
+    permissionUpdates++;
+  };
   await tick();
   assert.equal(b.nodes.qcMaintenance.hidden, true);
-  assert.equal(b.nodes.appWrapper.inert, false);
+  assert.equal(b.nodes.loginScreen.inert, false);
+  assert.equal(b.s.window.__QC_MAINTENANCE.blocked, true);
+  b.failed = false;
+  b.poll(); await tick();
+  assert.equal(permissionUpdates, 1);
+  assert.equal(b.s.window.__QC_MAINTENANCE.blocked, false);
+  assert.equal(b.nodes.qcMaintenance.hidden, true);
   assert.equal(b.reloads, 0);
   assert.equal(b.storage.pendingDraft, 'original draft');
 });
@@ -168,34 +141,11 @@ test('Tab reaches deliberate Refresh after maintenance ends, but does not refres
   assert.equal(b.storage.pendingDraft, 'original draft');
 });
 
-test('new maintenance client remains safe with cached HTML that has no Retry button', async () => {
-  const b = browser({ legacy: true });
-  assert.doesNotThrow(() => b.events.DOMContentLoaded.forEach(fn => fn()));
-  await tick();
-  assert.equal(b.s.window.__QC_MAINTENANCE.blocked, false);
-  b.failed = true; b.poll(); await tick();
-  assert.equal(b.s.window.__QC_MAINTENANCE.blocked, true);
-  assert.equal(b.nodes.appWrapper.inert, true);
-  assert.equal(b.nodes.qcMaintenanceTitle.textContent, '暂时无法连接系统');
-  b.failed = false; b.poll(); await tick();
-  assert.equal(b.s.window.__QC_MAINTENANCE.blocked, false);
-  assert.equal(b.nodes.qcMaintenance.hidden, true);
-  b.enabled = true; b.poll(); await tick();
-  b.enabled = false; b.poll(); await tick();
-  assert.equal(b.nodes.qcMaintenanceRefresh.hidden, false);
-  assert.equal(b.s.window.__QC_MAINTENANCE.blocked, true);
-  assert.equal(b.reloads, 0);
-  b.nodes.qcMaintenanceRefresh.onclick();
-  assert.equal(b.reloads, 1);
-  assert.equal(b.storage.pendingDraft, 'original draft');
-});
-
 test('gateway maintenance HTML remains a maintenance lock until deliberate refresh after recovery', async () => {
   const b = browser(); await tick();
   b.response={ok:false,status:503,headers:{get:key=>key==='Retry-After'?'60':null},json(){throw new Error('HTML must not be parsed');}};
   b.poll(); await tick();
   assert.equal(b.nodes.qcMaintenanceTitle.textContent,'系统修复中');
-  assert.equal(b.nodes.qcMaintenanceRetry.hidden,true);
   assert.equal(b.nodes.appWrapper.inert,true);
   b.response=null; b.poll(); await tick();
   assert.equal(b.nodes.qcMaintenanceTitle.textContent,'修复已完成');
@@ -208,7 +158,6 @@ test('repeated status failures pause writes without masking or intercepting an e
   b.poll(); await tick(); b.poll(); await tick();
   assert.equal(b.s.window.__QC_MAINTENANCE.blocked, true);
   assert.equal(b.nodes.qcMaintenance.hidden,true);
-  assert.equal(b.nodes.qcConnectionNotice.hidden,false);
   assert.equal(b.nodes.appWrapper.inert,false);
   let prevented=0;
   for (const name of ['click','keydown']) b.events[name][0]({target:b.nodes.appWrapper,preventDefault(){prevented++;},stopImmediatePropagation(){}});
@@ -217,21 +166,15 @@ test('repeated status failures pause writes without masking or intercepting an e
   b.failed = false; b.poll(); await tick();
   assert.equal(b.s.window.__QC_MAINTENANCE.blocked, false);
   assert.equal(b.nodes.qcMaintenance.hidden, true);
-  assert.equal(b.nodes.qcConnectionNotice.hidden,true);
   assert.equal(b.reloads,0);
   assert.equal(b.storage.pendingDraft,'original draft');
 });
 
-test('an unknown initial status still blocks the page; confirmed maintenance immediately replaces the small notice', async () => {
-  const first=browser({initialFailed:true}); await tick();
-  assert.equal(first.nodes.qcMaintenance.hidden,false);
-  assert.equal(first.nodes.appWrapper.inert,true);
-  assert.equal(first.nodes.qcConnectionNotice.hidden,true);
+test('confirmed maintenance locks the page after a silent connection failure', async () => {
   const b=browser(); await tick(); b.failed=true; b.poll(); await tick();
   b.failed=false; b.enabled=true; b.poll(); await tick();
   assert.equal(b.nodes.qcMaintenance.hidden,false);
   assert.equal(b.nodes.qcMaintenanceTitle.textContent,'系统修复中');
-  assert.equal(b.nodes.qcConnectionNotice.hidden,true);
   assert.equal(b.nodes.appWrapper.inert,true);
   b.failed=true; b.poll(); await tick();
   assert.equal(b.nodes.qcMaintenanceTitle.textContent,'系统修复中');
@@ -279,11 +222,66 @@ for (const staleEnabled of [false, true]) {
     b.s.document.hidden=true;b.events.visibilitychange[0]();
     resolveJson({enabled:staleEnabled});await tick();
     assert.equal(b.s.window.__QC_MAINTENANCE.blocked,true);
-    assert.equal(b.nodes.qcConnectionNotice.hidden,false);
     assert.equal(b.nodes.qcMaintenance.hidden,true);assert.equal(cancelledOcr,0);
     assert.equal(b.warnings.length,1);
     b.response=null;b.s.document.hidden=false;b.events.visibilitychange[0]();await tick();
     assert.equal(b.s.window.__QC_MAINTENANCE.blocked,false);
     assert.equal(b.reloads,0);assert.equal(b.storage.pendingDraft,'original draft');
+  });
+}
+
+function businessWrites(b) {
+  const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const messages = []; let persisted = 0;
+  Object.assign(b.s, {state: {records: [{id: 1, value: 'original'}], nextId: 2},
+    showToast: message => messages.push(message), persist() { persisted++; return true; }});
+  for (const name of ['_recordWritesPaused', '_stageRecordChange', 'saveRecord']) {
+    const start = app.indexOf('function ' + name + '('), end = app.indexOf('\nfunction ', start + 1);
+    assert.ok(start >= 0 && end > start); vm.runInContext(app.slice(start, end), b.s);
+  }
+  return {messages, get persisted() { return persisted; }};
+}
+
+test('first slow status check pauses real record helpers without hiding the editable form', async () => {
+  let resolveStatus;
+  const b = browser({initialResponse: {ok: true, json: () => new Promise(resolve => { resolveStatus = resolve; })}});
+  const writes = businessWrites(b), original = b.s.state.records;
+  b.events.DOMContentLoaded.forEach(fn => fn()); await tick();
+  assert.equal(b.s._stageRecordChange([{id: 2, value: 'must not persist'}], 3, true), false);
+  assert.equal(b.s.window.__QC_MAINTENANCE.blocked, true);
+  assert.equal(b.nodes.qcMaintenance.hidden, true); assert.equal(b.nodes.appWrapper.inert, false);
+  assert.equal(b.s.saveRecord(), false);
+  assert.equal(b.s.state.records, original); assert.equal(b.s.state.nextId, 2);
+  assert.equal(Object.hasOwn(b.s.window, '__QC_FORCE_REPLACE'), false); assert.equal(writes.persisted, 0);
+  assert.ok(writes.messages.every(message => /暂未提交/.test(message)));
+  let intercepted = 0;
+  for (const name of ['click', 'keydown']) b.events[name][0]({target: b.nodes.appWrapper, preventDefault() { intercepted++; }, stopImmediatePropagation() {}});
+  assert.equal(intercepted, 0); assert.equal(b.storage.pendingDraft, 'original draft');
+  let permissions = 0; b.s.window.applyPermissions = () => { permissions++; };
+  resolveStatus({enabled: false}); await tick();
+  assert.equal(b.s.window.__QC_MAINTENANCE.blocked, false); assert.equal(permissions, 1);
+  assert.equal(writes.persisted, 0, 'valid status alone must not submit drafts');
+  assert.equal(b.s._stageRecordChange([{id: 2, value: 'explicit retry'}], 3, false), true);
+  assert.equal(writes.persisted, 1); assert.equal(b.s.state.records[0].value, 'explicit retry');
+  assert.equal(b.storage.pendingDraft, 'original draft'); assert.equal(b.reloads, 0);
+});
+
+for (const staleEnabled of [false, true]) {
+  test('first cancelled status '+staleEnabled+' keeps real record writes paused until fresh valid status', async () => {
+    let resolveStatus;
+    const b = browser({initialResponse: {ok: true, json: () => new Promise(resolve => { resolveStatus = resolve; })}});
+    const writes = businessWrites(b), original = b.s.state.records;
+    await tick(); b.s.document.hidden = true; b.events.visibilitychange[0]();
+    resolveStatus({enabled: staleEnabled}); await tick();
+    assert.equal(b.s._stageRecordChange([{id: 9}], 10, true), false);
+    assert.equal(b.s.window.__QC_MAINTENANCE.blocked, true);
+    assert.equal(writes.persisted, 0); assert.equal(b.s.state.records, original);
+    assert.equal(b.nodes.qcMaintenance.hidden, true); assert.equal(b.nodes.appWrapper.inert, false);
+    assert.equal(b.warnings.length, 0); assert.equal(b.storage.pendingDraft, 'original draft');
+    b.response = null; b.s.document.hidden = false; b.events.visibilitychange[0](); await tick();
+    assert.equal(b.s.window.__QC_MAINTENANCE.blocked, false);
+    assert.equal(writes.persisted, 0); assert.equal(b.s.state.records, original);
+    assert.equal(b.s._stageRecordChange([{id: 2, value: 'retry after fresh status'}], 3, false), true);
+    assert.equal(writes.persisted, 1); assert.equal(b.reloads, 0);
   });
 }

@@ -177,6 +177,11 @@
     });
   }
 
+  function weightRemark(item) {
+    if (!item || !/^(?:KG|千克|公斤)$/i.test(String(item.unit || '').trim()) || !item.quantityNeedsReview) return '';
+    return '送货单重量：' + String(item.qty || '') + ' ' + item.unit + (item.sourceRemark ? '；原单备注：' + item.sourceRemark : '') + '；请确认并填写验货数量';
+  }
+
   function applyFields(fields) {
     fields = fields || {};
     window.__qcOcrTextNeedsParsing = false;
@@ -194,13 +199,14 @@
     /* 每次识别整组替换；缺失字段不能继承上一张图片的日期、货号或PO。 */
     setV('ocrDate', fields.date || '');
     setV('ocrSupplier', fields.supplier || '');
+    setV('ocrClient', fields.customer ? canonName('customer', fields.customer) : '');
     setV('ocrDeliveryNo', fields.deliveryNo || '');
     setV('ocrOrderNo', first.orderNo || fields.orderNo || '');
     setV('ocrType', fields.type || '来料');
     setV('ocrProductNo', first.productNo || '');
     setV('ocrProductName', /^待核对原(?:文|行)[：:]/.test(first.productName || '') ? '' : first.productName || '');
-    setV('ocrRemark', [['型号',first.model],['颜色',first.color],['原单送货/欠数',first.deliveryBalance],['箱数',first.cartons],['原单备注',first.remark]].filter(function (pair) { return pair[1]; }).map(function (pair) { return pair[0]+'：'+pair[1]; }).join('；'));
-    setV('ocrQty', String(first.qty == null ? '' : first.qty).replace(/[^\d.]/g, ''));
+    setV('ocrRemark', weightRemark(first) || [['型号',first.model],['颜色',first.color],['原单送货/欠数',first.deliveryBalance],['箱数',first.cartons],['原单备注',first.remark]].filter(function (pair) { return pair[1]; }).map(function (pair) { return pair[0]+'：'+pair[1]; }).join('；'));
+    setV('ocrQty', weightRemark(first) ? '' : String(first.qty == null ? '' : first.qty).replace(/[^\d.]/g, ''));
 
     var lines = [];
     if (fields.supplier) lines.push('供应商：' + fields.supplier);
@@ -219,6 +225,7 @@
       common: {
         date: fields.date || '',
         supplier: fields.supplier || '',
+        customer: fields.customer ? canonName('customer', fields.customer) : '',
         deliveryNo: fields.deliveryNo || '',
         orderNo: fields.orderNo || '',
         type: fields.type || '来料',
@@ -305,7 +312,7 @@
             window.__qcOcrResultContext = committed;
             if (body.rawText) setV('ocrRawText', body.rawText);
             var manual = body.needsManualReview || body.fields.items.some(function (item) { return item && item.quantityNeedsReview; });
-            setT('ocrStatus', manual ? '识别结果需要人工核对，请逐行确认数量后保存' :
+            setT('ocrStatus', manual ? '识别结果需要人工核对，请逐行确认数量和单位后保存' :
               'AI 识别完成' + (n > 1 ? ('（共 ' + n + ' 行货品，已填第 1 行）') : ''));
             toast(manual ? '原文已保留，请人工核对货品与数量' :
               (n > 1 ? ('识别完成，共 ' + n + ' 行，已填第 1 行') : 'AI 识别完成，请核对字段'), manual ? 'info' : 'success');
@@ -353,13 +360,14 @@
     var date = String(c.date || '').trim();
     if (date) setV('f_date', date);
     setV('f_supplier', c.supplier || '');
+    if (c.customer) setV('f_client', c.customer);
     setV('f_deliveryNo', c.deliveryNo || '');
     setV('f_orderNo', it.orderNo || c.orderNo || '');   /* 多 PO 单：用本条自己的 PO 号 */
     if (c.type) setV('f_type', c.type);
     setV('f_productNo', it.productNo || '');
     setV('f_productName', /^待核对原(?:文|行)[：:]/.test(it.productName || '') ? '' : it.productName || '');
-    setV('f_remark', [['型号',it.model],['颜色',it.color],['原单送货/欠数',it.deliveryBalance],['箱数',it.cartons],['原单备注',it.remark]].filter(function (pair) { return pair[1]; }).map(function (pair) { return pair[0]+'：'+pair[1]; }).join('；'));
-    setV('f_qty', String(it.qty == null ? '' : it.qty).replace(/[^\d.]/g, ''));
+    setV('f_remark', weightRemark(it) || [['型号',it.model],['颜色',it.color],['原单送货/欠数',it.deliveryBalance],['箱数',it.cartons],['原单备注',it.remark]].filter(function (pair) { return pair[1]; }).map(function (pair) { return pair[0]+'：'+pair[1]; }).join('；'));
+    setV('f_qty', weightRemark(it) ? '' : String(it.qty == null ? '' : it.qty).replace(/[^\d.]/g, ''));
     if (typeof window._markOcrQuantity === 'function') window._markOcrQuantity(it.quantityNeedsReview ? '待核对' : it.qty);
     if (typeof window.onQtyChange === 'function') window.onQtyChange();
     if (typeof window.onProductNoChange === 'function') window.onProductNoChange();
@@ -477,6 +485,10 @@
         if (r && r.items && r.items.length > 1) return startQueue(r.common, r.items);
         var ret = origApply.apply(this, arguments);
         window.__qcOcrFormContext = actorContext();
+        if (r && r.common && r.common.customer) {
+          var previewClient = document.getElementById('ocrClient');
+          setV('f_client', previewClient ? previewClient.value : r.common.customer);
+        }
         /* number 输入可能把多点原文清空，仍以原识别值标记待人工核对。 */
         if (r && r.items && r.items.length === 1 && typeof window._markOcrQuantity === 'function') {
           var quantity = r.items[0].quantityNeedsReview ? '待核对' : r.items[0].qty;

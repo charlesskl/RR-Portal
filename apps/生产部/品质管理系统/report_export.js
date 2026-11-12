@@ -1449,6 +1449,18 @@ async function exportIQCReport(recordId) {
     return;
   }
 
+  const auth = window.__QC_AUTH;
+  const companyId = typeof getCompany === 'function' ? getCompany() : '';
+  const company = typeof QC_COMPANIES !== 'undefined' ? QC_COMPANIES.find(c => c.id === companyId) : null;
+  if (!auth || !auth.user || !auth.user.enabled || auth.company !== companyId || !company) {
+    showToast('无法确认当前登录子公司，请重新登录后导出', 'error');
+    return;
+  }
+  // A/B/C/D 是厂区标识，不属于公司全称。
+  const factoryName = company.name.replace(/[A-D]$/, '') + '塑胶制品有限公司';
+  const username = auth.user.username;
+  const user = auth.user;
+  const csrfToken = auth.csrfToken;
   const allData = _getData();
   const record  = allData.find(r => r.id === recordId);
   if (!record) {
@@ -1461,7 +1473,7 @@ async function exportIQCReport(recordId) {
   try {
     await new Promise(r => requestAnimationFrame(r));
 
-    const canvas = _buildIQCCanvas(record);
+    const canvas = _buildIQCCanvas(record, factoryName);
     document.body.appendChild(canvas);
     await new Promise(r => setTimeout(r, 100));
 
@@ -1512,6 +1524,9 @@ async function exportIQCReport(recordId) {
     const supplier  = (record.supplier  || '供应商').replace(/[/\\:*?"<>|]/g, '');
     const productNo = (record.productNo || '').replace(/[/\\:*?"<>|]/g, '');
     const dateStr   = (record.date || _todayStr()).replace(/-/g, '');
+    if (window.__QC_AUTH !== auth || auth.user !== user || auth.csrfToken !== csrfToken || window.__QC_AUTH.company !== companyId ||
+        !window.__QC_AUTH.user || !window.__QC_AUTH.user.enabled || window.__QC_AUTH.user.username !== username ||
+        getCompany() !== companyId) throw new Error('登录或子公司已切换，请重新导出');
     pdf.save(`IQC检验报告_${supplier}_${productNo}_${dateStr}.pdf`);
 
     _rptHideOverlay();
@@ -1528,7 +1543,10 @@ async function exportIQCReport(recordId) {
 }
 
 /* ── 构建 IQC 画布 ── */
-function _buildIQCCanvas(r) {
+function _buildIQCCanvas(r, factoryName) {
+
+  const safeFactoryName = String(factoryName || '').replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
 
   /* ── 空值降级 ── */
   const supplier    = r.supplier    || '—';
@@ -1737,7 +1755,7 @@ function _buildIQCCanvas(r) {
       <div class="iqc-report-no">
         Report No.&nbsp;${reportNo}
       </div>
-      <div class="iqc-co-name">东莞兴信塑胶制品有限公司</div>
+      <div class="iqc-co-name">${safeFactoryName}</div>
       <div class="iqc-doc-title">IQC 检 验 报 告</div>
     </div>
 

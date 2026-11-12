@@ -604,3 +604,15 @@ for(const stalledAt of ['status','fetch','body']) {
     assert.deepEqual(x.controls(),[false,false,false]);
   });
 }
+
+test('bilingual document PO and delivery numbers stay separate when the server result enters the single-record form',async()=>{
+  const server=source('server/server.js'),context=vm.createContext({});
+  vm.runInContext(server.slice(server.indexOf('const OCR_READ_PROMPT ='),server.indexOf('/* ── 记录表列顺序'))+';this.parse=parseDeliveryNote;',context);
+  const rawText='客户订单\n编号PO.NO: PO2026/S019\n送货单号\nNO: 20261112HD0123\n|货号|品名|数量|单位|\n|SKU001|合成甲零件|80|KG|\n|SKU002|合成乙零件|100|KG|';
+  const fields=JSON.parse(JSON.stringify(context.parse(rawText)));
+  const x=fixture();x.upload();x.responses.push({ok:true,fields,rawText});await x.b.ctx.startOcr();
+  assert.equal(x.value('ocrDeliveryNo'),'20261112HD0123');assert.equal(x.value('ocrOrderNo'),'PO2026/S019');
+  x.b.ctx.applyOcrToForm();
+  assert.equal(x.value('f_deliveryNo'),'20261112HD0123');assert.equal(x.value('f_orderNo'),'PO2026/S019');
+  assert.equal(x.value('f_qty'),'80');assert.equal(x.value('f_productNo'),'SKU001');
+});

@@ -155,6 +155,33 @@ function _pendingOcrItem(text) {
   return { productNo: '', productName: '待核对原文：' + text, qty: '', unit: '', quantityNeedsReview: true };
 }
 
+/* Document numbers are classified by their complete labels. A PO label's
+   embedded NO is never a delivery label; explicit delivery labels outrank NO. */
+function _ocrDocumentNumbers(source, allowGeneric = true) {
+  const text = String(source || '');
+  const value = '((?=[A-Za-z0-9.\\-/]*\\d)[A-Za-z0-9][A-Za-z0-9.\\-/]{3,})(?![A-Za-z0-9.\\-/])';
+  const separator = '(?:[ \\t]*[:：][ \\t\\r\\n]*|[ \\t]+|[ \\t]*\\r?\\n[ \\t]*)';
+  const po = '(?<![A-Za-z0-9])(?:P\\s*\\.?\\s*O\\s*\\.?(?:\\s*NO\\.?)?|PURCHASE\\s+ORDER(?:\\s+(?:NO\\.?|NUMBER))?)';
+  const orderLabel = '(?:(?:客户|客戶)?\\s*[订訂]\\s*[单單]\\s*(?:[号號]|[编編]\\s*[号號])|' + po + ')';
+  const deliveryLabel = '(?:送\\s*[货貨]\\s*[单單]\\s*(?:[号號]|[编編]\\s*[号號])|[发發]\\s*[货貨]\\s*[单單]\\s*(?:[号號]|[编編]\\s*[号號])|DELIVERY\\s+(?:NOTE\\s+)?(?:NO\\.?|NUMBER)|D\\.?\\s*O\\.?\\s*NO\\.?)';
+  const orderValues = new Set(), explicit = new Set(), generic = new Set(), orderSpans = [];
+  for (const match of text.matchAll(new RegExp(orderLabel + '(?:\\s*[（(][^）)\\n]*[）)])?(?:\\s*[号號#])?(?:\\s*[）)])?' + separator + value, 'ig'))) {
+    orderValues.add(match[1]); orderSpans.push([match.index, match.index + match[0].length]);
+  }
+  for (const match of text.matchAll(new RegExp(deliveryLabel + '(?:\\s*[（(][^）)\\n]*[）)])?(?:\\s*(?:NO\\.?|D\\.?\\s*O\\.?\\s*NO\\.?))?' + separator + value, 'ig'))) explicit.add(match[1]);
+  if (allowGeneric) for (const match of text.matchAll(new RegExp('(?:^|[\\s|])(?:[单單]\\s*[号號]|NO\\.?)' + separator + value, 'ig'))) {
+    const start = match.index + (match[0][0].match(/[\s|]/) ? 1 : 0);
+    if (orderSpans.some(([from,to]) => start >= from && start < to)) continue;
+    const before = text.slice(0, start);
+    if (/(?:[订訂]\s*|P\s*\.?\s*O\s*\.?\s*|PURCHASE\s+ORDER\s*|ORDER\s*|ITEM\s*)$/i.test(before)) continue;
+    if (!orderValues.has(match[1])) generic.add(match[1]);
+  }
+  const candidates = explicit.size ? explicit : generic;
+  const unique = values => values.size === 1 ? [...values][0] : '';
+  return { deliveryNo: unique(candidates), orderNo: unique(orderValues),
+    orderValues: [...orderValues], hasDeliveryCandidates: candidates.size > 0 };
+}
+
 /* ── 送货单 OCR 文本 → 结构化字段（确定性解析，不依赖模型指令遵循）── */
 function parseDeliveryNote(text, options = {}) {
   const fields = { date: '', supplier: '', deliveryNo: '', orderNo: '', type: '来料', items: [] };
@@ -278,17 +305,14 @@ function parseDeliveryNote(text, options = {}) {
     if (m) fields.date = m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
   }
 
-  /* 送货单号：送货单号/发货单号/单号/NO. */
-  const deliveryLabels = /(?:送\s*[货貨]\s*[单單]\s*(?:[号號]|[编編]\s*[号號])(?:\s*[（(][^）)]*[）)])?|[发發]\s*[货貨]\s*[单單]\s*(?:[号號]|[编編]\s*[号號])(?:\s*[（(][^）)]*[）)])?|[单單]\s*[号號]|NO\.?)\s*[：:]\s*((?=[A-Za-z0-9.\-\/]*\d)[A-Za-z0-9][A-Za-z0-9.\-\/]{3,})/ig;   /* 完整4+字符值必须含数字；保留DN12、1ABC及括号标签；含「編號」写法 */
-  for (const candidate of joined.matchAll(deliveryLabels)) {
-    if (/[订訂]\s*$/.test(joined.slice(0, candidate.index))) continue;   /* 订单号/訂單號不属于送货单号 */
-    fields.deliveryNo = candidate[1]; break;
-  }
+  const documentNumbers = _ocrDocumentNumbers(joined);
+  fields.deliveryNo = documentNumbers.deliveryNo;
   /* 无标签单号兜底：开头独立成行的 5-8 位流水号（排除年份，进表格即停） */
-  if (!fields.deliveryNo) {
+  if (!fields.deliveryNo && !documentNumbers.hasDeliveryCandidates) {
     for (const ln of lines.slice(0, 12)) {
       const t = ln.trim();
       if (t.startsWith('|')) break;
+      if (documentNumbers.orderValues.includes(t)) continue;
       if (/^[A-Za-z]{2,6}[.\-]\d{4,}$/.test(t)) { fields.deliveryNo = t; break; }   /* 字母前缀流水号（DGHD.2673728） */
       if (/^\d{5,8}$/.test(t) && !/^(19|20)\d{2}$/.test(t)) { fields.deliveryNo = t; break; }   /* 5-8 位，4 位易误抓货号 */
     }
@@ -341,8 +365,7 @@ function parseDeliveryNote(text, options = {}) {
       return /品名|名称|名稱|货名|貨名|ITEM|Description/i.test(line) && /数量|數量|(?:^|\s)QTY(?:\s|$)/i.test(line);
     });
     const header = lines.slice(0, bodyStart < 0 ? lines.length : bodyStart).join('\n');
-    m = header.match(/(?:[订訂]\s*[单單]\s*(?:[号號]|[编編]\s*[号號])|PO\s*[号號#]?\s*[）)]?)\s*[：:]\s*([A-Za-z0-9][A-Za-z0-9.\-\/]{3,})/i);
-    if (m) fields.orderNo = m[1];
+    fields.orderNo = _ocrDocumentNumbers(header).orderNo;
   }
 
   /* 纸品单的「产品名称」为代码，「规格型号」为描述。
@@ -861,24 +884,26 @@ function parseDeliveryNote(text, options = {}) {
    before the table; conflicting labels remain empty for the user to confirm. */
 function _explicitOcrHeaders(content) {
   const values = { date: new Set(), supplier: new Set(), deliveryNo: new Set() };
+  const headerLines = [];
   for (const raw of content.split('\n').slice(0, 16)) {
     const line = raw.trim().replace(/^#+\s*/, '').replace(/\*\*/g, '');
     if (/^[|{\[]|<table\b|\\begin\{/i.test(line) ||
         /^(?:品名|货名|貨名|名称|名稱|货品名称|貨品名稱|Description|ITEM|Qty|Quantity|数量|數量)\s*[.:：]?$/i.test(line) ||
         /品名|货名|貨名|名称|名稱|Description|ITEM/i.test(line) && /数量|數量|QTY/i.test(line)) break;
+    headerLines.push(line);
     let match = /^(?:日期|送[货貨]日期|DATE)\s*[:：]\s*(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?$/i.exec(line);
     if (match) {
       const y = Number(match[1]), m = Number(match[2]), d = Number(match[3]), dt = new Date(Date.UTC(y, m - 1, d));
       if (dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d)
         values.date.add(match[1] + '-' + match[2].padStart(2, '0') + '-' + match[3].padStart(2, '0'));
     }
-    match = /^(?:送[货貨][单單](?:[号號]|[编編][号號])|[发發][货貨][单單][号號]|[单單][号號])\s*[:：]\s*((?=[A-Za-z0-9.\-/]*\d)[A-Za-z0-9][A-Za-z0-9.\-/]{3,})$/.exec(line);
-    if (match) values.deliveryNo.add(match[1]);
     match = /^(?:供应商|供應商|Supplier)\s*[:：]\s*([^|<>{}]{2,40})$/i.exec(line);
     if (match) values.supplier.add(match[1].trim());
     else if (!/[:：|<>{}]|客户|客戶|收货|收貨|地址|电话|電話/.test(line) &&
         /^[\p{L}0-9（）()· .-]{6,40}(?:公司|工厂|工廠|制品厂|製品廠|纸品厂|紙品廠)$/u.test(line)) values.supplier.add(line);
   }
+  const documentNumbers = _ocrDocumentNumbers(headerLines.join('\n'), false);
+  if (documentNumbers.deliveryNo) values.deliveryNo.add(documentNumbers.deliveryNo);
   return Object.fromEntries(Object.entries(values).map(([key, set]) => [key, set.size === 1 ? [...set][0] : '']));
 }
 

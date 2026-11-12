@@ -91,6 +91,70 @@ public sealed class ShipmentMultiOutboundStorageTests
     }
 
     [ShipmentTextStorageTests.ShipmentTextFact]
+    public async Task Paged_read_ignores_unrelated_purchase_receipt_and_outbound_activity()
+    {
+        await using var f = await Fixture.Create();
+        await using var host = await HttpHost.Start(f.Connection);
+        var created = await host.Client.PostAsJsonAsync("/api/shipments", Body());
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        var first = await host.Client.GetFromJsonAsync<JsonElement>($"/api/shipments/{id}?offset=0&limit=1");
+        var version = first.GetProperty("items_version").GetString();
+        // An entirely different order/material is not a source of this shipment.
+        foreach (var sql in new[] {
+            "INSERT INTO purchase_orders(id,po_no) VALUES(21,'UNRELATED-21'); INSERT INTO po_items(id,po_id,material_id,qty,purchase_unit) VALUES(21,21,67,10,'个'); INSERT INTO po_receipts(id,po_item_id,receipt_date,qty,spare_qty) VALUES(21,21,CURRENT_DATE,8,2); INSERT INTO outbound(id,material_id,po_item_id,qty,po_no) VALUES(21,67,21,10,'UNRELATED-21')",
+            "UPDATE purchase_orders SET po_no='UNRELATED-RENAMED' WHERE id=21",
+            "UPDATE po_items SET purchase_unit='千个' WHERE id=21",
+            "UPDATE po_receipts SET qty=7,spare_qty=3 WHERE id=21",
+            "UPDATE outbound SET qty=9 WHERE id=21",
+            "DELETE FROM po_receipts WHERE id=21"
+        })
+        {
+            await f.Db.ExecuteAsync(sql);
+            var before = await f.AllSnapshot();
+            var response = await host.Client.GetAsync($"/api/shipments/{id}?offset=1&limit=2&version={version}");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var next = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(version, next.GetProperty("items_version").GetString());
+            Assert.Equal(2, next.GetProperty("items").GetArrayLength());
+            Assert.Equal(before, await f.AllSnapshot());
+        }
+    }
+
+    [ShipmentTextStorageTests.ShipmentTextFact]
+    public async Task Paged_read_tracks_linked_and_all_fallback_candidates_including_ambiguity_changes()
+    {
+        await using var f = await Fixture.Create();
+        await using var host = await HttpHost.Start(f.Connection);
+        var created = await host.Client.PostAsJsonAsync("/api/shipments", Body());
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        // Exercise both real source paths: two explicit outbound links and one
+        // unlinked row whose PO/material must identify exactly one PO item.
+        await f.Db.ExecuteAsync("UPDATE shipment_items SET outbound_id=NULL WHERE shipment_id=@id AND seq=3", new { id });
+        foreach (var sql in new[] {
+            "UPDATE outbound SET po_item_id=12 WHERE id=11",
+            "UPDATE po_items SET purchase_unit='千个' WHERE id=13",
+            "UPDATE purchase_orders SET po_no='NO-LONGER-MATCHED' WHERE id=13",
+            "INSERT INTO purchase_orders(id,po_no) VALUES(21,'IRRI-SYNTHETIC-13'); INSERT INTO po_items(id,po_id,material_id,qty,purchase_unit) VALUES(21,21,66,10,'个')",
+            "INSERT INTO po_items(id,po_id,material_id,qty,purchase_unit) VALUES(22,21,66,10,'个')",
+            "DELETE FROM po_items WHERE id=22",
+            "INSERT INTO po_receipts(id,po_item_id,receipt_date,qty,spare_qty) VALUES(21,21,CURRENT_DATE,8,2)",
+            "UPDATE po_receipts SET qty=7,spare_qty=3 WHERE id=21",
+            "UPDATE po_items SET material_id=67 WHERE id=21"
+        })
+        {
+            var first = await host.Client.GetFromJsonAsync<JsonElement>($"/api/shipments/{id}?offset=0&limit=1");
+            var version = first.GetProperty("items_version").GetString();
+            await f.Db.ExecuteAsync(sql);
+            var before = await f.AllSnapshot();
+            Assert.Equal(HttpStatusCode.Conflict,
+                (await host.Client.GetAsync($"/api/shipments/{id}?offset=1&limit=1&version={version}")).StatusCode);
+            Assert.Equal(before, await f.AllSnapshot());
+        }
+    }
+
+    [ShipmentTextStorageTests.ShipmentTextFact]
     public async Task Multiple_outbound_allocations_roundtrip_original_purchase_basis_without_stock_changes()
     {
         await using var f = await Fixture.Create();

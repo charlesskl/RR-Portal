@@ -46,17 +46,42 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
         var sh = await c.QueryFirstOrDefaultAsync("SELECT * FROM shipments WHERE id=@id", new { id }, tx);
         if (sh == null) return NotFound(new { error = "not found" });
         // Detect edits between HTTP pages without loading any image/snapshot.
-        // Receipt corrections affect the live free-spare ratio; PO/outbound
-        // revisions affect unit/source lookup even when this header is unchanged.
+        // Only this shipment's real source dependencies participate: unrelated
+        // purchasing/stock activity must not invalidate every open shipment.
+        // Include ALL fallback candidates, not just a currently unique match,
+        // so candidate insertion/removal and PO/material reassignment are caught.
         var metadata = await c.QuerySingleAsync<(int total, string version)>(@"
+            WITH shipment_rows AS (
+                SELECT id, seq, xmin::text AS row_version, outbound_id, material_id, po_no
+                FROM shipment_items WHERE shipment_id=@id
+            ), linked_outbound AS (
+                SELECT o.id, o.po_item_id, o.xmin::text AS row_version
+                FROM outbound o WHERE EXISTS (SELECT 1 FROM shipment_rows si WHERE si.outbound_id=o.id)
+            ), relevant_items AS (
+                SELECT p.id, p.po_id, p.xmin::text AS row_version
+                FROM po_items p JOIN (
+                    SELECT po_item_id AS id FROM linked_outbound WHERE po_item_id IS NOT NULL
+                    UNION
+                    SELECT candidate.id FROM shipment_rows si
+                    JOIN purchase_orders po ON po.po_no=si.po_no
+                    JOIN po_items candidate ON candidate.po_id=po.id AND candidate.material_id=si.material_id
+                    WHERE si.outbound_id IS NULL
+                ) dependencies ON dependencies.id=p.id
+            ), relevant_orders AS (
+                SELECT po.id, po.xmin::text AS row_version FROM purchase_orders po
+                WHERE EXISTS (SELECT 1 FROM relevant_items p WHERE p.po_id=po.id)
+            ), relevant_receipts AS (
+                SELECT r.id, r.xmin::text AS row_version FROM po_receipts r
+                WHERE EXISTS (SELECT 1 FROM relevant_items p WHERE p.id=r.po_item_id)
+            )
             SELECT COUNT(*)::int,
                    md5(COALESCE((SELECT xmin::text FROM shipments WHERE id=@id), '') || ':' ||
-                       COALESCE(string_agg(si.id::text || ':' || si.xmin::text, ',' ORDER BY si.seq, si.id), '') || ':' ||
-                       COALESCE((SELECT md5(string_agg(r.id::text || ':' || r.xmin::text, ',' ORDER BY r.id)) FROM po_receipts r), '') || ':' ||
-                       COALESCE((SELECT md5(string_agg(p.id::text || ':' || p.xmin::text, ',' ORDER BY p.id)) FROM po_items p), '') || ':' ||
-                       COALESCE((SELECT md5(string_agg(o.id::text || ':' || o.xmin::text, ',' ORDER BY o.id)) FROM outbound o), '') || ':' ||
-                       COALESCE((SELECT md5(string_agg(po.id::text || ':' || po.xmin::text, ',' ORDER BY po.id)) FROM purchase_orders po), ''))
-            FROM shipment_items si WHERE si.shipment_id=@id", new { id }, tx);
+                       COALESCE(string_agg(si.id::text || ':' || si.row_version, ',' ORDER BY si.seq, si.id), '') || ':' ||
+                       COALESCE((SELECT md5(string_agg(r.id::text || ':' || r.row_version, ',' ORDER BY r.id)) FROM relevant_receipts r), '') || ':' ||
+                       COALESCE((SELECT md5(string_agg(p.id::text || ':' || p.row_version, ',' ORDER BY p.id)) FROM relevant_items p), '') || ':' ||
+                       COALESCE((SELECT md5(string_agg(o.id::text || ':' || o.row_version, ',' ORDER BY o.id)) FROM linked_outbound o), '') || ':' ||
+                       COALESCE((SELECT md5(string_agg(po.id::text || ':' || po.row_version, ',' ORDER BY po.id)) FROM relevant_orders po), ''))
+            FROM shipment_rows si", new { id }, tx);
         if (version != null && version != metadata.version)
             return Conflict(new { error = "走货单在加载期间已被修改，请重新加载" });
         var items = (await c.QueryAsync($@"

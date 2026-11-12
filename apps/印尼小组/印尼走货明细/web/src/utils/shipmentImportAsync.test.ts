@@ -225,7 +225,7 @@ it('原明细或物料更新后手动核对选择失效，必须重新确认覆�
 
 it('超过500行可先预览，批次选择只读取本批图片且不会静默截掉明细', async () => {
   const rows = Array.from({ length: 501 }, (_, index) => ({ ...row(`ROW-${index}`), selected: false }))
-  const images = vi.fn(async (_rows: ShipmentImportRow[]) => {})
+  const images = vi.fn<(rows: ShipmentImportRow[]) => Promise<void>>(async () => {})
   const f = component({ rows, warnings: [], loadImages: images })
   await f.render().upload.beforeUpload(new File([], 'multi.xlsx'))
   let view = f.render()
@@ -242,7 +242,7 @@ it('超过500行可先预览，批次选择只读取本批图片且不会静默�
 })
 
 it('所选超过500行时不能通过直接确认绕过批次限制，也不会提前读取图片', async () => {
-  const images = vi.fn(async (_rows: ShipmentImportRow[]) => {})
+  const images = vi.fn<(rows: ShipmentImportRow[]) => Promise<void>>(async () => {})
   const f = component({ rows: Array.from({ length: 501 }, (_, index) => row(`ROW-${index}`)), warnings: [], loadImages: images })
   await f.render().upload.beforeUpload(new File([], 'multi.xlsx'))
   const view = f.render()

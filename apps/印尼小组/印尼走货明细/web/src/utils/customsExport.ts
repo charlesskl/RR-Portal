@@ -16,6 +16,7 @@ import { AUXILIARY_TABLES, auxiliaryDetailFormulas } from './auxiliaryDocumentFo
 import { invoiceDetailGroups, invoiceDetailSumFormula } from './invoiceDetailGroups'
 import { consolidateShipmentItems } from './shipmentConsolidation'
 import { shipmentImages } from './shipmentImages'
+import { appendShipmentDocumentSheets, shipmentDocumentBatches } from './shipmentDocumentOverflow'
 
 import { CUSTOMS_FIXED, effectiveCustomsCompany, sortShipmentItems, cartonLayout } from './shipmentOrder'
 export { CUSTOMS_FIXED, effectiveCustomsCompany } from './shipmentOrder'
@@ -512,6 +513,7 @@ function populateLinkedDocuments(
   customer = '',
   sellerForItem?: (item: CustomsItem) => SupplierDict | undefined,
   shipment?: CustomsExportForm,
+  selectedGroups?: LinkedDocumentGroup[],
 ) {
   type Slot = {
     contractHeader: string; contractDate: string; contractRows: [number, number]
@@ -519,7 +521,7 @@ function populateLinkedDocuments(
     packingHeader: string; packingRows: [number, number]
     contractStart?: number; invoiceStart?: number
   }
-  const groups = collectLinkedDocumentGroups(sorted, sellerForItem)
+  const groups = selectedGroups ?? collectLinkedDocumentGroups(sorted, sellerForItem)
 
   const rri = customer.toUpperCase().includes('RRI')
   const contractSheet = wb.Sheets[rri ? '实业合同' : '全球合同']
@@ -1075,6 +1077,10 @@ function populateGlobalIndoLinkedDocuments(wb: XLSX.WorkBook, mainName: string, 
 }
 
 export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<Blob> {
+  return buildCustomsWorkbookBatch(input)
+}
+
+async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGroups?: LinkedDocumentGroup[]): Promise<Blob> {
   const { templateBuffer, items, materials, productHs, images, form } = input
   const AUX = new Set(['类别金额', '实业合同', '实业发票', '全球合同', '全球发票', '印尼合同', '印尼发票', '装箱单', '商品汇总表', '发票',
     '出货地址', '销售合同', '装箱单 (2)', '草稿大单-1', '司机资料', '单位对照', 'WpsReserved_CellImgList'])
@@ -1187,7 +1193,8 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
           true,
         )
       : undefined
-  const linkedDocumentGroups = legacyDocuments ? [] : collectLinkedDocumentGroups(sorted, sellerForItem)
+  const batches = legacyDocuments ? [] : shipmentDocumentBatches(collectLinkedDocumentGroups(sorted, sellerForItem), String(form.customer || '').toUpperCase().includes('RRI'))
+  const linkedDocumentGroups = selectedGroups ?? batches[0] ?? []
 
   if (!legacyDocuments && !embeddedIndonesiaDocuments && sorted.some(item => isIndonesiaBlHead(item.bl_head))) {
     if (!input.indonesiaTemplateBuffer) throw new Error('缺少印尼合同/印尼发票模板')
@@ -1214,7 +1221,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       }
       applyCustomerDocumentEntity(wbObj, form.customer)
     } else {
-      populateLinkedDocuments(wbObj, newName, sorted, form.customer, sellerForItem, form)
+      populateLinkedDocuments(wbObj, newName, sorted, form.customer, sellerForItem, form, linkedDocumentGroups)
     }
   }
   if (!input.mainOnly) {
@@ -1242,7 +1249,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     // including local snapshot galleries, instead of keeping the first batch.
     const pictures: { bytes: Uint8Array; ext: string }[] = []
     const seen = new Set<string>()
-    for (const source of it.sources) {
+    for (const source of selectedGroups ? [] : it.sources) {
       const material = matOf(source) || source.material_snapshot as Material | undefined
       const inline = shipmentImages(material)
       if (inline.length || Array.isArray(material?.shipment_images)) {
@@ -1614,6 +1621,13 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   }
   for (const [key, value] of Object.entries({ calcMode: 'auto', fullCalcOnLoad: '1', forceFullCalc: '1' })) calc.setAttribute(key, value)
   outZip.file('xl/workbook.xml', new XMLSerializer().serializeToString(calculationDoc))
+  if (!input.mainOnly && !selectedGroups) for (let index = 1; index < batches.length; index++) {
+    // Each continuation sees the same complete main rows and global serials.
+    // Only its financial sheets are appended, so stock, money, photos and the
+    // generic summaries remain single and no contract/invoice number is changed.
+    const continuation = await buildCustomsWorkbookBatch(input, batches[index])
+    await appendShipmentDocumentSheets(outZip, await JSZip.loadAsync(await continuation.arrayBuffer()), index + 1)
+  }
   return await outZip.generateAsync({ type: 'blob' })
 }
 

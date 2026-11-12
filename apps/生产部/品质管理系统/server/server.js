@@ -99,7 +99,7 @@ let AI = loadAiConfig();
 
 /* 模型读取原文和保留表格空列，字段提取统一由 parseDeliveryNote() 完成。
    不要求模型输出业务字段 JSON，避免把模型推断当作确定的列位置。 */
-const OCR_READ_PROMPT = 'Read all the text in the image, including the company name, title, serial number, date, customer, and all text outside the table, then the table contents. Output tables as markdown tables using the original column headers and column order. Keep every column and every empty cell, including empty leading cells in continuation rows. Keep carton counts and remarks in their own original columns. Do not merge columns, fill empty cells, infer values, or move footer totals into goods rows. Skip fully empty table rows.';
+const OCR_READ_PROMPT = 'Read all the text in the image, including the company name, title, serial number, date, customer, and all text outside the table, then the table contents. Output tables as markdown tables using the original column headers and column order. Keep every column and every empty cell, including empty leading cells in continuation rows. Keep carton counts and remarks in their own original columns. Read complete contract and order identifiers across wrapped lines within the same cell; preserve those internal line breaks as <br>, never as separate goods rows. Do not merge columns, fill empty cells, infer values, or move footer totals into goods rows. Skip fully empty table rows.';
 /* 表格密集型单据（如台聚）全文 OCR 易乱行/复读，解析不出明细时改用此提示词重试 */
 const OCR_TABLE_PROMPT = 'Read all the text in the image. Output the table contents as a markdown table with every column kept (including the quantity column and empty cells), one row per line.';
 /* 第二次重试仍失败时：只要求输出货品明细表（列名固定，指令简单，命中率最高） */
@@ -243,6 +243,31 @@ function parseDeliveryNote(text, options = {}) {
         return '\n' + rows.join('\n') + '\n';
       }).join('');
   }
+  /* Markdown may contain a physical newline inside a contract-number cell.
+     Join only a bounded, column-preserving continuation of that same cell.
+     A new pipe-prefixed row or an unpositioned suffix is never attached. */
+  const physicalRows = rawText.split(/\r?\n/);
+  let contractWidth = 0, contractColumn = -1;
+  for (let i = 0; i < physicalRows.length; i++) {
+    const line = physicalRows[i].trim();
+    if (!line.startsWith('|')) continue;
+    const cells = splitRow(line);
+    if (cells.length >= 5 && /^(NO\.?|序号|序號)$/i.test(cells[0]) &&
+        cells.some(cell => /品名|名称|名稱|规格|規格/.test(cell)) && cells.some(cell => /数量|數量/.test(cell))) {
+      contractColumn = cells.findIndex(cell => /^合同[编編][号號]$/.test(cell));
+      contractWidth = contractColumn > 0 ? cells.length : 0;
+      continue;
+    }
+    if (!contractWidth || !/^\d+$/.test(cells[0]) || cells.length !== contractColumn + 1 ||
+        line.endsWith('|') || !/^[A-Za-z][A-Za-z0-9._/-]*\d$/.test(cells[contractColumn] || '')) continue;
+    const continuation = (physicalRows[i + 1] || '').trim();
+    if (!/^\d{1,4}[-/]\d{1,4}\s*\|/.test(continuation) || !continuation.endsWith('|')) continue;
+    const joinedRow = line + '<br>' + continuation;
+    if (splitRow(joinedRow).length !== contractWidth) continue;
+    physicalRows[i] = joinedRow; physicalRows[i + 1] = '';
+  }
+  rawText = physicalRows.join('\n');
+
   const lines = [], latexCells = new Map();
   const unwrapLatex = (s, latexRow) => {
     const value = s.replace(/\$\\text\{([^}]*)\}\$/g, '$1').replace(/\\text\s*\{([^}]*)\}/g, '$1');
@@ -519,6 +544,7 @@ function parseDeliveryNote(text, options = {}) {
          精确唯一的本次交货列优先，订单/总交货/累计/未交数量都不能作兜底。 */
       const headKeys = head.map(value => value.replace(/\s+/g, ''));
       const componentColumnsLayout = componentHeader.test(headKeys.join(''));
+      const contractColumnsLayout = cOrder >= 0 && /^合同[编編][号號]$/.test(headKeys[cOrder]) && /^(NO\.?|序号|序號)$/i.test(headKeys[0]);
       const cColor = find(/^[颜顏]色$/), cCartons = find(/^箱[数數]$/), cRemark = find(/^(备注|備註|備注)$/);
       const cBalance = find(/^本[单單]送[货貨][数數]/), cModel = find(/^[型模][号號]$/);
       const deliveryLayoutHeaders = [/^(序号|序號|序|NO\.?)$/i, /^(订单编号|订单号|訂單編號|訂單號)$/,
@@ -541,7 +567,7 @@ function parseDeliveryNote(text, options = {}) {
         if (cells.every(c => !c)) continue;   /* 空白可能是分页间隔，不能截断后续真实明细 */
         // Only a complete repeated header is non-business text; keep partial and ambiguous rows.
         if (cells.length === head.length && cells.every((value, index) => value.replace(/\s+/g, '') === headKeys[index])) continue;
-        if (componentColumnsLayout && cells.length !== head.length) { fields.items.push(_pendingOcrItem(row)); continue; }
+        if ((componentColumnsLayout || contractColumnsLayout) && cells.length !== head.length) { fields.items.push(_pendingOcrItem(row)); continue; }
         if (deliveryColumnsLayout) {
           if (/^(合计|合計|总计|總計|TOTAL)(?:[：:]|$)/i.test(cells[0] || '')) continue;
           const quantity = cells[cQty] || '', unit = cells[4] || '';

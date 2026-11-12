@@ -616,3 +616,19 @@ test('bilingual document PO and delivery numbers stay separate when the server r
   assert.equal(x.value('f_deliveryNo'),'20261112HD0123');assert.equal(x.value('f_orderNo'),'PO2026/S019');
   assert.equal(x.value('f_qty'),'80');assert.equal(x.value('f_productNo'),'SKU001');
 });
+
+test('six wrapped contract numbers remain complete and row-specific through save-and-continue',async()=>{
+  const server=source('server/server.js'),context=vm.createContext({});
+  vm.runInContext(server.slice(server.indexOf('const OCR_READ_PROMPT ='),server.indexOf('/* ── 记录表列顺序'))+';this.parse=parseDeliveryNote;',context);
+  const rawText='|NO|合同编号|客户订单号|品名规格|物料编号|单位|数量|备品数|重量kg|\n'+
+    Array.from({length:6},(_,i)=>'|'+(i+1)+'|PO202600'+(i<3?'1<br>7-01':'2<br>1-01')+'||合成吊牌|SKU00'+i+'|PCS|'+(i?'10000':'20000')+'|100|20|').join('\n');
+  const fields=JSON.parse(JSON.stringify(context.parse(rawText)));fields.supplier='Test Supplier';
+  const x=fixture();x.upload();x.responses.push({ok:true,fields,rawText});await x.b.ctx.startOcr();x.b.ctx.applyOcrToForm();
+  const expected=['PO20260017-01','PO20260017-01','PO20260017-01','PO20260021-01','PO20260021-01','PO20260021-01'];
+  for(let i=0;i<6;i++) {
+    assert.equal(x.value('f_orderNo'),expected[i]);assert.equal(x.value('f_productNo'),'SKU00'+i);
+    assert.equal(x.value('f_qty'),i?'10000':'20000');x.b.ctx.saveRecord({continueEntry:true});
+  }
+  assert.deepEqual(x.b.json('state.records.map(r=>r.orderNo)'),expected);
+  assert.equal(x.b.ctx.__qcQueue,null);
+});

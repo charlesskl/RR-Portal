@@ -4,6 +4,7 @@ import ts from 'typescript'
 import React, { cloneElement, isValidElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it, vi } from 'vitest'
+import { createShipmentHorizontalScroll } from './shipmentHorizontalScroll'
 import { parseSheetClipboard, sheetFillDownEdits, sheetPasteSelectionEdits } from './shipmentSheet'
 
 const source = readFileSync(new URL('../components/ShipmentSheetTable.tsx', import.meta.url), 'utf8')
@@ -143,13 +144,15 @@ it('focus clears native filler scroll and synchronizes virtual offset with the h
   filler.parentElement = holder; holder.parentElement = root
   holder.contains = (node: any) => node === filler || node === holder
   holder.getBoundingClientRect = () => ({ top: 100, bottom: 400 })
-  const header = { scrollLeft: 0 }, cell = { parentElement: filler, focus: vi.fn(), getBoundingClientRect: () => ({ top: 120, bottom: 150 }) }
+  const header = { scrollLeft: 0, clientWidth: 1000, scrollWidth: 5000 }, cell = { parentElement: filler, focus: vi.fn(), getBoundingClientRect: () => ({ top: 120, bottom: 150 }) }
   root.querySelector = (selector: string) => selector === '.ant-table-header' ? header : holder
   const pendingFocus = { current: { point: { row: 67, col: 21 }, edit: false } }
   const scrollTo = vi.fn()
   const context = createContext({ root: { current: root }, pendingFocus, cellAt: () => cell, editorAt: () => null,
     columns: Array.from({ length: 47 }, (_, col) => ({ width: 100, fixed: [0, 4, 5].includes(col) ? 'left' : col === 46 ? 'right' : undefined })),
-    widths: {}, props: { rowSelection: {} }, table: { current: { scrollTo } }, cancelAnimationFrame: vi.fn() })
+    widths: {}, props: { rowSelection: {} }, table: { current: { scrollTo } }, cancelAnimationFrame: vi.fn(),
+    horizontalScroll: { current: createShipmentHorizontalScroll({ elements: () => ({ header, rail: null }),
+      scrollBody: left => scrollTo({ left }), requestFrame: () => 1, cancelFrame: vi.fn() }) } })
   runInContext(transpile(`const layout = ${layout}; layout()`), context)
   expect(filler.scrollLeft).toBe(0)
   expect(holder.scrollLeft).toBe(0)

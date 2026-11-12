@@ -144,7 +144,7 @@ it.each(['supplier', 'spec', 'product_code'] as const)('blank file %s does not l
   expect(() => applyShipmentImport(rows, new Map(rows.map(row => [row.material_id, row.material_snapshot])), [incoming], [0])).toThrow('匹配结果已变化')
 })
 
-it('actual OOXML image extraction marks only a uniquely selected file image as an update', async () => {
+it('actual OOXML image extraction retains file photos and deduplicates repeated anchors', async () => {
   vi.stubGlobal('DOMParser', DOMParser)
   try {
     const wb = XLSX.utils.book_new()
@@ -161,13 +161,14 @@ it('actual OOXML image extraction marks only a uniquely selected file image as a
       zip.file('xl/drawings/drawing1.xml', `<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${anchor.repeat(count)}</xdr:wsDr>`)
       const parsed = await importShipmentFile(new File([await zip.generateAsync({ type: 'arraybuffer' })], 'images.xlsx'))
       const item = parsed.rows[0].item
-      expect(item._fileMaterialFields?.includes('image')).toBe(count === 1)
+      expect(item._fileMaterialFields).toEqual(expect.arrayContaining(['image', 'shipment_images']))
+      expect(item.material_snapshot.shipment_images).toEqual([item.material_snapshot.image])
       const enriched = matchShipmentMaterial(item.material_snapshot, [{ ...material, image: 'master-image' }]).material
       const snapshot = { ...material, image: 'local-image' }
       const [next] = applyShipmentImport([{ ...old, material_id: -1, material_snapshot: snapshot }],
         new Map([[-1, snapshot]]), [{ ...item, material_snapshot: enriched }], [0])
-      if (count === 1) expect(next.material_snapshot!.image).toMatch(/^data:image\/png;base64,/)
-      else expect(next.material_snapshot!.image).toBe('local-image')
+      expect(next.material_snapshot!.image).toMatch(/^data:image\/png;base64,/)
+      expect(next.material_snapshot!.shipment_images).toHaveLength(1)
     }
   } finally { vi.unstubAllGlobals() }
 })

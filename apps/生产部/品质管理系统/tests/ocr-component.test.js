@@ -54,7 +54,7 @@ test('manual source text stays in the review result and never becomes the produc
   const values={}, item={productName:'待核对原行：complete synthetic row',qty:'',quantityNeedsReview:true};
   const s={window:{},setV:(k,v)=>{values[k]=v;},canonName:(_t,v)=>v,toast(){},setT(){},canSaveOcr:()=>true,
     document:{getElementById:()=>null}};
-  vm.createContext(s);vm.runInContext(fn('applyFields')+'\n'+fn('loadQueueItem'),s);
+  vm.createContext(s);vm.runInContext(fn('weightRemark')+'\n'+fn('applyFields')+'\n'+fn('loadQueueItem'),s);
   s.applyFields({supplier:'synthetic',items:[item]});
   assert.equal(values.ocrProductName,'');
   assert.match(s.window.__qcAiResult.items[0].productName,/待核对原行/);

@@ -77,6 +77,7 @@ test('AI OCR carries the PO number through single and queued entry', () => {
     setV: (id, value) => { previewValues[id] = value; },
     document: { getElementById: () => null },
     window: aiWindow,
+    weightRemark: loadFunction(aiOcrSource, 'weightRemark'),
   });
 
   applyFields({
@@ -98,6 +99,7 @@ test('AI OCR carries the PO number through single and queued entry', () => {
     },
   };
   queueContext.actorContext = loadFunction(aiOcrSource, 'actorContext', queueContext);
+  queueContext.weightRemark = loadFunction(aiOcrSource, 'weightRemark');
   queueContext.sameActor = loadFunction(aiOcrSource, 'sameActor', queueContext);
   queueContext.canSaveOcr = loadFunction(aiOcrSource, 'canSaveOcr', queueContext);
   const loadQueueItem = loadFunction(aiOcrSource, 'loadQueueItem', queueContext);

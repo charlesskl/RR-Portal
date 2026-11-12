@@ -313,6 +313,79 @@ function parseDeliveryNote(text, options = {}) {
   }
   const joined = lines.join('\n');
 
+  /* 补货单：产品名称 / 物料编号 / 数量(KG) / 累计(KG) / 备注。
+     仅在表头明确且列名唯一时启用，数量绝不能从累计列或箱数推测。 */
+  const weightTable = lines.filter(line => line.startsWith('|') || (line.match(/\|/g) || []).length >= 3);
+  const weightHeaderIndex = weightTable.findIndex(line => {
+    const h = splitRow(line).map(s => s.replace(/\s+/g, ''));
+    return h.some(s => /^(?:产品|產品)(?:名称|名稱)$/.test(s)) &&
+      h.some(s => /^(?:数量|數量)[/／(（]?KG[)）]?$/i.test(s));
+  });
+  /* 视觉模型也可能把一整行表格输出成普通文本；仅识别表头顺序完整的格式。 */
+  const plainWeightHeader = lines.findIndex(line => !line.includes('|') &&
+    /(?:序号|序號)\s+(?:产品|產品)(?:名称|名稱)\s+物料(?:编号|編號)\s+(?:数量|數量)\s*[/／(（]?\s*KG[)）]?\s+(?:累计|累計)\s*[/／(（]?\s*KG[)）]?\s+(?:备注|備註|備注)/i.test(line));
+  if (weightHeaderIndex >= 0 || plainWeightHeader >= 0) {
+    fields.weightDocument = true;
+    const plain = weightHeaderIndex < 0;
+    const head = plain ? ['序号', '产品名称', '物料编号', '数量/KG', '累计/KG', '备注'] : splitRow(weightTable[weightHeaderIndex]).map(s => s.replace(/\s+/g, ''));
+    const unique = re => { const indexes = head.map((s, i) => re.test(s) ? i : -1).filter(i => i >= 0); return indexes.length === 1 ? indexes[0] : -1; };
+    const nameCol = unique(/^(?:产品|產品)(?:名称|名稱)$/), codeCol = unique(/^物料(?:编号|編號)$/);
+    const qtyCol = unique(/^(?:数量|數量)[/／(（]?KG[)）]?$/i);
+    const totalCol = unique(/^(?:累计|累計)[/／(（]?KG[)）]?$/i);
+    const seqCol = unique(/^(?:序号|序號|序)$/), remarkCol = unique(/^(?:备注|備註|備注)$/);
+    if ([nameCol, codeCol, qtyCol, totalCol].some(i => i < 0)) {
+      fields.items = [_pendingOcrItem(String(text || ''))]; fields.manualReviewRequired = true; return fields;
+    }
+    // 多种明细表或换列后的续页不能沿用第一张表的列号，也不能丢掉前面的普通明细。
+    const sameHeader = cells => cells.length === head.length && cells.every((s, i) => s.replace(/\s+/g, '') === head[i]);
+    const differentCargoHeader = weightTable.some(row => {
+      const cells = splitRow(row).map(s => s.replace(/\s+/g, ''));
+      const hasProduct = cells.some(s => /^(?:(?:产品|產品|物料|货品|貨品)(?:名称|名稱)|品名|货号|貨號|物料(?:编号|編號)|规格型号|規格型號|名称|名稱|Description)$/i.test(s));
+      const hasQuantity = cells.some(s => /^(?:数量|數量|交货数量|交貨數量|送货数量|送貨數量|QTY)(?:[/／(（].*)?$/i.test(s));
+      return hasProduct && hasQuantity && !sameHeader(cells);
+    });
+    if (differentCargoHeader) {
+      fields.items = [_pendingOcrItem(String(text || ''))]; fields.manualReviewRequired = true; return fields;
+    }
+    const heading = lines.slice(0, plain ? plainWeightHeader : lines.indexOf(weightTable[weightHeaderIndex])).join('\n').replace(/\|/g, ' ');
+    const company = heading.split('\n').map(s => s.replace(/^#+\s*/, '').trim()).find(s =>
+      /(?:公司|工厂|工廠)/.test(s) && !/客户|客戶|CUSTOMER|收货|收貨/i.test(s));
+    if (company) fields.supplier = company;
+    let customer = heading.match(/(?:客户|客戶)\s*(?:名称|名稱)\s*[：:]?\s*(?:CUSTOMER|CUSTCMER)?\s*[：:]?\s*([^\n|：:]*?(?:有限公司|公司))/i);
+    if (customer) fields.customer = customer[1].trim();
+    let match = heading.match(/(?:送\s*[货貨]\s*[单單]\s*[号號])\s*(?:NO\s*[.:：]?\s*)?[：:]?\s*([A-Za-z0-9][A-Za-z0-9.\-/]{3,})/i);
+    if (match && /\d/.test(match[1]) && !/^NO$/i.test(match[1])) fields.deliveryNo = match[1];
+    match = heading.match(/(?:客户|客戶)\s*[订訂]\s*[单單]\s*(?:[编編]\s*[号號]|[号號])?\s*(?:PO\s*\.?\s*NO\.?)?\s*[：:]\s*([A-Za-z0-9][A-Za-z0-9.\-/]{3,})/i);
+    if (match) fields.orderNo = match[1];
+    match = heading.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?/);
+    if (!match) match = heading.match(/(?:日期|DATE)\s*[：:]?\s*(\d{4})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{1,2})/i);
+    if (match) fields.date = match[1] + '-' + match[2].padStart(2, '0') + '-' + match[3].padStart(2, '0');
+    const rows = plain ? lines.slice(plainWeightHeader + 1) : weightTable.slice(weightHeaderIndex + 1);
+    for (const row of rows) {
+      let cells;
+      if (plain) {
+        // 空格不能可靠区分名称、数字型号、重量和累计；逐行保留，不能猜列界。
+        if (!row.trim() || row === lines[plainWeightHeader] || /^(?:合计|合計|总计|總計|TOTAL)(?:\s|[:：]|$)/i.test(row)) continue;
+        fields.items.push(_pendingOcrItem(row));
+        continue;
+      } else cells = splitRow(row);
+      if (cells.every(c => !c) || /^(?:合计|合計|总计|總計|TOTAL)/i.test(cells[0] || '')) continue;
+      if (sameHeader(cells)) continue;
+      if (seqCol >= 0 && !/^\d+$/.test(cells[seqCol] || '')) { fields.items.push(_pendingOcrItem(row)); continue; }
+      if (cells.length !== head.length) { fields.items.push(_pendingOcrItem(row)); continue; }
+      const quantity = cells[qtyCol], name = cells[nameCol], code = cells[codeCol];
+      if (!name || !/^(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?$/.test(quantity)) {
+        fields.items.push(_pendingOcrItem(row)); continue;
+      }
+      fields.items.push({ productNo: code, productName: name, qty: quantity.replace(/[,，]/g, ''), unit: 'KG',
+        sourceRemark: remarkCol >= 0 ? cells[remarkCol] : '', quantityNeedsReview: true });
+    }
+    if (!fields.items.length) fields.items.push(_pendingOcrItem(String(text || '')));
+    fields.manualReviewRequired = true;
+    return fields;
+  }
+
+
   /* 日期：发货/送货/来料日期：2026-09-10 | 2026年9月10日 | 2026/9/10 */
   let m = joined.match(/(?:日期|DATE)\s*[：:]\s*(\d{4})\s*[-年\/.]\s*(\d{1,2})\s*[-月\/.]\s*(\d{1,2})/i);
   if (m) fields.date = m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');

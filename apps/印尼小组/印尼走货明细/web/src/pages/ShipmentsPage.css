@@ -194,6 +194,8 @@
 }
 
 .shipment-sheet-top-scroll {
+  overscroll-behavior-x: contain;
+  scroll-behavior: auto;
   height: 16px;
   overflow-x: scroll;
   overflow-y: hidden;

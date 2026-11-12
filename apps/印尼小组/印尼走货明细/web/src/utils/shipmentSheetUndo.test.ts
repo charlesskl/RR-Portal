@@ -3,6 +3,8 @@ import { createContext, runInContext } from 'node:vm'
 import ts from 'typescript'
 import dayjs from 'dayjs'
 import { expect, it, vi } from 'vitest'
+import { shipmentLoadError } from './shipmentLoadError'
+import { loadShipmentDetail, loadShipmentMaterials } from './shipmentDetailLoad'
 import { shipmentDeclarationSaveError } from './shipmentDeclarationSaveValidation'
 import { shipmentPackingAverageQty, shipmentWeightQuantity, shipmentKgWeight } from './shipmentWeight'
 import { applyMergedShipmentEdits, mergedFieldEditable } from './shipmentMergedEditor'
@@ -40,6 +42,7 @@ function fixture() {
     customsOptions: [], outRows: [], message: { info: vi.fn(), error: vi.fn(), success: vi.fn() },
     Modal: { confirm: vi.fn() },
     api: { put: vi.fn(async () => ({})), post: vi.fn(async () => ({ data: { id: 777 } })), get: vi.fn() },
+    setEditorLoadError: vi.fn(), shipmentLoadError, loadShipmentDetail, loadShipmentMaterials,
     load: vi.fn(), closeOutboundLink: vi.fn(), setDrawerFull: vi.fn(), setEditorLoad: vi.fn(),
     setUndoCount: vi.fn(), setCartonSelection: vi.fn(), setOutRows: vi.fn(),
     flushSync: (fn: () => void) => fn(), setTimeout: (fn: () => void) => fn(),
@@ -80,14 +83,14 @@ function fixture() {
 
 it('undo deep snapshots preserve every source, nested import image/metadata, zero/null and pending material fields', () => {
   const f = fixture(), s = f.state
-  const imported = { id: 77, name_zh: 'Synthetic imported', image: 'data:image/png;base64,c3ludGhldGlj', import_source: { sheet: 'PR1067', row: 4 } }
+  const imported = { id: 77, name_zh: 'Synthetic imported', image: 'data:image/png;base64,c3ludGhldGlj', shipment_images: ['first', 'second'], import_source: { sheet: 'PR1067', row: 4 } }
   s.rawItems = [{ _rowKey: 1, material_id: -1, material_snapshot: imported, qty: 0, kg: null, po_no: 'PR1067-IMPORTED' },
     { _rowKey: 2, material_id: 8, outbound_id: 4, po_no: 'PR1067-PO-1', qty: 3 },
     { _rowKey: 3, material_id: 8, outbound_id: 5, po_no: 'PR1067-PO-2', qty: 7 }]
   s.baseMatMap.set(-1, imported); s.baseMatMap.get(8).extra = { preserved: 0 }
   f.publish(); const expected = structuredClone(s.latestUndoState.current)
   f.run('recordSheetUndo()')
-  imported.import_source.row = 99; s.baseMatMap.get(8).extra.preserved = 5; s.rawItems[1].qty = 30; s.dirtyMatIds.add(8)
+  imported.import_source.row = 99; imported.shipment_images.push('third'); s.baseMatMap.get(8).extra.preserved = 5; s.rawItems[1].qty = 30; s.dirtyMatIds.add(8)
   f.run('undoSheetEdit()'); f.publish()
   expect(s.rawItems).toEqual(expected.rawItems); expect(s.baseMatMap).toEqual(expected.baseMatMap)
   expect(s.dirtyMatIds).toEqual(expected.dirtyMatIds)

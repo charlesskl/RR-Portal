@@ -101,6 +101,7 @@ let AI = loadAiConfig();
    不要求模型输出业务字段 JSON，避免把模型推断当作确定的列位置。 */
 const OCR_READ_PROMPT = 'Read all the text in the image, including the company name, title, serial number, date, customer, and all text outside the table, then the table contents. Output tables as markdown tables using the original column headers and column order. Keep every column and every empty cell, including empty leading cells in continuation rows. Keep carton counts and remarks in their own original columns. Read complete contract and order identifiers across wrapped lines within the same cell; preserve those internal line breaks as <br>, never as separate goods rows. Do not merge columns, fill empty cells, infer values, or move footer totals into goods rows. Skip fully empty table rows.';
 /* 表格密集型单据（如台聚）全文 OCR 易乱行/复读，解析不出明细时改用此提示词重试 */
+const OCR_CONTRACT_PROMPT = 'Read the complete contract identifiers in the image, including every lower wrapped line in the same cell. Return ONLY a markdown table with these exact columns: | NO | 合同编号 | 单位 | 数量 |. Keep the original printed row numbers, units and quantities. Do not shorten identifiers, infer missing digits or include totals/footer rows.';
 const OCR_TABLE_PROMPT = 'Read all the text in the image. Output the table contents as a markdown table with every column kept (including the quantity column and empty cells), one row per line.';
 /* 第二次重试仍失败时：只要求输出货品明细表（列名固定，指令简单，命中率最高） */
 const OCR_ITEMS_PROMPT = 'This is a delivery note photo. Output ONLY a markdown table of the goods rows with exactly these columns: | 订单号 | 货号 | 品名 | 数量 | 单位 |. One row per goods item. No other text.';
@@ -567,6 +568,7 @@ function parseDeliveryNote(text, options = {}) {
         if (cells.every(c => !c)) continue;   /* 空白可能是分页间隔，不能截断后续真实明细 */
         // Only a complete repeated header is non-business text; keep partial and ambiguous rows.
         if (cells.length === head.length && cells.every((value, index) => value.replace(/\s+/g, '') === headKeys[index])) continue;
+        if (contractColumnsLayout && /^(?:[（(]?大[写寫][）)]?|合[计計]人民[币幣](?:\s*[（(]大[写寫][）)])?)$/.test(cells[0] || '') && !cells[cQty] && !cells[cName]) continue;
         if ((componentColumnsLayout || contractColumnsLayout) && cells.length !== head.length) { fields.items.push(_pendingOcrItem(row)); continue; }
         if (deliveryColumnsLayout) {
           if (/^(合计|合計|总计|總計|TOTAL)(?:[：:]|$)/i.test(cells[0] || '')) continue;
@@ -663,6 +665,7 @@ function parseDeliveryNote(text, options = {}) {
         if (rowOrder) lastOrder = rowOrder;
         if (!fields.orderNo && rowOrder && rowOrder !== no && rowOrder.length >= 6) fields.orderNo = rowOrder;
         fields.items.push({ productNo: no, productName: name, qty, unit, _seq: sequence,
+          ...(contractColumnsLayout && /^FDJA20\d{5}$/.test(rowOrder) ? { orderNoNeedsReview: true } : {}),
           ...(componentColumnsLayout ? { color: get(cColor), deliveryBalance: get(cBalance), cartons: get(cCartons), remark: get(cRemark), ...(cModel >= 0 ? { model: get(cModel) } : {}) } : {}),
           ...(rowOrder && rowOrder !== no ? { orderNo: rowOrder } : {}) });
       }
@@ -902,8 +905,59 @@ function parseDeliveryNote(text, options = {}) {
       seenStrict.add(k); return true;
     });
   }
+  if (fields.items.some(it => it.orderNoNeedsReview)) fields.orderNo = '';
   fields.items.forEach(it => { delete it._seq; });
   return fields;
+}
+
+/* Only this established contract format has a lower suffix after its
+   FDJA/year prefix. Missing suffixes are never generated from another row. */
+function _contractOrderRows(text, verification = false) {
+  const split = line => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|')
+    .map(cell => cell.replace(/<br\s*\/?>/gi, '').replace(/\s+/g, '').trim());
+  const lines = String(text || '').split(/\r?\n/).filter(line => line.trim().startsWith('|'));
+  let head, indices, rows = [];
+  for (const line of lines) {
+    const cells = split(line);
+    if (cells.every(cell => /^:?-+:?$/.test(cell))) continue;
+    if (/^(NO\.?|序号|序號)$/i.test(cells[0]) && cells.some(cell => /^合同[编編][号號]$/.test(cell))) {
+      if (head) return null;
+      head = cells;
+      indices = [0,cells.findIndex(cell => /^合同[编編][号號]$/.test(cell)),cells.findIndex(cell => /^[单單]位$/.test(cell)),cells.findIndex(cell => /^[数數]量$/.test(cell))];
+      if ((verification && cells.length !== 4) || indices.some(i => i < 0) || new Set(indices).size !== 4) return null;
+      continue;
+    }
+    if (!head) continue;
+    if (/^(?:合[计計]人民[币幣](?:[（(]大[写寫][）)])?|[（(]?大[写寫][）)]?)$/.test(cells[0] || '')) continue;
+    if (cells.length !== head.length || !/^\d{1,5}$/.test(cells[0])) return null;
+    const [seq,code,unit,quantity] = indices.map(i => cells[i]);
+    if (!/^[A-Za-z0-9._/-]+$/.test(code) || !/^(?:\d{1,3}(?:[,，]\d{3})+|\d+)$/.test(quantity)) return null;
+    rows.push({seq:seq.replace(/^0+(?=\d)/,''),code,unit:unit.toUpperCase(),qty:quantity.replace(/[,，]/g,'')});
+  }
+  if (!rows.length || rows.length > 200 || new Set(rows.map(row => row.seq)).size !== rows.length) return null;
+  return rows;
+}
+function _applyContractOrderVerification(original, fields, response) {
+  const before = _contractOrderRows(original), after = _contractOrderRows(response, true);
+  if (!before || !after || before.length !== after.length || before.length !== fields.items.length) return false;
+  const bySequence = new Map(after.map(row => [row.seq,row]));
+  for (let i = 0; i < before.length; i++) {
+    const row = before[i], next = bySequence.get(row.seq), item = fields.items[i];
+    if (!next || item.orderNo !== row.code || String(item.qty) !== row.qty || next.qty !== row.qty || next.unit !== row.unit) return false;
+    if (item.orderNoNeedsReview) {
+      if (!/^FDJA20\d{6}-\d{2}$/.test(next.code) || !next.code.startsWith(row.code)) return false;
+    } else if (next.code !== row.code) return false;
+  }
+  for (let i = 0; i < before.length; i++) {
+    const item = fields.items[i];
+    if (!item.orderNoNeedsReview) continue;
+    item.orderNo = bySequence.get(before[i].seq).code;
+    item.orderNoEvidence = item.orderNo;
+    delete item.orderNoNeedsReview;
+  }
+  const orders = new Set(fields.items.map(item => item.orderNo));
+  fields.orderNo = orders.size === 1 ? [...orders][0] : '';
+  return true;
 }
 
 /* Secondary OCR is not a second goods parser. Read only explicit header lines
@@ -1020,7 +1074,7 @@ async function aiVisionExtract(dataUrl) {
     try {
       const nextData = JSON.parse(retry.raw), next = decode(nextData);
       if (next.fields.items.length || next.fields.manualReviewRequired || next.needRotate) {
-        const manual = next.fields.manualReviewRequired === true || next.fields.items.some(item => item.quantityNeedsReview === true);
+        const manual = next.fields.manualReviewRequired === true || next.fields.items.some(item => item.quantityNeedsReview === true || item.orderNoNeedsReview === true);
         // A pending whole-source row has no confirmed business identity. Do not
         // refill a cleared PO/supplier/date from a different model response.
         if (!manual) for (const key of ['date','supplier','deliveryNo','orderNo']) if (!next.fields[key] && fields[key]) next.fields[key] = fields[key];
@@ -1028,7 +1082,18 @@ async function aiVisionExtract(dataUrl) {
       }
     } catch (error) { console.warn('[AI] 重试响应异常：', error.name); }
   }
-  const needsManualReview = fields.manualReviewRequired === true || fields.items.some(item => item.quantityNeedsReview === true);
+  if (!needRotate && fields.items.some(item => item.orderNoNeedsReview)) {
+    try {
+      payload.messages[0].content[0].text = OCR_CONTRACT_PROMPT;
+      const verified = await callModel(payload.model, AbortSignal.timeout(12000));
+      if (verified.status < 400) {
+        const packet = JSON.parse(verified.raw), choice = packet && packet.choices && packet.choices[0];
+        const evidence = choice && choice.message && choice.message.content;
+        if (choice && choice.finish_reason === 'stop' && typeof evidence === 'string') _applyContractOrderVerification(content, fields, evidence);
+      }
+    } catch (error) { console.warn('[AI] Contract identifier verification unavailable'); }
+  }
+  const needsManualReview = fields.manualReviewRequired === true || fields.items.some(item => item.quantityNeedsReview === true || item.orderNoNeedsReview === true);
   /* Optional header recovery must never discard successful rows or replace their PO.
      One bounded request; only explicit, complete document-header evidence is used. */
   if (fields.items.length && !needRotate && !needsManualReview && (!fields.supplier || !fields.deliveryNo || !fields.date)) {
@@ -1984,7 +2049,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       if (!body || typeof body.text !== 'string' || !body.text.trim() || body.text.length > 200000) Auth.fail(400, '请提供有效的识别原文（不超过20万字）');
       const fields = parseDeliveryNote(body.text);
-      return sendJson(res, 200, { ok: true, fields, needsManualReview: fields.manualReviewRequired === true || fields.items.some(item => item.quantityNeedsReview) });
+      return sendJson(res, 200, { ok: true, fields, needsManualReview: fields.manualReviewRequired === true || fields.items.some(item => item.quantityNeedsReview || item.orderNoNeedsReview) });
     }
     if (p === '/api/ai/ocr-extract' && req.method === 'POST') {
       const body = await readBody(req);

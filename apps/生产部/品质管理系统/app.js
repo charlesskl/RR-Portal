@@ -3186,6 +3186,7 @@ function _markOcrQuantity(raw) {
 }
 function _clearOcrQuantityReview() {
   window.__qcOcrFormContext = null;
+  window.__qcOcrOrderReview = null;
   const el = document.getElementById('f_qty');
   if (el) { delete el.dataset.ocrApplied; delete el.dataset.ocrNeedsReview; }
 }

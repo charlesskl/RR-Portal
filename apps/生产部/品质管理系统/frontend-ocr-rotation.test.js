@@ -632,3 +632,22 @@ test('six wrapped contract numbers remain complete and row-specific through save
   assert.deepEqual(x.b.json('state.records.map(r=>r.orderNo)'),expected);
   assert.equal(x.b.ctx.__qcQueue,null);
 });
+
+test('unresolved truncated contract PO cannot be silently saved or advance the queue; manual correction or explicit NA is preserved',async()=>{
+  const fields={supplier:'Test Supplier',date:'2026-11-12',items:[0,1].map(i=>({productNo:'SKU00'+i,productName:'合成吊牌',qty:'1000',unit:'PCS',orderNo:'FDJA2026123',orderNoNeedsReview:true}))};
+  const x=fixture();x.upload();x.responses.push({ok:true,fields,rawText:'合成原文',needsManualReview:true});await x.b.ctx.startOcr();
+  assert.match(x.b.elements.get('ocrItemsPreview').innerHTML,/需核对完整编号/);x.b.ctx.applyOcrToForm();
+  assert.equal(x.b.ctx.saveRecord({continueEntry:true}),false);assert.equal(x.b.ctx.__qcQueue.idx,0);
+  assert.equal(x.b.json('state.records.length'),0);assert.match(x.b.messages.at(-1).message,/PO.*缺少换行/);
+  x.b.elements.get('f_orderNo').value='FDJA20261237-01';assert.equal(x.b.ctx.saveRecord({continueEntry:true}),true);
+  assert.equal(x.b.ctx.__qcQueue.idx,1);assert.equal(x.b.ctx.saveRecord(),false);
+  x.b.elements.get('f_orderNo').value='NA';assert.equal(x.b.ctx.saveRecord(),true);
+  assert.deepEqual(x.b.json('state.records.map(r=>r.orderNo)'),['FDJA20261237-01','NA']);
+  x.b.ctx.closeModalDirect();x.b.ctx.openAddModal();assert.equal(x.b.ctx.__qcOcrOrderReview,null);
+});
+test('a single unresolved contract PO also requires correction before saving',async()=>{
+  const x=fixture();x.upload();x.responses.push({ok:true,needsManualReview:true,rawText:'合成原文',fields:{supplier:'Test Supplier',date:'2026-11-12',items:[{productNo:'SKU001',productName:'合成吊牌',qty:'1000',orderNo:'FDJA2026123',orderNoNeedsReview:true}]}});
+  await x.b.ctx.startOcr();x.b.ctx.applyOcrToForm();assert.equal(x.b.ctx.saveRecord(),false);
+  x.b.elements.get('f_orderNo').value='FDJA20261237-01';assert.equal(x.b.ctx.saveRecord(),true);
+  assert.equal(x.b.json('state.records[0].orderNo'),'FDJA20261237-01');
+});

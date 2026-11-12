@@ -19,6 +19,7 @@ function runtime(responses=[]) {
     extract:async()=>plain(await ctx.actual.aiVisionExtract('data:image/png;base64,c3ludGhldGlj')),calls:()=>calls};
 }
 const goods='|序号|产品名称|物料编号|数量/KG|累计/KG|备注|\n|1|合成轻泥甲|系列-TEST|80|80|20KG*4箱|\n|2|合成轻泥乙|系列-TEST|100|100|20KG*5箱|';
+const countedGoods='|货号|品名|数量|单位|\n|SKU-001|合成甲零件|80|PCS|\n|SKU-002|合成乙零件|100|PCS|';
 const prefix='合成供应商有限公司\n日期：2026-11-12\n客户订单\n编号PO.NO: PO2026/S019\n';
 const delivery='送货单号\nNO: 20261112HD0123\n';
 test('a customer PO.NO preceding the bilingual delivery number keeps the two identities separate through extraction',async()=>{
@@ -64,9 +65,40 @@ test('supplemental headers use the same explicit bilingual classification and ig
 });
 
 test('optional bilingual header recovery fills delivery identity without copying or replacing the original PO',async()=>{
-  const raw='客户订单\n编号PO.NO: PO2026/S019\n'+goods;
+  const raw='客户订单\n编号PO.NO: PO2026/S019\n'+countedGoods;
   const r=runtime([raw,'合成供应商有限公司\n日期：2026-11-12\n客户订单\n编号PO.NO: OTHER-1234\n'+delivery]);
   const result=await r.extract();
   assert.equal(result.fields.orderNo,'PO2026/S019'); assert.equal(result.fields.deliveryNo,'20261112HD0123');
   assert.equal(result.rawText,raw); assert.equal(result.fields.items.length,2); assert.equal(r.calls(),2);
+});
+
+test('weight quantities still require manual confirmation and do not trigger optional header recovery',async()=>{
+  const raw='客户订单\n编号PO.NO: PO2026/S019\n'+goods;
+  const r=runtime([raw,'合成供应商有限公司\n日期：2026-11-12\n'+delivery]);
+  const result=await r.extract();
+  assert.equal(r.calls(),1); assert.equal(result.needsManualReview,true);
+  assert.equal(result.fields.orderNo,'PO2026/S019'); assert.equal(result.fields.deliveryNo,'');
+  assert.equal(result.rawText,raw); assert.equal(result.fields.items.length,2);
+  assert.deepEqual(result.fields.items.map(i=>[i.qty,i.unit,i.quantityNeedsReview]),[['80','KG',true],['100','KG',true]]);
+});
+
+for(const [kind,table] of [['counted',countedGoods],['weight',goods]]) {
+  test(kind+' delivery conflict preserves all primary rows and cannot be filled from a later one-number header',async()=>{
+    const raw=prefix+'送货单号: DN-1111\n发货单号: DN-2222\n'+table;
+    const r=runtime([raw,'合成供应商有限公司\n日期：2026-11-12\n送货单号: DN-1111']);
+    const initial=r.parse(raw),result=await r.extract();
+    assert.equal(result.fields.deliveryNo,''); assert.equal(result.fields.orderNo,'PO2026/S019');
+    assert.equal(result.fields.manualReviewRequired,true); assert.equal(result.needsManualReview,true);
+    assert.equal(result.rawText,raw); assert.deepEqual(result.fields.items,initial.items);
+    assert.equal(result.fields.items.length,2); assert.equal(r.calls(),1);
+  });
+}
+
+test('explicit corrected source text is reparsed afresh without carrying the previous delivery conflict',()=>{
+  const r=runtime(),conflicting=prefix+'送货单号: DN-1111\n发货单号: DN-2222\n'+countedGoods;
+  const before=r.parse(conflicting); assert.equal(before.deliveryNo,''); assert.equal(before.manualReviewRequired,true);
+  const corrected=r.parse(conflicting.replace('发货单号: DN-2222\n',''));
+  assert.equal(corrected.deliveryNo,'DN-1111'); assert.equal(corrected.orderNo,'PO2026/S019');
+  assert.equal(corrected.manualReviewRequired,undefined); assert.deepEqual(corrected.items,before.items);
+  assert.equal(r.calls(),0,'Manual source parsing does not invoke a model');
 });

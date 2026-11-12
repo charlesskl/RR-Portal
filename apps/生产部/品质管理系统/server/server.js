@@ -180,7 +180,8 @@ function _ocrDocumentNumbers(source, allowGeneric = true) {
   const candidates = explicit.size ? explicit : generic;
   const unique = values => values.size === 1 ? [...values][0] : '';
   return { deliveryNo: unique(candidates), orderNo: unique(orderValues),
-    orderValues: [...orderValues], hasDeliveryCandidates: candidates.size > 0 };
+    orderValues: [...orderValues], hasDeliveryCandidates: candidates.size > 0,
+    deliveryConflict: candidates.size > 1 };
 }
 
 /* ── 送货单 OCR 文本 → 结构化字段（确定性解析，不依赖模型指令遵循）── */
@@ -353,11 +354,11 @@ function parseDeliveryNote(text, options = {}) {
     if (company) fields.supplier = company;
     let customer = heading.match(/(?:客户|客戶)\s*(?:名称|名稱)\s*[：:]?\s*(?:CUSTOMER|CUSTCMER)?\s*[：:]?\s*([^\n|：:]*?(?:有限公司|公司))/i);
     if (customer) fields.customer = customer[1].trim();
-    let match = heading.match(/(?:送\s*[货貨]\s*[单單]\s*[号號])\s*(?:NO\s*[.:：]?\s*)?[：:]?\s*([A-Za-z0-9][A-Za-z0-9.\-/]{3,})/i);
-    if (match && /\d/.test(match[1]) && !/^NO$/i.test(match[1])) fields.deliveryNo = match[1];
-    match = heading.match(/(?:客户|客戶)\s*[订訂]\s*[单單]\s*(?:[编編]\s*[号號]|[号號])?\s*(?:PO\s*\.?\s*NO\.?)?\s*[：:]\s*([A-Za-z0-9][A-Za-z0-9.\-/]{3,})/i);
-    if (match) fields.orderNo = match[1];
-    match = heading.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?/);
+    const numbers = _ocrDocumentNumbers(heading);
+    fields.deliveryNo = numbers.deliveryNo;
+    fields.orderNo = numbers.orderNo;
+    if (numbers.deliveryConflict) fields.manualReviewRequired = true;
+    let match = heading.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?/);
     if (!match) match = heading.match(/(?:日期|DATE)\s*[：:]?\s*(\d{4})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{1,2})/i);
     if (match) fields.date = match[1] + '-' + match[2].padStart(2, '0') + '-' + match[3].padStart(2, '0');
     const rows = plain ? lines.slice(plainWeightHeader + 1) : weightTable.slice(weightHeaderIndex + 1);
@@ -406,6 +407,9 @@ function parseDeliveryNote(text, options = {}) {
 
   const documentNumbers = _ocrDocumentNumbers(joined);
   fields.deliveryNo = documentNumbers.deliveryNo;
+  // Conflicting evidence is not a missing header. Keep it for human review;
+  // a later OCR pass returning only one candidate must not silently resolve it.
+  if (documentNumbers.deliveryConflict) fields.manualReviewRequired = true;
   /* 无标签单号兜底：开头独立成行的 5-8 位流水号（排除年份，进表格即停） */
   if (!fields.deliveryNo && !documentNumbers.hasDeliveryCandidates) {
     for (const ln of lines.slice(0, 12)) {

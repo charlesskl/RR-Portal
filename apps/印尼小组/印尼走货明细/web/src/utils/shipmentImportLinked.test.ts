@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { createContext, runInContext } from 'node:vm'
 import ts from 'typescript'
 import { expect, it, vi } from 'vitest'
+import { SHIPMENT_IMPORT_BATCH_LIMIT } from './shipmentImportBatch'
 import { shipmentSaveTestRefs } from './shipmentSaveTestRefs'
 import { applyShipmentImport } from './shipmentImportApply'
 import { planShipmentImport, type ShipmentImportItem } from './shipmentImport'
@@ -94,7 +95,7 @@ it('实际确认按钮允许已关联行的缺省币种，不接受重复匹配�
   }
   walk(tree)
   const context = createContext({ selected: [{ item: { ...incoming, currency: undefined } }], targets: [0], reviewedTargets: [], linkedTarget: () => old,
-    busy: false, loadImages: undefined, importContext: { current: { active: true } },
+    SHIPMENT_IMPORT_BATCH_LIMIT, tooManySelected: false, busy: false, loadImages: undefined, importContext: { current: { active: true } },
     onImport: vi.fn(() => false), setRows: vi.fn(), message: { warning: vi.fn(), success: vi.fn() } })
   runInContext(ts.transpileModule(code, { fileName: 'ShipmentImport.tsx', compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText, context)
   await runInContext('confirm()', context)

@@ -98,6 +98,8 @@ export interface ShipmentImportSource {
 }
 
 export interface Material {
+  // Local shipment photos; image remains the first photo for legacy readers.
+  shipment_images?: string[]
   // Local shipment snapshot only; keeps explicitly linked batches in one packing row.
   shipment_outbound_link_group?: string
   import_source?: ShipmentImportSource

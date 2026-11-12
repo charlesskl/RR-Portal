@@ -3,6 +3,8 @@ import { createContext, runInContext } from 'node:vm'
 import ts from 'typescript'
 import dayjs from 'dayjs'
 import { expect, it, vi } from 'vitest'
+import { shipmentLoadError } from './shipmentLoadError'
+import { loadShipmentDetail, loadShipmentMaterials } from './shipmentDetailLoad'
 
 // Run the real page handlers with deferred read requests; never call a server.
 const source = readFileSync(new URL('../pages/ShipmentsPage.tsx', import.meta.url), 'utf8')
@@ -25,7 +27,7 @@ function setup() {
     dayjs, editorSession: { current: 0 }, editorLoadState: { current: 'ready' }, savePending: { current: null },
     unacknowledgedSave: { current: false }, writtenMaterials: { current: new Map() },
     undoHistory: { current: ['previous shipment edit'] }, setUndoCount: vi.fn(),
-    setEditorLoad: vi.fn(), setCreating: vi.fn(), setEditing: vi.fn(), setItems: vi.fn(),
+    shipmentLoadError, loadShipmentDetail, loadShipmentMaterials, setEditorLoadError: vi.fn(), setEditorLoad: vi.fn(), setCreating: vi.fn(), setEditing: vi.fn(), setItems: vi.fn(),
     setMatMap: vi.fn(), setDirtyMatIds: vi.fn(), setEditorDirty: vi.fn(),
     form: { resetFields: vi.fn(), setFieldsValue: vi.fn(), validateFields: vi.fn() },
     message: { error: vi.fn(), info: vi.fn() }, sheetEditing: false,
@@ -44,8 +46,8 @@ it('pending detail or material requests cannot validate or save an empty editor'
   expect(f.state.editorLoadState.current).toBe('loading')
   expect(f.state.undoHistory.current).toEqual([])
   expect(await f.save()).toBe(false)
-  f.detail.resolve({ data: record }); await Promise.resolve(); await Promise.resolve()
-  expect(f.state.api.get).toHaveBeenLastCalledWith('/materials/by-ids', { params: { ids: '8' } })
+  f.detail.resolve({ data: record })
+  await vi.waitFor(() => expect(f.state.api.get).toHaveBeenLastCalledWith('/materials/by-ids', { params: { ids: '8' } }))
   expect(await f.save()).toBe(false)
   expect(f.state.form.validateFields).not.toHaveBeenCalled()
   expect(f.state.api.put).not.toHaveBeenCalled()
@@ -199,4 +201,18 @@ it('undo restores a complete previous table edit and keeps later header edits', 
   expect(state.setUndoCount).toHaveBeenLastCalledWith(0)
   expect(state.setEditorDirty).toHaveBeenCalledWith(true)
   expect(state.form.setFieldsValue).not.toHaveBeenCalled()
+})
+
+it.each(['detail', 'metadata'] as const)('Network Error保留具体%s阶段，重新加载时清除旧原因', async stage => {
+  const f = setup(), pending = f.open(23)
+  if (stage === 'detail') f.detail.reject(new Error('Network Error'))
+  else { f.detail.resolve({ data: { ...record, id: 23 } }); f.metadata.reject(new Error('Network Error')) }
+  await pending
+  expect(f.state.setEditorLoadError).toHaveBeenLastCalledWith(expect.stringContaining(stage === 'detail' ? '走货详情' : '物料资料'))
+  expect(f.state.setEditorLoadError).toHaveBeenLastCalledWith(expect.stringContaining('Network Error'))
+  expect(f.state.editorLoadState.current).toBe('error')
+  f.state.api.get.mockImplementation(async url => ({ data: url.startsWith('/shipments/') ? { ...record, id: 23 } : [{ id: 8 }] }))
+  await f.open(23)
+  expect(f.state.setEditorLoadError).toHaveBeenLastCalledWith('')
+  expect(f.state.editorLoadState.current).toBe('ready')
 })

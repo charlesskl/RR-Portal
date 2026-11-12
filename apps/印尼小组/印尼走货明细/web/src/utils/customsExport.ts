@@ -15,6 +15,7 @@ import auxiliaryDocumentLayout from './auxiliaryDocumentLayout.json'
 import { AUXILIARY_TABLES, auxiliaryDetailFormulas } from './auxiliaryDocumentFormula'
 import { invoiceDetailGroups, invoiceDetailSumFormula } from './invoiceDetailGroups'
 import { consolidateShipmentItems } from './shipmentConsolidation'
+import { shipmentImages } from './shipmentImages'
 
 import { CUSTOMS_FIXED, effectiveCustomsCompany, sortShipmentItems, cartonLayout } from './shipmentOrder'
 export { CUSTOMS_FIXED, effectiveCustomsCompany } from './shipmentOrder'
@@ -1232,14 +1233,30 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   fitCategoryColumn(wbObj)
   compactMainColumns(ws)
 
-  const floatImages: { rowZeroIdx: number; bytes: Uint8Array; ext: string }[] = []
+  const floatImages: { rowZeroIdx: number; bytes: Uint8Array; ext: string; position: number }[] = []
+  const imageCounts = new Map<number, number>()
   sorted.forEach((it, i) => {
     const m = matOf(it)
     const ri = 3 + i
-    if (it.material_id != null && images.has(it.material_id)) {
-      const img = images.get(it.material_id)!
-      floatImages.push({ rowZeroIdx: ri, bytes: img.bytes, ext: img.ext })
+    // Consolidation is display-only. Collect photos from every source batch,
+    // including local snapshot galleries, instead of keeping the first batch.
+    const pictures: { bytes: Uint8Array; ext: string }[] = []
+    const seen = new Set<string>()
+    for (const source of it.sources) {
+      const material = matOf(source) || source.material_snapshot as Material | undefined
+      const inline = shipmentImages(material)
+      if (inline.length || Array.isArray(material?.shipment_images)) {
+        for (const dataUrl of inline) {
+          const image = dataUrlToBytes(dataUrl)
+          if (image && !seen.has(dataUrl)) { pictures.push(image); seen.add(dataUrl) }
+        }
+      } else if (source.material_id != null && images.has(source.material_id)) {
+        const key = `material:${source.material_id}`
+        if (!seen.has(key)) { pictures.push(images.get(source.material_id)!); seen.add(key) }
+      }
     }
+    imageCounts.set(ri, pictures.length)
+    pictures.forEach((image, position) => floatImages.push({ rowZeroIdx: ri, ...image, position }))
     const phs = m?.product_code && !m.tool_kind ? productHs.get(m.product_code) : undefined
     setCell(ws, ri, 0, i + 1, 'n')
     // A packing-only import retains the ordinary row's absent-code fallback.
@@ -1533,7 +1550,12 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   const rows: any[] = ws['!rows'] || []
   rows[0] = { ...(rows[0] || {}), hpt: 24, hpx: 24 }
   rows[1] = { ...(rows[1] || {}), hpt: 24, hpx: 24 }
-  for (let i = 0; i < sorted.length; i++) rows[3 + i] = cloneTemplateValue(templateDetailRow)
+  for (let i = 0; i < sorted.length; i++) {
+    const row = cloneTemplateValue(templateDetailRow)
+    const height = Math.ceil((imageCounts.get(3 + i) || 0) / 2) * 50 + 6
+    if (height > (row.hpt || 108.75)) { row.hpt = height; delete row.hpx }
+    rows[3 + i] = row
+  }
   if (mainTotalRow) {
     rows[mainTotalRow - 2] = { hpt: 24 }
     rows[mainTotalRow - 1] = { hpt: 24 }
@@ -4155,16 +4177,16 @@ async function mergeGeneratedValuesIntoTemplate(
 
 async function injectOoxmlImages(
   zip: JSZip, mainSheetIdx: number,
-  rowsWithImage: { rowZeroIdx: number; bytes: Uint8Array; ext: string }[],
+  rowsWithImage: { rowZeroIdx: number; bytes: Uint8Array; ext: string; position: number }[],
 ) {
   if (!rowsWithImage.length) return
   let mediaSeq = 100
   while (zip.file('xl/media/image' + mediaSeq + '.png') || zip.file('xl/media/image' + mediaSeq + '.jpeg')) mediaSeq++
-  const mediaEntries: { path: string; num: number; rowZeroIdx: number }[] = []
+  const mediaEntries: { path: string; num: number; rowZeroIdx: number; position: number }[] = []
   for (const r of rowsWithImage) {
     const path = 'xl/media/image' + mediaSeq + '.' + r.ext
     zip.file(path, r.bytes)
-    mediaEntries.push({ path, num: mediaSeq, rowZeroIdx: r.rowZeroIdx })
+    mediaEntries.push({ path, num: mediaSeq, rowZeroIdx: r.rowZeroIdx, position: r.position })
     mediaSeq++
   }
   const drawingNum = 999
@@ -4174,12 +4196,12 @@ async function injectOoxmlImages(
   mediaEntries.forEach((m, i) => {
     const rid = 'rId' + (i + 1)
     anchors += `<xdr:oneCellAnchor>
-  <xdr:from><xdr:col>19</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${m.rowZeroIdx}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
-  <xdr:ext cx="600000" cy="600000"/>
+  <xdr:from><xdr:col>19</xdr:col><xdr:colOff>${m.position % 2 * 570000}</xdr:colOff><xdr:row>${m.rowZeroIdx}</xdr:row><xdr:rowOff>${Math.floor(m.position / 2) * 570000}</xdr:rowOff></xdr:from>
+  <xdr:ext cx="540000" cy="540000"/>
   <xdr:pic>
     <xdr:nvPicPr><xdr:cNvPr id="${i + 2}" name="Picture ${i + 1}"/><xdr:cNvPicPr/></xdr:nvPicPr>
     <xdr:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>
-    <xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="600000" cy="600000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>
+    <xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="540000" cy="540000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>
   </xdr:pic>
   <xdr:clientData/>
 </xdr:oneCellAnchor>`

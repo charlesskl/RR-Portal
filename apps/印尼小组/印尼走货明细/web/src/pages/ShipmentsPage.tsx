@@ -14,11 +14,15 @@ import { createCartonGroupId } from '../utils/cartonGroupId'
 import { receiptChargeRatio, shipmentChargeQuantity, shipmentDeclarationPrice, shipmentPurchaseAmount, shipmentUsesDeclarationPrice } from '../utils/shipmentPurchase'
 import ShipmentImport from '../components/ShipmentImport'
 import ShipmentImportSource from '../components/ShipmentImportSource'
+import ShipmentImages from '../components/ShipmentImages'
+import { replaceShipmentRowImages, shipmentImages } from '../utils/shipmentImages'
 import ShipmentSheetTable from '../components/ShipmentSheetTable'
 import ShipmentNumberCell from '../components/ShipmentNumberCell'
 import ShipmentTextCell from '../components/ShipmentTextCell'
 import { ShipmentSheetFillContext } from '../components/ShipmentSheetDraft'
 import { formatShipmentDeclaration, isShipmentCountUnit, roundedShipmentDeclaration, shipmentDeclarationPrecision } from '../utils/shipmentDeclaration'
+import { shipmentLoadError, type ShipmentLoadStage } from '../utils/shipmentLoadError'
+import { loadShipmentDetail, loadShipmentMaterials } from '../utils/shipmentDetailLoad'
 import { shipmentDeclarationSaveError } from '../utils/shipmentDeclarationSaveValidation'
 import { shipmentDateOnly, shipmentPurchaseDates } from '../utils/shipmentDates'
 import { formatShipmentPallet, shipmentOptionalNumber } from '../utils/shipmentDisplay'
@@ -200,6 +204,7 @@ export default function ShipmentsPage() {
   const [editing, setEditing] = useState<ShipmentDetail | null>(null)
   const [creating, setCreating] = useState(false)
   const [editorLoad, setEditorLoad] = useState<'ready' | 'loading' | 'error'>('ready')
+  const [editorLoadError, setEditorLoadError] = useState('')
   const editorLoadState = useRef<'ready' | 'loading' | 'error'>('ready')
   const [rawItems, setRawItems] = useState<ShipmentItem[]>([])
   const nextRowKey = useRef(0)
@@ -763,6 +768,8 @@ export default function ShipmentsPage() {
     }) }, 0)
   }
   async function openEdit(s: ShipmentSummary) {
+    setEditorLoadError('')
+    let stage: ShipmentLoadStage = 'detail'
     const session = ++editorSession.current
     editorLoadState.current = 'loading'; setEditorLoad('loading')
     setCreating(false); setEditing(s)
@@ -770,18 +777,22 @@ export default function ShipmentsPage() {
     form.resetFields(); setItems([], false); setMatMap(new Map()); setDirtyMatIds(new Set())
     setEditorDirty(false)
     try {
-      const { data } = await api.get<ShipmentDetail>(`/shipments/${s.id}`)
-      if (editorSession.current !== session) return
+      const current = () => editorSession.current === session
+      const data = await loadShipmentDetail<ShipmentDetail>(params => api.get(`/shipments/${s.id}`, { params }), s.id, current)
+      if (!data || !current()) return
       if (data.id !== s.id || !Array.isArray(data.items)) throw new Error('走货详情响应不完整，请重试')
+      stage = 'parse'
       const its = data.items.map(item => ({
         ...item,
         material_snapshot: typeof item.material_snapshot === 'string' ? JSON.parse(item.material_snapshot) : item.material_snapshot,
       }))
       const ids = [...new Set(its.filter(item => !item.material_snapshot).map(item => item.material_id).filter((id): id is number => id != null && id > 0))]
-      const materials = ids.length ? (await api.get<Material[]>('/materials/by-ids', { params: { ids: ids.join(',') } })).data : []
-      if (editorSession.current !== session) return
+      stage = 'metadata'
+      const materials = await loadShipmentMaterials<Material>(ids, batch => api.get('/materials/by-ids', { params: { ids: batch.join(',') } }), current)
+      if (!materials || !current()) return
       if (!Array.isArray(materials) || ids.some(id => !materials.some(material => material.id === id)))
         throw new Error('物料资料未完整加载，请重试后再编辑')
+      stage = 'parse'
       // Publish the detail and metadata together: no half-loaded editable table.
       setMatMap(new Map(materials.map(material => [material.id!, material])))
       form.setFieldsValue({
@@ -800,7 +811,9 @@ export default function ShipmentsPage() {
     } catch (e: any) {
       if (editorSession.current !== session) return
       editorLoadState.current = 'error'; setEditorLoad('error')
-      message.error('加载失败: ' + (e?.message ?? e))
+      const detail = shipmentLoadError(e, stage)
+      setEditorLoadError(detail)
+      message.error(detail)
     }
   }
   async function save(closeAfterSave = false): Promise<boolean> {
@@ -1476,7 +1489,7 @@ export default function ShipmentsPage() {
         }
       >
         {editorLoad === 'loading' && <div className="shipment-editor-loading" role="status"><Spin /><Typography.Text>正在加载走货明细和物料资料，请稍候…</Typography.Text></div>}
-        {editorLoad === 'error' && <Alert type="error" showIcon message="走货资料加载失败，尚未修改原数据" description="请重试。详情和物料完整载入前不能编辑、保存或导出。" action={<Button onClick={() => editing && openEdit(editing)}>重新加载</Button>} />}
+        {editorLoad === 'error' && <Alert type="error" showIcon message="走货资料加载失败，尚未修改原数据" description={<><div>{editorLoadError}</div><div>详情和物料完整载入前不能编辑、保存或导出。</div></>} action={<Button onClick={() => editing && openEdit(editing)}>重新加载</Button>} />}
         {sheetEditing && <div role="status">正在校验数量，请稍候再继续编辑…</div>}
         <div hidden={editorLoad !== 'ready'} inert={sheetEditing || saving}>
         <Form form={form} layout="vertical" disabled={editorLoad !== 'ready' || saving} onValuesChange={changed => {
@@ -1620,12 +1633,24 @@ export default function ShipmentsPage() {
                   : <Space direction="vertical" size={0}><Tag bordered={false}>未关联</Tag><Button type="link" size="small" onClick={() => openOutboundLink(r)}>关联出库</Button></Space>,
               },
               {
-                title: '图片', width: 56, align: 'center',
+                title: '图片', width: 80, align: 'center',
                 render: (_v, r) => {
-                  const m = r.material_id != null ? matMap.get(r.material_id) : null
-                  return m?.image
-                    ? <img src={m.image} style={{ width: 36, height: 36, objectFit: 'contain', border: '1px solid #eee', borderRadius: 3 }} />
-                    : <span style={{ color: '#bbb', fontSize: 12 }}>无</span>
+                  const photos = [...new Set(r.sources.flatMap(source => shipmentImages(matMap.get(source.material_id!))))]
+                  return <ShipmentImages images={photos} onChange={values => {
+                    if (editorLoadState.current !== 'ready' || saving || sheetEditing) return false
+                    try {
+                      const keys = new Set(r.sources.map(source => source._rowKey!))
+                      const next = replaceShipmentRowImages(items, matMap, keys, values)
+                      setItems(next)
+                      setMatMap(current => {
+                        const map = new Map(current)
+                        for (const source of r.sources) if (source.material_id != null && source.material_id < 0) map.delete(source.material_id)
+                        return map
+                      })
+                      setEditorDirty(true)
+                      return true
+                    } catch (error) { message.error(error instanceof Error ? error.message : '图片更新失败'); return false }
+                  }} />
                 },
               },
               { title: '物料ID', width: 100, render: (_v, r, i) => r.material_snapshot ? <><Tag title="Excel 导入资料只保存在本次走货单">{r.material_snapshot.id || '导入'}</Tag><ShipmentImportSource source={matMap.get(r.material_id!)?.import_source} /></> : r.material_id ? <Tag>{r.material_id}</Tag> : <Input.Search size="small" placeholder="物料ID" enterButton="选" onSearch={value => { const id = Number(value); if (Number.isInteger(id) && id > 0) { patchItem(i, 'material_id', id); loadMatsForItems([id]) } else message.warning('请输入有效物料 ID') }} /> },

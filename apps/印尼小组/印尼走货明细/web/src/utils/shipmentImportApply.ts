@@ -5,7 +5,7 @@ import { mergeShipmentImportMaterial, planShipmentImport, type ExistingShipmentI
 const linkedFields = ['cartons', 'carton_no', 'carton_group', 'qty_per_carton', 'weighing_qty', 'pallet',
   'customs_company', 'bl_head', 'contract_no', 'contract_date', 'invoice_no', 'invoice_date', 'product_use', 'formula_name'] as const
 const linkedMaterialFields = ['length', 'width', 'height', 'weight_per_carton', 'gross_per_pc', 'hs_cn', 'hs_id',
-  'name_en', 'image', 'import_source'] as const
+  'name_en', 'image', 'shipment_images', 'import_source'] as const
 const present = (value: unknown) => value != null && value !== ''
 function importValues(row: ShipmentImportItem) {
   const values = { ...row }
@@ -37,6 +37,11 @@ export function applyShipmentImport(existing: readonly ExistingShipmentImportRow
       if (row._fileMaterialFields && !row._fileMaterialFields.includes('image')) {
         if (material?.image == null) delete snapshot.image
         else snapshot.image = material.image
+        if (material?.shipment_images == null) delete snapshot.shipment_images
+        else snapshot.shipment_images = [...material.shipment_images]
+      } else if (row._fileMaterialFields?.includes('image') && !row._fileMaterialFields.includes('shipment_images')) {
+        // A single-photo legacy import replaces an old gallery completely.
+        delete snapshot.shipment_images
       }
       next[target] = { ...old, ...provided, material_snapshot: snapshot }
     } else {
@@ -56,6 +61,7 @@ export function applyShipmentImport(existing: readonly ExistingShipmentImportRow
       const merged = mergeShipmentImportMaterial(material, row.material_snapshot)
       const snapshot = { ...material }
       for (const field of linkedMaterialFields) if (fileMaterialField(field) && present(merged[field])) Object.assign(snapshot, { [field]: merged[field] })
+      if (fileMaterialField('image') && present(row.material_snapshot.image) && !fileMaterialField('shipment_images')) delete snapshot.shipment_images
       // The backend checks snapshot.id against the outbound's actual material.
       const materialId = old.material_snapshot?.id || (Number(old.material_id) > 0 ? old.material_id : material?.id)
       if (!(Number(materialId) > 0)) throw new Error(`第 ${target + 1} 行缺少已确认的出库物料 ID，请重新关联后导入`)

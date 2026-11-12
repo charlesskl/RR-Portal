@@ -6,7 +6,7 @@ const src=fs.readFileSync(path.join(__dirname,'../report_export.js'),'utf8');
 const exportCode=src.slice(src.indexOf('async function exportIQCReport('),src.indexOf('/* ── 构建 IQC 画布 ── */'));
 function createHarness(id,name,afterCanvas) {
   let selected=id, heading, saved=false, messages=[];
-  const window={__QC_AUTH:{company:id,user:{username:'fixture',enabled:true}},jspdf:{jsPDF:class {
+  const window={__QC_AUTH:{company:id,csrfToken:'session-one',user:{username:'fixture',enabled:true}},jspdf:{jsPDF:class {
     constructor(){this.internal={pageSize:{getWidth:()=>210,getHeight:()=>297}};}
     addImage(){} save(){saved=true;}
   }}};
@@ -16,7 +16,7 @@ function createHarness(id,name,afterCanvas) {
     showToast:msg=>messages.push(msg),requestAnimationFrame:fn=>fn(),setTimeout:fn=>fn(),console:{error(){}},
     document:{body:{appendChild(){},removeChild(){}},getElementById:()=>null},
     _buildIQCCanvas:(_r,n)=>{heading=n;return {offsetWidth:794,scrollWidth:794,offsetHeight:1000}},
-    html2canvas:async()=>{if(afterCanvas){selected='other';window.__QC_AUTH={company:'other',user:{username:'fixture',enabled:true}};}return {width:794,height:1000,toDataURL:()=>''};},
+    html2canvas:async()=>{if(typeof afterCanvas==='function'){afterCanvas(window);}else if(afterCanvas){selected='other';window.__QC_AUTH={company:'other',user:{username:'fixture',enabled:true}};}return {width:794,height:1000,toDataURL:()=>''};},
   });
   vm.runInContext(exportCode,c);
   return {run:()=>c.exportIQCReport(1),heading:()=>heading,saved:()=>saved,messages};
@@ -31,4 +31,13 @@ test('switching company during rendering cancels the export',async()=>{
 });
 test('an unrecognized company cannot produce a report',async()=>{
  const h=createHarness('unknown','');await h.run();assert.equal(h.saved(),false);
+});
+test('same username in a replaced session cannot finish the previous export',async()=>{
+ const h=createHarness('dg-xingxin','东莞兴信',w=>{w.__QC_AUTH={...w.__QC_AUTH,user:{...w.__QC_AUTH.user}};});
+ await h.run();assert.equal(h.saved(),false);assert.ok(h.messages.some(s=>s.includes('切换')));
+});
+test('changed CSRF token or user identity on the same auth object cancels export',async()=>{
+ for(const change of [w=>{w.__QC_AUTH.csrfToken='session-two';},w=>{w.__QC_AUTH.user={...w.__QC_AUTH.user};},w=>{w.__QC_AUTH=null;}]) {
+   const h=createHarness('dg-xingxin','东莞兴信',change);await h.run();assert.equal(h.saved(),false);
+ }
 });

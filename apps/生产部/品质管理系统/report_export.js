@@ -1459,6 +1459,8 @@ async function exportIQCReport(recordId) {
   // A/B/C/D 是厂区标识，不属于公司全称。
   const factoryName = company.name.replace(/[A-D]$/, '') + '塑胶制品有限公司';
   const username = auth.user.username;
+  const user = auth.user;
+  const csrfToken = auth.csrfToken;
   const allData = _getData();
   const record  = allData.find(r => r.id === recordId);
   if (!record) {
@@ -1522,7 +1524,7 @@ async function exportIQCReport(recordId) {
     const supplier  = (record.supplier  || '供应商').replace(/[/\\:*?"<>|]/g, '');
     const productNo = (record.productNo || '').replace(/[/\\:*?"<>|]/g, '');
     const dateStr   = (record.date || _todayStr()).replace(/-/g, '');
-    if (!window.__QC_AUTH || window.__QC_AUTH.company !== companyId ||
+    if (window.__QC_AUTH !== auth || auth.user !== user || auth.csrfToken !== csrfToken || window.__QC_AUTH.company !== companyId ||
         !window.__QC_AUTH.user || !window.__QC_AUTH.user.enabled || window.__QC_AUTH.user.username !== username ||
         getCompany() !== companyId) throw new Error('登录或子公司已切换，请重新导出');
     pdf.save(`IQC检验报告_${supplier}_${productNo}_${dateStr}.pdf`);

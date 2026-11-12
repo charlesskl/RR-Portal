@@ -73,7 +73,7 @@ NO: 20261110DN8033
 送货日期: DELIVERY
 DATE 2026年11月10日
 序号 产品名称 物料编号 数量/KG 累计/KG 备注\n`;
-test('模型实际返回的分行表头和纯文本明细可解析', () => {
+test('分行表头保留公共信息，纯文本明细逐条保留原文待核对', () => {
  const input=plainHeader+`1 合成蓝色轻泥299C Example Brand--蛋糕系列 160 160 20KG*8箱
 2 合成黄色轻泥109C Example Brand--蛋糕系列 220 220 20KG*11箱
 3 合成粉色轻泥232C Example Brand--蛋糕系列 240 240 20KG*12箱
@@ -82,9 +82,44 @@ test('模型实际返回的分行表头和纯文本明细可解析', () => {
 6 合成白色轻泥 Example Brand--蛋糕系列 220 220 20KG*11箱`;
  const r=parse(input); assert.equal(r.weightDocument,true); assert.equal(r.customer,'测试客户塑胶制品有限公司');
  assert.equal(r.supplier,'测试供应商贸易有限公司'); assert.equal(r.deliveryNo,'20261110DN8033'); assert.equal(r.orderNo,'TEST2026/P017');
- assert.equal(r.date,'2026-11-10'); assert.equal(r.items.length,6); assert.deepEqual(r.items.map(x=>x.qty),['160','220','240','120','200','220']);
- assert.equal(r.items[0].productName,'合成蓝色轻泥299C'); assert.equal(r.items[0].productNo,'Example Brand--蛋糕系列');
+ assert.equal(r.date,'2026-11-10'); assert.equal(r.items.length,6);
+ assert.ok(r.items.every(x=>x.qty==='' && x.productNo==='' && x.unit==='' && x.quantityNeedsReview));
+ assert.equal(r.items[0].productName,'待核对原文：1 合成蓝色轻泥299C Example Brand--蛋糕系列 160 160 20KG*8箱');
 });
 test('无法确定纯文本明细的列界时保留原行而非猜测', () => {
  const r=parse(plainHeader+'1 品名 未知系列 160 160 20KG*8箱'); assert.equal(r.items.length,1); assert.equal(r.items[0].qty,''); assert.match(r.items[0].productName,/待核对原文/);
+});
+test('纯文本数字型号和异常序号均保留，不错读成重量或漏掉明细', () => {
+ for (const seq of ['1','1.','一']) {
+   const line=seq+' 轻泥 Example Brand--系列 600 160 220 20KG*8箱';
+   const r=parse(plainHeader+line);
+   assert.equal(r.items.length,1); assert.equal(r.items[0].productName,'待核对原文：'+line);
+   assert.equal(r.items[0].qty,''); assert.equal(r.items[0].productNo,'');
+ }
+});
+test('重量表异常序号保留原行且不影响下一条正常明细', () => {
+ for (const seq of ['1.','','一']) {
+   const row='| '+seq+' | 轻泥 | 系列 | 160 | 999 | 20KG*8箱 |';
+   const r=parse(prefix+head+row+'\n| 2 | 轻泥2 | 系列2 | 220 | 999 | 20KG*11箱 |');
+   assert.equal(r.items.length,2); assert.equal(r.items[0].productName,'待核对原文：'+row);
+   assert.equal(r.items[0].qty,''); assert.equal(r.items[1].qty,'220');
+ }
+});
+test('混合普通与重量表时保留整份原文，不吞掉任何一类明细', () => {
+ for (const qtyName of ['数量','送货数量','交货数量','送貨數量','交貨數量','QTY']) {
+ const regular='| 序号 | 产品编号 | 产品名称 | '+qtyName+' | 单位 |\n| 1 | A123 | 纸盒 | 500 | 个 |\n';
+ for (const input of [prefix+regular+head+rows,prefix+head+rows+'\n'+regular]) {
+   const r=parse(input); assert.equal(r.items.length,1);
+   assert.equal(r.items[0].productName,'待核对原文：'+input); assert.equal(r.items[0].qty,'');
+ }
+ }
+});
+test('同序续页表头忽略，变更列序的续页保留整份待核对', () => {
+ const first='| 1 | 轻泥 | 系列 | 160 | 999 | 20KG*8箱 |\n';
+ const second='| 2 | 轻泥2 | 系列2 | 220 | 888 | 20KG*11箱 |';
+ const repeated=parse(prefix+head+first+head+second);
+ assert.deepEqual(repeated.items.map(x=>x.qty),['160','220']);
+ const input=prefix+head+first+'| 序号 | 产品名称 | 物料编号 | 累计/KG | 数量/KG | 备注 |\n| 2 | 轻泥2 | 系列2 | 999 | 220 | 20KG*11箱 |';
+ const changed=parse(input); assert.equal(changed.items.length,1);
+ assert.equal(changed.items[0].productName,'待核对原文：'+input); assert.equal(changed.items[0].qty,'');
 });

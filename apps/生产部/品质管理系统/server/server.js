@@ -283,6 +283,17 @@ function parseDeliveryNote(text, options = {}) {
     if ([nameCol, codeCol, qtyCol, totalCol].some(i => i < 0)) {
       fields.items = [_pendingOcrItem(String(text || ''))]; fields.manualReviewRequired = true; return fields;
     }
+    // 多种明细表或换列后的续页不能沿用第一张表的列号，也不能丢掉前面的普通明细。
+    const sameHeader = cells => cells.length === head.length && cells.every((s, i) => s.replace(/\s+/g, '') === head[i]);
+    const differentCargoHeader = weightTable.some(row => {
+      const cells = splitRow(row).map(s => s.replace(/\s+/g, ''));
+      const hasProduct = cells.some(s => /^(?:(?:产品|產品|物料|货品|貨品)(?:名称|名稱)|品名|货号|貨號|物料(?:编号|編號)|规格型号|規格型號|名称|名稱|Description)$/i.test(s));
+      const hasQuantity = cells.some(s => /^(?:数量|數量|交货数量|交貨數量|送货数量|送貨數量|QTY)(?:[/／(（].*)?$/i.test(s));
+      return hasProduct && hasQuantity && !sameHeader(cells);
+    });
+    if (differentCargoHeader) {
+      fields.items = [_pendingOcrItem(String(text || ''))]; fields.manualReviewRequired = true; return fields;
+    }
     const heading = lines.slice(0, plain ? plainWeightHeader : lines.indexOf(weightTable[weightHeaderIndex])).join('\n').replace(/\|/g, ' ');
     const company = heading.split('\n').map(s => s.replace(/^#+\s*/, '').trim()).find(s =>
       /(?:公司|工厂|工廠)/.test(s) && !/客户|客戶|CUSTOMER|收货|收貨/i.test(s));
@@ -300,14 +311,14 @@ function parseDeliveryNote(text, options = {}) {
     for (const row of rows) {
       let cells;
       if (plain) {
-        if (!/^\d+\s+/.test(row)) continue;
-        /* 只有紧邻数量前且带分隔符的英文系列名称有可辨识的列界；其余行保留原文。 */
-        const parts = row.match(/^(\d+)\s+(.+?)\s+([A-Za-z][A-Za-z ]{1,60}[-—–一]+\s*\S.*?)\s+((?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?)\s+((?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?)\s+(.+)$/i);
-        if (!parts) { fields.items.push(_pendingOcrItem(row)); continue; }
-        cells = parts.slice(1);
+        // 空格不能可靠区分名称、数字型号、重量和累计；逐行保留，不能猜列界。
+        if (!row.trim() || row === lines[plainWeightHeader] || /^(?:合计|合計|总计|總計|TOTAL)(?:\s|[:：]|$)/i.test(row)) continue;
+        fields.items.push(_pendingOcrItem(row));
+        continue;
       } else cells = splitRow(row);
       if (cells.every(c => !c) || /^(?:合计|合計|总计|總計|TOTAL)/i.test(cells[0] || '')) continue;
-      if (seqCol >= 0 && !/^\d+$/.test(cells[seqCol] || '')) continue;
+      if (sameHeader(cells)) continue;
+      if (seqCol >= 0 && !/^\d+$/.test(cells[seqCol] || '')) { fields.items.push(_pendingOcrItem(row)); continue; }
       if (cells.length !== head.length) { fields.items.push(_pendingOcrItem(row)); continue; }
       const quantity = cells[qtyCol], name = cells[nameCol], code = cells[codeCol];
       if (!name || !/^(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?$/.test(quantity)) {

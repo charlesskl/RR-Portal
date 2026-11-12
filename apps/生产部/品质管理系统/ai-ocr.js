@@ -237,7 +237,8 @@
       var escape = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
       preview.hidden = !items.length;
       preview.innerHTML = '<table class="batch-preview-table"><thead><tr>' + ['订单号（PO）','货号','型号','配件名称','颜色','数量','单位','本单送货数/本单欠数','箱数','备注'].map(function (v) { return '<th>'+v+'</th>'; }).join('') + '</tr></thead><tbody>' + items.map(function (it) {
-        return '<tr>'+[it.orderNo || fields.orderNo,it.productNo,it.model,/^待核对原(?:文|行)[：:]/.test(it.productName || '') ? '待核对原文' : it.productName,it.color,it.qty,it.unit,it.deliveryBalance,it.cartons,it.remark].map(function (v) { return '<td>'+escape(v || '—')+'</td>'; }).join('')+'</tr>';
+        var orderLabel = (it.orderNo || fields.orderNo || '') + (it.orderNoNeedsReview ? '（需核对完整编号）' : it.orderNoEvidence ? '（图片复核）' : '');
+        return '<tr>'+[orderLabel,it.productNo,it.model,/^待核对原(?:文|行)[：:]/.test(it.productName || '') ? '待核对原文' : it.productName,it.color,it.qty,it.unit,it.deliveryBalance,it.cartons,it.remark].map(function (v) { return '<td>'+escape(v || '—')+'</td>'; }).join('')+'</tr>';
       }).join('')+'</tbody></table>';
     }
 
@@ -311,8 +312,8 @@
             var n = applyFields(body.fields);
             window.__qcOcrResultContext = committed;
             if (body.rawText) setV('ocrRawText', body.rawText);
-            var manual = body.needsManualReview || body.fields.items.some(function (item) { return item && item.quantityNeedsReview; });
-            setT('ocrStatus', manual ? '识别结果需要人工核对，请逐行确认数量和单位后保存' :
+            var manual = body.needsManualReview || body.fields.items.some(function (item) { return item && (item.quantityNeedsReview || item.orderNoNeedsReview); });
+            setT('ocrStatus', manual ? '识别结果需要人工核对，请逐行确认 PO、数量和单位后保存' :
               'AI 识别完成' + (n > 1 ? ('（共 ' + n + ' 行货品，已填第 1 行）') : ''));
             toast(manual ? '原文已保留，请人工核对货品与数量' :
               (n > 1 ? ('识别完成，共 ' + n + ' 行，已填第 1 行') : 'AI 识别完成，请核对字段'), manual ? 'info' : 'success');
@@ -363,6 +364,7 @@
     if (c.customer) setV('f_client', c.customer);
     setV('f_deliveryNo', c.deliveryNo || '');
     setV('f_orderNo', it.orderNo || c.orderNo || '');   /* 多 PO 单：用本条自己的 PO 号 */
+    window.__qcOcrOrderReview = it.orderNoNeedsReview ? {source:String(it.orderNo || '')} : null;
     if (c.type) setV('f_type', c.type);
     setV('f_productNo', it.productNo || '');
     setV('f_productName', /^待核对原(?:文|行)[：:]/.test(it.productName || '') ? '' : it.productName || '');
@@ -484,6 +486,7 @@
         })) { toast('尚无可应用的识别结果，请先识别或填写核对字段', 'info'); return false; }
         if (r && r.items && r.items.length > 1) return startQueue(r.common, r.items);
         var ret = origApply.apply(this, arguments);
+        window.__qcOcrOrderReview = r && r.items && r.items[0] && r.items[0].orderNoNeedsReview ? {source:String(r.items[0].orderNo || '')} : null;
         window.__qcOcrFormContext = actorContext();
         if (r && r.common && r.common.customer) {
           var previewClient = document.getElementById('ocrClient');
@@ -514,6 +517,13 @@
         var q = window.__qcQueue;
         var context = window.__qcOcrFormContext || q && q.context;
         if (!canSaveOcr(context)) return false;
+        var review = window.__qcOcrOrderReview, input = document.getElementById('f_orderNo');
+        var currentOrder = input && String(input.value || '').trim();
+        if (review && (!currentOrder || currentOrder === review.source)) {
+          toast('PO 可能缺少换行内容，请核对并补全后保存；无 PO 时请明确选择 NA', 'error');
+          if (input && input.focus) input.focus();
+          return false;
+        }
         var ret = origSave.apply(this, arguments);
         /* 普通保存可能已关闭弹窗并清理全局状态，仍核对保存前捕获的身份。 */
         if (!sameActor(context)) {
@@ -543,6 +553,7 @@
         var ret = origClose.apply(this, arguments);
         window.__qcQueue = null;
         window.__qcOcrFormContext = null;
+        window.__qcOcrOrderReview = null;
         return ret;
       };
       window.closeModalDirect.__qcQueueWrapped = true;

@@ -442,3 +442,38 @@ test('a subsequent reordered eight-column heading cannot reuse the earlier paper
   assert.deepEqual(fields.items.map(i=>i.qty),['80','','','100']);
   assert.deepEqual(fields.items.slice(1,3).map(i=>i.productName),[otherHeading,otherRow].map(row=>'待核对原文：'+row));
 });
+
+const contractHeading='|NO|合同编号|客户订单号|品名规格|物料编号|单位|数量|备品数|重量kg|';
+test('physical newlines inside contract cells retain each complete per-row PO and the quantity column',()=>{
+  const rows=Array.from({length:6},(_,i)=>'|'+(i+1)+'|PO202600'+(i<3?'1':'2')+'\n'+(i<3?'7-01':'1-01')+'||SKU00'+i+' 合成吊牌||PCS|'+(i===0?'20000':'10000')+'|'+(i===0?'200':'100')+'|20|');
+  const fields=runtime().parse(contractHeading+'\n'+rows.join('\n'));
+  assert.equal(fields.items.length,6);
+  assert.deepEqual(fields.items.map(i=>i.orderNo),['PO20260017-01','PO20260017-01','PO20260017-01','PO20260021-01','PO20260021-01','PO20260021-01']);
+  assert.deepEqual(fields.items.map(i=>i.qty),['20000','10000','10000','10000','10000','10000']);
+});
+for(const cell of ['PO2026001<br>7-01','PO2026001<br/>7-01','PO2026001 7-01']) {
+  test('already positioned contract wrap remains complete: '+cell,()=>{
+    const fields=runtime().parse(contractHeading+'\n|1|'+cell+'||合成吊牌||PCS|20000|200|20|');
+    assert.equal(fields.items[0].orderNo,'PO20260017-01');assert.equal(fields.items[0].qty,'20000');
+  });
+}
+for(const next of ['|2|PO20260021-01||另一吊牌||PCS|10000|100|20|',
+  '7-01', '7-01||合成吊牌||PCS|200|20|', '备注：7-01|200|20|']) {
+  test('ambiguous or incomplete contract continuation cannot shift a spare count into quantity: '+next,()=>{
+    const fields=runtime().parse(contractHeading+'\n|1|PO2026001\n'+next);
+    assert.equal(fields.items[0].qty,'');assert.equal(fields.items[0].quantityNeedsReview,true);
+    assert.ok(!fields.items.some(i=>i.qty==='200'));
+    if(next.startsWith('|2|')) assert.equal(fields.items.at(-1).orderNo,'PO20260021-01');
+  });
+}
+
+for(const wrap of ['<br>','\n']) {
+  test('provider raw contract source and complete per-row identifiers stay in sync for '+JSON.stringify(wrap),async()=>{
+    const raw='合成供应商有限公司\n日期：2026-11-12\n送货单号：DN-CONTRACT-01\n'+contractHeading+'\n'+
+      Array.from({length:6},(_,i)=>'|'+(i+1)+'|PO202600'+(i<3?'1':'2')+wrap+(i<3?'7-01':'1-01')+'||合成吊牌|SKU00'+i+'|PCS|'+(i?'10000':'20000')+'|100|20|').join('\n');
+    const r=runtime([raw]),result=await r.extract();
+    assert.equal(r.calls(),1);assert.equal(result.rawText,raw);assert.equal(result.fields.items.length,6);
+    assert.deepEqual(result.fields.items.map(i=>i.orderNo),['PO20260017-01','PO20260017-01','PO20260017-01','PO20260021-01','PO20260021-01','PO20260021-01']);
+    assert.equal(result.fields.items[0].qty,'20000');
+  });
+}

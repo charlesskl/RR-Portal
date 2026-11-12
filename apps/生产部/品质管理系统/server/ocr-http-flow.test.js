@@ -101,6 +101,17 @@ test('isolated real OCR HTTP, explicit save, SQLite and reopen retain rows and p
   assert.equal(paperPositioned.status,200);
   assert.deepEqual(paperPositioned.json.fields.items.map(i=>[i.orderNo,i.productNo,i.productName,i.qty]),[['PO-26001','0030721','甲贴纸','80']]);
   assert.equal(modelCalls, 0);
+  const bilingual = '客户订单\n编号PO.NO: PO2026/S019\n送货单号\nNO: 20261112HD0123\n'+'|货号|品名|数量|单位|\n|SKU001|合成零件|80|KG|';
+  const labels = await request('/api/ai/ocr-parse', 'POST', {text:bilingual}, admin);
+  assert.equal(labels.status,200); assert.equal(labels.json.fields.deliveryNo,'20261112HD0123');
+  assert.equal(labels.json.fields.orderNo,'PO2026/S019');
+  assert.equal(labels.json.fields.items.length,1);
+  assert.equal(modelCalls,0,'text parsing never sends another model request');
+  const contractMissing='|NO|合同编号|客户订单号|品名规格|物料编号|单位|数量|备品数|重量kg|\n|1|FDJA2026123||合成吊牌|SKU001|PCS|2000|100|20|\n|合计人民币||||||||20|\n|(大写)|||||||||';
+  const incompleteContract=await request('/api/ai/ocr-parse','POST',{text:contractMissing},admin);
+  assert.equal(incompleteContract.status,200);assert.equal(incompleteContract.json.fields.items.length,1);
+  assert.equal(incompleteContract.json.fields.items[0].orderNoNeedsReview,true);assert.equal(incompleteContract.json.needsManualReview,true);
+  assert.equal(modelCalls,0,'reparsing incomplete PO text must not upload an image or invoke OCR');
   const ocr = await request('/api/ai/ocr-extract', 'POST', image, admin);
   assert.equal(ocr.status, 200); assert.equal(ocr.json.ok, true); assert.equal(modelCalls, 2);
   assert.equal(ocr.json.rawText, raw); assert.equal(ocr.json.needsManualReview, false);

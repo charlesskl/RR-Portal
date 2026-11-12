@@ -5,6 +5,8 @@ import { extractSheetImages } from './engineeringImport'
 import { readToolPrice } from './toolPrice'
 import { shipmentKgWeight, shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
 import { normalizeShipmentDeclaration } from './shipmentDeclaration'
+import { SHIPMENT_IMPORT_BATCH_LIMIT, SHIPMENT_IMPORT_PREVIEW_LIMIT } from './shipmentImportBatch'
+import { compressShipmentImage, withShipmentImages } from './shipmentImages'
 
 export interface ShipmentImportItem {
   material_snapshot: Material
@@ -91,6 +93,11 @@ const currencies: Record<string, string> = { CNY: '¥', USD: 'US$', HKD: 'HK$', 
 export function parseShipmentWorkbook(wb: XLSX.WorkBook): ShipmentImportResult {
   const rows: ShipmentImportRow[] = [], warnings: string[] = []
   for (const sheet of wb.SheetNames) {
+    // Templates often retain an ARRIVED/history table as a hidden worksheet.
+    // It can have the same headers as the current container, but is not part
+    // of this import. Honor visibility from the file rather than sheet names.
+    const metadata = wb.Workbook?.Sheets?.find(entry => entry.name === sheet)
+    if (metadata?.Hidden) { warnings.push(`${sheet}：隐藏工作表未导入`); continue }
     const ws = wb.Sheets[sheet]
     const range = XLSX.utils.decode_range(ws['!ref'] || 'A1')
     if (range.e.r > 10000 || range.e.c > 200) {
@@ -328,9 +335,15 @@ export async function importShipmentFile(file: File) {
   const workbook = dataOnly ? await readLargeShipmentWorkbook(zip) : buffer
   const parsed = parseShipmentWorkbook(XLSX.read(workbook, { type: 'array', cellNF: true }))
   parsed.rows.forEach(row => { if (row.item.material_snapshot.import_source) row.item.material_snapshot.import_source.file = file.name })
-  if (parsed.rows.length > 500) throw new Error('一次最多导入 500 行，请分批导入')
-  if (dataOnly) {
-    parsed.warnings.push('大文件先预览表格，确认时读取并压缩所选明细对应的图片')
+  if (parsed.rows.length > SHIPMENT_IMPORT_PREVIEW_LIMIT)
+    throw new Error(`文件识别超过 ${SHIPMENT_IMPORT_PREVIEW_LIMIT} 行明细，请按工作表拆分文件后导入`)
+  const batched = parsed.rows.length > SHIPMENT_IMPORT_BATCH_LIMIT
+  if (batched) {
+    parsed.rows.forEach(row => { row.selected = false })
+    parsed.warnings.push(`已识别全部 ${parsed.rows.length} 行，请选择工作表或预览批次；每次确认最多 ${SHIPMENT_IMPORT_BATCH_LIMIT} 行`)
+  }
+  if (dataOnly || batched) {
+    parsed.warnings.push('先预览表格，确认时读取并压缩所选明细对应的图片')
     return { ...parsed, loadImages: (rows: ShipmentImportRow[]) => loadShipmentImages(zip, rows, resizeShipmentImage) }
   }
   await loadShipmentImages(zip, parsed.rows)
@@ -338,26 +351,7 @@ export async function importShipmentFile(file: File) {
 }
 
 async function resizeShipmentImage(file: JSZip.JSZipObject): Promise<string> {
-  const bitmap = await createImageBitmap(new Blob([await readBoundedShipmentImage(file)]))
-  try {
-    const canvas = document.createElement('canvas')
-    const context = canvas.getContext('2d')
-    if (!context) throw new Error('无法创建图片预览')
-    // Cap each encoded image so 500 rows add at most about 12 MB to a save.
-    for (const size of [768, 512, 320, 192, 128]) {
-      const scale = Math.min(1, size / Math.max(bitmap.width, bitmap.height))
-      canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-      canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-      context.fillStyle = '#fff'
-      context.fillRect(0, 0, canvas.width, canvas.height)
-      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-      const image = canvas.toDataURL('image/jpeg', 0.75)
-      if (image.length <= 24 * 1024 && image.startsWith('data:image/jpeg;base64,')) return image
-    }
-    throw new Error('图片压缩后仍过大')
-  } finally {
-    bitmap.close()
-  }
+  return compressShipmentImage(new Blob([await readBoundedShipmentImage(file)]))
 }
 
 export async function loadShipmentImages(zip: JSZip, rows: ShipmentImportRow[],
@@ -397,16 +391,23 @@ export async function loadShipmentImages(zip: JSZip, rows: ShipmentImportRow[],
       const matched = images.filter(image => image.row === row.row - 1 && image.col === row.imageCol)
       const clearUnreadImage = () => {
         delete row.item.material_snapshot.image
-        row.item._fileMaterialFields = (row.item._fileMaterialFields || []).filter(field => field !== 'image')
+        delete row.item.material_snapshot.shipment_images
+        row.item._fileMaterialFields = (row.item._fileMaterialFields || []).filter(field => !['image', 'shipment_images'].includes(field))
       }
       if (failed.has(row)) { clearUnreadImage(); row.warnings.push(failed.get(row)!) }
-      else if (matched.length === 1) {
-        row.item.material_snapshot.image = matched[0].dataUrl
-        row.item._fileMaterialFields = [...(row.item._fileMaterialFields || []), 'image']
+      else if (matched.length) {
+        const photos = [...new Set(matched.map(image => image.dataUrl))]
+        if (photos.reduce((size, image) => size + image.length, 0) > 256 * 1024) {
+          clearUnreadImage(); row.warnings.push('本行图片总量过大，未替换已有图片，请压缩后重新导入'); continue
+        }
+        row.item.material_snapshot = withShipmentImages(row.item.material_snapshot, photos)
+        row.item._fileMaterialFields = [...(row.item._fileMaterialFields || []), 'image', 'shipment_images']
       }
-      else if (matched.length > 1) { clearUnreadImage(); row.warnings.push('多张图片对应同一行，未自动选择') }
     }
   }
+  const imageBytes = rows.reduce((total, row) => total + (row.item.material_snapshot.image?.length || 0)
+    + (row.item.material_snapshot.shipment_images || []).reduce((size, image) => size + image.length, 0), 0)
+  if (imageBytes > 12 * mib) throw new Error('所选图片总量过大，请减少本次勾选行数后重试')
 }
 
 /** Updating a shipment must not replace its HS with defaults for blank source cells. */

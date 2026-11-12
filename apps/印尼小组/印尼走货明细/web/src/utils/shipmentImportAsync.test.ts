@@ -4,6 +4,7 @@ import { createContext, runInContext } from 'node:vm'
 import { readFileSync } from 'node:fs'
 import { planShipmentImport, shipmentImportCandidates, type ShipmentImportItem, type ShipmentImportRow } from './shipmentImport'
 import { applyShipmentImport } from './shipmentImportApply'
+import { SHIPMENT_IMPORT_BATCH_LIMIT, shipmentImportBatches } from './shipmentImportBatch'
 import { shipmentNetTotalKg } from './shipmentWeight'
 
 // Execute the entire production component with deterministic hook commits and
@@ -31,6 +32,7 @@ function component(parsed: { rows: ShipmentImportRow[]; warnings: string[]; load
       if (!(index in slots)) slots[index] = initial
       return [slots[index], (next: unknown) => { slots[index] = typeof next === 'function' ? next(slots[index]) : next }]
     },
+    useMemo(factory: () => unknown) { return factory() },
     useRef(initial: unknown) { const index = cursor++; if (!(index in slots)) slots[index] = { current: initial }; return slots[index] },
     useLayoutEffect(effect: () => (() => void), deps: unknown[]) {
       const index = cursor++, old = slots[index] as unknown[] | undefined
@@ -44,7 +46,7 @@ function component(parsed: { rows: ShipmentImportRow[]; warnings: string[]; load
     matchShipmentMaterial: (material: object) => ({ material, matches: 0 }),
     toolImportDefaults: (material: object) => ({ material, warnings: [] }),
     createCartonGroupId: () => 'synthetic-carton',
-    planShipmentImport, shipmentImportCandidates, applyShipmentImport,
+    SHIPMENT_IMPORT_BATCH_LIMIT, shipmentImportBatches, planShipmentImport, shipmentImportCandidates, applyShipmentImport,
     shipmentNetTotalKg, shipmentGrossPerPc: () => 0, shipmentWeightQuantity: () => 0, isShipmentCountUnit: () => false,
     ShipmentImportSource: 'ShipmentImportSource',
   })
@@ -219,4 +221,34 @@ it('原明细或物料更新后手动核对选择失效，必须重新确认覆�
   expect(reviewChoice(view, source).value).toBeUndefined()
   await view.modal.onOk()
   expect(fixture.onImport).not.toHaveBeenCalled()
+})
+
+it('超过500行可先预览，批次选择只读取本批图片且不会静默截掉明细', async () => {
+  const rows = Array.from({ length: 501 }, (_, index) => ({ ...row(`ROW-${index}`), selected: false }))
+  const images = vi.fn(async (_rows: ShipmentImportRow[]) => {})
+  const f = component({ rows, warnings: [], loadImages: images })
+  await f.render().upload.beforeUpload(new File([], 'multi.xlsx'))
+  let view = f.render()
+  expect(view.table.dataSource).toHaveLength(501)
+  expect(view.modal.okButtonProps.disabled).toBe(true)
+  const descendants = (node: any): any[] => !node || typeof node !== 'object' ? [] : [node, ...(Array.isArray(node.props?.children) ? node.props.children : [node.props?.children]).flatMap(descendants)]
+  const batchPicker = descendants({ props: { children: view.modal.children } }).find(node => node.type === 'Select' && node.props.placeholder === '选择预览批次')
+  expect(batchPicker.props.options.map((option: any) => option.disabled)).toEqual([false, false])
+  batchPicker.props.onChange(1); view = f.render()
+  expect(view.table.rowSelection.selectedRowKeys).toEqual(['ROW-500'])
+  await view.modal.onOk()
+  expect(images.mock.calls[0][0].map(row => row.key)).toEqual(['ROW-500'])
+  expect(f.onImport.mock.calls[0][0]).toHaveLength(1)
+})
+
+it('所选超过500行时不能通过直接确认绕过批次限制，也不会提前读取图片', async () => {
+  const images = vi.fn(async (_rows: ShipmentImportRow[]) => {})
+  const f = component({ rows: Array.from({ length: 501 }, (_, index) => row(`ROW-${index}`)), warnings: [], loadImages: images })
+  await f.render().upload.beforeUpload(new File([], 'multi.xlsx'))
+  const view = f.render()
+  expect(view.modal.okButtonProps.disabled).toBe(true)
+  await view.modal.onOk()
+  expect(images).not.toHaveBeenCalled()
+  expect(f.onImport).not.toHaveBeenCalled()
+  expect(f.message.warning).toHaveBeenCalledWith(expect.stringContaining('500'))
 })

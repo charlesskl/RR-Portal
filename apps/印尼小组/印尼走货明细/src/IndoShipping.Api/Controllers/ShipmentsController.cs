@@ -1,4 +1,6 @@
 using Dapper;
+using System.Data;
+using System.Text.Json;
 using IndoShipping.Api.Auditing;
 using IndoShipping.Api.Features.Purchasing;
 using IndoShipping.Infrastructure.Persistence;
@@ -32,17 +34,44 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
     }
 
     [HttpGet("{id:int}")]
-    public async Task<IActionResult> Get(int id)
+    public async Task<IActionResult> Get(int id, [FromQuery] int? offset = null,
+        [FromQuery] int? limit = null, [FromQuery] string? version = null)
     {
+        var paged = offset.HasValue || limit.HasValue || version != null;
+        if (offset < 0 || limit is < 1 or > 50 || version?.Length > 64)
+            return BadRequest(new { error = "走货分页参数无效" });
         using var c = factory.Create();
-        var sh = await c.QueryFirstOrDefaultAsync("SELECT * FROM shipments WHERE id=@id", new { id });
+        c.Open();
+        using var tx = c.BeginTransaction(IsolationLevel.RepeatableRead);
+        var sh = await c.QueryFirstOrDefaultAsync("SELECT * FROM shipments WHERE id=@id", new { id }, tx);
         if (sh == null) return NotFound(new { error = "not found" });
+        // Detect edits between HTTP pages without loading any image/snapshot.
+        // Receipt corrections affect the live free-spare ratio; PO/outbound
+        // revisions affect unit/source lookup even when this header is unchanged.
+        var metadata = await c.QuerySingleAsync<(int total, string version)>(@"
+            SELECT COUNT(*)::int,
+                   md5(COALESCE((SELECT xmin::text FROM shipments WHERE id=@id), '') || ':' ||
+                       COALESCE(string_agg(si.id::text || ':' || si.xmin::text, ',' ORDER BY si.seq, si.id), '') || ':' ||
+                       COALESCE((SELECT md5(string_agg(r.id::text || ':' || r.xmin::text, ',' ORDER BY r.id)) FROM po_receipts r), '') || ':' ||
+                       COALESCE((SELECT md5(string_agg(p.id::text || ':' || p.xmin::text, ',' ORDER BY p.id)) FROM po_items p), '') || ':' ||
+                       COALESCE((SELECT md5(string_agg(o.id::text || ':' || o.xmin::text, ',' ORDER BY o.id)) FROM outbound o), '') || ':' ||
+                       COALESCE((SELECT md5(string_agg(po.id::text || ':' || po.xmin::text, ',' ORDER BY po.id)) FROM purchase_orders po), ''))
+            FROM shipment_items si WHERE si.shipment_id=@id", new { id }, tx);
+        if (version != null && version != metadata.version)
+            return Conflict(new { error = "走货单在加载期间已被修改，请重新加载" });
         var items = (await c.QueryAsync($@"
-            WITH receipt_basis AS ({ShipmentPurchaseBasis.ReceiptBasisSql})
+            WITH page_keys AS (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY seq, id) AS page_row,
+                       SUM(octet_length(COALESCE(material_snapshot::text, ''))) OVER (ORDER BY seq, id) AS snapshot_bytes
+                FROM (SELECT id, seq, material_snapshot FROM shipment_items WHERE shipment_id=@id
+                      ORDER BY seq, id LIMIT @take OFFSET @skip) batch
+            ), receipt_basis AS ({ShipmentPurchaseBasis.ReceiptBasisSql})
             SELECT si.*,
                    COALESCE(NULLIF(pi.purchase_unit, ''), NULLIF(si.purchase_unit, ''), '个') AS purchase_unit,
                    COALESCE(rb.purchase_charge_ratio, 1) AS purchase_charge_ratio
             FROM shipment_items si
+            JOIN page_keys pk ON pk.id=si.id
+                AND (NOT @paged OR pk.page_row=1 OR pk.snapshot_bytes<=@budget)
             LEFT JOIN outbound o ON o.id=si.outbound_id
             LEFT JOIN LATERAL (
                 SELECT MIN(p.id) AS id FROM po_items p
@@ -53,9 +82,27 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
             LEFT JOIN po_items pi ON pi.id=COALESCE(o.po_item_id, matched.id)
             LEFT JOIN receipt_basis rb ON rb.po_item_id=pi.id
             WHERE si.shipment_id=@id
-            ORDER BY si.seq, si.id", new { id })).ToList();
+            ORDER BY si.seq, si.id", new { id, take = paged ? limit ?? 10 : (int?)null,
+                skip = offset ?? 0, paged, budget = 4 * 1024 * 1024 }, tx)).ToList();
+        // A snapshot is already JSON. Returning it as an escaped JSON string
+        // makes the writer rent huge escape buffers (observed production OOM).
+        foreach (IDictionary<string, object?> item in items)
+            if (item.TryGetValue("material_snapshot", out var value) && value is string json && json.Length > 0)
+            {
+                try { item["material_snapshot"] = JsonSerializer.Deserialize<JsonElement>(json); }
+                catch (JsonException) { return UnprocessableEntity(new { error = "走货物料快照格式损坏，请核对原资料；尚未修改数据" }); }
+            }
         var dict = (IDictionary<string, object?>)sh!;
         dict["items"] = items;
+        if (paged)
+        {
+            dict["items_offset"] = offset ?? 0;
+            dict["items_total"] = metadata.total;
+            dict["items_version"] = metadata.version;
+            var next = (offset ?? 0) + items.Count;
+            dict["items_next_offset"] = next < metadata.total ? next : (int?)null;
+        }
+        tx.Commit();
         return Ok(dict);
     }
 

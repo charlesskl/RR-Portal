@@ -4,6 +4,7 @@ import type { GetRef, TableProps } from 'antd'
 import { parseSheetClipboard, sheetClearSelectionEdits, sheetFillDownEdits, sheetPasteSelectionEdits, type SheetEdit, type SheetPoint } from '../utils/shipmentSheet'
 import { sheetArrowKeys, sheetArrowPoint, sheetArrowUsesEditor } from '../utils/shipmentSheetNavigation'
 import { formatShipmentPallet } from '../utils/shipmentDisplay'
+import { createShipmentHorizontalScroll } from '../utils/shipmentHorizontalScroll'
 import { ShipmentSheetDraftContext, ShipmentSheetFillContext, type ShipmentDraftCommit } from './ShipmentSheetDraft'
 
 type Props<T extends object> = TableProps<T> & {
@@ -37,6 +38,22 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
   const root = useRef<HTMLDivElement>(null)
   const table = useRef<GetRef<typeof Table>>(null)
   const topScroll = useRef<HTMLDivElement>(null)
+  const horizontalScroll = useRef<ReturnType<typeof createShipmentHorizontalScroll> | null>(null)
+  useLayoutEffect(() => {
+    const sync = createShipmentHorizontalScroll({
+      elements: () => ({ header: root.current?.querySelector<HTMLElement>('.ant-table-header') || null, rail: topScroll.current }),
+      scrollBody: left => {
+        // Empty AntD tables use a native body whose public scrollTo only
+        // supports row targets. Horizontal proxy calls require a virtual body.
+        if (!root.current?.querySelector('.ant-table-tbody-virtual-holder')) return
+        const position: { left: number; top?: number } = { left }
+        table.current?.scrollTo(position)
+      },
+      requestFrame: callback => requestAnimationFrame(callback), cancelFrame: cancelAnimationFrame,
+    })
+    horizontalScroll.current = sync
+    return () => { sync.dispose(); horizontalScroll.current = null }
+  }, [])
   const [scrollSize, setScrollSize] = useState({ width: 0, contentWidth: 0 })
   const measureScroll = useCallback(() => {
     const header = root.current?.querySelector<HTMLElement>('.ant-table-header')
@@ -45,10 +62,9 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     const contentWidth = header.scrollWidth
     setScrollSize(current => current.width === width && current.contentWidth === contentWidth
       ? current : { width, contentWidth })
-    if (topScroll.current && topScroll.current.scrollLeft !== header.scrollLeft)
-      topScroll.current.scrollLeft = header.scrollLeft
   }, [])
   useLayoutEffect(measureScroll)
+  useLayoutEffect(() => { horizontalScroll.current?.resize() }, [scrollSize.width, scrollSize.contentWidth])
   useEffect(() => {
     const header = root.current?.querySelector<HTMLElement>('.ant-table-header')
     const observer = new ResizeObserver(measureScroll)
@@ -172,11 +188,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
           let offset = header.scrollLeft
           if (left < offset + fixedLeft) offset = Math.max(0, left - fixedLeft)
           else if (left + sizes[col] > offset + holder.clientWidth - fixedRight) offset = left + sizes[col] - holder.clientWidth + fixedRight
-          header.scrollLeft = offset
-          // The installed virtual-list proxy accepts a horizontal position;
-          // update both sides, including while rc-table holds its scroll lock.
-          const position: { left: number; top?: number } = { left: header.scrollLeft }
-          table.current?.scrollTo(position)
+          horizontalScroll.current?.scrollTo(offset)
         }
       }
       // Keep one real input focused even in navigation mode. The first letter
@@ -229,10 +241,29 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
         const x = event.clientX; const original = widths[col] || Number(column.width) || 120
         const otherFixedWidth = columns.reduce((total, c, i) => total + (i !== col && c.fixed === 'left' ? (widths[i] || Number(c.width) || 120) : 0), 40)
         const maxWidth = column.fixed === 'left' ? Math.max(60, Math.min(600, (root.current?.clientWidth || 1000) - otherFixedWidth - 300)) : 600
-        const move = (e: PointerEvent) => setWidths(old => ({ ...old, [col]: Math.max(60, Math.min(maxWidth, original + e.clientX - x)) }))
-        const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); resizeCleanup.current = null }
-        resizeCleanup.current = stop
+        let frame: number | null = null, pendingWidth: number | null = null
+        const apply = () => {
+          frame = null
+          if (pendingWidth == null) return
+          const width = pendingWidth; pendingWidth = null
+          setWidths(old => old[col] === width ? old : { ...old, [col]: width })
+        }
+        const move = (e: PointerEvent) => {
+          pendingWidth = Math.max(60, Math.min(maxWidth, original + e.clientX - x))
+          if (frame == null) frame = requestAnimationFrame(apply)
+        }
+        const cleanup = (flush: boolean) => {
+          if (frame != null) cancelAnimationFrame(frame)
+          frame = null
+          if (flush) apply()
+          window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop)
+          window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop)
+          resizeCleanup.current = null
+        }
+        const stop = () => cleanup(true)
+        resizeCleanup.current = () => cleanup(false)
         window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop)
+        window.addEventListener('pointercancel', stop); window.addEventListener('blur', stop)
       }} />
     </div>,
     onCell: (record: T, row = 0) => {
@@ -248,9 +279,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
   return <ShipmentSheetDraftContext.Provider value={registerDraft}><ShipmentSheetFillContext.Provider value={fillFrom}><div className="shipment-sheet" ref={root} tabIndex={-1} style={{ '--sheet-fixed-width': `${fixedWidth}px` } as React.CSSProperties}
     onScrollCapture={event => {
       const holder = event.target as HTMLElement
-      if (holder.matches('.ant-table-header') && topScroll.current
-        && topScroll.current.scrollLeft !== holder.scrollLeft)
-        topScroll.current.scrollLeft = holder.scrollLeft
+      if (holder.matches('.ant-table-header')) horizontalScroll.current?.headerScroll(holder.scrollLeft)
       if (!holder.matches('.ant-table-tbody-virtual-holder')) return
       const active = document.activeElement as HTMLElement | null
       if (!root.current?.contains(active) || !active?.matches('input,textarea') || active.closest('.ant-select,.ant-picker')) return
@@ -262,7 +291,11 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       // newly focused visible editor during keyboard navigation.
       if (box.bottom <= viewport.top || box.top >= viewport.bottom) active.blur()
     }}
-    onWheelCapture={() => {
+    onWheelCapture={event => {
+      if (!(event.target as HTMLElement).closest('.shipment-sheet-top-scroll')) horizontalScroll.current?.cancelPending()
+      // Horizontal trackpad gestures keep the current editor/caret intact.
+      // Only vertical scrolling can remove the active virtual row.
+      if (event.shiftKey || !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return
       // Flush drafts before wheel scrolling can unmount a virtual row.
       const active = document.activeElement as HTMLElement | null
       if (root.current?.contains(active) && active?.matches('input,textarea') && !active.closest('.ant-select,.ant-picker')) active.blur()
@@ -469,15 +502,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     <div ref={topScroll} className="shipment-sheet-top-scroll" tabIndex={0} role="region" aria-label="横向滚动走货明细"
       style={{ width: scrollSize.width || '100%', display: scrollSize.contentWidth > scrollSize.width ? undefined : 'none' }}
       onKeyDown={event => event.stopPropagation()}
-      onScroll={event => {
-        const left = event.currentTarget.scrollLeft
-        const header = root.current?.querySelector<HTMLElement>('.ant-table-header')
-        if (header && header.scrollLeft !== left) {
-          header.scrollLeft = left
-          const position: { left: number; top?: number } = { left }
-          table.current?.scrollTo(position)
-        }
-      }}>
+      onScroll={event => horizontalScroll.current?.railScroll(event.currentTarget.scrollLeft)}>
       <div style={{ width: scrollSize.contentWidth, height: 1 }} />
     </div>
     <Table<T> {...props} ref={table} virtual bordered columns={mapped}

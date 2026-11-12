@@ -23,3 +23,7 @@
 .files-heading .file-search{width:340px;max-width:100%;margin:0}
 .file-result-count{font-size:11px;color:#78879e;margin:0 0 14px}
 @media(max-width:600px){.files-heading{gap:14px;margin-bottom:16px}.files-heading>.heading{flex-basis:100%}.files-heading .file-search{width:100%;min-width:0}}
+
+.users-toolbar{flex-wrap:wrap;gap:16px}.users-toolbar>.subtext{flex:1;min-width:240px}
+.users-toolbar .user-search{width:300px;max-width:100%;margin:0}.user-search-count{font-size:11px;color:#78879e;margin:0 0 14px}
+@media(max-width:600px){.users-toolbar>.subtext{flex-basis:100%;min-width:0}.users-toolbar .user-search{flex:1;min-width:150px}.users-toolbar>.btn{flex-shrink:0}}

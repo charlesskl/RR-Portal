@@ -33,7 +33,7 @@ db.prepare('INSERT OR IGNORE INTO metadata VALUES (?,?)').run('mode', DEMO ? 'de
 const factories = ['清溪', '湖南', '河源', '印尼'];
 const statuses = ['待接单', '待排产', '打印中', '待交付', '已完成', '已取消'];
 const transitions = { '待接单': ['待排产', '已取消'], '待排产': ['打印中', '已取消'], '打印中': ['待交付'], '待交付': ['已完成'], '已完成': [], '已取消': [] };
-const extensions = new Set(['.stl','.stp','.step','.obj','.3mf','.iges','.igs','.ply','.png','.jpg','.jpeg','.webp','.gif','.zip','.rar','.7z']);
+const extensions = new Set(['.stl','.stp','.step','.obj','.3mf','.iges','.igs','.ply','.x_t','.png','.jpg','.jpeg','.jfif','.webp','.gif','.zip','.rar','.7z']);
 const now = () => new Date().toISOString();
 const hash = x => createHash('sha256').update(x).digest('hex');
 function passwordHash(password) { const salt = randomBytes(16).toString('hex'); return salt + ':' + scryptSync(password, salt, 64).toString('hex'); }
@@ -202,8 +202,8 @@ const server = http.createServer(async (req,res) => {
     if(fileMatch && req.method==='GET') {
       const f=db.prepare('SELECT * FROM files WHERE id=?').get(fileMatch[1]); if(!f) fail(404,'文件不存在');
       if(f.order_id) { const order=getOrder(u,f.order_id); if(!canAccessOrderFiles(u,order)) fail(404,'文件不存在或无访问权限'); } else if(u.role!=='admin' && f.owner!==u.id) fail(404,'文件不存在或无访问权限');
-      const isImage=['.png','.jpg','.jpeg','.webp','.gif'].includes(path.extname(f.name).toLowerCase());
-      const types={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif'};
+      const isImage=['.png','.jpg','.jpeg','.jfif','.webp','.gif'].includes(path.extname(f.name).toLowerCase());
+      const types={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.jfif':'image/jpeg','.webp':'image/webp','.gif':'image/gif'};
       res.writeHead(200,{'Content-Type':isImage?types[path.extname(f.name).toLowerCase()]:'application/octet-stream','Content-Length':f.size,'Content-Disposition':`${isImage && url.searchParams.has('preview')?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(f.name)}`,'Cache-Control':'private, no-store'});
       return createReadStream(path.join(DATA,'uploads',f.id)).pipe(res);
     }

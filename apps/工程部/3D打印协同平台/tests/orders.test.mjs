@@ -30,6 +30,7 @@ test('production: login, uploads, persistence, permissions and order workflow', 
     const upload=async(name,auth=hn)=>request('/api/uploads',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(name)},body:bytes},auth);
     assert.equal((await upload('evil.html')).res.status,400);
     assert.equal((await upload('../test.stp')).res.status,400);
+    assert.equal((await upload('伪装图片.jfif.exe')).res.status,400);
     const file=await upload('呼吸灯.stp');assert.equal(file.res.status,201);
     assert.equal((await request('/api/files/'+file.data.id,{},filePeer)).res.status,404,'pending uploads are private');
     const input={factory:'湖南',workshop:'A',customer:'测试客户',sku:'TEST-1',product:'测试模型',quantity:10,printerType:'光固化',material:'硬胶',color:'白色',engineer:'测试工程师',dueDate:'2026-10-06',priority:'普通',fileIds:[file.data.id]};
@@ -159,6 +160,26 @@ test('production: login, uploads, persistence, permissions and order workflow', 
     assert.deepEqual((await request('/api/me',{},multi)).data.user.factories,['河源']);
     assert.equal((await request('/api/files/'+file.data.id,{},multi)).res.status,404);
     assert.equal((await request('/api/orders',{},multi)).data.length,1);
+    // Exercise both formats as linked order attachments, including uppercase extensions.
+    for(const name of ['参考图片.jfif','参考图片.JFIF','模型.x_t','模型.X_T']){
+      const uploaded=await upload(name,admin);assert.equal(uploaded.res.status,201,name);
+      const orderResult=await request('/api/orders',{method:'POST',body:JSON.stringify({...input,factory:'湖南',fileIds:[uploaded.data.id]})},admin);
+      assert.equal(orderResult.res.status,201,name);
+      assert.equal(orderResult.data.files[0].name,name);
+      const route='/api/files/'+uploaded.data.id;
+      const image=/\.jfif$/i.test(name);
+      for(const suffix of ['', '?preview=1']){
+        const download=await fetch(base+route+suffix,{headers:{Cookie:admin.cookie}});
+        assert.equal(download.status,200);
+        assert.equal(download.headers.get('content-type'),image?'image/jpeg':'application/octet-stream');
+        assert.ok(download.headers.get('content-disposition').startsWith(image&&suffix?'inline;':'attachment;'));
+        assert.deepEqual(Buffer.from(await download.arrayBuffer()),bytes);
+        assert.equal((await request(route+suffix,{},filePeer)).res.status,404,'same-factory non-owner cannot access new formats');
+      }
+      const peerView=(await request('/api/orders',{},filePeer)).data.find(o=>o.id===orderResult.data.id);
+      assert.deepEqual(peerView.files,[],'new formats are also hidden from other accounts');
+    }
+
 
 
   } finally {await stop();await rm(dir,{recursive:true,force:true});}

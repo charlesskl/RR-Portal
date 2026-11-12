@@ -4,13 +4,58 @@ import JSZip from 'jszip'
 import { DOMParser } from '@xmldom/xmldom'
 import * as XLSX from 'xlsx'
 import { compressShipmentImage, replaceShipmentRowImages, shipmentImages, withShipmentImages } from './shipmentImages'
-import { loadShipmentImages, parseShipmentWorkbook } from './shipmentImport'
+import { importShipmentFile, loadShipmentImages, parseShipmentWorkbook } from './shipmentImport'
 import { applyShipmentImport } from './shipmentImportApply'
 import { buildCustomsWorkbook } from './customsExport'
 import { extractSheetImages } from './engineeringImport'
 
 afterEach(() => vi.unstubAllGlobals())
 const photo = (n: number) => `data:image/png;base64,${btoa(String(n))}`
+
+async function smallWorkbookWithPhotos(imageBytes: number, count: number) {
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ['货号', '产品中文名称', '图片', '送货数量'],
+    ...Array.from({ length: count }, (_, i) => [`SYN-${i}`, `合成物料${i}`, '', i + 1]),
+  ]), '明细')
+  const zip = await JSZip.loadAsync(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }))
+  zip.file('xl/worksheets/_rels/sheet1.xml.rels', '<Relationships><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>')
+  zip.file('xl/drawings/_rels/drawing1.xml.rels', '<Relationships><Relationship Id="image1" Target="../media/image1.png"/></Relationships>')
+  zip.file('xl/media/image1.png', new Uint8Array(imageBytes).fill(65))
+  zip.file('xl/drawings/drawing1.xml', '<xdr:wsDr xmlns:xdr="urn:drawing" xmlns:a="urn:art" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' + Array.from({ length: count }, (_, i) => `<xdr:oneCellAnchor><xdr:from><xdr:row>${i + 1}</xdr:row><xdr:col>2</xdr:col></xdr:from><xdr:pic><a:blip r:embed="image1"/></xdr:pic></xdr:oneCellAnchor>`).join('') + '</xdr:wsDr>')
+  return new File([await zip.generateAsync({ type: 'arraybuffer' })], 'small-photo-budget.xlsx')
+}
+
+it.each([[300_000, 2], [100_000, 60]])('小工作簿图片超行或整批预算时完整预览，再仅压缩所选行（%i字节/%i行）', async (bytes, count) => {
+  vi.stubGlobal('DOMParser', DOMParser)
+  const file = await smallWorkbookWithPhotos(bytes, count)
+  expect(file.size).toBeLessThan(20 * 1024 * 1024)
+  const result = await importShipmentFile(file)
+  expect(result.rows).toHaveLength(count)
+  expect(result.loadImages).toBeTypeOf('function')
+  expect(result.rows.every(row => !row.item.material_snapshot.image && !row.item.material_snapshot.shipment_images)).toBe(true)
+  expect(result.rows.every(row => !row.warnings.some(warning => warning.includes('未替换已有图片')))).toBe(true)
+  expect(result.rows.at(-1)!.item.qty).toBe(count)
+  expect(result.rows.at(-1)!.item.material_snapshot.import_source?.file).toBe(file.name)
+  const close = vi.fn(), decode = vi.fn(async () => ({ width: 1000, height: 500, close }))
+  vi.stubGlobal('createImageBitmap', decode)
+  vi.stubGlobal('document', { createElement: () => ({ getContext: () => ({ fillRect: vi.fn(), drawImage: vi.fn() }), toDataURL: () => 'data:image/jpeg;base64,AA==' }) })
+  const chosen = result.rows.at(-1)!
+  await result.loadImages!([chosen])
+  expect(shipmentImages(chosen.item.material_snapshot)).toEqual(['data:image/jpeg;base64,AA=='])
+  expect(chosen.item._fileMaterialFields).toContain('shipment_images')
+  expect(result.rows[0].item.material_snapshot).not.toHaveProperty('image')
+  expect(decode).toHaveBeenCalledOnce()
+  expect(close).toHaveBeenCalledOnce()
+})
+
+it('预算内小图仍可直接预览，不必等到确认才显示', async () => {
+  vi.stubGlobal('DOMParser', DOMParser)
+  const result = await importShipmentFile(await smallWorkbookWithPhotos(200, 2))
+  expect(result.loadImages).toBeUndefined()
+  expect(result.rows).toHaveLength(2)
+  expect(result.rows.every(row => shipmentImages(row.item.material_snapshot).length === 1)).toBe(true)
+})
 
 it('兼容旧单图，显式空数组表示清空，重复图片只保留一次', () => {
   expect(shipmentImages({ image: 'old' })).toEqual(['old'])

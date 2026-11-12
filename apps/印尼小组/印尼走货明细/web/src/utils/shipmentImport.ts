@@ -271,6 +271,7 @@ export function parseShipmentWorkbook(wb: XLSX.WorkBook): ShipmentImportResult {
 }
 
 const mib = 1024 * 1024
+class ShipmentImageBudgetError extends Error {}
 
 function readBoundedZipEntry(entry: JSZip.JSZipObject, remainingBytes: number, limitMessage: string): Promise<Uint8Array<ArrayBuffer>> {
   if (!Number.isSafeInteger(remainingBytes) || remainingBytes < 0) return Promise.reject(new Error('工作表数据大小限制无效'))
@@ -346,8 +347,19 @@ export async function importShipmentFile(file: File) {
     parsed.warnings.push('先预览表格，确认时读取并压缩所选明细对应的图片')
     return { ...parsed, loadImages: (rows: ShipmentImportRow[]) => loadShipmentImages(zip, rows, resizeShipmentImage) }
   }
-  await loadShipmentImages(zip, parsed.rows)
-  return { ...parsed, loadImages: undefined }
+  // Small workbooks can still contain a large photo or repeat the same photo
+  // across many rows. Keep their quick preview when it fits, but retry selected
+  // images through the bounded compression path instead of dropping photos or
+  // rejecting the file before the user can choose a smaller batch.
+  const previewRows = structuredClone(parsed.rows)
+  try {
+    await loadShipmentImages(zip, previewRows, undefined, { deferOversizedPreview: true })
+    return { ...parsed, rows: previewRows, loadImages: undefined }
+  } catch (error) {
+    if (!(error instanceof ShipmentImageBudgetError)) throw error
+    parsed.warnings.push('图片较大，先预览完整表格；确认时读取并压缩所选明细对应的图片')
+    return { ...parsed, loadImages: (rows: ShipmentImportRow[]) => loadShipmentImages(zip, rows, resizeShipmentImage) }
+  }
 }
 
 async function resizeShipmentImage(file: JSZip.JSZipObject): Promise<string> {
@@ -355,7 +367,8 @@ async function resizeShipmentImage(file: JSZip.JSZipObject): Promise<string> {
 }
 
 export async function loadShipmentImages(zip: JSZip, rows: ShipmentImportRow[],
-  resize?: (file: JSZip.JSZipObject) => Promise<string>) {
+  resize?: (file: JSZip.JSZipObject) => Promise<string>,
+  { deferOversizedPreview = false }: { deferOversizedPreview?: boolean } = {}) {
   const cache = new Map<string, string | null>()
   const failures = new Map<string, string>()
   for (const sheet of new Set(rows.map(row => row.sheet))) {
@@ -398,6 +411,7 @@ export async function loadShipmentImages(zip: JSZip, rows: ShipmentImportRow[],
       else if (matched.length) {
         const photos = [...new Set(matched.map(image => image.dataUrl))]
         if (photos.reduce((size, image) => size + image.length, 0) > 256 * 1024) {
+          if (deferOversizedPreview) throw new ShipmentImageBudgetError('本行图片需要压缩后导入')
           clearUnreadImage(); row.warnings.push('本行图片总量过大，未替换已有图片，请压缩后重新导入'); continue
         }
         row.item.material_snapshot = withShipmentImages(row.item.material_snapshot, photos)
@@ -407,7 +421,7 @@ export async function loadShipmentImages(zip: JSZip, rows: ShipmentImportRow[],
   }
   const imageBytes = rows.reduce((total, row) => total + (row.item.material_snapshot.image?.length || 0)
     + (row.item.material_snapshot.shipment_images || []).reduce((size, image) => size + image.length, 0), 0)
-  if (imageBytes > 12 * mib) throw new Error('所选图片总量过大，请减少本次勾选行数后重试')
+  if (imageBytes > 12 * mib) throw new ShipmentImageBudgetError('所选图片总量过大，请减少本次勾选行数后重试')
 }
 
 /** Updating a shipment must not replace its HS with defaults for blank source cells. */

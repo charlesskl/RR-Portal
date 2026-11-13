@@ -21,4 +21,9 @@ function prepare(data, previous) {
     else if (!validRate(row.resinQuotePerGram)) row.resinQuotePerGram = validRate(data.settings?.resinQuotePerGram) ? data.settings.resinQuotePerGram : 0.8;
   }
 }
-module.exports = {prepare};
+function headcountOnlyEdit(previous, patch){
+  const next={...previous,...patch};
+  return ['name','material','weight','time'].every(key=>
+    (previous[key]??(['weight','time'].includes(key)?0:''))===(next[key]??(['weight','time'].includes(key)?0:'')));
+}
+module.exports = {prepare,headcountOnlyEdit};

@@ -2116,6 +2116,11 @@ function editProduct(id){
   openModal('modalProduct');
   autoCalcProductPrice();
 }
+function headcountOnlyEdit(previous, patch){
+  const next={...previous,...patch};
+  return ['name','material','weight','time'].every(key=>
+    (previous[key]??(['weight','time'].includes(key)?0:''))===(next[key]??(['weight','time'].includes(key)?0:'')));
+}
 function syncProductToRecords(oldName, newName, data){
   let count=0;
   // 更新每日记录
@@ -2162,6 +2167,7 @@ async function saveProduct(){
     const p=products.find(x=>x.id===editingProdId);
     if(p){
       const oldName=p.name;
+      const preserveHistory=headcountOnlyEdit(p,{name,...data});
       const saveBtn=document.querySelector('#modalProduct .btn-p');
       const oldBtnText=saveBtn ? saveBtn.textContent : '';
       if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='保存中...'; }
@@ -2175,7 +2181,7 @@ async function saveProduct(){
         const result=await res.json().catch(()=>({}));
         if(!res.ok || !result.ok) throw new Error(result.error||('服务器返回 '+res.status));
         Object.assign(p,result.product);
-        syncProductToRecords(oldName, result.product.name, result.product);
+        if(!preserveHistory) syncProductToRecords(oldName, result.product.name, result.product);
         if(result.version) _serverVer=result.version;
         _dirty=false;
         updateSyncUI('ok');

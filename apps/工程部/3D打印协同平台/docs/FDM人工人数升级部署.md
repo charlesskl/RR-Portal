@@ -40,7 +40,7 @@ PR等待审核期间，本地可继续使用旧版。不要本地先按1/2人正
 
 ## Windows配套文件与命令
 
-使用与本 PR 合并提交相同版本的现场更新包。若管理员从仓库重新打包，取以下文件并保留目录结构，合并到**已有**桥接根目录（不删除原目录）：
+使用与本 PR 合并提交相同版本的现场更新包。若管理员从仓库重新打包，取以下文件并保留目录结构，放在**独立的升级包目录**（例如 `D:\PrintLink-PR1115`）。不要预先将包内 `shared` 等文件覆盖到现有桥接或原系统：更新器需要读取并备份目标目录的原文件，才能检查版本并保留已有修复。
 
 - `ops/update-fdm-pricing.cjs`、`ops/restore-fdm-pricing.cjs`
 - `legacy/pricing-patch.cjs`、`legacy/pricing-patch-rules.cjs`、`legacy/pricing-report-hashes.json`
@@ -48,12 +48,12 @@ PR等待审核期间，本地可继续使用旧版。不要本地先按1/2人正
 
 这些文件不覆盖 `collector`、现有 `business-sync-adapter.cjs`、`authority-durability.cjs`、异步写队列修复或站点配置。已有源代码形式的Node.js24+桥接支持直接运行。仓库的基础安装器另外补齐了新依赖文件，但**本次现场升级使用以下增量命令**，不改用旧安装器覆盖队列修复。
 
-以下示例在已有桥接根目录 `D:\PrintLinkBridge` 内执行，替换为实际路径：
+以下示例使用独立升级包 `D:\PrintLink-PR1115`，目标仍是已有桥接 `D:\PrintLinkBridge` 和原系统 `D:\3d-server`；替换为实际路径。不要从升级包启动桥接，不创建第二套业务目录：
 
 ```powershell
-node ops/update-fdm-pricing.cjs windows "D:\PrintLinkBridge" "D:\3d-server" --check
+node "D:\PrintLink-PR1115\ops\update-fdm-pricing.cjs" windows "D:\PrintLinkBridge" "D:\3d-server" --check
 # 停止桥接和原服务，完成两个目录的完整备份后：
-node ops/update-fdm-pricing.cjs windows "D:\PrintLinkBridge" "D:\3d-server"
+node "D:\PrintLink-PR1115\ops\update-fdm-pricing.cjs" windows "D:\PrintLinkBridge" "D:\3d-server"
 ```
 
 预检查会先校验所有修改点；版本不匹配时不写入文件。若缺少原有桥接接口，可能是先前整包替换 `server.js` 导致：保持停机，请使用现场已有的异步写队列兼容修复版安装器恢复接口，再重新检查；不要跳过检查或覆盖整份程序。

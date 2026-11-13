@@ -691,6 +691,7 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        const preserveHistory = require('./pricing-records.cjs').headcountOnlyEdit(product, {...patch,name});
         const oldName = product.name;
         const editableFields = ['name','customer','material','weight','time','qty','price','image','process','fdmLaborCount'];
         for (const field of editableFields) {
@@ -699,6 +700,8 @@ const server = http.createServer((req, res) => {
         product.name = name;
         product._updatedAt = Date.now();
 
+        // 人数及其报价调整只更新产品，不改写已有生产记录或排期。
+        if (!preserveHistory) {
         // 保持每日记录和排期中的产品引用与产品库一致。
         for (const day of Object.values(data.records || {})) {
           for (const item of (day.items || [])) {
@@ -717,6 +720,7 @@ const server = http.createServer((req, res) => {
           if (product.material) schedule.material = product.material;
           if (product.weight) schedule.weight = product.weight;
           schedule._updatedAt = Date.now();
+        }
         }
         data._snapshotUpdatedAt = Date.now();
         await saveData(data);

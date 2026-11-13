@@ -219,6 +219,7 @@ export default function ShipmentsPage() {
   const writtenMaterials = useRef(new Map<number, Material>())
   const [sheetEditing, setSheetEditing] = useState(false)
   const editorSession = useRef(0)
+  const [editorViewKey, setEditorViewKey] = useState(0)
   useEffect(() => () => { editorSession.current++ }, [])
   const [editorDirty, setEditorDirty] = useState(false)
   const [customers, setCustomers] = useState<string[]>([])
@@ -777,6 +778,7 @@ export default function ShipmentsPage() {
 
   function openCreate() {
     const session = ++editorSession.current
+    setEditorViewKey(session)
     editorLoadState.current = 'ready'; setEditorLoad('ready')
     setCreating(true); setEditing({ id: 0, status: 'draft', rate: 0.93, container_count: 1 })
     resetSheetUndo()
@@ -794,6 +796,7 @@ export default function ShipmentsPage() {
     setEditorLoadError('')
     let stage: ShipmentLoadStage = 'detail'
     const session = ++editorSession.current
+    setEditorViewKey(session)
     editorLoadState.current = 'loading'; setEditorLoad('loading')
     setCreating(false); setEditing(s)
     resetSheetUndo()
@@ -1515,7 +1518,7 @@ export default function ShipmentsPage() {
         {editorLoad === 'error' && <Alert type="error" showIcon message="走货资料加载失败，尚未修改原数据" description={<><div>{editorLoadError}</div><div>详情和物料完整载入前不能编辑、保存或导出。</div></>} action={<Button onClick={() => editing && openEdit(editing)}>重新加载</Button>} />}
         {sheetEditing && <div role="status">正在校验数量，请稍候再继续编辑…</div>}
         <div className="shipment-editor-content" hidden={editorLoad !== 'ready'} inert={sheetEditing || saving}>
-        <details className="shipment-editor-info" key={editorSession.current} open={creating || undefined}>
+        <details className="shipment-editor-info" key={editorViewKey} open={creating || undefined}>
         <summary>走货基本资料</summary>
         <Form form={form} layout="vertical" disabled={editorLoad !== 'ready' || saving} onValuesChange={changed => {
           formRevision.current++
@@ -1606,7 +1609,7 @@ export default function ShipmentsPage() {
               <Button size="small" onClick={unmergeCartons} disabled={!cartonSelection.length}>取消合并</Button>
             </Space>
           <ShipmentSheetTable<MergedEditorRow<ShipmentItem>>
-            key={editorSession.current}
+            key={editorViewKey}
             fields={shipmentSheetFields}
             editableAt={(row, field) => {
               const item = consolidatedItems[row]

@@ -27,7 +27,7 @@ function setup() {
     dayjs, editorSession: { current: 0 }, editorLoadState: { current: 'ready' }, savePending: { current: null },
     unacknowledgedSave: { current: false }, writtenMaterials: { current: new Map() },
     undoHistory: { current: ['previous shipment edit'] }, setUndoCount: vi.fn(), redoHistory: { current: [] }, setRedoCount: vi.fn(),
-    shipmentLoadError, loadShipmentDetail, loadShipmentMaterials, setEditorLoadError: vi.fn(), setEditorLoad: vi.fn(), setCreating: vi.fn(), setEditing: vi.fn(), setItems: vi.fn(),
+    shipmentLoadError, loadShipmentDetail, loadShipmentMaterials, setEditorLoadError: vi.fn(), setEditorViewKey: vi.fn(), setEditorLoad: vi.fn(), setCreating: vi.fn(), setEditing: vi.fn(), setItems: vi.fn(),
     setMatMap: vi.fn(), setDirtyMatIds: vi.fn(), setEditorDirty: vi.fn(),
     form: { resetFields: vi.fn(), setFieldsValue: vi.fn(), validateFields: vi.fn() },
     message: { error: vi.fn(), info: vi.fn() }, sheetEditing: false,

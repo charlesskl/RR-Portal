@@ -42,7 +42,7 @@ function fixture() {
     customsOptions: [], outRows: [], message: { info: vi.fn(), error: vi.fn(), success: vi.fn() },
     Modal: { confirm: vi.fn() },
     api: { put: vi.fn(async () => ({})), post: vi.fn(async () => ({ data: { id: 777 } })), get: vi.fn() },
-    setEditorLoadError: vi.fn(), shipmentLoadError, loadShipmentDetail, loadShipmentMaterials,
+    setEditorLoadError: vi.fn(), setEditorViewKey: vi.fn(), shipmentLoadError, loadShipmentDetail, loadShipmentMaterials,
     load: vi.fn(), closeOutboundLink: vi.fn(), setDrawerFull: vi.fn(), setEditorLoad: vi.fn(),
     setUndoCount: vi.fn(), setRedoCount: vi.fn(), setCartonSelection: vi.fn(), setOutRows: vi.fn(),
     flushSync: (fn: () => void) => fn(), setTimeout: (fn: () => void) => fn(),

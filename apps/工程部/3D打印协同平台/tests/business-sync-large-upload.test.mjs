@@ -487,7 +487,7 @@ test('real large keep-both sync survives lost response, collector restart and Wi
   // Use the real installed Windows adapter, including its disk verification and
   // compare-and-swap check, with an isolated synthetic business file.
   for (const [source, target] of [['../legacy/business-sync-adapter.cjs', 'adapter.cjs'],
-    ['../shared/business-sync.cjs', 'business-sync-core.cjs'], ['../shared/authority-commands.cjs', 'authority-commands.cjs'], ['../shared/json-stream.cjs', 'json-stream.cjs']]) {
+    ['../shared/business-sync.cjs', 'business-sync-core.cjs'], ['../shared/authority-commands.cjs', 'authority-commands.cjs'],['../shared/pricing-report.cjs','pricing-report.cjs'],['../shared/pricing-records.cjs','pricing-records.cjs'], ['../shared/json-stream.cjs', 'json-stream.cjs']]) {
     copyFileSync(new URL(source, import.meta.url), path.join(dir, target));
   }
   const adapter = createRequire(import.meta.url)(path.join(dir, 'adapter.cjs'));

@@ -72,7 +72,7 @@ test('source keeps a newer task version and rejects equal-version divergent task
 });
 async function adapterFixture(t){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'authority-regression-'));
- for(const [from,to]of [['legacy/business-sync-adapter.cjs','adapter.cjs'],['shared/business-sync.cjs','business-sync-core.cjs'],['shared/authority-commands.cjs','authority-commands.cjs'],['shared/json-stream.cjs','json-stream.cjs']])fs.copyFileSync(new URL('../'+from,import.meta.url),path.join(dir,to));
+ for(const [from,to]of [['legacy/business-sync-adapter.cjs','adapter.cjs'],['shared/business-sync.cjs','business-sync-core.cjs'],['shared/authority-commands.cjs','authority-commands.cjs'],['shared/pricing-report.cjs','pricing-report.cjs'],['shared/pricing-records.cjs','pricing-records.cjs'],['shared/json-stream.cjs','json-stream.cjs']])fs.copyFileSync(new URL('../'+from,import.meta.url),path.join(dir,to));
  const adapter=require(path.join(dir,'adapter.cjs'));let memory=source(),disk=structuredClone(memory),failDisk=false;
  const server=http.createServer((req,res)=>adapter(req,res,{enabled:true,load:()=>structuredClone(memory),readDisk:()=>structuredClone(disk),save:async x=>{memory=x;if(!failDisk)disk=structuredClone(x);}}));
  await new Promise(r=>server.listen(0,'127.0.0.1',r));

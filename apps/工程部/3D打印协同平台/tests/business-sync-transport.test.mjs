@@ -23,6 +23,7 @@ test('Windows adapter + collector: credentials, CAS, restart, lost response, fai
  copyFileSync(new URL('../legacy/business-sync-adapter.cjs',import.meta.url),path.join(dir,'adapter.cjs'));copyFileSync(new URL('../shared/business-sync.cjs',import.meta.url),path.join(dir,'business-sync-core.cjs'));
  copyFileSync(new URL('../shared/json-stream.cjs',import.meta.url),path.join(dir,'json-stream.cjs'));
  copyFileSync(new URL('../shared/authority-commands.cjs',import.meta.url),path.join(dir,'authority-commands.cjs'));
+ for(const name of ['pricing-report.cjs','pricing-records.cjs'])copyFileSync(new URL('../shared/'+name,import.meta.url),path.join(dir,name));
  const adapter=createRequire(import.meta.url)(path.join(dir,'adapter.cjs')),db=new DatabaseSync(path.join(dir,'collector.sqlite')),cloudDB=new DatabaseSync(':memory:');t.after(()=>{db.close();cloudDB.close();});
  cloudDB.exec('CREATE TABLE snapshot(value TEXT)');cloudDB.prepare('INSERT INTO snapshot VALUES (?)').run(JSON.stringify(data()));
  const cloud=()=>JSON.parse(cloudDB.prepare('SELECT value FROM snapshot').get().value);const writeCloud=x=>cloudDB.prepare('UPDATE snapshot SET value=?').run(JSON.stringify(x));
@@ -69,6 +70,7 @@ test('Windows CAS rejects a disk-only edit made after the initial read',async t=
  copyFileSync(new URL('../shared/business-sync.cjs',import.meta.url),path.join(dir,'business-sync-core.cjs'));
  copyFileSync(new URL('../shared/json-stream.cjs',import.meta.url),path.join(dir,'json-stream.cjs'));
  copyFileSync(new URL('../shared/authority-commands.cjs',import.meta.url),path.join(dir,'authority-commands.cjs'));
+ for(const name of ['pricing-report.cjs','pricing-records.cjs'])copyFileSync(new URL('../shared/'+name,import.meta.url),path.join(dir,name));
  const adapter=createRequire(import.meta.url)(path.join(dir,'adapter.cjs')),file=path.join(dir,'data.json');
  let memory=data(),writes=0;writeFileSync(file,JSON.stringify(memory));
  const server=http.createServer((req,res)=>{

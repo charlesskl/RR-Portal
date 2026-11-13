@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { createContext, runInContext } from 'node:vm'
 import ts from 'typescript'
 import { expect, it, vi } from 'vitest'
+import { shipmentFrozenColumns } from './shipmentSheetFreeze'
 
 const source = readFileSync(new URL('../components/ShipmentSheetTable.tsx', import.meta.url), 'utf8')
 const tree = ts.createSourceFile('table.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -47,6 +48,7 @@ function resizing() {
   const resizeCleanup = { current: null as (() => void) | null }
   const context = createContext({ event: { clientX: 100, preventDefault: vi.fn(), stopPropagation: vi.fn() },
     resizeCleanup, widths, col: 0, column: { width: 120 }, columns: [{ width: 120 }], root: { current: { clientWidth: 1200 } }, setWidths,
+    shipmentFrozenColumns, frozen: { col: null },
     window: { addEventListener: (type: string, fn: (event?: unknown) => void) => listeners.set(type, fn),
       removeEventListener: (type: string) => listeners.delete(type) },
     requestAnimationFrame: (fn: () => void) => { frames.set(++id, fn); return id }, cancelAnimationFrame: (key: number) => frames.delete(key) })

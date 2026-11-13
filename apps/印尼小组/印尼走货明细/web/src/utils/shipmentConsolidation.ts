@@ -1,6 +1,6 @@
 import type { Material } from '../api/client'
 import type { CustomsItem } from './customsExport'
-import { effectiveCustomsCompany, sortShipmentItems } from './shipmentOrder'
+import { effectiveCustomsCompany, sortShipmentItems, shipmentKeepsImportOrder } from './shipmentOrder'
 import { invoiceCustomsCompany } from './shipmentInvoice'
 import { shipmentChargeQuantity, shipmentPurchaseAmount } from './shipmentPurchase'
 import { isPaperRope, parseShipmentPacking, shipmentWeightQuantity } from './shipmentWeight'
@@ -12,8 +12,8 @@ type BatchItem = CustomsItem & { outbound_id?: number; carton_no?: string; mater
 // Call once for a single shipment/container, not across a list of shipments.
 export function consolidateShipmentItems<T extends BatchItem>(
   items: readonly T[], materials: ReadonlyMap<number, Material>, fallback?: string,
-): Array<T & { sources: T[]; outbound_ids: number[]; purchase_charge_ratio?: number; packing_source?: T }> {
-  const groups = new Map<string, T & { sources: T[]; outbound_ids: number[]; purchase_charge_ratio?: number; packing_source?: T }>()
+): Array<T & { sources: T[]; outbound_ids: number[]; purchase_charge_ratio?: number; packing_source?: T; invoice_company_last?: boolean }> {
+  const groups = new Map<string, T & { sources: T[]; outbound_ids: number[]; purchase_charge_ratio?: number; packing_source?: T; invoice_company_last?: boolean }>()
   const text = (value: unknown) => String(value ?? '').trim()
   const sum = (...values: unknown[]) => {
     const numbers = values.map(value => Number(value) || 0)
@@ -30,6 +30,9 @@ export function consolidateShipmentItems<T extends BatchItem>(
   // Supplementary allocations from the same outbound can have no packing
   // data. Attach them only to one unambiguous packed row of that material.
   const ordered = sortShipmentItems(items, materials, fallback)
+  const keepImportOrder = shipmentKeepsImportOrder(items)
+  const lastCompanySource = new Map<string, T>()
+  for (const item of ordered) lastCompanySource.set(invoiceCustomsCompany(item, materials.get(item.material_id!)), item)
   const supplementKey = (item: T) => {
     const material = materials.get(item.material_id!)
     const snapshot = item.material_snapshot as Material | undefined
@@ -143,10 +146,13 @@ export function consolidateShipmentItems<T extends BatchItem>(
     // Do not infer counts from these labels or overwrite the source batches.
     group.carton_no = [...new Set(group.sources.map(source => text(source.carton_no)).filter(Boolean))].join(' / ')
     group.po_no = [...new Set(group.sources.map(source => text(source.po_no)).filter(Boolean))].join(' / ')
-    // Keep the last batch's position. Company surcharges belong to the last
-    // line, so a non-adjacent merge must not move that fee to another contract.
-    groups.delete(key)
-    groups.set(key, group)
+    // Catalog-only lists retain their last-batch position. Imported lists keep
+    // the first file position; surcharge ownership is carried separately below.
+    if (!keepImportOrder) { groups.delete(key); groups.set(key, group) }
   })
-  return [...groups.values()]
+  return [...groups.values()].map(group => ({ ...group,
+    // A merged import keeps its first file position. Preserve surcharge
+    // ownership from its source batches rather than charging another contract.
+    invoice_company_last: group.sources.includes(lastCompanySource.get(invoiceCustomsCompany(group, materials.get(group.material_id!)))!),
+  }))
 }

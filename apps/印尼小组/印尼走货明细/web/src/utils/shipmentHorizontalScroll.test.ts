@@ -87,3 +87,47 @@ it('unmount cancels queued work and performs no later DOM/body writes', () => {
   expect(t.scrollBody).not.toHaveBeenCalled()
   expect(t.frames.size).toBe(0)
 })
+
+it('a delayed virtual header callback cannot reverse a newer drag after its frame has applied', () => {
+  const header = { scrollLeft: 0, scrollWidth: 5000, clientWidth: 1000 }
+  const rail = { ...header }
+  let frame: (() => void) | undefined
+  const scrollBody = vi.fn(() => true)
+  const sync = createShipmentHorizontalScroll({ elements: () => ({ header, rail }), scrollBody,
+    requestFrame: callback => { frame = callback; return 1 }, cancelFrame: () => {} })
+  for (const left of [200, 800]) {
+    rail.scrollLeft = left; sync.railScroll(left); frame!()
+  }
+  // Only the virtual body may update the header; no competing native write.
+  expect(header.scrollLeft).toBe(0)
+  sync.headerScroll(200)
+  expect(rail.scrollLeft).toBe(800)
+  header.scrollLeft = 800; sync.headerScroll(800)
+  expect(rail.scrollLeft).toBe(800)
+  sync.cancelPending() // A real trackpad gesture takes ownership.
+  header.scrollLeft = 450; sync.headerScroll(450)
+  expect(rail.scrollLeft).toBe(450)
+  sync.dispose()
+})
+
+it('a long drag caches geometry between resizes and avoids duplicate virtual updates at the same position', () => {
+  let reads = 0, width = 5000
+  const header = { scrollLeft: 0, get scrollWidth() { reads++; return width }, get clientWidth() { reads++; return 1000 } }
+  const rail = { scrollLeft: 0, scrollWidth: 5000, clientWidth: 1000 }
+  let frame: (() => void) | undefined
+  const scrollBody = vi.fn()
+  const sync = createShipmentHorizontalScroll({ elements: () => ({ header, rail }), scrollBody,
+    requestFrame: callback => { frame = callback; return 1 }, cancelFrame: () => {} })
+  for (let left = 1; left <= 100; left++) {
+    rail.scrollLeft = left; sync.railScroll(left); frame!()
+    sync.headerScroll(left)
+  }
+  expect(reads).toBe(2) // No forced geometry reads for each scroll event/frame.
+  expect(scrollBody).toHaveBeenCalledTimes(100)
+  sync.railScroll(100); frame!()
+  expect(scrollBody).toHaveBeenCalledTimes(100)
+  width = 1050; sync.resize()
+  expect(reads).toBe(4)
+  expect(scrollBody).toHaveBeenLastCalledWith(50)
+  expect(rail.scrollLeft).toBe(50)
+})

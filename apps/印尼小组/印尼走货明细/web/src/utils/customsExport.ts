@@ -537,9 +537,9 @@ function populateLinkedDocuments(
       [90, 94, 109, 114, 88, 90, 92, 107, 112],
       [133, 137, 152, 157, 125, 127, 129, 146, 149],
       [176, 180, 195, 199, 162, 164, 166, 182, 186],
-      [218, 222, 237, 238, 199, 201, 203, 219, 224],
+      [218, 222, 236, 239, 199, 201, 203, 219, 224],
       [256, 260, 275, 281, 237, 239, 241, 257, 260],
-      [300, 304, 319, 321, 272, 274, 276, 292, 295],
+      [300, 304, 318, 322, 272, 274, 276, 292, 295],
       [338, 342, 357, 362, 307, 309, 311, 327, 331],
       [380, 384, 399, 403, 343, 345, 347, 363, 367],
       [422, 426, 441, 454, 380, 382, 384, 400, 414],
@@ -781,7 +781,8 @@ function populateLinkedDocuments(
     setPreservingStyle(groupInvoiceSheet, slot.invoiceContract, group.contract || '')
     setPreservingStyle(packingSheet, packingSlot.packingHeader, group.invoice || '')
     const packingHeaderRow = addressRow(packingSlot.packingHeader)
-    setPreservingStyle(packingSheet, `D${packingHeaderRow + 2}`, group.invoiceDate ? excelDate(group.invoiceDate) : '')
+    // Packing lists describe the container loading, independently of invoice dates.
+    setPreservingStyle(packingSheet, `D${packingHeaderRow + 2}`, excelDate(shipment?.loadDate))
     setPreservingStyle(packingSheet, `D${packingHeaderRow + 4}`, group.contract || '')
     setPreservingStyle(packingSheet, `D${packingHeaderRow + 8}`, (shipment?.containerNo || '').trim())
     setPreservingStyle(packingSheet, `H${packingHeaderRow + 8}`, (shipment?.blNo || '').trim())
@@ -986,7 +987,7 @@ function collectDocumentGroups(sorted: CustomsItem[], grouping: DocumentGrouping
 }
 
 // 旧版单模板（template-customs.xlsx）含全球/印尼两套单据，合同与发票各自分组填充。
-function populateGlobalIndoLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: CustomsItem[]) {
+function populateGlobalIndoLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: CustomsItem[], shipment?: CustomsExportForm) {
   const contractGroups = collectDocumentGroups(sorted, 'contract')
   const invoiceGroups = collectDocumentGroups(sorted, 'invoice')
   const globalContractGroups = contractGroups.filter(g => !g.indo)
@@ -1025,6 +1026,8 @@ function populateGlobalIndoLinkedDocuments(wb: XLSX.WorkBook, mainName: string, 
     setPreservingStyle(invoiceSheet, slot.invoiceHeader, group?.invoice || '')
     setPreservingStyle(invoiceSheet, slot.invoiceContract, group?.contract || '')
     setPreservingStyle(packingSheet, slot.packingHeader, group?.invoice || '')
+    const packingHeaderRow = Number(slot.packingHeader.slice(1))
+    setPreservingStyle(packingSheet, `D${packingHeaderRow + 2}`, group ? excelDate(shipment?.loadDate) : '')
     fillSerials(invoiceSheet, slot.invoiceRows, group)
     fillSerials(packingSheet, slot.packingRows, group)
   }
@@ -1151,6 +1154,9 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
     freightID: Number(form.freightID) || 0,
   }
   setCell(ws, 0, 13, tf.rate, 'n')
+  setPreservingStyle(ws, 'P1', '装柜日期')
+  setPreservingStyle(ws, 'Q1', excelDate(form.loadDate))
+  ws.Q1.z = 'yyyy-mm-dd'
   setCell(ws, 0, 25, '')
   setCell(ws, 1, 27, '')
 
@@ -1214,7 +1220,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
   // RRI 主体替换和 OOXML 动态扩行都基于该模板；RRI/RRM 模板走统一栏位管线。
   if (!input.mainOnly) {
     if (legacyDocuments) {
-      populateGlobalIndoLinkedDocuments(wbObj, newName, sorted)
+      populateGlobalIndoLinkedDocuments(wbObj, newName, sorted, form)
       if (input.seller) {
         fillSeller(wbObj, input.seller)
         applySellerTradeTerms(wbObj, input.seller)
@@ -1302,7 +1308,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
     setCell(ws, ri, 23, it.invoice_no || '', 's')
     if (it.invoice_date) setCell(ws, ri, 24, excelDate(it.invoice_date), 'n')
     const customsCompany = invoiceCustomsCompany(it, m)
-    const isLastCompanyItem = !sorted.slice(i + 1).some(next => invoiceCustomsCompany(next, matOf(next)) === customsCompany)
+    const isLastCompanyItem = it.invoice_company_last ?? !sorted.slice(i + 1).some(next => invoiceCustomsCompany(next, matOf(next)) === customsCompany)
     const declarationPrice = shipmentDeclarationPrice(it)
     const invoicePrice = customsInvoicePrice(declarationPrice, customsCompany, it.kg, isLastCompanyItem, it.currency)
     setCell(ws, ri, 25, invoicePrice, 'n')
@@ -1605,6 +1611,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
   if (!input.mainOnly) await formatHengxinchangInvoiceFooters(outZip)
   if (!input.mainOnly) await compactEmptyInvoiceFooters(outZip)
   if (!input.mainOnly) await addPackingGrandTotal(outZip, newName, mainTotalRow)
+  if (!input.mainOnly) await linkPackingHeaders(outZip, documentPlans, newName, ws)
   if (floatImages.length) {
     const mainSheetIdx = wbObj.SheetNames.indexOf(newName) + 1
     await injectOoxmlImages(outZip, mainSheetIdx, floatImages)
@@ -2473,6 +2480,8 @@ async function restoreTemplateDocumentStyles(
       const address = cell.getAttribute('r') || ''
       let rawStyle = styles.get(address)
       if (outputName === newMainName) {
+        // New loading-date input has no template header style; reuse its date column.
+        if (address === 'Q1') rawStyle = rawMainStyles.get('W4')
         const match = /^([A-Z]+)(\d+)$/.exec(address)
         if (match && Number(match[2]) >= 4) {
           const sourceRow = companyRows.get(outputCompanies[Number(match[2]) - 4] || '') || colorRows[0]
@@ -3039,6 +3048,18 @@ function mergeWorksheetXml(templateXml: string, generatedXml: string, mainSheet:
         if (generatedCell) copyGeneratedCellValue(targetDoc, cell, generatedCell)
       }
     }
+    // The legacy template has no loading-date input cells. Add these explicit
+    // header inputs before applying generated number formats to their values.
+    const header = templateRows.find(row => rowNumber(row) === 1)
+    if (header) for (const column of ['P', 'Q']) {
+      const source = generatedCells.get(column + '1')
+      if (!source) continue
+      const cell = ensureXmlCell(targetDoc, header, column)
+      copyGeneratedCellValue(targetDoc, cell, source)
+      const next = directChildren(header, 'c').find(other =>
+        XLSX.utils.decode_col(cellColumn(other.getAttribute('r')!)) > XLSX.utils.decode_col(column))
+      header.insertBefore(cell, next || null)
+    }
     for (const row of templateRows.filter(row => rowNumber(row) >= 4)) targetData.removeChild(row)
     const rowPrototype = templateDetailRow
     for (const generatedRow of directChildren(generatedData, 'row').filter(row => rowNumber(row) >= 4)) {
@@ -3168,12 +3189,12 @@ async function applyGeneratedMainFormats(templateZip: JSZip, generatedZip: JSZip
   const targetCells = new Map<string, XmlElement>()
   for (const cell of Array.from(templateSheetDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as XmlElement[]) {
     const address = cell.getAttribute('r') || ''
-    if (Number(address.match(/\d+$/)?.[0] || 0) >= 4) targetCells.set(address, cell)
+    if (address === 'Q1' || Number(address.match(/\d+$/)?.[0] || 0) >= 4) targetCells.set(address, cell)
   }
   const generatedCells = new Map<string, XmlElement>()
   for (const cell of Array.from(generatedSheetDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as XmlElement[]) {
     const address = cell.getAttribute('r') || ''
-    if (Number(address.match(/\d+$/)?.[0] || 0) >= 4) generatedCells.set(address, cell)
+    if (address === 'Q1' || Number(address.match(/\d+$/)?.[0] || 0) >= 4) generatedCells.set(address, cell)
   }
 
   const appendedStyles = new Map<string, string>()
@@ -3218,6 +3239,46 @@ async function applyGeneratedMainFormats(templateZip: JSZip, generatedZip: JSZip
   templateXfs.setAttribute('count', String(directChildren(templateXfs, 'xf').length))
   templateZip.file('xl/styles.xml', new XMLSerializer().serializeToString(templateStylesDoc))
   templateZip.file('xl/worksheets/sheet2.xml', new XMLSerializer().serializeToString(templateSheetDoc))
+}
+
+/** Bind after table/formula restoration, so template header formulas cannot replace these links. */
+async function linkPackingHeaders(zip: JSZip, plans: LinkedDocumentPlan[], mainName: string, main: XLSX.WorkSheet) {
+  const parser = new DOMParser(), serializer = new XMLSerializer()
+  const sharedFile = zip.file('xl/sharedStrings.xml')
+  const shared = sharedFile ? Array.from(parser.parseFromString(await sharedFile.async('string'), 'application/xml')
+    .getElementsByTagNameNS(SPREADSHEET_NS, 'si')).map(node => node.textContent || '') : []
+  for (const plan of plans.filter(plan => plan.kind === 'packing')) {
+    const doc = parser.parseFromString(await zip.file(plan.path)!.async('string'), 'application/xml')
+    const rows = directChildren(directChild(doc.documentElement as XmlElement, 'sheetData')!, 'row')
+    const headers = rows.filter(row => directChildren(row, 'c').some(cell => {
+      if (cellColumn(cell.getAttribute('r') || '') !== 'D') return false
+      const value = cell.getAttribute('t') === 's' ? shared[Number(directChild(cell, 'v')?.textContent)]
+        : directChild(cell, 'is')?.textContent || directChild(cell, 'v')?.textContent || ''
+      return /Packing\s*List\s*Number/i.test(value || '')
+    }))
+    plan.sections.forEach((section, index) => {
+      const serial = section.group?.indices[0], label = headers[index]
+      if (!serial || !label) return
+      const first = rowNumber(label) + 1
+      for (const [column, rowNo, source] of [
+        ['D', first, `X${serial + 3}`], ['D', first + 2, 'Q1'], ['D', first + 4, `V${serial + 3}`],
+        ['D', first + 8, `AC${serial + 3}`], ['H', first + 8, `AE${serial + 3}`],
+      ] as const) {
+        const row = rows.find(row => rowNumber(row) === rowNo)
+        if (!row) throw new Error('装箱单资料区不完整，无法建立公式引用')
+        const cell = ensureXmlCell(doc, row, column), value = main[source]?.v ?? ''
+        clearXmlCell(cell)
+        cell.setAttribute('t', typeof value === 'number' ? 'n' : 'str')
+        const reference = `'${mainName.replace(/'/g, "''")}'!$${source.replace(/\d+$/, row => '$' + row)}`
+        const formula = doc.createElementNS(SPREADSHEET_NS, 'f')
+        formula.textContent = `IF(${reference}="","",${reference})`
+        const cached = doc.createElementNS(SPREADSHEET_NS, 'v')
+        cached.textContent = String(value)
+        cell.appendChild(formula); cell.appendChild(cached)
+      }
+    })
+    zip.file(plan.path, serializer.serializeToString(doc))
+  }
 }
 
 type LinkedTableKind = 'contract' | 'invoice' | 'packing'
@@ -4034,8 +4095,11 @@ type ModernTableCoordinates = {
 }
 
 const RRI_TABLE_COORDINATES: ModernTableCoordinates = {
-  contractStarts: [24, 68, 109, 152, 195, 237, 275, 319, 357, 399, 441, 492, 543, 585],
-  contractTotals: [31, 72, 115, 158, 200, 239, 282, 322, 363, 404, 455, 506, 548, 590],
+  // Slots 6/8 begin one row earlier than the other header-to-detail offsets.
+  // Include their actual first detail and subtotal or stale sample serials and
+  // blank-text multiplication formulas survive outside the resized table.
+  contractStarts: [24, 68, 109, 152, 195, 236, 275, 318, 357, 399, 441, 492, 543, 585],
+  contractTotals: [31, 72, 115, 158, 200, 240, 282, 323, 363, 404, 455, 506, 548, 590],
   invoiceStarts: [28, 70, 107, 146, 182, 219, 257, 292, 327, 363, 400, 447, 494, 531],
   invoiceTotals: [35, 76, 113, 150, 187, 225, 261, 296, 332, 368, 415, 462, 499, 536],
   packingStarts: [25, 59, 92, 124, 155, 185, 217, 247, 279, 309, 339, 380, 421, 453, 496],

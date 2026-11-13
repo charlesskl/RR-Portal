@@ -88,7 +88,7 @@ it.each(['RRI', 'RRM'].flatMap(customer => [true, false].map(mixed => ({ custome
     product_code: `SYN-${item.material_id}`, unit_kg: 'PCE', net_per_pc: 1, supplier: seller.keyword }]))
   const blob = await buildCustomsWorkbook({ templateBuffer: template(customer),
     indonesiaTemplateBuffer: Uint8Array.from(readFileSync(new URL('../../public/template-customs.xlsx', import.meta.url))).buffer,
-    items, materials, seller, productHs: new Map(), images: new Map(), form: { customer, containerNo: 'OVERFLOW-SYNTHETIC' } })
+    items, materials, seller, productHs: new Map(), images: new Map(), form: { customer, containerNo: 'OVERFLOW-SYNTHETIC', loadDate: '2026-11-11' } })
   const bytes = await blob.arrayBuffer(), zip = await JSZip.loadAsync(bytes)
   const { workbook, result } = await sheets(zip)
   expect([...result.keys()].filter(name => name.includes('·续')).length).toBeGreaterThan(0)
@@ -96,12 +96,25 @@ it.each(['RRI', 'RRM'].flatMap(customer => [true, false].map(mixed => ({ custome
     Array.from(doc.getElementsByTagNameNS(ns, 'row')).flatMap(row => {
       const r = row.getAttribute('r')!, cells = Array.from(row.getElementsByTagNameNS(ns, 'c'))
       const serial = cells.find(c => c.getAttribute('r') === `A${r}`)?.getElementsByTagNameNS(ns, 'v')[0]?.textContent
-      const lookup = cells.find(c => c.getAttribute('r') === `B${r}`)?.getElementsByTagNameNS(ns, 'f')[0]?.textContent
-      return serial && lookup?.includes('OVERFLOW-SYNTHETIC') ? [Number(serial)] : []
+      // Include orphaned template serials too: cleared lookup cells must not
+      // conceal a stale row whose amount formula will fail on recalculation.
+      return serial && Number.isInteger(Number(serial)) && Number(serial) > 0 ? [Number(serial)] : []
     }))
   for (const pattern of [/^(实业|全球|印尼)合同(?:·续\d+)?$/, /^(实业|全球|印尼)发票(?:·续\d+)?$/, /^装箱单(?:·续\d+)?$/])
     expect(records(pattern).sort((a, b) => a - b)).toEqual(Array.from({ length: items.length }, (_, i) => i + 1))
   const data = XLSX.read(bytes, { type: 'array' }), main = data.Sheets['OVERFLOW-SYNTHETIC']
+  const packingDates = data.SheetNames.filter(name => /^装箱单(?:·续\d+)?$/.test(name)).flatMap(name => {
+    const sheet = data.Sheets[name]
+    return Object.entries(sheet).filter(([address, cell]) => /^D\d+$/.test(address)
+      && /Packing\s*List\s*Date/i.test(String(cell.v || '')))
+      .map(([address]) => {
+        const cell = sheet['D' + (Number(address.slice(1)) + 1)]
+        expect(cell.f).toBe(`IF('OVERFLOW-SYNTHETIC'!$Q$1="","",'OVERFLOW-SYNTHETIC'!$Q$1)`)
+        return cell.v
+      })
+  })
+  expect(packingDates).toHaveLength(20)
+  expect(packingDates.every(date => date === (Date.UTC(2026, 10, 11) - Date.UTC(1899, 11, 30)) / 86400000)).toBe(true)
   expect(items).toEqual(original)
   expect(items.reduce((sum, _, index) => sum + Number(main[`AP${index + 4}`].v), 0)).toBe(items.reduce((sum, item) => sum + item.qty * item.price, 0))
   const styles = parse(await zip.file('xl/styles.xml')!.async('string'))

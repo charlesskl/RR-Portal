@@ -44,7 +44,7 @@ public static class MaterialReflow
         => Math.Min(demand, material.ExpectedDate > Today && material.ExpectedDate.Value.Date <= day.Date ? demand : material.ArrivedQty);
 
     // 人工撤销排期具有优先权，不允许定时任务借用旧配置把它重新生成。
-    public static async Task Pause(AppDbContext db, IEnumerable<ProductionPlan> cancelled, string by)
+    public static async Task Pause(AppDbContext db, IEnumerable<ProductionPlan> cancelled, string by, string action = "manual_unschedule_pause")
     {
         var keys = cancelled.Select(plan => (plan.OrderId, plan.PartName)).ToHashSet();
         var ids = keys.Select(key => key.OrderId).ToList();
@@ -52,7 +52,7 @@ public static class MaterialReflow
         foreach (var record in records.Where(material => keys.Contains((material.OrderId, material.PartName)))) {
             record.AutoScheduleEnabled = false; record.Version++; record.UpdatedAt = DateTime.UtcNow; record.UpdatedBy = by;
             var history = JsonSerializer.Deserialize<List<JsonElement>>(record.History) ?? new();
-            history.Add(JsonSerializer.SerializeToElement(new { action = "manual_unschedule_pause", by, at = record.UpdatedAt }));
+            history.Add(JsonSerializer.SerializeToElement(new { action, by, at = record.UpdatedAt }));
             record.History = JsonSerializer.Serialize(history);
         }
     }

@@ -11,7 +11,7 @@ const source = readFileSync(new URL('../pages/ShipmentsPage.tsx', import.meta.ur
 const tree = ts.createSourceFile('page.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 const handlers: string[] = []
 function collect(node: ts.Node) {
-  if (ts.isFunctionDeclaration(node) && ['openEdit', 'save', 'recordSheetUndo', 'resetSheetUndo', 'undoSheetEdit'].includes(node.name?.text || '')) handlers.push(node.getText(tree))
+  if (ts.isFunctionDeclaration(node) && ['openEdit', 'save', 'recordSheetUndo', 'resetSheetUndo', 'undoSheetEdit', 'restoreSheetHistory'].includes(node.name?.text || '')) handlers.push(node.getText(tree))
   ts.forEachChild(node, collect)
 }
 collect(tree)
@@ -26,8 +26,8 @@ function setup() {
   const state = {
     dayjs, editorSession: { current: 0 }, editorLoadState: { current: 'ready' }, savePending: { current: null },
     unacknowledgedSave: { current: false }, writtenMaterials: { current: new Map() },
-    undoHistory: { current: ['previous shipment edit'] }, setUndoCount: vi.fn(),
-    shipmentLoadError, loadShipmentDetail, loadShipmentMaterials, setEditorLoadError: vi.fn(), setEditorLoad: vi.fn(), setCreating: vi.fn(), setEditing: vi.fn(), setItems: vi.fn(),
+    undoHistory: { current: ['previous shipment edit'] }, setUndoCount: vi.fn(), redoHistory: { current: [] }, setRedoCount: vi.fn(),
+    shipmentLoadError, loadShipmentDetail, loadShipmentMaterials, setEditorLoadError: vi.fn(), setEditorViewKey: vi.fn(), setEditorLoad: vi.fn(), setCreating: vi.fn(), setEditing: vi.fn(), setItems: vi.fn(),
     setMatMap: vi.fn(), setDirtyMatIds: vi.fn(), setEditorDirty: vi.fn(),
     form: { resetFields: vi.fn(), setFieldsValue: vi.fn(), validateFields: vi.fn() },
     message: { error: vi.fn(), info: vi.fn() }, sheetEditing: false,
@@ -172,7 +172,7 @@ it('undo restores a complete previous table edit and keeps later header edits', 
   const state = {
     Map, Set, structuredClone, latestUndoState: { current: { rawItems, baseMatMap, dirtyMatIds, editorDirty: false } },
     unacknowledgedSave: { current: false }, writtenMaterials: { current: new Map() },
-    undoHistory: { current: [] },
+    undoHistory: { current: [] }, redoHistory: { current: [] }, setRedoCount: vi.fn(),
     formRevision: { current: 0 },
     customerRevision: { current: 0 },
     form: { getFieldValue: vi.fn(() => 'RRI'), setFieldsValue: vi.fn() },

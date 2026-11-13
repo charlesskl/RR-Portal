@@ -22,10 +22,15 @@ export function applyShipmentImport(existing: readonly ExistingShipmentImportRow
   if (targets.length !== imported.length || planned.some((target, index) => target < -1 || target !== targets[index]))
     throw new Error('匹配结果已变化或存在重复匹配，请重新核对后导入')
   const next = [...existing]
+  const importedIndexes: number[] = []
   const affectedGroups = new Set<string>()
   imported.forEach((row, index) => {
     const target = targets[index]
-    if (target === -1) { next.push({ ...importValues(row), material_snapshot: { ...row.material_snapshot } }); return }
+    if (target === -1) {
+      importedIndexes.push(next.length)
+      next.push({ ...importValues(row), material_snapshot: { ...row.material_snapshot } }); return
+    }
+    importedIndexes.push(target)
     const old = existing[target], material = current[target].material_snapshot
     const oldGroup = cartonGroupKey(old, materials)
     if (oldGroup) affectedGroups.add(oldGroup)
@@ -93,5 +98,14 @@ export function applyShipmentImport(existing: readonly ExistingShipmentImportRow
       || after.some(row => !(Number(row.cartons) > 0))))
       throw new Error('共箱箱数不一致，请同时更新全部共箱明细或先取消合并箱数')
   }
-  return next
+  // Keep this file's selected rows together in source order, including updates
+  // and newly inserted rows. Unselected existing rows keep their relative order;
+  // a later import batch with no matches appends after the earlier batch.
+  const selected = new Set(importedIndexes)
+  const anchor = targets.reduce((first, target) => target >= 0 ? Math.min(first, target) : first, existing.length)
+  return [
+    ...next.slice(0, anchor).filter((_, index) => !selected.has(index)),
+    ...importedIndexes.map(index => next[index]),
+    ...next.slice(anchor).filter((_, offset) => !selected.has(anchor + offset)),
+  ]
 }

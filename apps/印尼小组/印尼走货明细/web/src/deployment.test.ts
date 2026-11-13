@@ -194,7 +194,7 @@ describe('deployment base paths', () => {
         bytes: Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zf8AAAAAASUVORK5CYII=', 'base64')),
         ext: 'png',
       }]]),
-      form: { customer: 'RRM', containerNo: 'TEST-CNTR', blNo: 'TEST-SEAL', rate: 7.8 },
+      form: { customer: 'RRM', containerNo: 'TEST-CNTR', blNo: 'TEST-SEAL', rate: 7.8, loadDate: '2026-09-03' },
     })
 
     const outputBytes = await output.arrayBuffer()
@@ -346,9 +346,10 @@ describe('deployment base paths', () => {
     expect(workbook.Sheets['全球发票'].B35?.f).toBeUndefined()
     expect(workbook.Sheets['装箱单'].B24?.f).toBe("LOOKUP(1,0/(('TEST-CNTR'!X:X=$D$9)*('TEST-CNTR'!A:A=A24)),'TEST-CNTR'!D:D)")
     expect(workbook.Sheets['装箱单'].D9?.v).toBe('RW202600206')
-    expect(workbook.Sheets['装箱单'].D11?.v).toBe(excelSerial('2026-09-02'))
+    expect(workbook.Sheets['装箱单'].D11?.v).toBe(excelSerial('2026-09-03'))
+    expect(workbook.Sheets['装箱单'].D11?.f).toBe(`IF('TEST-CNTR'!$Q$1="","",'TEST-CNTR'!$Q$1)`)
     expect(workbook.Sheets['装箱单'].D13?.v).toBe('RWCRRM2600206')
-    expect(workbook.Sheets['装箱单'].D13?.f).toBeUndefined()
+    expect(workbook.Sheets['装箱单'].D13?.f).toBe(`IF('TEST-CNTR'!$V$4="","",'TEST-CNTR'!$V$4)`)
     expect(workbook.Sheets['装箱单'].D17?.v).toBe('TEST-CNTR')
     expect(workbook.Sheets['装箱单'].H17?.v).toBe('TEST-SEAL')
     expect(workbook.Sheets['装箱单'].B27?.v || '').toBe('')

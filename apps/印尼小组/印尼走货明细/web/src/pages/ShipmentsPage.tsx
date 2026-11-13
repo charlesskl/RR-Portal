@@ -11,7 +11,7 @@ import { sortShipmentItems, cartonLayout, cartonGroupKey, shipmentScope } from '
 import { withShipmentInvoicePrices } from '../utils/shipmentInvoice'
 import { consolidateShipmentItems } from '../utils/shipmentConsolidation'
 import { createCartonGroupId } from '../utils/cartonGroupId'
-import { receiptChargeRatio, shipmentChargeQuantity, shipmentDeclarationPrice, shipmentPurchaseAmount, shipmentUsesDeclarationPrice } from '../utils/shipmentPurchase'
+import { receiptChargeRatio, shipmentChargeQuantity, shipmentDeclarationPrice, shipmentPurchaseAmount } from '../utils/shipmentPurchase'
 import ShipmentImport from '../components/ShipmentImport'
 import ShipmentImportSource from '../components/ShipmentImportSource'
 import ShipmentImages from '../components/ShipmentImages'
@@ -219,6 +219,7 @@ export default function ShipmentsPage() {
   const writtenMaterials = useRef(new Map<number, Material>())
   const [sheetEditing, setSheetEditing] = useState(false)
   const editorSession = useRef(0)
+  const [editorViewKey, setEditorViewKey] = useState(0)
   useEffect(() => () => { editorSession.current++ }, [])
   const [editorDirty, setEditorDirty] = useState(false)
   const [customers, setCustomers] = useState<string[]>([])
@@ -278,7 +279,6 @@ export default function ShipmentsPage() {
     sortShipmentItems(consolidateShipmentItems(items, matMap), matMap)
       .map(item => roundedShipmentDeclaration(item, matMap.get(item.material_id!))), matMap,
   ), [items, matMap])
-  const showConsolidated = consolidatedItems.length < items.length
   const consolidatedCartons = useMemo(() => cartonLayout(consolidatedItems, matMap), [consolidatedItems, matMap])
   const customsOptions = useMemo(() => [...new Set([
     HUASHENGYI_FULL_NAME, ...customsNames,
@@ -291,6 +291,7 @@ export default function ShipmentsPage() {
   const cartonRows = useMemo(() => cartonLayout(items, matMap), [items, matMap])
   const [dirtyMatIds, setDirtyMatIds] = useState<Set<number>>(new Set())
   const [undoCount, setUndoCount] = useState(0)
+  const [redoCount, setRedoCount] = useState(0)
   const formRevision = useRef(0)
   const customerRevision = useRef(0)
   const undoState = { rawItems, baseMatMap, dirtyMatIds, editorDirty }
@@ -301,8 +302,11 @@ export default function ShipmentsPage() {
     customerRevision: number
     customer: ShipmentForm['customer']
   }>>([])
+  const redoHistory = useRef<typeof undoHistory.current>([])
 
   function recordSheetUndo() {
+    redoHistory.current = []
+    setRedoCount(0)
     const history = undoHistory.current
     history.push({
       ...structuredClone(latestUndoState.current),
@@ -316,14 +320,26 @@ export default function ShipmentsPage() {
 
   function resetSheetUndo() {
     undoHistory.current = []
+    redoHistory.current = []
     unacknowledgedSave.current = false
     writtenMaterials.current = new Map()
     setUndoCount(0)
+    setRedoCount(0)
   }
 
   function undoSheetEdit() {
+    restoreSheetHistory(false)
+  }
+
+  function redoSheetEdit() {
+    restoreSheetHistory(true)
+  }
+
+  function restoreSheetHistory(redo: boolean) {
     if (saving || sheetWritePending.current || editorLoadState.current !== 'ready') return
-    const previous = undoHistory.current.at(-1)
+    const history = redo ? redoHistory.current : undoHistory.current
+    const destination = redo ? undoHistory.current : redoHistory.current
+    const previous = history.at(-1)
     if (!previous) return
     const materials = new Map(previous.baseMatMap)
     // A material lookup may have completed after the snapshot was taken.
@@ -341,8 +357,16 @@ export default function ShipmentsPage() {
         return
       }
     }
-    undoHistory.current.pop()
+    destination.push({
+      ...structuredClone(current),
+      formRevision: formRevision.current,
+      customerRevision: customerRevision.current,
+      customer: form.getFieldValue('customer'),
+    })
+    if (destination.length > 30) destination.shift()
+    history.pop()
     setUndoCount(undoHistory.current.length)
+    setRedoCount(redoHistory.current.length)
     setRawItems(previous.rawItems)
     setMatMap(materials)
     setDirtyMatIds(new Set([...previous.dirtyMatIds, ...writtenMaterials.current.keys()]))
@@ -350,7 +374,7 @@ export default function ShipmentsPage() {
       form.setFieldsValue({ customer: previous.customer })
     setEditorDirty(previous.editorDirty || formRevision.current !== previous.formRevision || unacknowledgedSave.current)
     setCartonSelection([])
-    if (unacknowledgedSave.current) message.info('本次保存尚未完整确认，撤回后需再次保存。')
+    if (unacknowledgedSave.current) message.info(redo ? '本次保存尚未完整确认，恢复后需再次保存。' : '本次保存尚未完整确认，撤回后需再次保存。')
   }
 
   // All index-based edits, deletion and fill-down operate on the displayed order.
@@ -754,6 +778,7 @@ export default function ShipmentsPage() {
 
   function openCreate() {
     const session = ++editorSession.current
+    setEditorViewKey(session)
     editorLoadState.current = 'ready'; setEditorLoad('ready')
     setCreating(true); setEditing({ id: 0, status: 'draft', rate: 0.93, container_count: 1 })
     resetSheetUndo()
@@ -771,6 +796,7 @@ export default function ShipmentsPage() {
     setEditorLoadError('')
     let stage: ShipmentLoadStage = 'detail'
     const session = ++editorSession.current
+    setEditorViewKey(session)
     editorLoadState.current = 'loading'; setEditorLoad('loading')
     setCreating(false); setEditing(s)
     resetSheetUndo()
@@ -1491,7 +1517,9 @@ export default function ShipmentsPage() {
         {editorLoad === 'loading' && <div className="shipment-editor-loading" role="status"><Spin /><Typography.Text>正在加载走货明细和物料资料，请稍候…</Typography.Text></div>}
         {editorLoad === 'error' && <Alert type="error" showIcon message="走货资料加载失败，尚未修改原数据" description={<><div>{editorLoadError}</div><div>详情和物料完整载入前不能编辑、保存或导出。</div></>} action={<Button onClick={() => editing && openEdit(editing)}>重新加载</Button>} />}
         {sheetEditing && <div role="status">正在校验数量，请稍候再继续编辑…</div>}
-        <div hidden={editorLoad !== 'ready'} inert={sheetEditing || saving}>
+        <div className="shipment-editor-content" hidden={editorLoad !== 'ready'} inert={sheetEditing || saving}>
+        <details className="shipment-editor-info" key={editorViewKey} open={creating || undefined}>
+        <summary>走货基本资料</summary>
         <Form form={form} layout="vertical" disabled={editorLoad !== 'ready' || saving} onValuesChange={changed => {
           formRevision.current++
           if ('customer' in changed) customerRevision.current++
@@ -1540,11 +1568,9 @@ export default function ShipmentsPage() {
             </Col>
           </Row>
         </Form>
+        </details>
 
-        <Card
-          size="small"
-          className="shipment-detail-card"
-          title={
+        <Card size="small" className="shipment-detail-card">
             <div className="shipment-summary">
               <span><b>{consolidatedItems.length}</b><small>明细行</small></span>
               <span><b>{tot.qty.toFixed(2)}</b><small>送货数量</small></span>
@@ -1554,9 +1580,7 @@ export default function ShipmentsPage() {
               <span><b>{tot.cbm.toFixed(4)}</b><small>总 CBM</small></span>
               <span><b>{tot.amount.toFixed(2)}</b><small>采购金额</small></span>
             </div>
-          }
-          extra={
-            <Space wrap>
+            <Space wrap className="shipment-actions">
               <Button size="small" type="primary" onClick={() => { setOutSel([]); loadOutbound(editing?.id || undefined); setOutOpen(true) }}>📦 从出库精确分配</Button>
               <Button size="small" onClick={() => { setManOpen(true); loadProductCodes(); loadOutbound(editing?.id || undefined); if (!manMats.length) loadManMats(manCode) }}>🗂 按货号选物料</Button>
               <Button size="small" onClick={openTools}>从工具库选择</Button>
@@ -1584,24 +1608,8 @@ export default function ShipmentsPage() {
               <Button size="small" onClick={requestMergeCartons} disabled={cartonSelection.length < 2}>合并箱数</Button>
               <Button size="small" onClick={unmergeCartons} disabled={!cartonSelection.length}>取消合并</Button>
             </Space>
-          }
-        >
-          {showConsolidated && <Typography.Paragraph type="secondary">
-            同柜相同物料已合并，可直接在本表编辑、粘贴或向下填充。合并行的数量和重量只显示汇总，采购单号和日期保留各自来源。修改后请保存。
-          </Typography.Paragraph>}
-          {consolidatedItems.some(item => item.packing_source) && <Typography.Paragraph type="secondary">
-            装箱明细与补量合并后，包装信息仅修改原装箱明细，补量保留原数量、重量和箱数。申报单位及单个净重按各来源保留，不能在汇总行统一修改。
-          </Typography.Paragraph>}
-          {items.some(item => !shipmentUsesDeclarationPrice(item) && (item.purchase_charge_ratio ?? 1) < 1) && <Typography.Paragraph type="secondary">
-            备品不收费：数量和重量保留实际走货（含备品），采购金额按对应采购明细的正常入库／总入库比例折算；分批及合并走货不重复计费。
-          </Typography.Paragraph>}
-          {items.some(item => item.material_snapshot) && <Typography.Paragraph type="secondary">
-            全部来源均为 Excel 导入行时，中国／印尼海关编码可直接编辑、粘贴或向下填充；含货号库物料的合并行保留原编码。修改仅影响本票走货及导出，不写回货号库。
-          </Typography.Paragraph>}
-          <Typography.Paragraph type="secondary">
-            申报数量按申报单位：PCE 为实际件数，SET 为套数，KGM 为净重公斤，TNE 为净重吨数。送货数量及其数量单位单独保留；毛重、净重始终以 kg 显示。
-          </Typography.Paragraph>
           <ShipmentSheetTable<MergedEditorRow<ShipmentItem>>
+            key={editorViewKey}
             fields={shipmentSheetFields}
             editableAt={(row, field) => {
               const item = consolidatedItems[row]
@@ -1612,17 +1620,18 @@ export default function ShipmentsPage() {
             onEdits={editSheetCells}
             onUndo={undoSheetEdit}
             undoDisabled={!undoCount || saving || sheetEditing}
+            onRedo={redoSheetEdit}
+            redoDisabled={!redoCount || saving || sheetEditing}
             rowOrder={consolidatedItems.map(item => item.sources.map(source => source._rowKey).join('-')).join(',')}
             valueAt={mergedCellValue}
             displayAt={sheetDisplayValue}
             extraEditorAt={(row, col) => col === 3 ? !consolidatedItems[row]?.material_id && !consolidatedItems[row]?.material_snapshot
               : col === 11 && !consolidatedItems[row]?.outbound_id && consolidatedItems[row]?.material_id != null && matMap.has(consolidatedItems[row].material_id)}
-            viewportOffset={drawerFull ? 350 : 400}
             rowKey={r => String(r._rowKey)}
             rowSelection={{ selectedRowKeys: cartonSelection.map(String), onChange: keys => setCartonSelection(keys.map(Number)), fixed: true }}
             size="small"
             pagination={false}
-            scroll={{ x: 4600, y: drawerFull ? 'calc(100vh - 350px)' : 'calc(100vh - 400px)' }}
+            scroll={{ x: 4600 }}
             dataSource={consolidatedItems}
             columns={[
               { title: '序号', width: 50, fixed: 'left', align: 'center', render: (_, _r, i) => i + 1 },

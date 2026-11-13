@@ -72,7 +72,7 @@ function setup(key: string, at = { row: 1, col: 1 }) {
     cellAt: () => ({ querySelector: () => null }), hasCell: () => true,
     canEdit: (p: { row: number; col: number }): boolean => p.col === 0 ? !!state.editorAt() : state.editableAt(),
     editorAt: vi.fn(() => ({} as HTMLElement | null)), focus: vi.fn(),
-    setAnchor: vi.fn(), setEnd: vi.fn(), fillDown: vi.fn(), clearSelection: vi.fn(), onUndo: vi.fn(), undoDisabled: false,
+    setAnchor: vi.fn(), setEnd: vi.fn(), fillDown: vi.fn(), clearSelection: vi.fn(), onUndo: vi.fn(), undoDisabled: false, onRedo: vi.fn(), redoDisabled: false,
     editingCell: null as { row: number; col: number } | null, setEditingCell: vi.fn(),
     batchPending: { current: false }, anchor: at, end: at,
     event: { key, target: input, nativeEvent: { isComposing: false },
@@ -296,4 +296,22 @@ it.each(['ctrlKey', 'metaKey'] as const)('%s+Z 撤回已提交的表格操作，
   run()
   expect(state.onUndo).toHaveBeenCalledOnce()
   expect(state.event.preventDefault).not.toHaveBeenCalled()
+})
+
+it.each([
+  { key: 'z', shiftKey: true, ctrlKey: true }, { key: 'Z', shiftKey: true, metaKey: true },
+  { key: 'y', ctrlKey: true }, { key: 'y', metaKey: true },
+])('恢复快捷键只恢复表格历史，编辑文字时保留原生恢复 %j', keys => {
+  const { state, run } = setup(keys.key)
+  Object.assign(state.event, keys)
+  run()
+  expect(state.onRedo).toHaveBeenCalledOnce(); expect(state.onUndo).not.toHaveBeenCalled()
+  state.redoDisabled = true; run()
+  expect(state.onRedo).toHaveBeenCalledOnce()
+  state.redoDisabled = false; state.event.repeat = true; run()
+  expect(state.onRedo).toHaveBeenCalledOnce()
+  state.event.repeat = false; state.editingCell = { row: 1, col: 1 }
+  state.event.target.closest = ((selector: string) => selector.startsWith('input:not') ? {} : null) as typeof state.event.target.closest
+  state.event.preventDefault.mockClear(); run()
+  expect(state.onRedo).toHaveBeenCalledOnce(); expect(state.event.preventDefault).not.toHaveBeenCalled()
 })

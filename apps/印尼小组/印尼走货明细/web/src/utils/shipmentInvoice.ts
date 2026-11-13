@@ -25,7 +25,7 @@ export function customsInvoiceFormula(excelRow: number, customsCompany: string, 
 }
 
 // Input must already be in the shared export order.
-export function withShipmentInvoicePrices<T extends ShipmentPurchaseItem & { material_id?: number; customs_company?: string; currency?: string }>(
+export function withShipmentInvoicePrices<T extends ShipmentPurchaseItem & { material_id?: number; customs_company?: string; currency?: string; invoice_company_last?: boolean }>(
   items: readonly T[], materials: ReadonlyMap<number, Material>,
 ) {
   const company = (it: T) => invoiceCustomsCompany(it, it.material_id == null ? undefined : materials.get(it.material_id))
@@ -33,6 +33,6 @@ export function withShipmentInvoicePrices<T extends ShipmentPurchaseItem & { mat
   return normalized.map((it, i) => ({
     ...it,
     invoice_price: customsInvoicePrice(shipmentDeclarationPrice(it), company(it), it.kg,
-      !normalized.slice(i + 1).some(next => company(next) === company(it)), it.currency),
+      it.invoice_company_last ?? !normalized.slice(i + 1).some(next => company(next) === company(it)), it.currency),
   }))
 }

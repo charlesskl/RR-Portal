@@ -209,6 +209,26 @@ describe('supplier customs-company linkage', () => {
 })
 
 describe('supplierForLine', () => {
+  it.each([false, true])('exact display-name archive keeps all seller details despite shared full names (allowIncomplete=%s)', allowIncomplete => {
+    const selected = { ...profile, id: 101, keyword: HUASHENGYI_FULL_NAME }
+    const alias = { ...profile, id: 102, nameEn: 'Old alias name', addressEn: 'Old alias address', phone: '', email: '' }
+    for (const profiles of [[alias, selected], [selected, alias]]) {
+      expect(supplierForLine(selected.keyword, profiles, allowIncomplete)).toEqual(selected)
+      expect(documentSellerForLine(otherProfile.keyword, HUASHENGYI_FULL_NAME, profiles, allowIncomplete)).toEqual(selected)
+      expect(supplierSummaryRows(profiles).map(row => row.seller)).toEqual([selected, selected])
+      // Selecting the distinct alias still selects that archive only.
+      if (allowIncomplete) expect(supplierForLine(alias.keyword, profiles, true)).toEqual(alias)
+    }
+  })
+
+  it('does not fill missing fields from another same-company archive or choose between duplicate exact names', () => {
+    const emptySelected = { ...profile, keyword: HUASHENGYI_FULL_NAME, nameEn: '', addressEn: '', phone: '', email: '' }
+    const profiles = [profile, emptySelected]
+    expect(supplierForLine(HUASHENGYI_FULL_NAME, profiles, true)).toMatchObject({ nameEn: '', addressEn: '', phone: '', email: '' })
+    expect(() => supplierForLine(HUASHENGYI_FULL_NAME, profiles)).toThrow('公司英文名称')
+    expect(supplierProfileForName(profile.keyword, [profile, { ...profile, id: 99 }])).toBeUndefined()
+  })
+
   it('allows incomplete export profiles without guessing missing company data', () => {
     expect(supplierForLine('新供应商', [], true)).toMatchObject({ full: '新供应商', addressEn: '', email: '' })
     expect(supplierForLine('', [], true)).toMatchObject({ full: '', nameEn: '', contact: '' })

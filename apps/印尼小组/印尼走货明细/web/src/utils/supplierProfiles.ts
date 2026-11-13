@@ -32,20 +32,23 @@ function isHuashengyi(name: string): boolean {
   return key === '华胜益' || key === HUASHENGYI_FULL_NAME.toLocaleLowerCase()
 }
 
+// Display names identify individual archives even when company names are shared.
+// Never combine an exact display-name match with another archive's full-name
+// match, and never assemble contact details from different supplier archives.
+function exactSupplierProfiles(name: string, profiles: SupplierDict[]): SupplierDict[] {
+  const key = name.trim().toLocaleLowerCase()
+  if (!key) return []
+  const keywordMatches = profiles.filter(profile => profile.keyword?.trim().toLocaleLowerCase() === key)
+  return keywordMatches.length ? keywordMatches : profiles.filter(profile => profile.full?.trim().toLocaleLowerCase() === key)
+}
+
 export function supplierProfileForName(name: string, profiles: SupplierDict[]): SupplierDict | undefined {
   const key = name.trim().toLocaleLowerCase()
   if (!key) return undefined
   // 下拉选项使用 keyword 作为值；即使 keyword 与 full 相同，也必须优先
   // 返回用户明确选中的档案，不能串到同公司全称的其他显示名称。
-  const exactKeyword = profiles.find(profile =>
-    profile.keyword?.trim().toLocaleLowerCase() === key)
-  if (exactKeyword) return exactKeyword
-
-  // An exact company name takes precedence over a longer fuzzy match. A shared
-  // full name cannot identify which display-name archive the user intends.
-  const exactFull = profiles.filter(profile => profile.full?.trim().toLocaleLowerCase() === key
-    && profile.keyword?.trim().toLocaleLowerCase() !== key)
-  if (exactFull.length) return exactFull.length === 1 ? exactFull[0] : undefined
+  const exact = exactSupplierProfiles(name, profiles)
+  if (exact.length) return exact.length === 1 ? exact[0] : undefined
 
   // 仅在没有精确匹配时兼容旧简称，不覆盖已存在的显示名称。
   const containingFull = profiles.filter(profile => {
@@ -91,15 +94,14 @@ export function materialCustomsCompany(
 
 export function supplierForLine(name: string, profiles: SupplierDict[], allowIncomplete = false): SupplierDict {
   const key = name.trim().toLocaleLowerCase()
+  const matches = exactSupplierProfiles(name, profiles)
   if (allowIncomplete) {
-    const matches = profiles.filter(p => [p.keyword, p.full].some(n => n?.trim().toLocaleLowerCase() === key))
     const profile = key && matches.length === 1 ? matches[0] : undefined
     return { ...profile, keyword: profile?.keyword || name.trim(), full: profile?.full || name.trim(),
       nameEn: profile?.nameEn || '', addressZh: profile?.addressZh || '', addressEn: profile?.addressEn || '',
       phone: profile?.phone || '', email: profile?.email || '', contact: profile?.contact || '' }
   }
   if (!key) throw new Error('走货明细有物料未填写供应商，请先补齐卖方')
-  const matches = profiles.filter(p => [p.keyword, p.full].some(n => n?.trim().toLocaleLowerCase() === key))
   if (matches.length !== 1) throw new Error(matches.length
     ? `供应商「${name}」匹配到多份档案，请在供应商汇总中去重`
     : `供应商「${name}」没有档案，请先到供应商汇总补录`)

@@ -7,10 +7,18 @@ export function effectiveCustomsCompany(
   return (item.customs_company || material?.customs_company || fallback || CUSTOMS_FIXED).trim()
 }
 
-// Stable within each company/supplier group; shared by the editor and export.
-export function sortShipmentItems<T extends { material_id?: number; customs_company?: string; supplier?: string; carton_group?: string }>(
+export function shipmentKeepsImportOrder(items: readonly { material_snapshot?: unknown; sources?: readonly { material_snapshot?: unknown }[] }[]) {
+  const imported = (item: { material_snapshot?: unknown }) => !!(item.material_snapshot && typeof item.material_snapshot === 'object'
+    && 'import_source' in item.material_snapshot && item.material_snapshot.import_source)
+  return items.some(item => imported(item) || item.sources?.some(imported))
+}
+
+// Imported shipments keep their saved/file order in both editor and export.
+// Catalog-only shipments retain the original company/supplier ordering.
+export function sortShipmentItems<T extends { material_id?: number; customs_company?: string; supplier?: string; carton_group?: string; material_snapshot?: unknown }>(
   items: readonly T[], materials: ReadonlyMap<number, Material>, fallback = CUSTOMS_FIXED,
 ): T[] {
+  if (shipmentKeepsImportOrder(items)) return [...items]
   const mat = (it: T) => it.material_id != null ? materials.get(it.material_id) : undefined
   const ordered = [...items].sort((a, b) => {
     const ca = effectiveCustomsCompany(a, mat(a), fallback), cb = effectiveCustomsCompany(b, mat(b), fallback)
@@ -44,11 +52,16 @@ export function cartonGroupKey(item: CartonItem, materials: ReadonlyMap<number, 
 }
 export function cartonLayout(items: readonly CartonItem[], materials: ReadonlyMap<number, Material>, fallback = CUSTOMS_FIXED) {
   const seen = new Set<string>()
-  return items.map(item => {
+  return items.map((item, index) => {
     const key = cartonGroupKey(item, materials, fallback)
     if (!key) return { span: 1, count: item.cartons || 0 }
-    if (seen.has(key)) return { span: 0, count: 0 }
+    // Merge only consecutive members: source-file order can separate a shared
+    // carton group with unrelated goods. Count that physical group just once.
+    if (index > 0 && cartonGroupKey(items[index - 1], materials, fallback) === key) return { span: 0, count: 0 }
+    const count = seen.has(key) ? 0 : item.cartons || 0
     seen.add(key)
-    return { span: items.filter(row => cartonGroupKey(row, materials, fallback) === key).length, count: item.cartons || 0 }
+    let end = index + 1
+    while (end < items.length && cartonGroupKey(items[end], materials, fallback) === key) end++
+    return { span: end - index, count }
   })
 }

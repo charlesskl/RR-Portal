@@ -13,7 +13,7 @@ import { shipmentSheetFields, sheetFillDownEdits } from './shipmentSheet'
 
 const source = readFileSync(new URL('../pages/ShipmentsPage.tsx', import.meta.url), 'utf8')
 const tree = ts.createSourceFile('ShipmentsPage.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-const names = new Set(['recordSheetUndo', 'resetSheetUndo', 'undoSheetEdit', 'setItems', 'save', 'closeEditor', 'openEdit',
+const names = new Set(['recordSheetUndo', 'resetSheetUndo', 'undoSheetEdit', 'redoSheetEdit', 'restoreSheetHistory', 'setItems', 'save', 'closeEditor', 'openEdit',
   'openCreate', 'patchMatDim', 'kgForItem', 'writeMergedCells', 'effectiveWeighingQty', 'requestCloseEditor'])
 const functions: string[] = []
 function collect(node: ts.Node) {
@@ -36,15 +36,15 @@ function fixture() {
     rawItems: [{ _rowKey: 1, material_id: 8, outbound_id: 4, qty: 1, kg: 1, cartons: 1, price: 5, currency: 'US$', po_no: 'PR1067-PO' }],
     baseMatMap: new Map([[8, { id: 8, name_zh: 'PR1067 Synthetic material', unit_kg: 'KGM', net_per_pc: 1, length: 10 }]]),
     dirtyMatIds: new Set<number>(), editorDirty: true,
-    latestUndoState: { current: null }, undoHistory: { current: [] }, nextRowKey: { current: 1 },
+    latestUndoState: { current: null }, undoHistory: { current: [] }, redoHistory: { current: [] }, nextRowKey: { current: 1 },
     creating: false, editing: { id: 11, customer: 'RRI', container_no: 'PR1067-A' },
     customValues: { customer: 'RRI', container_no: 'PR1067-A', status: 'draft' },
     customsOptions: [], outRows: [], message: { info: vi.fn(), error: vi.fn(), success: vi.fn() },
     Modal: { confirm: vi.fn() },
     api: { put: vi.fn(async () => ({})), post: vi.fn(async () => ({ data: { id: 777 } })), get: vi.fn() },
-    setEditorLoadError: vi.fn(), shipmentLoadError, loadShipmentDetail, loadShipmentMaterials,
+    setEditorLoadError: vi.fn(), setEditorViewKey: vi.fn(), shipmentLoadError, loadShipmentDetail, loadShipmentMaterials,
     load: vi.fn(), closeOutboundLink: vi.fn(), setDrawerFull: vi.fn(), setEditorLoad: vi.fn(),
-    setUndoCount: vi.fn(), setCartonSelection: vi.fn(), setOutRows: vi.fn(),
+    setUndoCount: vi.fn(), setRedoCount: vi.fn(), setCartonSelection: vi.fn(), setOutRows: vi.fn(),
     flushSync: (fn: () => void) => fn(), setTimeout: (fn: () => void) => fn(),
   }
   state.form = {
@@ -115,6 +115,68 @@ it('undo restores a material change and its original dirty-material set as one o
   expect(s.baseMatMap.get(8).length).toBe(25); expect([...s.dirtyMatIds]).toEqual([12, 8])
   f.run('undoSheetEdit()'); f.publish()
   expect(s.baseMatMap.get(8).length).toBe(10); expect([...s.dirtyMatIds]).toEqual([12])
+})
+
+it('redo restores multiple table edits in order, including complete imported snapshots and material changes', () => {
+  const f = fixture(), s = f.state
+  s.rawItems[0].material_snapshot = { name_zh: 'Imported', shipment_images: ['one', 'two'], import_source: { sheet: 'Main', row: 4 } }
+  f.publish(); const original = structuredClone(s.latestUndoState.current)
+  f.edit(2)
+  f.run('patchMatDim(8, "length", 25)'); f.publish()
+  const changed = structuredClone(s.latestUndoState.current)
+  f.run('undoSheetEdit()'); f.publish(); f.run('undoSheetEdit()'); f.publish()
+  expect(s.rawItems).toEqual(original.rawItems)
+  expect(s.redoHistory.current).toHaveLength(2)
+  f.run('redoSheetEdit()'); f.publish()
+  expect(s.rawItems[0].qty).toBe(2)
+  expect(s.baseMatMap.get(8).length).toBe(10)
+  f.run('redoSheetEdit()'); f.publish()
+  expect(s.latestUndoState.current).toEqual(changed)
+  expect(s.redoHistory.current).toHaveLength(0)
+  expect(s.setRedoCount).toHaveBeenLastCalledWith(0)
+  f.run('redoSheetEdit()'); f.publish()
+  expect(s.latestUndoState.current).toEqual(changed)
+})
+
+it('new edits discard the redo branch, and resets clear both histories', () => {
+  const f = fixture(), s = f.state
+  f.edit(2); f.edit(3); f.run('undoSheetEdit()'); f.publish()
+  expect(s.redoHistory.current).toHaveLength(1)
+  f.edit(4)
+  expect(s.redoHistory.current).toHaveLength(0)
+  f.run('redoSheetEdit()'); f.publish()
+  expect(s.rawItems[0].qty).toBe(4)
+  f.run('undoSheetEdit()'); f.publish()
+  f.run('resetSheetUndo()')
+  expect(s.redoHistory.current).toHaveLength(0)
+  expect(s.undoHistory.current).toHaveLength(0)
+})
+
+it('redo is blocked during writes/loading, keeps later header edits, and stays dirty after an uncertain save', () => {
+  const f = fixture(), s = f.state
+  f.edit(2); f.run('undoSheetEdit()'); f.publish()
+  for (const state of ['saving', 'pending', 'loading']) {
+    s.saving = state === 'saving'; s.sheetWritePending.current = state === 'pending'
+    s.editorLoadState.current = state === 'loading' ? 'loading' : 'ready'
+    f.run('redoSheetEdit()')
+    expect(s.rawItems[0].qty).toBe(1)
+    expect(s.redoHistory.current).toHaveLength(1)
+  }
+  s.editorLoadState.current = 'ready'; s.formRevision.current++; s.customerRevision.current++
+  s.customValues.customer = 'RRM'; s.unacknowledgedSave.current = true
+  f.run('redoSheetEdit()'); f.publish()
+  expect(s.rawItems[0].qty).toBe(2)
+  expect(s.customValues.customer).toBe('RRM'); expect(s.editorDirty).toBe(true)
+  expect(s.message.info).toHaveBeenCalledWith('本次保存尚未完整确认，恢复后需再次保存。')
+})
+
+it('a complete explicit save discards redo targets from the previous saved state', async () => {
+  const f = fixture(), s = f.state
+  f.edit(2); f.run('undoSheetEdit()'); f.publish()
+  expect(s.redoHistory.current).toHaveLength(1)
+  expect(await f.run('save()')).toBe(true)
+  expect(s.redoHistory.current).toHaveLength(0)
+  expect(s.undoHistory.current).toHaveLength(0)
 })
 
 it('a save response cannot discard edits and undo steps made after its submitted snapshot', async () => {

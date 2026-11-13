@@ -1,10 +1,11 @@
 import { cloneElement, isValidElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { App, Button, Space, Table, Typography } from 'antd'
+import { App, Button, Checkbox, Dropdown, Space, Table, Typography } from 'antd'
 import type { GetRef, TableProps } from 'antd'
 import { parseSheetClipboard, sheetClearSelectionEdits, sheetFillDownEdits, sheetPasteSelectionEdits, type SheetEdit, type SheetPoint } from '../utils/shipmentSheet'
 import { sheetArrowKeys, sheetArrowPoint, sheetArrowUsesEditor } from '../utils/shipmentSheetNavigation'
 import { formatShipmentPallet } from '../utils/shipmentDisplay'
 import { createShipmentHorizontalScroll } from '../utils/shipmentHorizontalScroll'
+import { shipmentFrozenColumns, shipmentFrozenRowSpan } from '../utils/shipmentSheetFreeze'
 import { ShipmentSheetDraftContext, ShipmentSheetFillContext, type ShipmentDraftCommit } from './ShipmentSheetDraft'
 
 type Props<T extends object> = TableProps<T> & {
@@ -12,12 +13,13 @@ type Props<T extends object> = TableProps<T> & {
   onEdits: (edits: SheetEdit[]) => void | boolean | Promise<void | boolean>
   onUndo: () => void
   undoDisabled: boolean
+  onRedo: () => void
+  redoDisabled: boolean
   rowOrder: string
   valueAt: (row: number, field: string) => string | number | undefined
   editableAt?: (row: number, field: string) => boolean
   displayAt: (row: number, col: number) => string | number | undefined
   extraEditorAt?: (row: number, col: number) => boolean
-  viewportOffset?: number
 }
 const point = (target: EventTarget | null): SheetPoint | null => {
   const cell = (target as HTMLElement)?.closest?.<HTMLElement>('[data-sheet-col]')
@@ -33,7 +35,7 @@ function cellText(cell: HTMLElement | null): string {
 const quote = (value: string) => /[\t\n"]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value
 
 /** Spreadsheet interaction layer; the page retains ownership of data and saving. */
-export default function ShipmentSheetTable<T extends object>({ fields, onEdits, onUndo, undoDisabled, rowOrder, valueAt, editableAt, displayAt, extraEditorAt, viewportOffset = 400, columns = [], ...props }: Props<T>) {
+export default function ShipmentSheetTable<T extends object>({ fields, onEdits, onUndo, undoDisabled, onRedo, redoDisabled, rowOrder, valueAt, editableAt, displayAt, extraEditorAt, columns = [], ...props }: Props<T>) {
   const { message } = App.useApp()
   const root = useRef<HTMLDivElement>(null)
   const table = useRef<GetRef<typeof Table>>(null)
@@ -47,7 +49,9 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
         // supports row targets. Horizontal proxy calls require a virtual body.
         if (!root.current?.querySelector('.ant-table-tbody-virtual-holder')) return
         const position: { left: number; top?: number } = { left }
-        table.current?.scrollTo(position)
+        if (!table.current) return
+        table.current.scrollTo(position)
+        return true
       },
       requestFrame: callback => requestAnimationFrame(callback), cancelFrame: cancelAnimationFrame,
     })
@@ -55,6 +59,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     return () => { sync.dispose(); horizontalScroll.current = null }
   }, [])
   const [scrollSize, setScrollSize] = useState({ width: 0, contentWidth: 0 })
+  const [viewportHeight, setViewportHeight] = useState(200)
   const measureScroll = useCallback(() => {
     const header = root.current?.querySelector<HTMLElement>('.ant-table-header')
     if (!header) return
@@ -62,13 +67,19 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     const contentWidth = header.scrollWidth
     setScrollSize(current => current.width === width && current.contentWidth === contentWidth
       ? current : { width, contentWidth })
+    // Measure the actual flex space, including wrapped toolbars and the native
+    // top scrollbar, rather than reserving a fixed fraction of the window.
+    const toolbar = root.current?.querySelector<HTMLElement>('.shipment-sheet-toolbar')
+    if (root.current) setViewportHeight(Math.max(120, root.current.clientHeight
+      - (toolbar?.offsetHeight || 0) - (topScroll.current?.offsetHeight || 0) - header.offsetHeight - 2))
   }, [])
   useLayoutEffect(measureScroll)
   useLayoutEffect(() => { horizontalScroll.current?.resize() }, [scrollSize.width, scrollSize.contentWidth])
   useEffect(() => {
     const header = root.current?.querySelector<HTMLElement>('.ant-table-header')
     const observer = new ResizeObserver(measureScroll)
-    for (const element of [root.current, header, header?.querySelector('table')])
+    for (const element of [root.current, header, header?.querySelector('table'),
+      root.current?.querySelector('.shipment-sheet-toolbar'), topScroll.current])
       if (element) observer.observe(element)
     return () => observer.disconnect()
   }, [measureScroll])
@@ -90,14 +101,13 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
   }, [])
   const [editingCell, setEditingCell] = useState<SheetPoint | null>(null)
   const pendingFocus = useRef<{ point: SheetPoint; edit: boolean } | null>(null)
-  const [viewportHeight, setViewportHeight] = useState(() => Math.max(200, window.innerHeight - viewportOffset))
-  useEffect(() => {
-    const resize = () => setViewportHeight(Math.max(200, window.innerHeight - viewportOffset))
-    resize(); window.addEventListener('resize', resize)
-    return () => window.removeEventListener('resize', resize)
-  }, [viewportOffset])
   const [anchor, setAnchor] = useState<SheetPoint | null>(null)
   const [end, setEnd] = useState<SheetPoint | null>(null)
+  const [frozen, setFrozen] = useState<{ rows: number; col: number | null }>({ rows: 0, col: null })
+  useLayoutEffect(() => {
+    table.current?.scrollTo({ top: 0 })
+    horizontalScroll.current?.scrollTo(0)
+  }, [frozen.rows, frozen.col])
   const selectionGesture = useRef<{ anchor: SheetPoint; end: SheetPoint; dragged: boolean } | null>(null)
   const suppressClick = useRef(false)
   const finishSelection = useCallback(() => {
@@ -133,6 +143,10 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     selectionGesture.current = null; suppressClick.current = false
   }, [rowOrder])
   const count = props.dataSource?.length || 0
+  const frozenRows = Math.min(frozen.rows, Math.max(0, count - 1))
+  const bodyRowIndex = (row: number) => row - frozenRows
+  const rowSpanAt = (row: number, col: number) => shipmentFrozenRowSpan(row, frozenRows,
+    index => columns[col].onCell?.(props.dataSource![index], index)?.rowSpan)
   const inSelection = (row: number, col: number) => anchor && end
     && row >= Math.min(anchor.row, end.row) && row <= Math.max(anchor.row, end.row)
     && col >= Math.min(anchor.col, end.col) && col <= Math.max(anchor.col, end.col)
@@ -143,7 +157,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     const record = props.dataSource?.[p.row]
     if (!record || !columns[p.col]) return false
     const span = columns[p.col].onCell?.(record, p.row)
-    return span?.rowSpan !== 0 && span?.colSpan !== 0
+    return rowSpanAt(p.row, p.col) !== 0 && span?.colSpan !== 0
   }
   const canEdit = (p: SheetPoint) => !!extraEditorAt?.(p.row, p.col)
     || (!!fields[p.col] && editableAt?.(p.row, fields[p.col]) !== false)
@@ -157,7 +171,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     setAnchor(p); setEnd(p)
     setEditingCell(edit && canEdit(p) ? p : null)
     pendingFocus.current = { point: p, edit }
-    if (!cellAt(p)) table.current?.scrollTo({ index: p.row })
+    if (!cellAt(p) && p.row >= frozenRows) table.current?.scrollTo({ index: bodyRowIndex(p.row) })
   }
   useLayoutEffect(() => {
     let frame = 0, attempts = 0
@@ -177,14 +191,15 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
         for (let ancestor = cell.parentElement; ancestor && holder.contains(ancestor); ancestor = ancestor.parentElement)
           ancestor.scrollLeft = 0
         const box = cell.getBoundingClientRect(), viewport = holder.getBoundingClientRect()
-        if (box.top < viewport.top || box.bottom > viewport.bottom) table.current?.scrollTo({ index: pending.point.row })
+        if (pending.point.row >= frozenRows && (box.top < viewport.top || box.bottom > viewport.bottom)) table.current?.scrollTo({ index: bodyRowIndex(pending.point.row) })
         const col = pending.point.col
-        if (header && !columns[col].fixed) {
+        const fixedColumns = shipmentFrozenColumns(columns, frozen.col)
+        if (header && !fixedColumns[col].fixed) {
           const selectionWidth = props.rowSelection ? Number(props.rowSelection.columnWidth) || 32 : 0
           const sizes = columns.map((column, i) => widths[i] || Number(column.width) || 120)
           const left = sizes.slice(0, col).reduce((sum, width) => sum + width, selectionWidth)
-          const fixedLeft = sizes.reduce((sum, width, i) => sum + (columns[i].fixed === 'left' ? width : 0), selectionWidth) + 8
-          const fixedRight = sizes.reduce((sum, width, i) => sum + (columns[i].fixed === 'right' ? width : 0), 8)
+          const fixedLeft = sizes.reduce((sum, width, i) => sum + (fixedColumns[i].fixed === 'left' ? width : 0), frozen.col === -1 ? 0 : selectionWidth) + 8
+          const fixedRight = sizes.reduce((sum, width, i) => sum + (fixedColumns[i].fixed === 'right' ? width : 0), 8)
           let offset = header.scrollLeft
           if (left < offset + fixedLeft) offset = Math.max(0, left - fixedLeft)
           else if (left + sizes[col] > offset + holder.clientWidth - fixedRight) offset = left + sizes[col] - holder.clientWidth + fixedRight
@@ -222,10 +237,11 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
     const col = fields.indexOf(field)
     return sheetFillDownEdits({ row: source, col }, { row: target, col }, count, fields, values.valueAt)
   }) }
-  const mapped = columns.map((column, col) => ({
+  const mapped = shipmentFrozenColumns(columns, frozen.col).map((column, col) => ({
     ...column,
     width: widths[col] || Number(column.width) || 120,
-    render: (value: unknown, record: T, row: number) => {
+    render: (value: unknown, record: T, bodyRow: number) => {
+      const row = bodyRow + frozenRows
       const rendered = column.render?.(value, record, row) ?? value as React.ReactNode
       if (!canEdit({ row, col }) || (editingCell?.row === row && editingCell.col === col)
         || (!editingCell && anchor?.row === row && anchor.col === col)) return rendered
@@ -239,7 +255,7 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       <span className="shipment-sheet-resize" role="separator" aria-label={`调整第 ${col + 1} 列宽`} onPointerDown={event => {
         event.preventDefault(); event.stopPropagation(); resizeCleanup.current?.()
         const x = event.clientX; const original = widths[col] || Number(column.width) || 120
-        const otherFixedWidth = columns.reduce((total, c, i) => total + (i !== col && c.fixed === 'left' ? (widths[i] || Number(c.width) || 120) : 0), 40)
+        const otherFixedWidth = shipmentFrozenColumns(columns, frozen.col).reduce((total, c, i) => total + (i !== col && c.fixed === 'left' ? (widths[i] || Number(c.width) || 120) : 0), 40)
         const maxWidth = column.fixed === 'left' ? Math.max(60, Math.min(600, (root.current?.clientWidth || 1000) - otherFixedWidth - 300)) : 600
         let frame: number | null = null, pendingWidth: number | null = null
         const apply = () => {
@@ -266,17 +282,34 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
         window.addEventListener('pointercancel', stop); window.addEventListener('blur', stop)
       }} />
     </div>,
-    onCell: (record: T, row = 0) => {
+    onCell: (record: T, bodyRow = 0) => {
+      const row = bodyRow + frozenRows
       const original = column.onCell?.(record, row) || {}
-      return { ...original, tabIndex: -1,
+      return { ...original, rowSpan: rowSpanAt(row, col), tabIndex: -1,
         'data-sheet-row': row, 'data-sheet-col': col,
         'data-sheet-mode': editingCell?.row === row && editingCell.col === col ? 'edit' : 'navigate',
         className: [original.className, !fields[col] || editableAt?.(row, fields[col]) === false ? 'shipment-sheet-protected' : '', inSelection(row, col) ? 'shipment-sheet-selected' : ''].filter(Boolean).join(' '),
       }
     },
   }))
-  const fixedWidth = mapped.reduce((total, col) => total + (col.fixed === 'left' ? Number(col.width) : 0), 64)
-  return <ShipmentSheetDraftContext.Provider value={registerDraft}><ShipmentSheetFillContext.Provider value={fillFrom}><div className="shipment-sheet" ref={root} tabIndex={-1} style={{ '--sheet-fixed-width': `${fixedWidth}px` } as React.CSSProperties}
+  const freezeAtSelection = (mode: 'both' | 'rows' | 'columns') => {
+    if (!anchor) return
+    setFrozen(current => ({ rows: mode === 'columns' ? current.rows : anchor.row,
+      col: mode === 'rows' ? current.col : anchor.col - 1 }))
+  }
+  const recordKey = (record: T, index: number): React.Key => typeof props.rowKey === 'function'
+    ? props.rowKey(record, index) : (record as Record<string, React.Key>)[String(props.rowKey || 'key')]
+  const selectedKeys = props.rowSelection?.selectedRowKeys || []
+  const updateSelection = (keys: React.Key[], type: 'all' | 'single') => props.rowSelection?.onChange?.(keys,
+    (props.dataSource || []).filter((record, index) => keys.includes(recordKey(record, index))), { type })
+  const rowSelection = props.rowSelection ? { ...props.rowSelection, fixed: frozen.col === -1 ? false : true,
+    preserveSelectedRowKeys: true,
+    columnTitle: <Checkbox aria-label="选择全部明细" checked={count > 0 && selectedKeys.length === count}
+      indeterminate={selectedKeys.length > 0 && selectedKeys.length < count}
+      onChange={event => updateSelection(event.target.checked ? (props.dataSource || []).map(recordKey) : [], 'all')} />,
+  } : undefined
+  const fixedWidth = mapped.reduce((total, col) => total + (col.fixed === 'left' ? Number(col.width) : 0), props.rowSelection && frozen.col !== -1 ? Number(props.rowSelection.columnWidth) || 32 : 0)
+  return <ShipmentSheetDraftContext.Provider value={registerDraft}><ShipmentSheetFillContext.Provider value={fillFrom}><div className={`shipment-sheet${frozenRows ? ' shipment-sheet-has-frozen-rows' : ''}`} ref={root} tabIndex={-1} style={{ '--sheet-fixed-width': `${fixedWidth}px` } as React.CSSProperties}
     onScrollCapture={event => {
       const holder = event.target as HTMLElement
       if (holder.matches('.ant-table-header')) horizontalScroll.current?.headerScroll(holder.scrollLeft)
@@ -290,6 +323,9 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       // before the virtual list removes the active row, without blurring a
       // newly focused visible editor during keyboard navigation.
       if (box.bottom <= viewport.top || box.top >= viewport.bottom) active.blur()
+    }}
+    onTouchStartCapture={event => {
+      if (!(event.target as HTMLElement).closest('.shipment-sheet-top-scroll')) horizontalScroll.current?.cancelPending()
     }}
     onWheelCapture={event => {
       if (!(event.target as HTMLElement).closest('.shipment-sheet-top-scroll')) horizontalScroll.current?.cancelPending()
@@ -426,11 +462,17 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       const p = point(event.target) || anchor
       const target = event.target as HTMLElement
       const isEditing = !!p && editingCell?.row === p.row && editingCell.col === p.col
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
+      const historyKey = event.key.toLowerCase()
+      const redo = historyKey === 'z' && event.shiftKey || historyKey === 'y' && !event.shiftKey
+      const undo = historyKey === 'z' && !event.shiftKey
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && (undo || redo)) {
         const textEditor = target.closest('input:not([readonly]),textarea:not([readonly]),[contenteditable="true"]')
         if (textEditor && (isEditing || !point(target))) return
         event.preventDefault(); event.stopPropagation()
-        if (!undoDisabled && !event.repeat) onUndo()
+        if (!event.repeat) {
+          if (redo) { if (!redoDisabled) onRedo() }
+          else if (!undoDisabled) onUndo()
+        }
         return
       }
       if (!p) return
@@ -496,6 +538,17 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
         ? `已选 ${Math.abs(anchor.row - end.row) + 1} 行 × ${Math.abs(anchor.col - end.col) + 1} 列（${(Math.abs(anchor.row - end.row) + 1) * (Math.abs(anchor.col - end.col) + 1)} 格）`
         : '尚未选择单元格'}</Typography.Text>
       <Button size="small" onClick={onUndo} disabled={undoDisabled} aria-keyshortcuts="Control+Z Meta+Z" title="Ctrl+Z / ⌘Z：撤回上一步表格操作">撤回</Button>
+      <Button size="small" onClick={onRedo} disabled={redoDisabled} aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z Control+Y Meta+Y" title="Ctrl/⌘+Shift+Z 或 Ctrl+Y：恢复刚撤回的表格操作">恢复</Button>
+      <Dropdown menu={{ items: [
+        { key: 'both', label: '冻结选中格上方行和左侧列', disabled: !anchor },
+        { key: 'rows', label: '冻结选中格上方行', disabled: !anchor },
+        { key: 'columns', label: '冻结选中格左侧列', disabled: !anchor },
+        { key: 'clear', label: '取消冻结' }, { key: 'default', label: '恢复默认冻结' },
+      ], onClick: ({ key }) => {
+        if (key === 'clear') setFrozen({ rows: 0, col: -1 })
+        else if (key === 'default') setFrozen({ rows: 0, col: null })
+        else freezeAtSelection(key as 'both' | 'rows' | 'columns')
+      } }}><Button size="small">冻结范围 ▾</Button></Dropdown>
       <Button size="small" onClick={fillDown} title="Ctrl/⌘D：单选复制上一行；多行选区按首行向下填充">向下填充选区</Button>
       <Button size="small" onClick={clearSelection} disabled={!anchor || !end} title="Delete / Backspace：清空所选可编辑单元格，不删除明细行">清空选区</Button>
     </Space>
@@ -505,7 +558,28 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
       onScroll={event => horizontalScroll.current?.railScroll(event.currentTarget.scrollLeft)}>
       <div style={{ width: scrollSize.contentWidth, height: 1 }} />
     </div>
-    <Table<T> {...props} ref={table} virtual bordered columns={mapped}
+    <Table<T> {...props} ref={table} virtual bordered columns={mapped} rowSelection={rowSelection}
+      rowKey={(record, index) => recordKey(record, (index || 0) + frozenRows)}
+      dataSource={props.dataSource?.slice(frozenRows)}
+      summary={frozenRows ? () => <Table.Summary fixed="top">
+        {props.dataSource!.slice(0, frozenRows).map((record, row) => <Table.Summary.Row key={recordKey(record, row)}>
+          {rowSelection && <Table.Summary.Cell index={0}><Checkbox aria-label={`选择第 ${row + 1} 行`}
+            checked={selectedKeys.includes(recordKey(record, row))}
+            onChange={event => updateSelection(event.target.checked ? [...selectedKeys, recordKey(record, row)]
+              : selectedKeys.filter(key => key !== recordKey(record, row)), 'single')} /></Table.Summary.Cell>}
+          {mapped.map((column, col) => {
+            const cell = column.onCell(record, row - frozenRows)
+            const { rowSpan, colSpan, ...attributes } = cell
+            const field = 'dataIndex' in column ? column.dataIndex : undefined
+            const value = field == null ? undefined : (Array.isArray(field) ? field : [field])
+              .reduce<unknown>((value, key) => value == null ? undefined : (value as Record<string, unknown>)[String(key)], record)
+            return rowSpan === 0 || colSpan === 0 ? null : <Table.Summary.Cell key={col} index={col + (rowSelection ? 1 : 0)}
+              rowSpan={rowSpan} colSpan={colSpan} align={column.align} className={cell.className}>
+              <div {...attributes}>{column.render(value, record, row - frozenRows) as React.ReactNode}</div>
+            </Table.Summary.Cell>
+          })}
+        </Table.Summary.Row>)}
+      </Table.Summary> : props.summary}
       scroll={{ ...props.scroll, y: viewportHeight, x: mapped.reduce((total, col) => total + Number(col.width), 40) }} />
   </div></ShipmentSheetFillContext.Provider></ShipmentSheetDraftContext.Provider>
 }

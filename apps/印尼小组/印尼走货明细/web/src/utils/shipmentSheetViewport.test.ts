@@ -4,23 +4,44 @@ import ts from 'typescript'
 import React, { cloneElement, isValidElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it, vi } from 'vitest'
+import { shipmentFrozenColumns } from './shipmentSheetFreeze'
 import { createShipmentHorizontalScroll } from './shipmentHorizontalScroll'
 import { parseSheetClipboard, sheetFillDownEdits, sheetPasteSelectionEdits } from './shipmentSheet'
 
 const source = readFileSync(new URL('../components/ShipmentSheetTable.tsx', import.meta.url), 'utf8')
 const tree = ts.createSourceFile('table.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 let columns = '', hasCell = '', copy = '', paste = '', layout = '', quoteSource = ''
+let measure = ''
 function collect(node: ts.Node) {
   if (ts.isVariableDeclaration(node) && node.name.getText(tree) === 'mapped') columns = node.initializer!.getText(tree)
   if (ts.isVariableDeclaration(node) && node.name.getText(tree) === 'hasCell') hasCell = node.initializer!.getText(tree)
   if (ts.isVariableDeclaration(node) && node.name.getText(tree) === 'quote') quoteSource = node.initializer!.getText(tree)
+  if (ts.isVariableDeclaration(node) && node.name.getText(tree) === 'measureScroll') measure = (node.initializer as ts.CallExpression).arguments[0].getText(tree)
   if (ts.isJsxAttribute(node) && node.name.getText(tree) === 'onCopyCapture') copy = ((node.initializer as ts.JsxExpression).expression!).getText(tree)
   if (ts.isJsxAttribute(node) && node.name.getText(tree) === 'onPasteCapture') paste = ((node.initializer as ts.JsxExpression).expression!).getText(tree)
   if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useLayoutEffect') layout = node.arguments[0].getText(tree)
   ts.forEachChild(node, collect)
 }
 collect(tree)
+const freezeContext = { shipmentFrozenColumns, frozen: { col: null }, frozenRows: 0, bodyRowIndex: (row: number) => row, rowSpanAt: (row: number) => row === 40 ? 0 : 1 }
 const transpile = (text: string) => ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText
+
+it('viewport fills its real container and adapts to collapsed metadata and wrapped controls', () => {
+  const header = { clientWidth: 1000, scrollWidth: 5000, offsetHeight: 40 }
+  const toolbar = { offsetHeight: 32 }
+  const container = { clientHeight: 740, querySelector: (selector: string) => selector === '.ant-table-header' ? header : toolbar }
+  const setViewportHeight = vi.fn(), setScrollSize = vi.fn()
+  const context = createContext({ ...freezeContext, root: { current: container }, topScroll: { current: { offsetHeight: 16 } }, setViewportHeight, setScrollSize })
+  runInContext(transpile(`const measure = ${measure}`), context)
+  runInContext('measure()', context)
+  expect(setViewportHeight).toHaveBeenLastCalledWith(650)
+  container.clientHeight = 520; toolbar.offsetHeight = 64
+  runInContext('measure()', context)
+  expect(setViewportHeight).toHaveBeenLastCalledWith(398)
+  container.clientHeight = 160
+  runInContext('measure()', context)
+  expect(setViewportHeight).toHaveBeenLastCalledWith(120)
+})
 
 it('68 x 47 cells mount no inactive inputs, and exactly one active editor', () => {
   const mounted = vi.fn()
@@ -34,7 +55,7 @@ it('68 x 47 cells mount no inactive inputs, and exactly one active editor', () =
     columns: fields.map((_, col) => ({ width: 120, title: col, render: () => React.createElement(Fillable, { onFill: () => {} }, React.createElement(Editor)) })),
     inSelection: () => false, editableAt: () => true, fields,
   }
-  const context = createContext(state)
+  const context = createContext({ ...freezeContext, ...state })
   const render = () => {
     runInContext(transpile(`const mapped = ${columns}`), context)
     const mapped = runInContext('mapped', context)
@@ -45,7 +66,7 @@ it('68 x 47 cells mount no inactive inputs, and exactly one active editor', () =
   expect(mounted).not.toHaveBeenCalled()
   // Re-evaluate in a fresh context (const mapped is deliberately not reassigned).
   state.editingCell = { row: 67, col: 46 }
-  const active = createContext({ ...state })
+  const active = createContext({ ...freezeContext, ...state })
   runInContext(transpile(`const mapped = ${columns}`), active)
   const mapped = runInContext('mapped', active)
   for (let row = 0; row < 68; row++) for (let col = 0; col < 47; col++)
@@ -60,7 +81,7 @@ it('选择模式也仅保留当前格的真实输入框，第一次输入/中文
     anchor: point, end: point, canEdit: () => true, displayAt: () => 'preview', widths: {},
     columns: [{ width: 120, render: () => input }], fields: ['pallet'],
     inSelection: () => false, editableAt: () => true }
-  const context = createContext(state)
+  const context = createContext({ ...freezeContext, ...state })
   runInContext(transpile(`const mapped = ${columns}`), context)
   const mapped = runInContext('mapped', context)
   expect(mapped[0].render(undefined, {}, 0)).not.toBe(input)
@@ -71,7 +92,7 @@ it('选择模式也仅保留当前格的真实输入框，第一次输入/中文
 })
 
 it('logical navigation includes unmounted rows and skips merged-away cells', () => {
-  const context = createContext({ props: { dataSource: Array.from({ length: 68 }, () => ({})) },
+  const context = createContext({ ...freezeContext, props: { dataSource: Array.from({ length: 68 }, () => ({})) },
     columns: [{ onCell: (_row: object, index: number) => ({ rowSpan: index === 40 ? 0 : 1 }) }] })
   runInContext(transpile(`const hasCell = ${hasCell}`), context)
   expect(runInContext('hasCell({ row: 67, col: 0 })', context)).toBe(true)
@@ -134,7 +155,7 @@ it('在仍挂载输入框的多行选区粘贴一个值，整区写入而非原�
 it('the real table enables native row virtualization with numeric viewport dimensions', () => {
   expect(source).toMatch(/ref=\{table\} virtual/)
   expect(source).toContain('y: viewportHeight')
-  expect(source).toContain('table.current?.scrollTo({ index: p.row })')
+  expect(source).toContain('table.current?.scrollTo({ index: bodyRowIndex(p.row) })')
   expect(source).toContain('onWheelCapture')
   expect(source).not.toContain('cell.scrollIntoView(')
 })
@@ -148,7 +169,7 @@ it('focus clears native filler scroll and synchronizes virtual offset with the h
   root.querySelector = (selector: string) => selector === '.ant-table-header' ? header : holder
   const pendingFocus = { current: { point: { row: 67, col: 21 }, edit: false } }
   const scrollTo = vi.fn()
-  const context = createContext({ root: { current: root }, pendingFocus, cellAt: () => cell, editorAt: () => null,
+  const context = createContext({ ...freezeContext, root: { current: root }, pendingFocus, cellAt: () => cell, editorAt: () => null,
     columns: Array.from({ length: 47 }, (_, col) => ({ width: 100, fixed: [0, 4, 5].includes(col) ? 'left' : col === 46 ? 'right' : undefined })),
     widths: {}, props: { rowSelection: {} }, table: { current: { scrollTo } }, cancelAnimationFrame: vi.fn(),
     horizontalScroll: { current: createShipmentHorizontalScroll({ elements: () => ({ header, rail: null }),

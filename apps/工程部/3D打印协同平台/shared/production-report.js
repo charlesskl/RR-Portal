@@ -1,6 +1,6 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.PrintLinkReport=factory();})(globalThis,function(){
  const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
- function day(data,date){
+ function context(data){
  const S={machines:21,elecPerMachine:1.5,laborPerDay:220,resinQuotePerGram:0.8,resinElecPerDay:50,resinLaborPerDay:250,lossRate:1.2,profitRate:40,...data.settings};
  const materials=data.materials||[],records=data.records||{};
 const MACHINE_COUNT_HISTORY = [
@@ -47,19 +47,20 @@ function getResinLaborPerDay(){
 }
 
 // FDM 使用原有成本加利润公式；光固化客户报价按克计价，实际成本在日报中独立核算。
-function calcUnitPrice(materialName, weightG, timeH, qty, machineCount=S.machines, machineOrProcess='fdm'){
+function calcUnitPrice(materialName, weightG, timeH, qty, machineCount=S.machines, machineOrProcess='fdm', resinRate=getResinQuoteRate(), fdmLaborCount=3){
   qty = qty || 1;
   const resin = isResinQuote(machineOrProcess);
   const matCost = (resin?calcRawMaterialCost(materialName,weightG):calcMaterialCost(materialName,weightG))*qty;
   const totalTimeH = timeH * qty;
   const elecCost = resin ? 0 : (totalTimeH / 12) * S.elecPerMachine;
   const fdmMachineCount = Math.max(1, Math.min(20, machineCount||20));
-  const laborCost = resin ? 0 : (totalTimeH / 12) * (S.laborPerDay / fdmMachineCount);
+  const laborCost = resin ? 0 : (totalTimeH / 12) * (S.laborPerDay / fdmMachineCount) * (([1,2,3].includes(fdmLaborCount)?fdmLaborCount:3)/3);
   const totalCost = matCost + elecCost + laborCost;
-  const resinQuotePerGram=getResinQuoteRate();
+  const resinQuotePerGram=resinRate;
   return { matCost, elecCost, laborCost, totalCost, price: resin?weightG*qty*resinQuotePerGram:totalCost*(1+S.profitRate/100), resin };
 }
 
+function recordRate(item){return Number.isFinite(item.resinQuotePerGram)&&item.resinQuotePerGram>=0?item.resinQuotePerGram:0.8;}
 function getDaySummary(date){
   const machineCount=getMachineCountForDate(date);
   const day = records[date];
@@ -69,13 +70,13 @@ function getDaySummary(date){
   const runCount = running.size;
   const revenue = items.filter(i=>i.status==='running').reduce((s,i)=>{
     const qty = i.qty||1;
-    const c = calcUnitPrice(i.material, i.weight||0, i.time||0, qty, machineCount, i.machine);
+    const c = calcUnitPrice(i.material, i.weight||0, i.time||0, qty, machineCount, i.machine, recordRate(i), i.fdmLaborCount);
     const base = c.price > 0 ? c.price : (i.price||0)*qty;
     return s + base + (+i.designFee||0);
   },0);
   const matCost = items.filter(i=>i.status==='running').reduce((s,i)=>s+calcRecordMaterialCost(i,i.qty||1),0);
   const elecCost = items.filter(i=>i.status==='running').reduce((s,i)=>{
-    const c=calcUnitPrice(i.material,i.weight||0,i.time||0,i.qty||1,machineCount,i.machine);
+    const c=calcUnitPrice(i.material,i.weight||0,i.time||0,i.qty||1,machineCount,i.machine,recordRate(i),i.fdmLaborCount);
     return s+c.elecCost;
   },0);
   const hasFdmRunning = items.some(i=>i.status==='running' && Number(i.machine)!==21);
@@ -107,7 +108,10 @@ function getDaySummary(date){
   return {revenue, materialCost:matCost, elecCost:totalElecCost, laborCost, totalCost, balance, runningMachines:runCount, utilization:machineCount>0?totalUtil/machineCount:0, machineCount, machineHours, isOff:false};
 }
 
- return getDaySummary(date);
+ return {day:getDaySummary,product(product){
+   const qty=product.qty||1;
+   return calcUnitPrice(product.material,product.weight||0,(product.time||0)/qty,1,S.machines,product.process||'fdm',getResinQuoteRate(),product.fdmLaborCount);
+ },record(item){return calcUnitPrice(item.material,item.weight||0,item.time||0,item.qty||1,S.machines,item.machine,recordRate(item),item.fdmLaborCount);}};
  }
- return {day,today,version:1};
+ return {day:(data,date)=>context(data).day(date),product:(data,product)=>context(data).product(product),record:(data,item)=>context(data).record(item),today,version:2};
 });

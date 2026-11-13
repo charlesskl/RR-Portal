@@ -142,6 +142,8 @@ function repairCorruptedData(data) {
 
 function deductInventory(data,name,grams){if(!name||!Number.isFinite(grams)||grams<=0)return;data.inventory||={};data.inventory[name]||={stockG:0,minStockG:3000};if(data.inventory[name].stockG<grams)throw Error('材料库存不足，请先核实入库');data.inventory[name].stockG-=grams;data.inventory[name]._updatedAt=Date.now();data._snapshotUpdatedAt=Date.now();}
 function saveData(data) {
+  // PRINTLINK_PRICING_V2
+  require('./pricing-records.cjs').prepare(data, loadData());
   data=dataImages.restore(data);
   // Linked orders are owned by the cloud task workflow, not legacy forms.
   const current=loadData(),existing=current.schedules||[];
@@ -383,7 +385,7 @@ const server = http.createServer((req, res) => {
           return;
         }
 
-        const editableFields = ['machine','status','productName','material','weight','qty','time','designFee','price','customer','remark'];
+        const editableFields = ['machine','status','productName','material','weight','qty','time','designFee','price','customer','remark','fdmLaborCount'];
         for (const field of editableFields) {
           if (Object.prototype.hasOwnProperty.call(patch, field)) item[field] = patch[field];
         }
@@ -437,7 +439,7 @@ const server = http.createServer((req, res) => {
         if (!Array.isArray(data.records[date].items)) data.records[date].items = [];
         data.records[date].off = false;
         const item = {};
-        const editableFields = ['machine','status','productName','material','weight','qty','time','designFee','price','customer','remark'];
+        const editableFields = ['machine','status','productName','material','weight','qty','time','designFee','price','customer','remark','fdmLaborCount'];
         for (const field of editableFields) {
           if (Object.prototype.hasOwnProperty.call(input, field)) item[field] = input[field];
         }
@@ -689,14 +691,17 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        const preserveHistory = require('./pricing-records.cjs').headcountOnlyEdit(product, {...patch,name});
         const oldName = product.name;
-        const editableFields = ['name','customer','material','weight','time','qty','price','image','process'];
+        const editableFields = ['name','customer','material','weight','time','qty','price','image','process','fdmLaborCount'];
         for (const field of editableFields) {
           if (Object.prototype.hasOwnProperty.call(patch, field)) product[field] = patch[field];
         }
         product.name = name;
         product._updatedAt = Date.now();
 
+        // 人数及其报价调整只更新产品，不改写已有生产记录或排期。
+        if (!preserveHistory) {
         // 保持每日记录和排期中的产品引用与产品库一致。
         for (const day of Object.values(data.records || {})) {
           for (const item of (day.items || [])) {
@@ -715,6 +720,7 @@ const server = http.createServer((req, res) => {
           if (product.material) schedule.material = product.material;
           if (product.weight) schedule.weight = product.weight;
           schedule._updatedAt = Date.now();
+        }
         }
         data._snapshotUpdatedAt = Date.now();
         await saveData(data);
@@ -776,7 +782,7 @@ const server = http.createServer((req, res) => {
           throw new Error('无法清理旧产品文件，请稍后重试');
         }
         const product = {id: nextId, name};
-        const editableFields = ['customer','material','weight','time','qty','price','image','process'];
+        const editableFields = ['customer','material','weight','time','qty','price','image','process','fdmLaborCount'];
         for (const field of editableFields) {
           if (Object.prototype.hasOwnProperty.call(input, field)) product[field] = input[field];
         }

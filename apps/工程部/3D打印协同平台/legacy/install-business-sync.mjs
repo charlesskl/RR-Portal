@@ -75,6 +75,8 @@ const plans=new Map([
  ['authority-durability.cjs',readFileSync(path.join(here,'authority-durability.cjs'))],
  ['json-stream.cjs',readFileSync(path.join(here,'../shared/json-stream.cjs'))],
  ['production-report.js',readFileSync(path.join(here,'../shared/production-report.js'))],
+ ['pricing-report.cjs',readFileSync(path.join(here,'../shared/pricing-report.cjs'))],
+ ['pricing-records.cjs',readFileSync(path.join(here,'../shared/pricing-records.cjs'))],
  ['index.html',Buffer.from(index)],['server.js',Buffer.from(server)]
 ]);
 const previous=new Map();

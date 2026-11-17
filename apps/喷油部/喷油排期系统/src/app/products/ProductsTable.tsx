@@ -1,9 +1,10 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import { filterProducts, PRODUCT_STATUS_META } from "@/lib/product";
+import FactoryMovePanel from "./FactoryMovePanel";
 
 // 列表行结构（与 page.tsx 取数后传入的字段一致）
 export type ProductRow = {
@@ -18,15 +19,36 @@ export type ProductRow = {
   updatedAt: string;
 };
 
-export function ProductsTable({ products, isAdmin }: { products: ProductRow[]; isAdmin: boolean }) {
+export function ProductsTable({ products, isAdmin, canMoveFactory = false, factoryId = "XINGXIN" }: { products: ProductRow[]; isAdmin: boolean; canMoveFactory?: boolean; factoryId?: string }) {
   const router = useRouter();
   const [kw, setKw] = useState("");
   const [view, setView] = useState<"normal" | "recycle">("normal");
   const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<number[]>([]);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [movedIds, setMovedIds] = useState<number[]>([]);
+  const [moveNotice, setMoveNotice] = useState("");
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("sprayplan:product-factory-move");
+      if (!raw) return;
+      sessionStorage.removeItem("sprayplan:product-factory-move");
+      const saved = JSON.parse(raw);
+      if (saved.factoryId === factoryId && Date.now() - saved.at < 60_000) setMoveNotice(saved.message);
+    } catch { /* 提示缓存不可用不影响迁移结果。 */ }
+  }, [factoryId]);
+  function factoryMoved() {
+    const targetName = factoryId === "HUADENG" ? "兴信" : "华登";
+    const message = `已将 ${selected.length} 个产品核价表移至${targetName}，请切换到${targetName}厂区查看。`;
+    setMoveNotice(message); setMovedIds(ids => [...ids, ...selected]); setSelected([]);
+    try { sessionStorage.setItem("sprayplan:product-factory-move", JSON.stringify({ factoryId, message, at: Date.now() })); } catch { /* 已保存，提示保留在当前页面。 */ }
+    router.refresh();
+  }
 
-  const recycleCount = products.filter((p) => p.status === "archived").length;
+  const currentProducts = products.filter(p => !movedIds.includes(p.id));
+  const recycleCount = currentProducts.filter((p) => p.status === "archived").length;
   // 正常视图=非作废；回收站视图=作废
-  const base = products.filter((p) => (view === "recycle" ? p.status === "archived" : p.status !== "archived"));
+  const base = currentProducts.filter((p) => (view === "recycle" ? p.status === "archived" : p.status !== "archived"));
   const rows = filterProducts(base, kw);
 
   async function archive(id: number, no: string) {
@@ -64,22 +86,26 @@ export function ProductsTable({ products, isAdmin }: { products: ProductRow[]; i
       <div className="mb-4 flex items-center gap-3">
         <input
           value={kw}
-          onChange={(e) => setKw(e.target.value)}
+          disabled={busy}
+          onChange={(e) => { setKw(e.target.value); setSelected([]); }}
           placeholder="🔍 搜货号"
           className="w-72 border border-app-border rounded-btn px-3 py-2 text-sm focus:outline-none focus:border-mint-400"
         />
+        {canMoveFactory && <button disabled={busy} onClick={() => setMoveOpen(value => !value)} className="rounded-btn border border-mint-400 px-3 py-2 text-sm text-mint-700 disabled:opacity-40">批量修改所属厂区（{selected.length}）</button>}
         {view === "normal" ? (
-          <button onClick={() => { setView("recycle"); setKw(""); }}
+          <button disabled={busy} onClick={() => { setView("recycle"); setKw(""); setSelected([]); }}
             className="ml-auto text-sm border border-app-border rounded-btn px-3 py-2 text-text-secondary hover:border-text-tertiary">
             🗑 回收站（{recycleCount}）
           </button>
         ) : (
-          <button onClick={() => { setView("normal"); setKw(""); }}
+          <button disabled={busy} onClick={() => { setView("normal"); setKw(""); setSelected([]); }}
             className="ml-auto text-sm border border-mint-400 rounded-btn px-3 py-2 text-mint-700 hover:bg-mint-50">
             ← 返回正常产品
           </button>
         )}
       </div>
+      {moveNotice && <p role="status" className="mb-3 rounded-lg bg-mint-50 p-3 text-sm text-mint-700">{moveNotice}</p>}
+      {canMoveFactory && moveOpen && <FactoryMovePanel ids={selected} factoryId={factoryId} busy={busy} onBusyChange={setBusy} onSaved={factoryMoved} />}
 
       {view === "recycle" && (
         <div className="flex items-center justify-between mb-3">
@@ -99,6 +125,7 @@ export function ProductsTable({ products, isAdmin }: { products: ProductRow[]; i
         <table className="w-full text-sm table-fixed">
           <thead className="bg-[#f0fdf4] text-[#047857] text-xs">
             <tr>
+              {canMoveFactory && <th className="w-10 px-2"><input type="checkbox" aria-label="全选当前显示产品" disabled={busy} checked={rows.length > 0 && rows.every(p => selected.includes(p.id))} onChange={e => setSelected(e.target.checked ? rows.map(p => p.id) : [])} /></th>}
               <th className="px-3 py-3 text-left w-[18%]">产品货号</th>
               <th className="px-3 py-3 text-center w-[9%]">部位数</th>
               <th className="px-3 py-3 text-center w-[10%]">总核价</th>
@@ -114,6 +141,7 @@ export function ProductsTable({ products, isAdmin }: { products: ProductRow[]; i
               const st = PRODUCT_STATUS_META[p.status] ?? PRODUCT_STATUS_META.draft;
               return (
                 <tr key={p.id} className={i % 2 ? "bg-[#fafdfb]" : ""}>
+                  {canMoveFactory && <td className="px-2 text-center"><input type="checkbox" aria-label={`选择产品 ${p.productNo}`} disabled={busy} checked={selected.includes(p.id)} onChange={e => setSelected(ids => e.target.checked ? [...ids, p.id] : ids.filter(id => id !== p.id))} /></td>}
                   <td className="px-3 py-3 font-mono">{p.productNo}</td>
                   <td className="px-3 py-3 text-center">{p.partCount ?? 0}</td>
                   <td className="px-3 py-3 text-center">{((p.totalUnitCost ?? 0) + (p.totalPaintCost ?? 0)).toFixed(3)}</td>

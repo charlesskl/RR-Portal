@@ -25,7 +25,7 @@ export default async function ProductsPage() {
         </div>
       </div>
       <p className="mb-4 text-sm text-text-secondary">当前厂区：{session.factoryId === "HUADENG" ? "华登" : "兴信"}。仅显示和维护本厂区的产品核价表。</p>
-      <ProductsTable products={products} isAdmin={session.role === "admin" || session.role === "manager"} />
+      <ProductsTable products={products} isAdmin={session.role === "admin" || session.role === "manager"} canMoveFactory={session.role === "admin"} factoryId={session.factoryId} />
     </div>
   );
 }

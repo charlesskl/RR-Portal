@@ -48,6 +48,68 @@ public class PlanWorkbenchTests : IAsyncLifetime
         return result;
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExcessDetailsIncludeAllDatesAdjustedDraftsAndActuals_WithoutSaving(bool preview)
+    {
+        await factory.WithDbAsync(async db => {
+            db.ProductionPlans.Add(new() { LineId = 1, OrderId = (await db.Orders.SingleAsync()).Id,
+                PartName = "头", Craft = "移印", PlanDate = Day.AddMonths(2), PlannedQty = 200 });
+            await db.SaveChangesAsync();
+        });
+        var snapshot = await ProtectedSnapshot();
+        var rows = (await Rows()).Where(r => r.LockedReason == null).ToList();
+        var response = await Save(rows.Select(r => Change(r, v => v with { PlannedQty = 600, PlanDate = "2030-01-08" })), preview);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var details = body.GetProperty("excessDetails").EnumerateArray().ToList();
+        Assert.Equal(2, details.Count);
+        var head = details.Single(d => d.GetProperty("partName").GetString() == "头");
+        Assert.Equal(500, head.GetProperty("demand").GetInt64());
+        Assert.Equal(18, head.GetProperty("produced").GetInt64());
+        Assert.Equal(800, head.GetProperty("unreportedPlanned").GetInt64());
+        Assert.Equal(318, head.GetProperty("excess").GetInt64());
+        var plans = head.GetProperty("plans").EnumerateArray().ToList();
+        Assert.Equal(818, plans.Sum(p => p.GetProperty("countedQty").GetInt64()));
+        Assert.Contains(plans, p => p.GetProperty("date").GetString() == "2030-03-07" && p.GetProperty("plannedQty").GetInt32() == 200);
+        Assert.Contains(plans, p => p.GetProperty("date").GetString() == "2030-01-08" && p.GetProperty("originalDate").GetString() == "2030-01-07" && p.GetProperty("adjusted").GetBoolean());
+        Assert.Equal(snapshot, await ProtectedSnapshot());
+        Assert.All((await Rows()).Where(r => r.LockedReason == null), r => Assert.Equal(100, r.Values.PlannedQty));
+    }
+
+    [Theory]
+    [InlineData(0, 20, 0, false)]
+    [InlineData(null, 17, 17, true)]
+    [InlineData(null, null, 20, true)]
+    public async Task ExcessDetailsUseTheSameActualQuantityBasisAsValidation(int? good, int? reported, int expected, bool fallback)
+    {
+        await factory.WithDbAsync(async db => {
+            var actual = await db.ProductionPlans.SingleAsync(p => p.Id == 3);
+            actual.GoodQty = good; actual.ReportedQty = reported; await db.SaveChangesAsync();
+        });
+        var row = (await Rows()).Single(r => r.Id == 1);
+        var response = await Save([Change(row, v => v with { PlannedQty = 600 })]);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var detail = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("excessDetails")[0];
+        Assert.Equal(expected, detail.GetProperty("produced").GetInt64());
+        Assert.Equal(100 + expected, detail.GetProperty("excess").GetInt64());
+        var actualRow = detail.GetProperty("plans").EnumerateArray().Single(p => p.GetProperty("recorded").GetBoolean());
+        Assert.Equal(fallback, actualRow.GetProperty("actualFallback").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ReducingExistingExcessRemainsAllowed()
+    {
+        await factory.WithDbAsync(async db => {
+            (await db.ProductionPlans.SingleAsync(p => p.Id == 1)).PlannedQty = 600;
+            await db.SaveChangesAsync();
+        });
+        var row = (await Rows()).Single(r => r.Id == 1);
+        (await Save([Change(row, v => v with { PlannedQty = 550 })])).EnsureSuccessStatusCode();
+        Assert.Equal(550, (await Rows()).Single(r => r.Id == 1).Values.PlannedQty);
+    }
+
     [Fact]
     public async Task PreviewIsReadOnly_SaveIsAtomicAndAudited_ActualsInventoryAndDemandStayUnchanged()
     {

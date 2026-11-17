@@ -217,13 +217,40 @@ public class PlanWorkbenchController(AppDbContext db) : ControllerBase
         if (changed.Count == 0) return Ok(new { adjustedPlans = 0, preview = request.Preview, warnings, changes = Array.Empty<object>() });
         var keys = changed.Select(PartKey).ToHashSet();
         var relevant = all.Where(p => keys.Contains(PartKey(p))).ToList();
+        var excessDetails = new List<object>();
+        foreach (var part in relevant.GroupBy(PartKey))
+        {
+            var first = part.First();
+            var demand = first.Order!.PartQtys.Where(q => q.PartName == first.PartName).Sum(q => (long)q.Qty);
+            foreach (var step in part.GroupBy(p => p.StepNo))
+            {
+                var total = step.Sum(CommittedQty);
+                if (total <= demand || total <= step.Sum(p => oldQty[p.Id])) continue;
+                excessDetails.Add(new {
+                    orderNo = first.Order.ExternalOrderNo, first.PartName, stepNo = step.Key, demand,
+                    produced = step.Where(PlanDateRules.HasActuals).Sum(CommittedQty),
+                    unreportedPlanned = step.Where(p => !PlanDateRules.HasActuals(p)).Sum(CommittedQty),
+                    excess = total - demand,
+                    plans = step.OrderBy(p => p.PlanDate).ThenBy(p => p.Id).Select(p => new {
+                        id = p.Id, date = ScheduleCalc.Ymd(p.PlanDate), originalDate = ScheduleCalc.Ymd(oldDates[p.Id]),
+                        lineName = lines.GetValueOrDefault(p.LineId)?.Name ?? $"拉别 #{p.LineId}",
+                        plannedQty = p.DeletedAt == null ? p.PlannedQty : 0,
+                        countedQty = CommittedQty(p), recorded = PlanDateRules.HasActuals(p),
+                        actualFallback = PlanDateRules.HasActuals(p) && p.GoodQty == null,
+                        adjusted = changed.Any(c => c.Id == p.Id)
+                    }).ToList()
+                });
+            }
+        }
+        if (excessDetails.Count > 0) return BadRequest(new {
+            error = "调整后累计排期超过订单需求，请按下方明细减少其他日期计划。本批未保存，草稿已保留。", excessDetails
+        });
         foreach (var part in relevant.GroupBy(PartKey))
         {
             var demand = part.First().Order!.PartQtys.Where(q => q.PartName == part.First().PartName).Sum(q => (long)q.Qty);
             foreach (var step in part.GroupBy(p => p.StepNo))
             {
-                var total = step.Sum(CommittedQty); var previous = step.Sum(p => oldQty[p.Id]);
-                if (total > demand && total > previous) return BadRequest(new { error = $"{part.First().Order!.ExternalOrderNo} / {part.First().PartName} 第{step.Key}道累计排期超过订单需求，请先减少其他日期计划" });
+                var total = step.Sum(CommittedQty);
                 if (total < demand) warnings.Add($"{part.First().Order!.ExternalOrderNo} / {part.First().PartName} 第{step.Key}道尚余 {demand - total:N0} 件未排");
             }
             // 前后工序按日累计校验，同一天可按工序顺序衔接。

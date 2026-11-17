@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { createServer, type Server } from "node:http";
 import { SignJWT } from "jose";
-let api: Server, failSave = false, failRead = false, writes = 0, previews = 0, autoCase = false, missingAddEndpoint = false;
+let api: Server, failSave = false, failRead = false, writes = 0, previews = 0, autoCase = false, missingAddEndpoint = false, excessCase = false;
 let submitted: { autoDeduct: boolean; allocationToken?: string }[] = [];
 const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Shanghai" }).format(new Date());
 const initial = () => [1, 2, 3].map(id => ({ id, token: `token-${id}`, orderNo: `ORDER-${id}`, productNo: "77711", partName: ["果汁瓶盖", "热蜂蜜瓶身", "已报工水瓶"][id - 1], stepNo: 1, craft: "手喷", demand: 50000, goodQty: id === 3 ? 500 : null, inboundQty: id === 3 ? 450 : null, lockedReason: id === 3 ? "已录实绩" : null,
@@ -19,6 +19,17 @@ test.beforeAll(async () => {
     if (url.pathname === "/api/plans/workbench/batch" && missingAddEndpoint) { response.statusCode = 404; return response.end(""); }
     if (["/api/plans/workbench", "/api/plans/workbench/batch"].includes(url.pathname) && request.method === "POST") {
       const body = JSON.parse(text);
+      if (excessCase) {
+        response.statusCode = 400;
+        return response.end(JSON.stringify({ error: "累计排期超过订单需求，本批未保存", excessDetails: [{
+          orderNo: "ORDER-1", partName: "果汁瓶盖", stepNo: 1, demand: 50000, produced: 5000, unreportedPlanned: 48000, excess: 3000,
+          plans: [
+            { id: 1, date: today, originalDate: today, lineName: "A拉：手喷", plannedQty: 18000, countedQty: 18000, recorded: false, adjusted: true },
+            { id: 99, date: "2030-12-10", originalDate: "2030-12-09", lineName: "备用手喷拉", plannedQty: 30000, countedQty: 30000, recorded: false, adjusted: true },
+            { id: 100, date: "2026-01-01", originalDate: "2026-01-01", lineName: "A拉：手喷", plannedQty: 6000, countedQty: 5000, recorded: true, actualFallback: true },
+          ],
+        }] }));
+      }
       if (!body.preview && failSave) { response.statusCode = 409; return response.end(JSON.stringify({ error: "计划已被修改或正在报工，本批未保存；请刷新核对" })); }
       const changes = body.changes.map((c: { id: number; values: typeof rows[0]["values"] }) => ({ id: c.id, before: rows.find(r => r.id === c.id)!.values, after: c.values }));
       for (const addition of body.additions ?? []) changes.push({ id: addition.clientId, created: true, orderNo: "TEMP-ORDER", partName: "临时产品", before: { ...addition.values, plannedQty: 0 }, after: addition.values });
@@ -53,11 +64,35 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await new Promise<void>(resolve => api.close(() => resolve())); });
 test.beforeEach(async ({ context }) => {
-  rows = initial(); failSave = false; failRead = false; writes = 0; previews = 0; autoCase = false; missingAddEndpoint = false; submitted = [];
+  rows = initial(); failSave = false; failRead = false; writes = 0; previews = 0; autoCase = false; missingAddEndpoint = false; excessCase = false; submitted = [];
   const token = await new SignJWT({ userId: "1", username: "clerk", factoryId: "XINGXIN", "http://schemas.microsoft.com/ws/2008/06/identity/claims/role": "clerk" })
     .setProtectedHeader({ alg: "HS256" }).setIssuer("order-parts-test").setExpirationTime("1h")
     .sign(new TextEncoder().encode("order-parts-test-only-key-32-characters-long"));
   await context.addCookies([{ name: "sprayplan_session", value: token, url: "http://127.0.0.1:18401" }]);
+});
+
+test("超排显示需求、实绩、草稿计划及跨日期明细，保留草稿并在再编辑后清除旧明细", async ({ page }) => {
+  excessCase = true;
+  await page.goto("/schedule/table");
+  await page.getByLabel("计划 #1 计划数").fill("18000");
+  await page.getByRole("button", { name: "检查改动（1）" }).click();
+  const report = page.getByRole("region", { name: "超排数量明细" });
+  await expect(report).toContainText("订单需求50,000 件");
+  await expect(report).toContainText("已生产5,000 件");
+  await expect(report).toContainText("调整后未报工计划48,000 件");
+  await expect(report).toContainText("超出数量3,000 件");
+  await expect(report).toContainText("2030-12-10");
+  await expect(report).toContainText("原日期 2030-12-09");
+  await expect(report).toContainText("30,000");
+  await expect(report).toContainText("未填良品数");
+  await expect(page.getByLabel("计划 #1 计划数")).toHaveValue("18000");
+  await expect(page.getByRole("button", { name: "确认统一保存（0）" })).toBeDisabled();
+  expect(writes).toBe(0);
+  await page.getByLabel("计划 #1 计划数").fill("15000");
+  await expect(report).toHaveCount(0);
+  excessCase = false;
+  await page.getByRole("button", { name: "检查改动（1）" }).click();
+  await expect(page.getByRole("region", { name: "统一保存预览" })).toBeVisible();
 });
 
 test("从排期总览进入，直接编辑、批量顺延、预览后整批保存，已报工保持只读", async ({ page }, testInfo) => {

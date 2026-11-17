@@ -6,6 +6,7 @@ import { invalidateClientCache } from "@/lib/clientCache";
 import { changed, draftOf, fields, pasteDrafts, shiftDraft, valuesOf, type Draft, type Field, type PlanValues, type WorkbenchLine, type WorkbenchRow } from "@/lib/planWorkbench";
 
 import AddPlanDialog, { type PlanOption } from "./AddPlanDialog";
+import ExcessScheduleDetails, { type ExcessDetail } from "./ExcessScheduleDetails";
 
 type Data = { rows: WorkbenchRow[]; lines: WorkbenchLine[] };
 type Transfer = { sourcePlanId: number; sourceDate: string; targetPlanId: number; targetDate: string; quantity: number; orderNo: string; partName: string; stepNo: number };
@@ -31,6 +32,7 @@ export default function PlanWorkbench({ orderId }: { orderId?: number }) {
   const [reason, setReason] = useState("");
   const [autoDeduct, setAutoDeduct] = useState(true);
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [excessDetails, setExcessDetails] = useState<ExcessDetail[]>([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const table = useRef<HTMLTableElement>(null);
   const dirty = data.rows.filter(row => row.id < 0 || changed(row, drafts[row.id]));
@@ -42,7 +44,7 @@ export default function PlanWorkbench({ orderId }: { orderId?: number }) {
     const response = await apiFetch(`/api/plans/workbench?from=${start}&to=${end}${orderId ? `&orderId=${orderId}` : ""}`, { cache: "no-store" });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || "排期读取失败");
-    setData(body); setDrafts({}); setAdditions({}); setSelected([]); setPreview(null);
+    setData(body); setDrafts({}); setAdditions({}); setSelected([]); setPreview(null); setExcessDetails([]);
   }, [orderId]);
   useEffect(() => {
     let active = true; setBusy(true);
@@ -82,7 +84,7 @@ export default function PlanWorkbench({ orderId }: { orderId?: number }) {
     setDrafts(current => { const next = { ...current }; delete next[id]; return next; });
     setSelected(current => current.filter(selectedId => selectedId !== id)); edited();
   }
-  function edited() { setPreview(null); setError(""); setNotice(""); }
+  function edited() { setPreview(null); setError(""); setNotice(""); setExcessDetails([]); }
   function edit(row: WorkbenchRow, field: Field, value: string) {
     edited(); setDrafts(previous => ({ ...previous, [row.id]: { ...(previous[row.id] ?? draftOf(row.values)), [field]: value,
       ...(field === "lineId" ? { machineNos: "" } : {}) } }));
@@ -124,7 +126,7 @@ export default function PlanWorkbench({ orderId }: { orderId?: number }) {
     finally { setBusy(false); }
   }
   async function submit(checkOnly: boolean) {
-    setBusy(true); setError(""); setNotice("");
+    setBusy(true); setError(""); setNotice(""); setExcessDetails([]); setPreview(null);
     let committed = false;
     try {
       const changes = dirty.filter(row => row.id > 0).map(row => {
@@ -136,6 +138,7 @@ export default function PlanWorkbench({ orderId }: { orderId?: number }) {
       const response = await apiFetch(newPlans.length ? "/api/plans/workbench/batch" : "/api/plans/workbench", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ changes, additions: newPlans, preview: checkOnly, reason, autoDeduct, allocationToken: checkOnly ? undefined : preview?.allocationToken }) });
       const body = await response.json().catch(() => ({}));
+      if (!response.ok && Array.isArray(body.excessDetails)) setExcessDetails(body.excessDetails);
       if (!response.ok) throw new Error(newPlans.length && response.status === 404 ? "新增排期接口尚未就绪，请更新后端后重试；草稿已保留" : body.error || "本批未保存，请稍后重试");
       if (checkOnly && newPlans.length && body.createdPlans !== newPlans.length) throw new Error("新增排期预览不完整，草稿已保留，请重新加载核对");
       if (checkOnly) { setPreview(body); return; }
@@ -172,6 +175,7 @@ export default function PlanWorkbench({ orderId }: { orderId?: number }) {
     <label className="mb-3 flex items-center gap-2 text-sm text-mint-700"><input type="checkbox" disabled={busy} checked={autoDeduct}
       onChange={e => { setAutoDeduct(e.target.checked); edited(); }} />增加计划数时，自动从后续未报工计划扣减（同订单、部位、工序，保持总量）</label>
     {error && <p role="alert" aria-label="排期工作台错误" className="mb-3 whitespace-pre-wrap rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+    {excessDetails.length > 0 && <ExcessScheduleDetails details={excessDetails} />}
     {notice && <p role="status" className="mb-3 rounded-lg bg-mint-50 p-3 text-sm text-mint-700">{notice}</p>}
     {busy && <p role="status" className="mb-2 text-sm text-text-secondary">处理中…</p>}
     <div className="max-h-[65vh] overflow-auto rounded-lg border border-app-border bg-white">

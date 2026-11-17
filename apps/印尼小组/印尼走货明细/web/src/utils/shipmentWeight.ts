@@ -61,12 +61,20 @@ export function formatShipmentPackingLines(value: unknown): string {
   return text.trim().split(/[\s,，;；]+/).filter(Boolean).join('\n')
 }
 
-// 包装尺寸以厘米保存，立方厘米直接换算为立方米，避免英尺近似换算误差。
+// 沿用确认的装箱模板公式；每箱值保留计算精度，总立方数另按 ROUND(..., 2)。
 export function shipmentCbmPerCarton(length: unknown, width: unknown, height: unknown): number {
   const dimensions = [length, width, height].map(Number)
   if (dimensions.some(value => !Number.isFinite(value) || value <= 0)) return 0
   const [l, w, h] = dimensions
-  return l * w * h / 1e6
+  return l * w * h / 28316.75 * 0.0283
+}
+
+/** Match the template's ROUND(R * actual carton count, 2). */
+export function shipmentCbmTotal(cbmEach: number, cartons: unknown): number {
+  const count = Number(cartons)
+  if (!Number.isFinite(cbmEach) || cbmEach <= 0 || !Number.isFinite(count) || count <= 0) return 0
+  const total = cbmEach * count
+  return Number.isFinite(total) ? Math.round(total * 100) / 100 : 0
 }
 
 // 称重数量属于走货行；同一物料每次抽取称重的数量可能不同。

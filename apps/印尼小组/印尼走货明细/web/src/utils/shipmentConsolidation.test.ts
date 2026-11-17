@@ -170,7 +170,7 @@ it.each(['RRI', 'RRM'])('真实模板保留两个半箱的实际箱数，数量�
   expect(sheet.L4.v).toBe(100)
   expect(sheet.K4.v).toBe(9.06)
   expect(sheet.AT4.v).toBe(2)
-  expect(sheet.S4.f).toBe('R4*AT4')
+  expect(sheet.S4.f).toBe('ROUND(R4*AT4,2)')
   expect(sheet.P4.f).toBe('ROUND(BA4*L4,2)')
   expect(sheet.Q4.f).toBe('ROUND(BB4*L4,2)')
   expect(sheet.AP4.f).toBe('AO4*K4')

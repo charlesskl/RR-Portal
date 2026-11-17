@@ -102,7 +102,8 @@ it('新版导入再导出保留毛净重、体积和金额缓存，未打开Exce
     expect(sheet.Q4.v).toBe(1.8)
     expect(sheet.P4.f).toBe('ROUND(BA4*L4,2)')
     expect(sheet.R4.v).toBeGreaterThan(.0225)
-    expect(sheet.S4.v).toBeCloseTo(sheet.R4.v)
+    expect(sheet.S4.v).toBe(.02)
+    expect(sheet.S4.f).toBe('ROUND(R4*AT4,2)')
     expect(sheet.AP4.v).toBeCloseTo(363.63)
     const reimported = parseShipmentWorkbook(workbook).rows[0].item
     expect(reimported.qty).toBe(3)

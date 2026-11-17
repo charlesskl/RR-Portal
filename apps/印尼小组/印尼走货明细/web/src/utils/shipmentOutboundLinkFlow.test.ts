@@ -6,7 +6,7 @@ import { linkShipmentOutboundBatches } from './shipmentOutboundBatchLink'
 import { consolidateShipmentItems } from './shipmentConsolidation'
 import { parseShipmentPacking } from './shipmentWeight'
 import { cartonLayout } from './shipmentOrder'
-import { shipmentCbmPerCarton, shipmentGrossPerPc, shipmentNetTotalKg, shipmentWeightQuantity } from './shipmentWeight'
+import { shipmentCbmPerCarton, shipmentCbmTotal, shipmentGrossPerPc, shipmentNetTotalKg, shipmentWeightQuantity } from './shipmentWeight'
 import { shipmentPurchaseAmount } from './shipmentPurchase'
 import type { Material } from '../api/client'
 
@@ -146,17 +146,17 @@ it('counts CBM once per physical carton even when packing rows or legacy metadat
   const totals = (items: typeof linked) => {
     const matMap = new Map(items.map(item => [item.material_id, item.material_snapshot!]))
     const context = createContext({ items, matMap, consolidatedItems: consolidateShipmentItems(items, matMap),
-      cartonRows: cartonLayout(items, matMap), shipmentCbmPerCarton, shipmentNetTotalKg, shipmentGrossPerPc, shipmentWeightQuantity, shipmentPurchaseAmount,
+      cartonRows: cartonLayout(items, matMap), shipmentCbmPerCarton, shipmentCbmTotal, shipmentNetTotalKg, shipmentGrossPerPc, shipmentWeightQuantity, shipmentPurchaseAmount,
       effectiveWeighingQty: () => 0 })
     return runInContext(ts.transpileModule(`(${totalHandler})()`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context)
   }
-  expect(totals(linked)).toMatchObject({ cbm: .012, cartons: 2, qty: 10, amount: 26 })
+  expect(totals(linked)).toMatchObject({ cbm: .01, cartons: 2, qty: 10, amount: 26 })
   expect(totals(linked).kg).toBeCloseTo(2.0001, 8)
   const distinctPacking = linked.map((item, index) => index ? { ...item, qty_per_carton: '1/2 2/4' } : item)
   // Packing contents may differ within the same physical carton group.
-  expect(totals(distinctPacking).cbm).toBe(.012)
+  expect(totals(distinctPacking).cbm).toBe(.01)
   const distinctGroup = linked.map((item, index) => index ? { ...item, carton_group: 'other' } : item)
-  expect(totals(distinctGroup).cbm).toBe(.024)
+  expect(totals(distinctGroup).cbm).toBe(.02)
   const legacy = linked.map(item => ({ ...item, material_snapshot: { ...item.material_snapshot!, shipment_outbound_link_group: undefined } }))
-  expect(totals(legacy).cbm).toBe(.012)
+  expect(totals(legacy).cbm).toBe(.01)
 })

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatShipmentPackingLines, isPaperRope, parseShipmentPacking, shipmentCartonCount,
-  shipmentCbmPerCarton, shipmentGrossPerPc, shipmentKgWeight, shipmentWeightQuantity,
+  shipmentCbmPerCarton, shipmentCbmTotal, shipmentGrossPerPc, shipmentKgWeight, shipmentWeightQuantity,
 } from './shipmentWeight'
 
 describe('每箱数量分段写法', () => {
@@ -25,8 +25,8 @@ describe('每箱数量分段写法', () => {
 })
 
 describe('立方数/每箱', () => {
-  it('厘米尺寸直接换成立方米，不引入英尺近似误差', () => {
-    expect(shipmentCbmPerCarton(60, 50, 34)).toBeCloseTo(.102, 12)
+  it('使用确认模板的长宽高换算公式', () => {
+    expect(shipmentCbmPerCarton(60, 50, 34)).toBeCloseTo(60 * 50 * 34 / 28316.75 * 0.0283, 12)
   })
 
   it.each([
@@ -93,4 +93,12 @@ describe('送货 KG 重量', () => {
   it('数量单位保持送货数量', () => {
     expect(shipmentKgWeight('PCE', 25, 0.2)).toBe(25)
   })
+})
+
+it('总立方数先乘实际箱数再 ROUND 两位，不能先舍入每箱值', () => {
+  const each = shipmentCbmPerCarton(60, 50, 34)
+  expect(shipmentCbmTotal(each, 3)).toBe(.31)
+  expect(shipmentCbmTotal(each, 2)).toBe(.20)
+  expect(shipmentCbmTotal(shipmentCbmPerCarton(30, 20, 10), 1)).toBe(.01)
+  for (const count of [0, -1, undefined, NaN, Infinity]) expect(shipmentCbmTotal(each, count)).toBe(0)
 })

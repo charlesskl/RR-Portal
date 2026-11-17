@@ -9,7 +9,7 @@ import { DOMParser, XMLSerializer } from '@xmldom/xmldom'
 import type { Material, SupplierDict } from '../api/client'
 import { documentSellerForLine, supplierForLine } from './supplierProfiles'
 import { deliveryDeadline, syncedShipmentDeadline } from './shipmentDeadline'
-import { isPaperRope, shipmentCbmPerCarton, shipmentNetTotalKg, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
+import { isPaperRope, shipmentCbmPerCarton, shipmentCbmTotal, shipmentNetTotalKg, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
 import { bindInvoiceLookupSerial, documentRow, rebindDocumentFormula, type DocumentTableLayout } from './documentTemplateFormula'
 import auxiliaryDocumentLayout from './auxiliaryDocumentLayout.json'
 import { AUXILIARY_TABLES, auxiliaryDetailFormulas } from './auxiliaryDocumentFormula'
@@ -17,6 +17,7 @@ import { invoiceDetailGroups, invoiceDetailSumFormula } from './invoiceDetailGro
 import { consolidateShipmentItems } from './shipmentConsolidation'
 import { shipmentImages } from './shipmentImages'
 import { appendShipmentDocumentSheets, shipmentDocumentBatches } from './shipmentDocumentOverflow'
+import { stackShipmentDocumentSheets } from './shipmentDocumentStack'
 
 import { CUSTOMS_FIXED, effectiveCustomsCompany, sortShipmentItems, cartonLayout } from './shipmentOrder'
 export { CUSTOMS_FIXED, effectiveCustomsCompany } from './shipmentOrder'
@@ -1300,8 +1301,8 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
     const weightDivisor = paperRope ? '/1000' : ''
     setCell(ws, ri, 15, '=ROUND(BA' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
     setCell(ws, ri, 16, '=ROUND(BB' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
-    setCell(ws, ri, 17, '=AU' + (ri + 1) + '*AV' + (ri + 1) + '*AW' + (ri + 1) + '/1000000', 'n')
-    setCell(ws, ri, 18, '=R' + (ri + 1) + '*AT' + (ri + 1), 'n')
+    setCell(ws, ri, 17, '=AU' + (ri + 1) + '*AV' + (ri + 1) + '*AW' + (ri + 1) + '/28316.75*0.0283', 'n')
+    setCell(ws, ri, 18, '=ROUND(R' + (ri + 1) + '*AT' + (ri + 1) + ',2)', 'n')
     setCell(ws, ri, 20, it.product_use || '', 's')
     setCell(ws, ri, 21, it.contract_no || '', 's')
     if (it.contract_date) setCell(ws, ri, 22, excelDate(it.contract_date), 'n')
@@ -1375,7 +1376,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
     ws[XLSX.utils.encode_cell({ r: ri, c: 16 })].v = Number(netTotal.toFixed(2))
     const cbmEach = shipmentCbmPerCarton(m?.length, m?.width, m?.height)
     ws[XLSX.utils.encode_cell({ r: ri, c: 17 })].v = cbmEach
-    ws[XLSX.utils.encode_cell({ r: ri, c: 18 })].v = cbmEach * cartonRows[i].count
+    ws[XLSX.utils.encode_cell({ r: ri, c: 18 })].v = shipmentCbmTotal(cbmEach, cartonRows[i].count)
   })
 
   // 同一分组可分散在多个位置；仅合并各个相邻连续段，不改变明细顺序。
@@ -1417,6 +1418,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
   })
   for (const indexes of invoiceGroups.values()) {
     setCell(ws, indexes[0] + 3, 27, groupedSumFormula('AA', indexes), 'n')
+    ws[`AB${indexes[0] + 4}`].v = indexes.reduce((sum, index) => sum + (Number(ws[`AA${index + 4}`]?.v) || 0), 0)
     mergeGroupedTotal(27, indexes)
   }
 
@@ -1434,6 +1436,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
   for (const indexes of supplierGroups.values()) {
     const firstIndex = indexes[0]
     setCell(ws, firstIndex + 3, 42, groupedSumFormula('AP', indexes), 'n')
+    ws[`AQ${firstIndex + 4}`].v = indexes.reduce((sum, index) => sum + (Number(ws[`AP${index + 4}`]?.v) || 0), 0)
     ;(ws as any)[XLSX.utils.encode_cell({ r: firstIndex + 3, c: 42 })].z = purchaseCurrencyFormat(sorted[firstIndex].currency)
     mergeGroupedTotal(42, indexes)
   }
@@ -1614,7 +1617,6 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
   if (!input.mainOnly) await restoreAuxiliaryFormulas(outZip, sorted, form, newName)
   if (!input.mainOnly) await formatHengxinchangInvoiceFooters(outZip)
   if (!input.mainOnly) await compactEmptyInvoiceFooters(outZip)
-  if (!input.mainOnly) await addPackingGrandTotal(outZip, newName, mainTotalRow)
   if (!input.mainOnly) await linkPackingHeaders(outZip, documentPlans, newName, ws)
   if (floatImages.length) {
     const mainSheetIdx = wbObj.SheetNames.indexOf(newName) + 1
@@ -1622,6 +1624,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
   }
   // Apply after every template merge: SheetJS does not retain native pane state.
   await wrapMainPalletCells(outZip, newName)
+  await fitMainAmountColumns(outZip, newName, ws)
   await freezeMainWorksheet(outZip, newName)
   // Force Excel/WPS to calculate preserved formulas, not display old template caches.
   const calculationDoc = new DOMParser().parseFromString(await outZip.file('xl/workbook.xml')!.async('string'), 'application/xml')
@@ -1639,6 +1642,11 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
     const continuation = await buildCustomsWorkbookBatch(input, batches[index])
     await appendShipmentDocumentSheets(outZip, await JSZip.loadAsync(await continuation.arrayBuffer()), index + 1)
   }
+  if (!input.mainOnly && !selectedGroups) {
+    await stackShipmentDocumentSheets(outZip, newName)
+    await addPackingGrandTotal(outZip, newName, mainTotalRow)
+  }
+  await showFullDocumentUnitPrices(outZip, newName)
   return await outZip.generateAsync({ type: 'blob' })
 }
 
@@ -1678,6 +1686,141 @@ async function wrapMainPalletCells(zip: JSZip, mainName: string) {
   xfs.setAttribute('count', String(directChildren(xfs, 'xf').length))
   zip.file('xl/styles.xml', serializer.serializeToString(styles))
   zip.file(path, serializer.serializeToString(sheet))
+}
+
+function widenWorksheetColumn(sheet: XmlDocument, root: XmlElement, index: number, width: number) {
+  let cols = directChild(root, 'cols')
+  if (!cols) { cols = sheet.createElementNS(SPREADSHEET_NS, 'cols') as XmlElement; root.insertBefore(cols, directChild(root, 'sheetData') || null) }
+  const original = directChildren(cols, 'col').find(col => Number(col.getAttribute('min')) <= index && Number(col.getAttribute('max')) >= index)
+  const fitted = original ? original.cloneNode(true) as XmlElement : sheet.createElementNS(SPREADSHEET_NS, 'col') as XmlElement
+  fitted.setAttribute('min', String(index)); fitted.setAttribute('max', String(index))
+  fitted.setAttribute('width', String(Math.max(width, Number(original?.getAttribute('width')) || 0)))
+  fitted.setAttribute('customWidth', '1')
+  if (original) {
+    if (Number(original.getAttribute('min')) < index) {
+      const before = original.cloneNode(true) as XmlElement; before.setAttribute('max', String(index - 1)); cols.insertBefore(before, original)
+    }
+    cols.insertBefore(fitted, original)
+    if (Number(original.getAttribute('max')) > index) {
+      const after = original.cloneNode(true) as XmlElement; after.setAttribute('min', String(index + 1)); cols.insertBefore(after, original)
+    }
+    cols.removeChild(original)
+  } else {
+    cols.insertBefore(fitted, directChildren(cols, 'col').find(col => Number(col.getAttribute('min')) > index) || null)
+  }
+}
+
+/** Keep long currency values visible after every template/style restoration. */
+async function fitMainAmountColumns(zip: JSZip, mainName: string, source: XLSX.WorkSheet) {
+  const path = (await workbookSheetParts(zip)).get(mainName)
+  const sheetFile = path ? zip.file(path) : null, stylesFile = zip.file('xl/styles.xml')
+  if (!path || !sheetFile || !stylesFile) return
+  const parser = new DOMParser(), serializer = new XMLSerializer()
+  const sheet = parser.parseFromString(await sheetFile.async('string'), 'application/xml')
+  const styles = parser.parseFromString(await stylesFile.async('string'), 'application/xml')
+  const root = sheet.documentElement as XmlElement, xfs = styleCollection(styles.documentElement as XmlElement, 'cellXfs')
+  const data = directChild(root, 'sheetData')
+  if (!xfs || !data) return
+  const amounts = new Set(['Z', 'AA', 'AB', 'AO', 'AP', 'AQ'])
+  for (const column of amounts) {
+    const index = XLSX.utils.decode_col(column) + 1
+    let width = 22
+    for (const [address, value] of Object.entries(source)) {
+      if (cellColumn(address) !== column || Number(address.match(/\d+$/)?.[0]) < 4 || value?.t !== 'n') continue
+      const cell = { ...value }; delete cell.w
+      width = Math.max(width, Math.min(36, XLSX.utils.format_cell(cell).length + 3))
+    }
+    widenWorksheetColumn(sheet, root, index, width)
+  }
+  const baseStyles = directChildren(xfs, 'xf'), fittedStyles = new Map<string, string>()
+  for (const row of directChildren(data, 'row')) {
+    if (rowNumber(row) < 4) continue
+    for (const cell of directChildren(row, 'c')) {
+      if (!amounts.has(cellColumn(cell.getAttribute('r') || ''))) continue
+      const baseId = cell.getAttribute('s') || '0'
+      let id = fittedStyles.get(baseId)
+      if (!id) {
+        const base = baseStyles[Number(baseId)] || baseStyles[0]
+        if (!base) continue
+        const xf = base.cloneNode(true) as XmlElement
+        let alignment = directChild(xf, 'alignment')
+        if (!alignment) { alignment = styles.createElementNS(SPREADSHEET_NS, 'alignment') as XmlElement; xf.insertBefore(alignment, directChild(xf, 'protection') || directChild(xf, 'extLst') || null) }
+        alignment.setAttribute('wrapText', '0'); alignment.setAttribute('shrinkToFit', '1'); xf.setAttribute('applyAlignment', '1')
+        id = String(directChildren(xfs, 'xf').length); xfs.appendChild(xf); fittedStyles.set(baseId, id)
+      }
+      cell.setAttribute('s', id)
+    }
+  }
+  xfs.setAttribute('count', String(directChildren(xfs, 'xf').length))
+  zip.file(path, serializer.serializeToString(sheet)); zip.file('xl/styles.xml', serializer.serializeToString(styles))
+}
+
+/** Keep effective unit-price decimals instead of rounding 0.0652 to 0.07. */
+async function showFullDocumentUnitPrices(zip: JSZip, mainName: string) {
+  const stylesFile = zip.file('xl/styles.xml')
+  if (!stylesFile) return
+  const parser = new DOMParser(), serializer = new XMLSerializer()
+  const styles = parser.parseFromString(await stylesFile.async('string'), 'application/xml')
+  const root = styles.documentElement as XmlElement, xfs = styleCollection(root, 'cellXfs')
+  if (!xfs) return
+  let formats = styleCollection(root, 'numFmts')
+  if (!formats) { formats = styles.createElementNS(SPREADSHEET_NS, 'numFmts') as XmlElement; root.insertBefore(formats, root.firstChild) }
+  const formatCodes = new Map(directChildren(formats, 'numFmt').map(format => [format.getAttribute('numFmtId') || '', format.getAttribute('formatCode') || '']))
+  const byCode = new Map([...formatCodes].map(([id, code]) => [code, id]))
+  let nextFormat = Math.max(163, ...[...formatCodes.keys()].map(Number)) + 1
+  const bases = directChildren(xfs, 'xf'), derived = new Map<string, string>()
+  for (const [name, path] of await workbookSheetParts(zip)) {
+    const main = name === mainName
+    const generic = name === '发票'
+    const contract = /^(?:实业|全球|印尼)合同(?:·续\d+(?:-\d+)?)?$/.test(name)
+    const invoice = /^(?:实业|全球|印尼)发票(?:·续\d+(?:-\d+)?)?$/.test(name)
+    if (!main && !contract && !invoice && !generic) continue
+    const file = zip.file(path)
+    if (!file) continue
+    const doc = parser.parseFromString(await file.async('string'), 'application/xml'), sheetRoot = doc.documentElement as XmlElement
+    const columns = main ? ['Z', 'AO'] : contract ? ['F', 'G'] : generic ? ['H', 'I'] : ['I', 'J']
+    if (!main) for (const column of columns) widenWorksheetColumn(doc, sheetRoot, XLSX.utils.decode_col(column) + 1, 18)
+    for (const row of Array.from(doc.getElementsByTagNameNS(SPREADSHEET_NS, 'row')) as XmlElement[]) {
+      const rowNo = rowNumber(row)
+      if (main && rowNo < 4) continue
+      const cells = directChildren(row, 'c')
+      const serial = cells.find(cell => cellColumn(cell.getAttribute('r') || '') === (generic ? 'B' : 'A'))
+      const detail = !!serial && Number(directChild(serial, 'v')?.textContent || 0) > 0
+      for (const cell of cells) {
+        const column = cellColumn(cell.getAttribute('r') || '')
+        if (!columns.includes(column) || (!detail && !directChild(cell, 'f')?.textContent?.startsWith('SUM('))) continue
+        const unit = detail && (main || column === columns[0])
+        const baseId = cell.getAttribute('s') || '0', base = bases[Number(baseId)] || bases[0]
+        if (!base) continue
+        let formatId = base.getAttribute('numFmtId') || '0'
+        if (unit) {
+          const original = formatCodes.get(formatId) || '#,##0.0000'
+          const code = /0\.[0#]+/.test(original) ? original.replace(/0\.[0#]+/g, '0.0000########') : original.replace(/0/g, '0.0000########')
+          let id = byCode.get(code)
+          if (!id) {
+            id = String(nextFormat++); byCode.set(code, id); formatCodes.set(id, code)
+            const format = styles.createElementNS(SPREADSHEET_NS, 'numFmt'); format.setAttribute('numFmtId', id); format.setAttribute('formatCode', code); formats.appendChild(format)
+          }
+          formatId = id
+        }
+        const key = `${baseId}:${formatId}`
+        let id = derived.get(key)
+        if (!id) {
+          const xf = base.cloneNode(true) as XmlElement
+          xf.setAttribute('numFmtId', formatId); xf.setAttribute('applyNumberFormat', '1')
+          let alignment = directChild(xf, 'alignment')
+          if (!alignment) { alignment = styles.createElementNS(SPREADSHEET_NS, 'alignment') as XmlElement; xf.insertBefore(alignment, directChild(xf, 'protection') || directChild(xf, 'extLst') || null) }
+          alignment.setAttribute('wrapText', '0'); alignment.setAttribute('shrinkToFit', '1'); xf.setAttribute('applyAlignment', '1')
+          id = String(directChildren(xfs, 'xf').length); xfs.appendChild(xf); derived.set(key, id)
+        }
+        cell.setAttribute('s', id)
+      }
+    }
+    zip.file(path, serializer.serializeToString(doc))
+  }
+  formats.setAttribute('count', String(directChildren(formats, 'numFmt').length))
+  xfs.setAttribute('count', String(directChildren(xfs, 'xf').length))
+  zip.file('xl/styles.xml', serializer.serializeToString(styles))
 }
 
 /** Freeze rows 1:3 and columns A:M on the final main detail worksheet only. */
@@ -2083,6 +2226,8 @@ async function groupGenericInvoice(zip: JSZip, mainName: string, companies: stri
           const unit = String(sourceValue('J', index)).trim()
           const units: Array<[string[], string]> = [
             [['KGM', 'KG', 'KGS', '公斤', '千克'], '千克'],
+            [['TNE', 'TON', 'TONS', '吨'], '吨'],
+            [['ROLL', 'ROLLS', '卷'], '卷'],
             [['PCE', 'PCS', 'PC', '个'], '个'],
             [['SET', 'SETS', '套'], '套'],
             [['M', 'MTR', '米'], '米'],

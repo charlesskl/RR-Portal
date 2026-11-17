@@ -39,7 +39,7 @@ import { publicAsset } from '../deployment'
 import './ShipmentsPage.css'
 import {
   formatShipmentPackingLines, isPaperRope, parseShipmentPacking,
-  shipmentCbmPerCarton, shipmentNetTotalKg, shipmentGrossPerPc, shipmentKgWeight, shipmentPackingAverageQty, shipmentWeightQuantity,
+  shipmentCbmPerCarton, shipmentCbmTotal, shipmentNetTotalKg, shipmentGrossPerPc, shipmentKgWeight, shipmentPackingAverageQty, shipmentWeightQuantity,
 } from '../utils/shipmentWeight'
 
 interface ShipmentSummary {
@@ -555,7 +555,7 @@ export default function ShipmentsPage() {
       ? sourceTotals.reduce((total, source) => total + source.netTotal, 0)
       : shipmentNetTotalKg(it, m)
     const cbmEach = shipmentCbmPerCarton(m?.length, m?.width, m?.height)
-    const cbmTotal = cbmEach * physicalCartons
+    const cbmTotal = shipmentCbmTotal(cbmEach, physicalCartons)
     const invoiceAmount = num(it.invoice_price) * num(it.kg)
     const purchaseAmount = shipmentPurchaseAmount(it)
     return { m, grossTotal, netTotal, cbmEach, cbmTotal, invoiceAmount, purchaseAmount }
@@ -1413,7 +1413,7 @@ export default function ShipmentsPage() {
     for (const [index, it] of items.entries()) {
       const m = it.material_id != null ? matMap.get(it.material_id) : null
       if (!repeatedPacking.has(it._rowKey))
-        cbm += shipmentCbmPerCarton(m?.length, m?.width, m?.height) * (cartonRows[index]?.count ?? (Number(it.cartons) || 0))
+        cbm += shipmentCbmTotal(shipmentCbmPerCarton(m?.length, m?.width, m?.height), cartonRows[index]?.count ?? it.cartons)
       const weightQty = shipmentWeightQuantity(m?.name_zh, it.qty)
       gross += shipmentGrossPerPc(m?.weight_per_carton, effectiveWeighingQty(it, m)) * weightQty
       net += shipmentNetTotalKg(it, m)

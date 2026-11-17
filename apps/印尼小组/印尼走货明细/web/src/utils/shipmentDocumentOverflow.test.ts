@@ -91,7 +91,7 @@ it.each(['RRI', 'RRM'].flatMap(customer => [true, false].map(mixed => ({ custome
     items, materials, seller, productHs: new Map(), images: new Map(), form: { customer, containerNo: 'OVERFLOW-SYNTHETIC', loadDate: '2026-11-11' } })
   const bytes = await blob.arrayBuffer(), zip = await JSZip.loadAsync(bytes)
   const { workbook, result } = await sheets(zip)
-  expect([...result.keys()].filter(name => name.includes('·续')).length).toBeGreaterThan(0)
+  expect([...result.keys()].filter(name => name.includes('·续'))).toEqual([])
   const records = (pattern: RegExp) => [...result].filter(([name]) => pattern.test(name)).flatMap(([, doc]) =>
     Array.from(doc.getElementsByTagNameNS(ns, 'row')).flatMap(row => {
       const r = row.getAttribute('r')!, cells = Array.from(row.getElementsByTagNameNS(ns, 'c'))
@@ -132,7 +132,7 @@ it.each(['RRI', 'RRM'].flatMap(customer => [true, false].map(mixed => ({ custome
       bold: font.getElementsByTagNameNS(ns, 'b').length,
       edges: ['left', 'right', 'top', 'bottom'].map(edge => border.getElementsByTagNameNS(ns, edge)[0]?.getAttribute('style')) }
   }
-  for (const [name, doc] of result) if (name.includes('·续')) {
+  for (const [name, doc] of result) if (/^(?:(实业|全球|印尼)(合同|发票)|装箱单)$/.test(name)) {
     for (const cell of Array.from(doc.getElementsByTagNameNS(ns, 'c'))) {
       const xf = xfs[Number(cell.getAttribute('s') || 0)]
       expect(xf).toBeDefined()
@@ -144,7 +144,45 @@ it.each(['RRI', 'RRM'].flatMap(customer => [true, false].map(mixed => ({ custome
     const area = Array.from(workbook.getElementsByTagNameNS(ns, 'definedName')).find(n => n.getAttribute('name') === '_xlnm.Print_Area' && n.getAttribute('localSheetId') === String(index))
     expect(area?.textContent).toContain(`'${name}'!$A$1:`)
     expect(doc.getElementsByTagNameNS(ns, 'mergeCell').length).toBeGreaterThan(0)
-    const base = result.get(name.split('·续')[0])
-    if (base) expect(styleAt(doc, 'B24')).toEqual(styleAt(base, 'B24'))
+    expect(styleAt(doc, 'B24').name).toBeTruthy()
+    expect(doc.getElementsByTagNameNS(ns, 'pageSetup')[0].getAttribute('fitToHeight')).toBe('0')
+    for (const formula of Array.from(doc.getElementsByTagNameNS(ns, 'f'))) expect(formula.textContent).not.toContain('·续')
   }
+}, 120000)
+
+it.each(['RRI', 'RRM'])('52、53、54 接到原印尼工作表下方，公式、页界和总计覆盖所有单据（%s）', async customer => {
+  const numbers = ['52', '53', '54']
+  const items = numbers.map((number, index) => ({ material_id: index + 1, supplier: seller.keyword,
+    qty: index + 1, kg: index + 1, price: .0652, currency: 'US$', cartons: 1,
+    contract_no: 'YN2600' + number, invoice_no: 'YNA2600' + number, bl_head: 'PT. SYNTHETIC' }))
+  const materials = new Map(items.map(item => [item.material_id, { id: item.material_id, name_zh: '物料' + item.material_id,
+    product_code: 'SYN-' + item.material_id, unit_kg: 'PCE', net_per_pc: 1 }]))
+  const blob = await buildCustomsWorkbook({ templateBuffer: template(customer), indonesiaTemplateBuffer: Uint8Array.from(readFileSync(new URL('../../public/template-customs.xlsx', import.meta.url))).buffer,
+    items, materials, seller, productHs: new Map(), images: new Map(), form: { customer, containerNo: '123' } })
+  const bytes = await blob.arrayBuffer(), zip = await JSZip.loadAsync(bytes), book = XLSX.read(bytes, { type: 'array' })
+  const { result, workbook } = await sheets(zip)
+  expect(book.SheetNames.some(name => name.includes('·续'))).toBe(false)
+  for (const name of ['印尼合同', '印尼发票', '装箱单']) {
+    const sheet = book.Sheets[name], doc = result.get(name)!
+    const serials = Object.keys(sheet).filter(address => /^A\d+$/.test(address) && Number(sheet[address].v) > 0)
+    expect(serials.map(address => sheet[address].v)).toEqual([1, 2, 3])
+    for (const address of serials) {
+      const row = address.slice(1), serial = Number(sheet[address].v), formula = sheet['C' + row]?.f
+      if (name === '印尼合同') {
+        expect(formula).toContain(`'123'!A:A=A${row}`)
+        const header = formula!.match(/V:V=\$H\$(\d+)/)![1]
+        expect(sheet['H' + header].v).toBe(items[serial - 1].contract_no)
+      }
+    }
+    const numbersPresent = Object.values(sheet).filter(cell => typeof cell.v === 'string').map(cell => cell.v)
+    for (const item of items) expect(numbersPresent).toContain(name === '印尼合同' ? item.contract_no : item.invoice_no)
+    expect(doc.getElementsByTagNameNS(ns, 'brk').length).toBeGreaterThan(0)
+    const sheetIndex = book.SheetNames.indexOf(name)
+    const area = Array.from(workbook.getElementsByTagNameNS(ns, 'definedName')).find(n => n.getAttribute('name') === '_xlnm.Print_Area' && n.getAttribute('localSheetId') === String(sheetIndex))!.textContent!
+    expect(Number(area.match(/\$(\d+)$/)![1])).toBeGreaterThan(Number(serials.at(-1)!.slice(1)))
+  }
+  const packing = book.Sheets['装箱单']
+  const grand = Object.keys(packing).filter(address => /^C\d+$/.test(address) && packing[address].v === '总合计')
+  expect(grand).toHaveLength(1)
+  expect(packing['D' + grand[0].slice(1)].f!.match(/D\d+/g)).toHaveLength(3)
 }, 120000)

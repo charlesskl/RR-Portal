@@ -39,7 +39,8 @@ model User {
 // status: 'draft' 草稿 | 'active' 生效 | 'archived' 作废
 model Product {
   id            Int       @id @default(autoincrement())
-  productNo     String    @unique // 产品货号（款号，如 11494），全厂唯一
+  productNo     String    // 产品货号，同厂区唯一
+  factoryId     String    @default("XINGXIN")
   iterationNo   String    @default("V1") // 迭代号（模板改价代次 V1/V2）
   status        String    @default("draft")
   effectiveDate DateTime? // 版本生效日期（生效时填）
@@ -52,6 +53,7 @@ model Product {
   parts  ProductPart[]
   orders Order[]
 
+  @@unique([factoryId, productNo])
   @@map("products")
 }
 

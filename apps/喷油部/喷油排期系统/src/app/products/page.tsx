@@ -24,6 +24,7 @@ export default async function ProductsPage() {
           <Link href="/products/new" className="bg-mint-400 hover:bg-mint-700 text-white px-4 py-2 rounded-btn text-sm font-semibold shadow-[0_2px_8px_rgba(52,211,153,0.30)]">+ 新建产品</Link>
         </div>
       </div>
+      <p className="mb-4 text-sm text-text-secondary">当前厂区：{session.factoryId === "HUADENG" ? "华登" : "兴信"}。仅显示和维护本厂区的产品核价表。</p>
       <ProductsTable products={products} isAdmin={session.role === "admin" || session.role === "manager"} />
     </div>
   );

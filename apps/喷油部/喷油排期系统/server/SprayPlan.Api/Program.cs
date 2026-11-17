@@ -74,6 +74,9 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
+    await ProductFactorySchema.Ensure(scope.ServiceProvider.GetRequiredService<AppDbContext>());
+
+using (var scope = app.Services.CreateScope())
     await DailyLineNoteSchema.Ensure(scope.ServiceProvider.GetRequiredService<AppDbContext>());
 using (var scope = app.Services.CreateScope())
     await MaterialSchema.Ensure(scope.ServiceProvider.GetRequiredService<AppDbContext>());

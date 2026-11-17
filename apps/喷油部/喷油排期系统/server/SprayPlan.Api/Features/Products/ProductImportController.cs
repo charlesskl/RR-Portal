@@ -127,6 +127,8 @@ public class ProductImportController(AppDbContext db) : ControllerBase
 
             var existing = await db.Products.Include(p => p.Parts)
                 .FirstOrDefaultAsync(p => p.ProductNo == cp.ProductNo);
+            if (existing is null && cp.ExistingProductId is not null)
+                return Conflict(new { error = $"货号 {cp.ProductNo} 不在当前厂区或已变化，请重新预览" });
             if (existing is not null)
             {
                 // 兼容旧版客户端：没有携带预览返回的产品 ID 时仍按原规则跳过，不允许盲目覆盖。

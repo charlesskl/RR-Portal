@@ -86,10 +86,11 @@ public class AppDbContext : DbContext
         m.Property(x => x.EquipmentKind).HasColumnName("equipmentKind");
         m.HasOne(x => x.Line).WithMany(x => x.Machines).HasForeignKey(x => x.LineId);
 
-        // 产品 products（货号唯一，日期毫秒转换器）
+        // 产品 products（同厂区货号唯一，日期毫秒转换器）
         var p = b.Entity<Product>();
         p.ToTable("products");
-        p.HasIndex(x => x.ProductNo).IsUnique();
+        p.HasIndex(x => new { x.FactoryId, x.ProductNo }).IsUnique();
+        p.Property(x => x.FactoryId).HasColumnName("factoryId");
         p.Property(x => x.ProductNo).HasColumnName("productNo");
         p.Property(x => x.IterationNo).HasColumnName("iterationNo");
         p.Property(x => x.Status).HasColumnName("status");
@@ -120,6 +121,8 @@ public class AppDbContext : DbContext
         pp.HasIndex(x => new { x.ProductId, x.PartGroupId });
         pp.Property(x => x.Remark).HasColumnName("remark");
         pp.HasOne(x => x.Product).WithMany(x => x.Parts).HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
+        p.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
+        pp.HasQueryFilter(x => CanSeeAllFactories || x.Product!.FactoryId == CurrentFactoryId);
 
         // ===== 订单 3 表 =====
         var o = b.Entity<Order>();
@@ -312,6 +315,7 @@ public class AppDbContext : DbContext
             var factory = entry.Entity switch
             {
                 User x => x.FactoryId,
+                Product x => x.FactoryId,
                 Order x => x.FactoryId,
                 ProductionLine x => x.FactoryId,
                 Machine x => x.FactoryId,
@@ -355,6 +359,7 @@ public class AppDbContext : DbContext
         switch (entity)
         {
             case User x: x.FactoryId = factoryId; break;
+            case Product x: x.FactoryId = factoryId; break;
             case Order x: x.FactoryId = factoryId; break;
             case ProductionLine x: x.FactoryId = factoryId; break;
             case Machine x: x.FactoryId = factoryId; break;

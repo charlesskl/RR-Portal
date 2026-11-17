@@ -31,10 +31,11 @@ RUN npx prisma db push --skip-generate \
     && npm prune --omit=dev
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS api-build
-WORKDIR /src
+WORKDIR /src/server/SprayPlan.Api
 COPY server/SprayPlan.Api/SprayPlan.Api.csproj ./
 RUN dotnet restore SprayPlan.Api.csproj
 COPY server/SprayPlan.Api/ ./
+COPY prisma/migrations/20261117000000_product_factory_scope/migration.sql /src/prisma/migrations/20261117000000_product_factory_scope/migration.sql
 RUN dotnet publish SprayPlan.Api.csproj -c Release --no-restore -o /publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0-bookworm-slim AS runtime

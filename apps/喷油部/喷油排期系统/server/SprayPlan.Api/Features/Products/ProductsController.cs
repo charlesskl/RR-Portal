@@ -159,7 +159,7 @@ public class ProductsController(AppDbContext db) : ControllerBase
         if (archived.Count == 0) return Ok(new { deleted = 0, skipped = 0 });
 
         var archivedIds = archived.Select(product => product.Id).ToList();
-        var referencedIds = await db.Orders
+        var referencedIds = await db.Orders.IgnoreQueryFilters()
             .Where(order => order.ProductId != null && archivedIds.Contains(order.ProductId.Value))
             .Select(order => order.ProductId!.Value)
             .Distinct()

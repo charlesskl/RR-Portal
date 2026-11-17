@@ -1,10 +1,10 @@
 namespace SprayPlan.Api.Entities;
 
-// 对应现有 prisma model Product（@@map("products")，货号唯一）。
-// 一条 = 一个货号。
+// 同一厂区内货号唯一；两厂区分别维护核价与工艺。
 public class Product
 {
     public int Id { get; set; }
+    public string FactoryId { get; set; } = "XINGXIN";
     public string ProductNo { get; set; } = "";
     public string IterationNo { get; set; } = "V1";
     public string Status { get; set; } = "draft";   // draft|active|archived

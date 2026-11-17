@@ -78,6 +78,74 @@ public class PlanWorkbenchTests : IAsyncLifetime
         Assert.All((await Rows()).Where(r => r.LockedReason == null), r => Assert.Equal(100, r.Values.PlannedQty));
     }
 
+    [Fact]
+    public async Task BalancesIncludeAllDatesAndLines_SeparateStepsPartsOrdersAndFactories_IgnoreDeleted()
+    {
+        await AddFuture(80, 120, part: "头");
+        await AddFuture(500, 120, step: 2, part: "头");
+        await factory.WithDbAsync(async db => {
+            var line = new ProductionLine { Name = "另一条移印拉", CraftType = "移印" };
+            db.ProductionLines.Add(line); await db.SaveChangesAsync();
+            db.ProductionPlans.AddRange(
+                new() { OrderId = 1, LineId = line.Id, PartName = "头", PlanDate = Day.AddDays(120), PlannedQty = 120 },
+                new() { OrderId = 1, LineId = 1, PartName = "头", PlanDate = Day, PlannedQty = 900, DeletedAt = DateTime.UtcNow },
+                new() { OrderId = 1, LineId = 1, FactoryId = "HUADENG", PartName = "头", PlanDate = Day, PlannedQty = 900 });
+            var other = new Order { ExternalOrderNo = "OTHER", PartQtys = [new() { PartName = "头", Qty = 900 }] };
+            db.ProductionPlans.Add(new() { Order = other, LineId = 1, PartName = "头", PlanDate = Day, PlannedQty = 900 });
+            await db.SaveChangesAsync();
+        });
+        var snapshot = await ProtectedSnapshot();
+        var rows = (await client.GetFromJsonAsync<Data>("/api/plans/workbench?from=2030-01-07&to=2030-01-07&orderId=1"))!.Rows;
+        Assert.Equal(2, rows.Count);
+        var row = rows.Single(r => r.PartName == "头"); var balance = row.Balance!;
+        Assert.Equal(1, row.OrderId); Assert.Null(row.GoodQty);
+        Assert.Equal(500, balance.Demand); Assert.Equal(18, balance.Produced);
+        Assert.Equal(300, balance.UnreportedPlanned); Assert.Equal(182, balance.RemainingToSchedule);
+        Assert.Equal(100, rows.Single(r => r.PartName == "脚").Balance!.UnreportedPlanned);
+        Assert.Equal(snapshot, await ProtectedSnapshot());
+    }
+
+    [Theory]
+    [InlineData(0, 20, 0, 0)]
+    [InlineData(null, 17, 17, 1)]
+    [InlineData(null, null, 20, 1)]
+    public async Task BalanceActualsUseValidationQuantityBasis_AndMarkLegacyFallback(int? good, int? reported, int expected, int fallback)
+    {
+        await factory.WithDbAsync(async db => { var actual = await db.ProductionPlans.FindAsync(3); actual!.GoodQty = good; actual.ReportedQty = reported; await db.SaveChangesAsync(); });
+        var balance = (await Rows()).Single(r => r.Id == 1).Balance!;
+        Assert.Equal(expected, balance.Produced); Assert.Equal(fallback, balance.ActualFallbackCount);
+        Assert.Equal(400 - expected, balance.RemainingToSchedule);
+    }
+
+    [Theory]
+    [InlineData(false, 450, 32)]
+    [InlineData(true, 400, 82)]
+    public async Task PreviewAndSaveBalancesIncludeDraftAndAutomaticDeductionsOutsideLoadedRange(bool auto, long planned, long remaining)
+    {
+        await AddFuture(300, 120, part: "头");
+        var row = (await Rows()).Single(r => r.Id == 1); var snapshot = await ProtectedSnapshot();
+        var request = new WorkbenchRequest([Change(row, v => v with { PlannedQty = 150 })], AutoDeduct: auto);
+        var response = await client.PostAsJsonAsync("/api/plans/workbench", request); response.EnsureSuccessStatusCode();
+        var preview = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var balance = Assert.Single(preview.GetProperty("balances").EnumerateArray());
+        Assert.Equal(18, balance.GetProperty("produced").GetInt64());
+        Assert.Equal(planned, balance.GetProperty("unreportedPlanned").GetInt64());
+        Assert.Equal(remaining, balance.GetProperty("remainingToSchedule").GetInt64());
+        Assert.Equal(100, (await Rows()).Single(r => r.Id == 1).Values.PlannedQty);
+        (await client.PostAsJsonAsync("/api/plans/workbench", request with { Preview = false, AllocationToken = preview.GetProperty("allocationToken").GetString() })).EnsureSuccessStatusCode();
+        Assert.Equal(planned, (await Rows()).Single(r => r.Id == 1).Balance!.UnreportedPlanned);
+        Assert.Equal(snapshot, await ProtectedSnapshot());
+    }
+
+    [Fact]
+    public async Task RemainingNeverGoesNegative_AndLargePlanTotalsUseLong()
+    {
+        await AddFuture(2_000_000_000, 120, part: "头");
+        await AddFuture(2_000_000_000, 121, part: "头");
+        var balance = (await Rows()).Single(r => r.Id == 1).Balance!;
+        Assert.Equal(4_000_000_100L, balance.UnreportedPlanned); Assert.Equal(0, balance.RemainingToSchedule);
+    }
+
     [Theory]
     [InlineData(0, 20, 0, false)]
     [InlineData(null, 17, 17, true)]
@@ -391,6 +459,9 @@ public class PlanWorkbenchTests : IAsyncLifetime
         var response = await client.PostAsJsonAsync("/api/plans/workbench/batch", request); response.EnsureSuccessStatusCode();
         var preview = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, preview.GetProperty("adjustedPlans").GetInt32()); Assert.Equal(1, preview.GetProperty("createdPlans").GetInt32());
+        var newBalance = preview.GetProperty("balances").EnumerateArray().Single(b => b.GetProperty("orderId").GetInt32() == option.OrderId);
+        Assert.Equal(0, newBalance.GetProperty("produced").GetInt64()); Assert.Equal(80, newBalance.GetProperty("unreportedPlanned").GetInt64());
+        Assert.Equal(920, newBalance.GetProperty("remainingToSchedule").GetInt64());
         await factory.WithDbAsync(async db => Assert.False(await db.ProductionPlans.AnyAsync(p => p.OrderId == option.OrderId)));
         var save = await client.PostAsJsonAsync("/api/plans/workbench/batch", request with { Preview = false, AllocationToken = preview.GetProperty("allocationToken").GetString() });
         save.EnsureSuccessStatusCode(); Assert.Equal(snapshot, await ProtectedSnapshot());

@@ -4,7 +4,8 @@ export const fields = ["planDate", "lineId", "machineNos", "plannedQty", "worker
 export type Field = typeof fields[number];
 export type PlanValues = { planDate: string; lineId: number; machineNos: string[]; plannedQty: number; workerCount: number; workHours: number; remark: string };
 export type Draft = Record<Field, string>;
-export type WorkbenchRow = { id: number; token: string; orderNo: string; productNo: string; partName: string; stepNo: number; craft: string; demand: number; goodQty: number | null; inboundQty: number | null; lockedReason: string | null; values: PlanValues };
+export type WorkbenchBalance = { orderId: number; partName: string; stepNo: number; demand: number; produced: number; unreportedPlanned: number; remainingToSchedule: number; actualFallbackCount: number };
+export type WorkbenchRow = { id: number; token: string; orderId?: number; orderNo: string; productNo: string; partName: string; stepNo: number; craft: string; demand: number; balance?: WorkbenchBalance; goodQty: number | null; inboundQty: number | null; lockedReason: string | null; values: PlanValues };
 export type WorkbenchLine = { id: number; name: string; craftType: string; isActive: boolean; dailyLimit: number; machineNos: string[] };
 export const draftOf = (v: PlanValues): Draft => ({ ...v, lineId: String(v.lineId), machineNos: v.machineNos.join("、"), plannedQty: String(v.plannedQty), workerCount: String(v.workerCount), workHours: String(v.workHours) });
 export const changed = (row: WorkbenchRow, draft?: Draft) => !!draft && fields.some(f => draft[f] !== draftOf(row.values)[f]);

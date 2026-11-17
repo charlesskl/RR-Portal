@@ -1,12 +1,19 @@
 import { test, expect } from "@playwright/test";
 import { createServer, type Server } from "node:http";
 import { SignJWT } from "jose";
-let api: Server, failSave = false, failRead = false, writes = 0, previews = 0, autoCase = false, missingAddEndpoint = false, excessCase = false;
+let api: Server, failSave = false, failRead = false, writes = 0, previews = 0, autoCase = false, missingAddEndpoint = false, excessCase = false, missingBalances = false;
 let submitted: { autoDeduct: boolean; allocationToken?: string }[] = [];
 const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Shanghai" }).format(new Date());
-const initial = () => [1, 2, 3].map(id => ({ id, token: `token-${id}`, orderNo: `ORDER-${id}`, productNo: "77711", partName: ["果汁瓶盖", "热蜂蜜瓶身", "已报工水瓶"][id - 1], stepNo: 1, craft: "手喷", demand: 50000, goodQty: id === 3 ? 500 : null, inboundQty: id === 3 ? 450 : null, lockedReason: id === 3 ? "已录实绩" : null,
+const initial = () => [1, 2, 3].map(id => ({ id, orderId: id, token: `token-${id}`, orderNo: `ORDER-${id}`, productNo: "77711", partName: ["果汁瓶盖", "热蜂蜜瓶身", "已报工水瓶"][id - 1], stepNo: 1, craft: "手喷", demand: 50000, goodQty: id === 3 ? 500 : null, inboundQty: id === 3 ? 450 : null, lockedReason: id === 3 ? "已录实绩" : null,
   values: { planDate: today, lineId: 1, machineNos: [], plannedQty: 10000, workerCount: 2, workHours: 8, remark: "" } }));
 let rows = initial();
+function balanceOf(row: typeof rows[0], effective = rows) {
+  const group = effective.filter(r => r.orderId === row.orderId && r.partName === row.partName && r.stepNo === row.stepNo);
+  const produced = (row.orderId === 9 || row.orderId === 3 ? 0 : 2000) + group.reduce((sum, r) => sum + (r.goodQty ?? 0), 0);
+  const unreportedPlanned = (row.orderId === 9 || row.orderId === 3 ? 0 : 20000) + group.filter(r => r.goodQty == null).reduce((sum, r) => sum + r.values.plannedQty, 0);
+  return { orderId: row.orderId, partName: row.partName, stepNo: row.stepNo, demand: row.demand, produced, unreportedPlanned,
+    remainingToSchedule: Math.max(0, row.demand - produced - unreportedPlanned), actualFallbackCount: 0 };
+}
 test.beforeAll(async () => {
   api = createServer(async (request, response) => {
     let text = ""; for await (const chunk of request) text += chunk;
@@ -44,15 +51,18 @@ test.beforeAll(async () => {
         }
       }
       submitted.push({ autoDeduct: body.autoDeduct, allocationToken: body.allocationToken });
+      const effective = rows.map(row => { const c = changes.find((c: { id: number }) => c.id === row.id); return c ? { ...row, values: c.after } : row; });
+      for (const addition of body.additions ?? []) effective.push({ ...initial()[0], id: addition.clientId, orderId: 9, orderNo: "TEMP-ORDER", partName: "临时产品", demand: 1000, values: addition.values });
+      const balances = missingBalances ? undefined : effective.map(row => balanceOf(row, effective));
       if (body.preview) previews++;
       else { writes++; rows = rows.map(row => { const change = changes.find((c: { id: number }) => c.id === row.id); return change ? { ...row, token: row.token + "v", values: change.after } : row; });
-        for (const addition of body.additions ?? []) rows.push({ ...initial()[0], id: 100 + rows.length, token: "created", orderNo: "TEMP-ORDER", productNo: "NEW-900", partName: "临时产品", values: addition.values });
+        for (const addition of body.additions ?? []) rows.push({ ...initial()[0], id: 100 + rows.length, orderId: 9, demand: 1000, token: "created", orderNo: "TEMP-ORDER", productNo: "NEW-900", partName: "临时产品", values: addition.values });
       }
-      return response.end(JSON.stringify({ adjustedPlans: changes.length, createdPlans: (body.additions ?? []).length, preview: body.preview, changes, transfers, allocationToken: "snapshot-1", warnings: ["部分订单仍需补排，请核对剩余需求"] }));
+      return response.end(JSON.stringify({ adjustedPlans: changes.length, createdPlans: (body.additions ?? []).length, preview: body.preview, changes, balances, transfers, allocationToken: "snapshot-1", warnings: ["部分订单仍需补排，请核对剩余需求"] }));
     }
     if (url.pathname === "/api/plans/workbench") {
       if (failRead && writes) { response.statusCode = 500; return response.end(JSON.stringify({ error: "模拟读取失败" })); }
-      return response.end(JSON.stringify({ rows: autoCase ? rows.filter(r => r.id !== 4) : rows, lines: [
+      return response.end(JSON.stringify({ rows: (autoCase ? rows.filter(r => r.id !== 4) : rows).map(row => ({ ...row, balance: missingBalances ? undefined : balanceOf(row) })), lines: [
         { id: 1, name: "A拉：手喷", craftType: "手喷", isActive: true, dailyLimit: 200000, machineNos: ["1 号机 (世通)", "2 号机 (世通)"] },
         { id: 2, name: "备用手喷拉", craftType: "手喷", isActive: true, dailyLimit: 100000, machineNos: [] },
       ] }));
@@ -64,11 +74,51 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await new Promise<void>(resolve => api.close(() => resolve())); });
 test.beforeEach(async ({ context }) => {
-  rows = initial(); failSave = false; failRead = false; writes = 0; previews = 0; autoCase = false; missingAddEndpoint = false; excessCase = false; submitted = [];
+  rows = initial(); failSave = false; failRead = false; writes = 0; previews = 0; autoCase = false; missingAddEndpoint = false; excessCase = false; missingBalances = false; submitted = [];
   const token = await new SignJWT({ userId: "1", username: "clerk", factoryId: "XINGXIN", "http://schemas.microsoft.com/ws/2008/06/identity/claims/role": "clerk" })
     .setProtectedHeader({ alg: "HS256" }).setIssuer("order-parts-test").setExpirationTime("1h")
     .sign(new TextEncoder().encode("order-parts-test-only-key-32-characters-long"));
   await context.addCookies([{ name: "sprayplan_session", value: token, url: "http://127.0.0.1:18401" }]);
+});
+
+test("展示订单总需求及累计统计，草稿经检查更新数量，编辑后恢复已保存口径，保存刷新保持结果", async ({ page }) => {
+  await page.goto("/schedule/table");
+  await expect(page.getByRole("columnheader", { name: "订单总需求", exact: true })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "已生产 / 入库（本行）", exact: true })).toBeVisible();
+  await expect(page.getByLabel("计划 #1 累计已生产", { exact: true })).toHaveText("2,000");
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("30,000");
+  await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toHaveText("18,000");
+  await page.getByLabel("计划 #1 计划数", { exact: true }).fill("8000");
+  await expect(page.getByText("当前统计按已保存排期；", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "检查改动（1）" }).click();
+  await expect(page.getByLabel("计划 #1 订单总需求", { exact: true })).toHaveText("50,000");
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("28,000");
+  await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toHaveText("20,000");
+  await page.getByLabel("计划 #1 计划数", { exact: true }).fill("9000");
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("30,000");
+  await page.getByRole("button", { name: "检查改动（1）" }).click();
+  await page.getByRole("button", { name: "确认统一保存（1）" }).click();
+  await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toHaveText("19,000");
+  await page.reload();
+  await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toHaveText("19,000");
+});
+
+test("加量并自动扣减筛选外后续排期时，累计未报工计划及补排缺口保持不变", async ({ page }) => {
+  autoCase = true; rows.push({ ...initial()[0], id: 4, token: "future", values: { ...initial()[0].values, planDate: "2030-12-10" } });
+  await page.goto("/schedule/table");
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("40,000");
+  await page.getByLabel("计划 #1 计划数", { exact: true }).fill("15000");
+  await page.getByRole("button", { name: "检查改动（1）" }).click();
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("40,000");
+  await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toHaveText("8,000");
+  expect(writes).toBe(0);
+});
+
+test("统计接口未就绪时显示未加载，不能把缺失统计误显示为零", async ({ page }) => {
+  missingBalances = true; await page.goto("/schedule/table");
+  await expect(page.getByLabel("计划 #1 订单总需求", { exact: true })).toHaveText("50,000");
+  await expect(page.getByLabel("计划 #1 累计已生产", { exact: true })).toHaveText("—");
+  await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toContainText("统计未加载");
 });
 
 test("超排显示需求、实绩、草稿计划及跨日期明细，保留草稿并在再编辑后清除旧明细", async ({ page }) => {
@@ -205,6 +255,8 @@ test("筛选栏增加临时产品排期，与原有修改统一预览和保存�
   await expect(footer.getByRole("button", { name: "检查改动（2）" })).toBeVisible();
   await footer.getByRole("button", { name: "检查改动（2）" }).click();
   await expect(page.getByRole("region", { name: "统一保存预览" })).toContainText("临时产品");
+  await expect(page.getByLabel("新增排期 1 未报工计划", { exact: true })).toHaveText("100");
+  await expect(page.getByLabel("新增排期 1 尚需补排", { exact: true })).toHaveText("900");
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   const after = await footer.boundingBox(); expect(Math.abs(after!.y - before!.y)).toBeLessThan(1);
   await page.screenshot({ path: testInfo.outputPath("add-plan-fixed-footer.png"), fullPage: true });

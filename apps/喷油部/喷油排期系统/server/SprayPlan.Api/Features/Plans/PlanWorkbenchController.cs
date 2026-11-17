@@ -20,7 +20,10 @@ public record WorkbenchRequest(List<WorkbenchChange>? Changes, bool Preview = tr
 public record WorkbenchTransfer(int SourcePlanId, string SourceDate, int TargetPlanId, string TargetDate,
     long Quantity, string OrderNo, string PartName, int StepNo);
 public record WorkbenchRow(int Id, string Token, string OrderNo, string ProductNo, string PartName,
-    int StepNo, string Craft, long Demand, int? GoodQty, int? InboundQty, string? LockedReason, WorkbenchValues Values);
+    int StepNo, string Craft, long Demand, int? GoodQty, int? InboundQty, string? LockedReason, WorkbenchValues Values,
+    int OrderId = 0, WorkbenchBalance? Balance = null);
+public record WorkbenchBalance(int OrderId, string PartName, int StepNo, long Demand, long Produced,
+    long UnreportedPlanned, long RemainingToSchedule, int ActualFallbackCount);
 
 // 统一保存只接受计划字段，实绩、入库、库存及订单需求不在此接口的写入范围。
 [ApiController]
@@ -42,6 +45,15 @@ public class PlanWorkbenchController(AppDbContext db) : ControllerBase
         : PlanDateRules.HasActuals(p) ? "已录实绩" : !PlanDateRules.CanReschedule(p) ? "订单已完工或作废" : null;
     static string PartKey(ProductionPlan p) => $"{p.OrderId}|{p.PartName}";
     static long CommittedQty(ProductionPlan p) => p.DeletedAt != null ? 0 : PlanDateRules.HasActuals(p) ? p.GoodQty ?? p.ReportedQty ?? p.PlannedQty : p.PlannedQty;
+    static WorkbenchBalance Balance(IEnumerable<ProductionPlan> source, long demand)
+    {
+        var rows = source.ToList(); var first = rows[0];
+        var active = rows.Where(p => p.DeletedAt == null).ToList();
+        var produced = active.Where(PlanDateRules.HasActuals).Sum(CommittedQty);
+        var planned = active.Where(p => !PlanDateRules.HasActuals(p)).Sum(CommittedQty);
+        return new(first.OrderId, first.PartName, first.StepNo, demand, produced, planned,
+            Math.Max(0, demand - produced - planned), active.Count(p => PlanDateRules.HasActuals(p) && p.GoodQty == null));
+    }
 
     [HttpGet]
     public async Task<IActionResult> Get(string? from, string? to, int? orderId)
@@ -54,6 +66,15 @@ public class PlanWorkbenchController(AppDbContext db) : ControllerBase
             .Include(p => p.Order!).ThenInclude(o => o.PartQtys)
             .OrderBy(p => p.PlanDate).ThenBy(p => p.LineId).ThenBy(p => p.Id).Take(5001).ToListAsync();
         if (plans.Count > 5000) return BadRequest(new { error = "计划超过 5000 行，请缩小日期范围" });
+        var orderIds = plans.Select(p => p.OrderId).Distinct().ToList();
+        // 日期筛选仅决定显示行；统计覆盖这些订单在本厂区全部日期和拉别的有效计划。
+        var allDates = await db.ProductionPlans.AsNoTracking().Where(p => p.DeletedAt == null && orderIds.Contains(p.OrderId))
+            .Select(p => new ProductionPlan { OrderId = p.OrderId, PartName = p.PartName, StepNo = p.StepNo,
+                PlannedQty = p.PlannedQty, Status = p.Status, GoodQty = p.GoodQty, ReportedQty = p.ReportedQty, InboundQty = p.InboundQty }).ToListAsync();
+        var demands = plans.GroupBy(p => p.OrderId).Select(g => g.First()).SelectMany(p => p.Order!.PartQtys.Select(q => new { p.OrderId, q.PartName, q.Qty }))
+            .GroupBy(q => (q.OrderId, q.PartName)).ToDictionary(g => g.Key, g => g.Sum(q => (long)q.Qty));
+        var balances = allDates.GroupBy(p => (p.OrderId, p.PartName, p.StepNo)).ToDictionary(g => g.Key,
+            g => Balance(g, demands.GetValueOrDefault((g.Key.OrderId, g.Key.PartName))));
         var ids = plans.Select(p => p.Id).ToList();
         var inbound = (await db.InboundApplications.Where(a => ids.Contains(a.SourcePlanId)).Select(a => a.SourcePlanId).ToListAsync()).ToHashSet();
         var lines = await db.ProductionLines.AsNoTracking().OrderBy(l => l.Name).ToListAsync();
@@ -62,7 +83,7 @@ public class PlanWorkbenchController(AppDbContext db) : ControllerBase
             rows = plans.Select(p => new WorkbenchRow(p.Id, Token(p), p.Order?.ExternalOrderNo ?? "—",
                 p.Order?.Product?.ProductNo ?? "待补产品", p.PartName, p.StepNo, p.Craft,
                 p.Order?.PartQtys.Where(q => q.PartName == p.PartName).Sum(q => (long)q.Qty) ?? 0,
-                p.GoodQty, p.InboundQty, Locked(p, inbound), Values(p))),
+                p.GoodQty, p.InboundQty, Locked(p, inbound), Values(p), p.OrderId, balances.GetValueOrDefault((p.OrderId, p.PartName, p.StepNo)))),
             lines = lines.Select(l => new { l.Id, l.Name, l.CraftType, l.IsActive, dailyLimit = l.DailyCapacityLimit,
                 machineNos = machines.Where(m => m.LineId == l.Id).Select(m => m.MachineNo).OrderBy(n => n).ToList() })
         });
@@ -298,6 +319,8 @@ public class PlanWorkbenchController(AppDbContext db) : ControllerBase
         }
         var createdPlanIds = new List<object>();
         var result = new { adjustedPlans = changed.Count, createdPlans = newRows.Count, createdPlanIds, preview = request.Preview, allocationToken, transfers, warnings = warnings.Distinct().ToList(),
+            balances = relevant.GroupBy(p => (p.OrderId, p.PartName, p.StepNo)).Select(g => Balance(g,
+                g.First().Order!.PartQtys.Where(q => q.PartName == g.Key.PartName).Sum(q => (long)q.Qty))).ToList(),
             changes = changed.Select(p => new { p.Id, created = newRows.Contains(p), automatic = automatic.Contains(p.Id), removed = p.DeletedAt != null,
                 orderNo = p.Order!.ExternalOrderNo, p.PartName, p.StepNo,
                 before = before[p.Id], after = p.DeletedAt != null ? Values(p) with { PlannedQty = 0 } : Values(p) }).ToList() };

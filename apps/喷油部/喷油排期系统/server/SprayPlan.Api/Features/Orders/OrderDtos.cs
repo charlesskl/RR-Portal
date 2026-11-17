@@ -33,4 +33,4 @@ public record OrderProductPartDto(int Id, string PartName, string Craft, int Par
 public record OrderProductDto(int Id, string ProductNo, List<OrderProductPartDto> Parts);
 // QtyEditable：非作废且已补全产品的订单允许更正需求，写入仍受角色鉴权。
 public record OrderDetail(int Id, string ExternalOrderNo, int? ProductId, DateTime OrderDate, DateTime? DeliveryDate, string Status, bool IsMA, bool IsUrgent, string? Remark, string CreatedBy, OrderProductDto? Product, List<OrderPartQtyDto> PartQtys, bool QtyEditable,
-    List<OrderProductDto>? Products = null, List<PartScheduleBalance>? ScheduleBalances = null);
+    List<OrderProductDto>? Products = null, List<PartScheduleBalance>? ScheduleBalances = null, List<OrderImportReceiptDto>? ImportReceipts = null);

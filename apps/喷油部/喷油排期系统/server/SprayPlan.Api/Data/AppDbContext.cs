@@ -34,6 +34,7 @@ public class AppDbContext : DbContext
     public DbSet<ProductionLine> ProductionLines => Set<ProductionLine>();
     public DbSet<Machine> Machines => Set<Machine>();
     public DbSet<Product> Products => Set<Product>();
+    public DbSet<OrderImportReceipt> OrderImportReceipts => Set<OrderImportReceipt>();
     public DbSet<ProductPart> ProductParts => Set<ProductPart>();
     public DbSet<CraftAlias> CraftAliases => Set<CraftAlias>();
     public DbSet<EquipmentKind> EquipmentKinds => Set<EquipmentKind>();
@@ -123,6 +124,22 @@ public class AppDbContext : DbContext
         pp.HasOne(x => x.Product).WithMany(x => x.Parts).HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
         p.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
         pp.HasQueryFilter(x => CanSeeAllFactories || x.Product!.FactoryId == CurrentFactoryId);
+
+        var receipt = b.Entity<OrderImportReceipt>();
+        receipt.ToTable("order_import_receipts");
+        receipt.Property(x => x.OrderId).HasColumnName("orderId");
+        receipt.Property(x => x.FactoryId).HasColumnName("factoryId");
+        receipt.Property(x => x.SourceFactoryId).HasColumnName("sourceFactoryId");
+        receipt.Property(x => x.AcceptedQty).HasColumnName("acceptedQty");
+        receipt.Property(x => x.Details).HasColumnName("details");
+        receipt.Property(x => x.PendingDetails).HasColumnName("pendingDetails");
+        receipt.Property(x => x.PdfToken).HasColumnName("pdfToken");
+        receipt.Property(x => x.CreatedBy).HasColumnName("createdBy");
+        receipt.Property(x => x.CreatedAt).HasColumnName("createdAt").HasConversion(MsConverter);
+        receipt.Property(x => x.UpdatedAt).HasColumnName("updatedAt").HasConversion(MsConverter);
+        receipt.HasIndex(x => new { x.FactoryId, x.OrderId });
+        receipt.HasOne(x => x.Order).WithMany().HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
+        receipt.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
 
         // ===== 订单 3 表 =====
         var o = b.Entity<Order>();
@@ -316,6 +333,7 @@ public class AppDbContext : DbContext
             {
                 User x => x.FactoryId,
                 Product x => x.FactoryId,
+                OrderImportReceipt x => x.FactoryId,
                 Order x => x.FactoryId,
                 ProductionLine x => x.FactoryId,
                 Machine x => x.FactoryId,
@@ -360,6 +378,7 @@ public class AppDbContext : DbContext
         {
             case User x: x.FactoryId = factoryId; break;
             case Product x: x.FactoryId = factoryId; break;
+            case OrderImportReceipt x: x.FactoryId = factoryId; break;
             case Order x: x.FactoryId = factoryId; break;
             case ProductionLine x: x.FactoryId = factoryId; break;
             case Machine x: x.FactoryId = factoryId; break;

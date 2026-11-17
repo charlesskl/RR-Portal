@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { STATUS_META } from "@/lib/orderStatus";
 import { invalidateClientCache } from "@/lib/clientCache";
 import { apiFetch } from "@/lib/apiFetch";
+import OrderImportHistory, { type ImportReceipt } from "./OrderImportHistory";
 
 type PartQtyDto = { id: number; partName: string; sourcePartId: number | null; qty: number; partOrder: number };
 type ProductPartDto = { id: number; partName: string; craft: string; partGroupId: number; unitCost: number; laborPrice: number; paintCost: number; quotedPrice: number; dailyCapacity: number };
@@ -20,6 +21,7 @@ export type OrderDetailDto = {
   product: OrderProductDto | null; partQtys: PartQtyDto[]; qtyEditable: boolean;
   products?: OrderProductDto[];
   scheduleBalances?: ScheduleBalance[];
+  importReceipts?: ImportReceipt[];
 };
 const pad = (n: number) => String(n).padStart(2, "0");
 const ymd = (value: string | null) => { if (!value) return ""; const d = new Date(value); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -204,6 +206,7 @@ export default function OrderDetailEditor({ order: initialOrder, lines, isAdmin,
       : "当前订单或账号不允许修改部位数量。"}</p>
     <div className="bg-white rounded-card border border-app-border overflow-hidden mb-3"><table className="w-full text-sm"><thead className="bg-[#f0fdf4] text-[#047857] text-xs"><tr><th className="px-4 py-2 text-left">部位</th><th className="px-4 py-2 text-right">数量</th></tr></thead><tbody>{order.partQtys.map((q, index) => <tr key={q.id} className={index % 2 ? "bg-[#fafdfb]" : ""}><td className="px-4 py-2">{q.partName}</td><td className="px-4 py-2 text-right">{order.qtyEditable && canEdit ? <input aria-label={`${q.partName} 数量`} disabled={busy} type="number" min="0" max="2147483647" step="1" className="w-32 border border-app-border rounded-btn px-2 py-1 text-right" value={Number.isNaN(qtys[q.id]) ? "" : (qtys[q.id] ?? q.qty)} onChange={e => { setQtys(current => ({ ...current, [q.id]: e.target.value === "" ? NaN : e.target.valueAsNumber })); setSuccess(""); }} /> : (qtys[q.id] ?? q.qty).toLocaleString("zh-CN")}</td></tr>)}</tbody></table></div>
     <div className="text-right text-sm mb-4">订单总数 <b className="text-mint-700">{Math.max(0, ...Array.from(demandByPart.values())).toLocaleString("zh-CN")}</b></div>
+    <OrderImportHistory receipts={order.importReceipts} />
     {canEdit && order.qtyEditable && <label className="flex items-center gap-2 text-sm text-text mb-3">
       <input type="checkbox" checked={autoAdjustSchedule} disabled={busy} onChange={event => setAutoAdjustSchedule(event.target.checked)} />
       保存时自动补排/减排（沿用原工序和拉别，仅调整未报工计划）

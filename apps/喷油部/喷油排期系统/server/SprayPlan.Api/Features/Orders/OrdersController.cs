@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using SprayPlan.Api.Data;
 using SprayPlan.Api.Entities;
 using SprayPlan.Api.Features.Basic;
@@ -13,23 +14,35 @@ namespace SprayPlan.Api.Features.Orders;
 [ApiController]
 [Route("api/orders")]
 [Authorize]
-public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
+public class OrdersController(AppDbContext db, PdfStorage pdf, IOrderDocumentReader documents) : ControllerBase
 {
     static readonly string[] OrderStatuses = ["draft", "received", "scheduled", "in_production", "completed", "archived"];
     const string PdfRemarkPrefix = "PDF导入:";   // 待补产品订单把 PDF token 存进 Remark，前缀固定
     string CurrentUser() => User.FindFirst("username")?.Value ?? "unknown";
-    private List<PdfWord> ReadOrderWords(string token)
+    IActionResult? ImportContextError(string? source, string? target)
     {
-        var extension = Path.GetExtension(token).ToLowerInvariant();
-        if (extension == ".pdf")
-        {
-            using var source = pdf.Open(token);
-            var textWords = PdfWordSource.Extract(source);
-            if (PdfTableExtractor.ExtractRows(textWords).Count > 0) return textWords;
-        }
-        using var image = pdf.Open(token);
-        return OrderImageOcr.Extract(image, extension);
+        if (source is not (null or "" or "XINGXIN" or "HUADENG")) return BadRequest(new { error = "来源厂区无效" });
+        if (target is not null && target != db.CurrentFactoryId) return Conflict(new { error = "当前厂区已切换，请重新上传核对后再导入" });
+        return null;
     }
+    public static string? DetectImportSource(IEnumerable<PdfWord> words)
+    {
+        var text = string.Concat(words.Select(w => w.Text)).Replace(" ", "");
+        var h = text.Contains("华登"); var x = text.Contains("兴信");
+        return h == x ? null : h ? "HUADENG" : "XINGXIN";
+    }
+    void RecordImport(Order order, string? source, string token, List<AcceptedImportPart> parts, bool pending)
+        => db.OrderImportReceipts.Add(new() { Order = order, FactoryId = db.CurrentFactoryId,
+            SourceFactoryId = string.IsNullOrEmpty(source) ? null : source, PdfToken = Path.GetFileName(token),
+            AcceptedQty = parts.Sum(p => (long)p.Qty), Details = JsonSerializer.Serialize(parts), PendingDetails = pending,
+            CreatedBy = CurrentUser(), CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+    static List<AcceptedImportPart> ImportParts(string details)
+    {
+        try { return JsonSerializer.Deserialize<List<AcceptedImportPart>>(details) ?? []; }
+        catch (JsonException) { return []; }
+    }
+    private List<PdfWord> ReadOrderWords(string token)
+        => documents.Read(token);
 
     // GET /api/orders — 列表（聚合 整单总数），id 降序
     [HttpGet]
@@ -136,7 +149,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                     o.Product.Parts.OrderBy(p => p.PartOrder).Select(p => new OrderProductPartDto(p.Id, p.PartName, p.Craft, p.PartGroupId, p.UnitCost, p.LaborPrice, p.PaintCost, p.QuotedPrice, p.DailyCapacity)).ToList()),
                 o.PartQtys.OrderBy(q => q.PartOrder).Select(q => new OrderPartQtyDto(q.Id, q.PartName, q.SourcePartId, q.Qty, q.PartOrder)).ToList(),
                 // 部位需求可独立更正；历史计划、实绩与库存保留。
-                o.Status != "archived" && !o.PendingProduct, null, null))
+                o.Status != "archived" && !o.PendingProduct, null, null, null))
             .FirstOrDefaultAsync();
         if (order is null) return NotFound(new { error = "订单不存在" });
         var sourceIds = order.PartQtys.Where(part => part.SourcePartId.HasValue).Select(part => part.SourcePartId!.Value).ToList();
@@ -152,7 +165,10 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         var planIds = plans.Select(plan => plan.Id).ToList();
         var inboundSources = (await db.InboundApplications.Where(app => planIds.Contains(app.SourcePlanId))
             .Select(app => app.SourcePlanId).ToListAsync()).ToHashSet();
-        order = order with { ScheduleBalances = OrderCalc.ScheduleBalances(quantities, plans, inboundSources) };
+        var receipts = await db.OrderImportReceipts.AsNoTracking().Where(r => r.OrderId == id).OrderByDescending(r => r.Id).ToListAsync();
+        order = order with { ScheduleBalances = OrderCalc.ScheduleBalances(quantities, plans, inboundSources),
+            ImportReceipts = receipts.Select(r => new OrderImportReceiptDto(r.Id, r.SourceFactoryId, r.FactoryId, r.AcceptedQty,
+                r.PendingDetails, r.CreatedBy, r.CreatedAt, ImportParts(r.Details))).ToList() };
         return Ok(order);
     }
 
@@ -484,8 +500,8 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         try { words = ReadOrderWords(token); }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         if (words.Count == 0) return BadRequest(new { error = "未识别到订单文字，请上传更清晰的图片或 PDF" });
-        if (words.Any(word => word.Text.Contains("华登")) && db.CurrentFactoryId != "HUADENG")
-            return BadRequest(new { error = "该合同属于华登，请先在页面顶部切换到华登厂区再导入" });
+        // 抬头仅用于提示来源；合同归属和生产厂区始终以当前选中的厂区为准。
+        var sourceFactory = DetectImportSource(words);
         var productRows = PdfTableExtractor.ExtractProductRows(words);
         var rows = PdfTableExtractor.ExtractRows(words);
         var pdfHead = PdfTableExtractor.ExtractHead(words);
@@ -519,7 +535,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             return Ok(new ImportDraft(new ImportDraftHead(pdfHead.ExternalOrderNo,
                     pdfHead.OrderDate == default ? "" : pdfHead.OrderDate.ToString("yyyy-MM-dd"), pdfHead.DeliveryDate?.ToString("yyyy-MM-dd"),
                     first.ProductNo, drafts.Any(draft => draft.IsMa)),
-                first.ProductFound, null, [], token, [], drafts));
+                first.ProductFound, null, [], token, [], drafts, sourceFactory, db.CurrentFactoryId));
         }
         var pnCell = PdfTableExtractor.ExtractProductNoCell(words);
         var pm = productRows.Count > 0
@@ -543,7 +559,8 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             var newLines = draftLines.Select(line => new ImportDraftLine(
                 line.PdfItemName, line.TotalQty, line.MergedRows, line.NormalizedName,
                 line.UnitPrice, ExistingUnitCost: null)).ToList();
-            return Ok(new ImportDraft(head, ProductFound: false, ProductId: null, Lines: newLines, PdfToken: token, AvailableItems: new()));
+            return Ok(new ImportDraft(head, ProductFound: false, ProductId: null, Lines: newLines, PdfToken: token, AvailableItems: new(),
+                SourceFactoryId: sourceFactory, TargetFactoryId: db.CurrentFactoryId));
         }
 
         // 命中 → 把草稿行与产品库子件名精确匹配（绿/红）。
@@ -553,7 +570,8 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             m.UnitPrice, product.Parts.FirstOrDefault(part => part.PartName.Trim() == m.MatchedItemName?.Trim())?.UnitCost)).ToList();
         // 该货号下全部子件名，供前端红行下拉手工选。
         var availableItems = availableParts;
-        return Ok(new ImportDraft(head, ProductFound: true, ProductId: product.Id, Lines: lines, PdfToken: token, AvailableItems: availableItems));
+        return Ok(new ImportDraft(head, ProductFound: true, ProductId: product.Id, Lines: lines, PdfToken: token, AvailableItems: availableItems,
+            SourceFactoryId: sourceFactory, TargetFactoryId: db.CurrentFactoryId));
     }
 
     // POST /api/orders/import-confirm — 确认草稿入库（建订单+明细，或建待补产品订单）。
@@ -561,6 +579,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
     [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> ImportConfirmMulti([FromBody] ImportConfirmMultiRequest req)
     {
+        if (ImportContextError(req.SourceFactoryId, req.TargetFactoryId) is { } contextError) return contextError;
         if (req.Products.Count < 2 || req.Products.Any(p => string.IsNullOrWhiteSpace(p.ProductNo) ||
             p.Lines.Count == 0 || p.Lines.Any(line => string.IsNullOrWhiteSpace(line.MatchedItemName) || line.TotalQty < 0)))
             return BadRequest(new { error = "多款号订单明细不完整" });
@@ -645,6 +664,8 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             }
         }
         order = MergeImportedOrder(order, existing);
+        RecordImport(order, req.SourceFactoryId, req.PdfToken, req.Products.SelectMany(p => p.Lines.Select(l =>
+            new AcceptedImportPart(p.ProductNo.Trim(), l.MatchedItemName.Trim(), l.TotalQty))).ToList(), false);
         await db.SaveChangesAsync();
         await transaction.CommitAsync();
         return CreatedAtAction(nameof(Get), new { id = order.Id }, new { id = order.Id, merged = existing is not null,
@@ -655,6 +676,8 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
     [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> ImportConfirm([FromBody] ImportConfirmRequest req)
     {
+        if (ImportContextError(req.SourceFactoryId, req.TargetFactoryId) is { } contextError) return contextError;
+        if (req.Lines.Any(l => l.TotalQty < 0)) return BadRequest(new { error = "承接数量不能小于零" });
         var targetFactory = db.CurrentFactoryId == "ALL" ? "XINGXIN" : db.CurrentFactoryId;
         if (string.IsNullOrWhiteSpace(req.Head.ExternalOrderNo))
             return BadRequest(new { error = "请填写订单编号" });
@@ -752,7 +775,10 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             order.PendingProduct = false;
         }
 
+        var pendingDetails = order.PendingProduct;
         order = MergeImportedOrder(order, existing);
+        RecordImport(order, req.SourceFactoryId, req.PdfToken, pendingDetails ? [] : req.Lines.Select(l =>
+            new AcceptedImportPart((req.Head.ProductNo ?? "").Trim(), l.MatchedItemName.Trim(), l.TotalQty)).ToList(), pendingDetails);
         await db.SaveChangesAsync();
         await transaction.CommitAsync();
         // 详情 action 名为 Get（见上方 [HttpGet("{id:int}")] Get）。
@@ -852,6 +878,14 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         order.PartQtys = BuildPartQtys(confirmLines, product);
         order.LastUpdatedBy = CurrentUser();
         order.UpdatedAt = DateTime.UtcNow;
+        var pendingReceipt = await db.OrderImportReceipts.Where(r => r.OrderId == id && r.PdfToken == token && r.PendingDetails)
+            .OrderByDescending(r => r.Id).FirstOrDefaultAsync();
+        if (pendingReceipt is not null)
+        {
+            var accepted = confirmLines.Select(l => new AcceptedImportPart(product.ProductNo, l.MatchedItemName, l.TotalQty)).ToList();
+            pendingReceipt.AcceptedQty = accepted.Sum(p => (long)p.Qty); pendingReceipt.Details = JsonSerializer.Serialize(accepted);
+            pendingReceipt.PendingDetails = false; pendingReceipt.UpdatedAt = DateTime.UtcNow;
+        }
         await db.SaveChangesAsync();
         return Ok(new { id = order.Id, partQtys = order.PartQtys.Count });
     }

@@ -106,6 +106,7 @@ model Order {
   updatedAt       DateTime  @updatedAt
 
   product  Product?         @relation(fields: [productId], references: [id])
+  importReceipts OrderImportReceipt[]
   partQtys OrderPartQty[]
   plans    ProductionPlan[]
   materials OrderMaterial[]
@@ -117,6 +118,23 @@ model Order {
 
 // 勾选的「子件」明细行（抄快照名 + 溯源 FK），数量下沉到部位级
 // 订单行（子件）下各部位的数量；接单按部位填，不分颜色/规格
+model OrderImportReceipt {
+  id Int @id @default(autoincrement())
+  orderId Int
+  factoryId String @default("XINGXIN")
+  sourceFactoryId String?
+  acceptedQty BigInt @default(0)
+  details String @default("[]")
+  pendingDetails Boolean @default(false)
+  pdfToken String @default("")
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  @@index([factoryId, orderId])
+  @@map("order_import_receipts")
+}
+
 model OrderPartQty {
   id           Int    @id @default(autoincrement())
   orderId      Int

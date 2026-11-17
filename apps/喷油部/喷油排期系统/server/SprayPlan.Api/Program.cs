@@ -12,6 +12,7 @@ builder.Services.AddControllers();
 builder.Services.AddHostedService<MaterialReflowWorker>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<JwtService>();
+builder.Services.AddScoped<IOrderDocumentReader, OrderDocumentReader>();
 builder.Services.AddScoped<SprayPlan.Api.Features.Inventory.InventoryService>();
 // PDF 暂存：单例，落盘目录默认 <ContentRoot>/storage/pdf
 builder.Services.AddSingleton(new SprayPlan.Api.Services.PdfStorage(
@@ -72,6 +73,9 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins("http://localhost:8400").AllowCredentials().AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+    await OrderImportReceiptSchema.Ensure(scope.ServiceProvider.GetRequiredService<AppDbContext>());
 
 using (var scope = app.Services.CreateScope())
     await ProductFactorySchema.Ensure(scope.ServiceProvider.GetRequiredService<AppDbContext>());

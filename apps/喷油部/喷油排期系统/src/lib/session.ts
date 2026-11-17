@@ -44,7 +44,7 @@ export async function getSession(): Promise<SessionData> {
       username: typeof payload.username === "string" ? payload.username : undefined,
       role,
       factoryId: role === "admin"
-        ? (selectedFactory === "HUADENG" ? "HUADENG" : "XINGXIN")
+        ? (selectedFactory === "HUADENG" || selectedFactory === "XINGXIN" ? selectedFactory : claimFactory === "HUADENG" ? "HUADENG" : "XINGXIN")
         : claimFactory,
     };
   } catch {

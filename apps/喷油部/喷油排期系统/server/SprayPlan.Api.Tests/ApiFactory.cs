@@ -12,7 +12,7 @@ namespace SprayPlan.Api.Tests;
 // 集成测试用的 App 工厂：把数据库换成一次性的临时 SQLite 文件库，
 // EnsureCreated 按实体建表 + 种子 admin/clerk，完全隔离真实 dev.db。
 // 每个测试方法 new 一个，互不干扰；Dispose 时删除临时库文件。
-public class ApiFactory(Action<DbContextOptionsBuilder>? configureOptions = null) : WebApplicationFactory<Program>
+public class ApiFactory(Action<DbContextOptionsBuilder>? configureOptions = null, Action<IServiceCollection>? configureServices = null) : WebApplicationFactory<Program>
 {
     private readonly string _dbPath =
         Path.Combine(Path.GetTempPath(), $"sprayplan_test_{Guid.NewGuid():N}.db");
@@ -30,6 +30,7 @@ public class ApiFactory(Action<DbContextOptionsBuilder>? configureOptions = null
                 o.UseSqlite($"Data Source={_dbPath}");
                 configureOptions?.Invoke(o);
             });
+            configureServices?.Invoke(services);
         });
     }
 

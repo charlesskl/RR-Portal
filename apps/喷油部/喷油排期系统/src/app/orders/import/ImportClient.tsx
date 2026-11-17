@@ -10,16 +10,19 @@ import { invalidateClientCache } from "@/lib/clientCache";
 
 type DraftHead = { externalOrderNo: string; orderDate: string; deliveryDate: string | null; productNo: string; isMa: boolean };
 type DraftLine = { pdfItemName: string; totalQty: number; mergedRows: number; matchedItemName: string | null; unitPrice: number; existingUnitCost: number | null };
+type DraftProduct = { productNo: string; isMa: boolean; productFound: boolean; lines: DraftLine[]; availableItems: string[] };
 type Draft = {
   head: DraftHead; productFound: boolean; productId: number | null;
   lines: DraftLine[]; pdfToken: string; availableItems: string[];
-  products?: { productNo: string; isMa: boolean; productFound: boolean; lines: DraftLine[]; availableItems: string[] }[];
+  products?: DraftProduct[]; sourceFactoryId?: string | null; targetFactoryId?: string;
 };
 
 const SKIP = "__skip__";
 const NEW_PART = "__new_part__";
 
-export default function ImportClient() {
+const factoryName = (value?: string | null) => value === "HUADENG" ? "华登" : value === "XINGXIN" ? "兴信" : "未确认";
+const validQty = (qty: number) => Number.isSafeInteger(qty) && qty >= 0 && qty <= 2147483647;
+export default function ImportClient({ factoryId = "XINGXIN" }: { factoryId?: string }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
@@ -36,6 +39,7 @@ export default function ImportClient() {
   const [multiPicks, setMultiPicks] = useState<Record<string, string>>({});
   const [multiNames, setMultiNames] = useState<Record<string, string>>({});
   const [savePricing, setSavePricing] = useState(false);
+  const [sourceFactoryId, setSourceFactoryId] = useState("");
 
   function chooseFile(file: File | null) {
     setErr("");
@@ -68,6 +72,7 @@ export default function ImportClient() {
       if (!res.ok) { setErr((await res.json().catch(() => ({})))?.error ?? "解析失败，请确认是委托加工合同 PDF"); return; }
       const d: Draft = await res.json();
       setDraft(d); setHead(d.head); setPicks({}); setNewNames({}); setMultiPicks({}); setMultiNames({});
+      setSourceFactoryId(d.sourceFactoryId ?? "");
       setSavePricing(d.products?.some(product => !product.productFound) ?? !d.productFound);
       setFileName(f.name);
     } catch { setErr("网络错误，请确认后端服务是否运行后重试"); }
@@ -85,6 +90,30 @@ export default function ImportClient() {
   // 还有红行没处理（既没选子件也没标跳过）→ 不能入库
   const redPending = !!draft?.productFound && draft.lines.some((ln, i) => !ln.matchedItemName && (!picks[i] || (picks[i] === NEW_PART && !resolved(i, ln))));
   const redCount = draft?.lines.filter((ln) => !ln.matchedItemName).length ?? 0;
+  function resolvedMulti(product: DraftProduct, pi: number, line: DraftLine, li: number) {
+    return product.productFound ? (line.matchedItemName || (multiPicks[`${pi}-${li}`] === NEW_PART
+      ? (multiNames[`${pi}-${li}`] ?? line.pdfItemName).trim() : multiPicks[`${pi}-${li}`]) || "")
+      : (multiNames[`${pi}-${li}`] ?? line.matchedItemName ?? "").trim();
+  }
+  const acceptedQuantities = draft?.products?.flatMap((p, pi) => p.lines.filter((l, li) => {
+    const name = resolvedMulti(p, pi, l, li); return name && name !== SKIP;
+  }).map(l => l.totalQty)) ?? draft?.lines.filter((l, i) => resolved(i, l)).map(l => l.totalQty) ?? [];
+  const acceptedQty = acceptedQuantities.every(validQty) ? acceptedQuantities.reduce((sum, q) => sum + q, 0) : null;
+  function quantityInput(line: DraftLine, index: number, productNo: string, productIndex?: number) {
+    return <input aria-label={`${productNo} ${line.pdfItemName} 本次承接数量`} disabled={busy} type="number" min="0" max="2147483647" step="1"
+      className={inp + " w-32 text-right"} value={Number.isFinite(line.totalQty) ? line.totalQty : ""} onChange={e => {
+        const qty = e.target.value === "" ? NaN : e.target.valueAsNumber;
+        setDraft(current => !current ? current : productIndex == null ? { ...current, lines: current.lines.map((l, i) => i === index ? { ...l, totalQty: qty } : l) }
+          : { ...current, products: current.products?.map((p, pi) => pi === productIndex ? { ...p, lines: p.lines.map((l, i) => i === index ? { ...l, totalQty: qty } : l) } : p) });
+      }} />;
+  }
+  const importContext = <fieldset disabled={busy} className="mb-4 rounded-lg border border-mint-400 bg-mint-50 p-3 text-sm">
+    <p className="font-semibold">导入厂区：{factoryName(draft?.targetFactoryId ?? factoryId)}（按右上角当前厂区归属）</p>
+    {draft && <><label className="mt-2 block">来源厂区（仅记录，可修改）<select aria-label="来源厂区" className="ml-2 rounded border bg-white px-2 py-1" value={sourceFactoryId} onChange={e => setSourceFactoryId(e.target.value)}>
+      <option value="">未确认</option><option value="HUADENG">华登</option><option value="XINGXIN">兴信</option>
+    </select></label><p className="mt-2">本次承接数量（所选部位合计）：<b>{acceptedQty == null ? "待核对" : `${acceptedQty.toLocaleString("zh-CN")} 件`}</b></p></>}
+    <p className="mt-2 text-xs text-text-secondary">合同抬头不限制导入厂区。请在下方核对本次承接数量，来源和数量将保留在订单导入记录中。</p>
+  </fieldset>;
 
   async function doConfirm(asPending: boolean) {
     if (!draft || !head) return;
@@ -93,7 +122,9 @@ export default function ImportClient() {
       .map((ln, i) => ({ name: resolved(i, ln), totalQty: ln.totalQty, unitPrice: ln.unitPrice, createPart: picks[i] === NEW_PART }))
       .filter((x) => x.name)   // 跳过未匹配/已标跳过的红行
       .map((x) => ({ matchedItemName: x.name as string, totalQty: x.totalQty, unitPrice: x.unitPrice, createPart: x.createPart }));
-    const body = { head, pdfToken: draft.pdfToken, asPendingProduct: asPending, savePricing, lines };
+    if (lines.some(l => !validQty(l.totalQty))) { setErr("本次承接数量必须为 0 至 2147483647 的整数"); setBusy(false); return; }
+    const body = { head, pdfToken: draft.pdfToken, asPendingProduct: asPending, savePricing, lines,
+      sourceFactoryId: sourceFactoryId || null, targetFactoryId: draft.targetFactoryId ?? factoryId };
     try {
       const res = await apiFetch("/api/orders/import-confirm", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -114,21 +145,19 @@ export default function ImportClient() {
     const products = draft.products.map((product, productIndex) => ({
       productNo: product.productNo, isMa: product.isMa,
       lines: product.lines.map((line, lineIndex) => ({
-        matchedItemName: product.productFound
-          ? (line.matchedItemName || (multiPicks[`${productIndex}-${lineIndex}`] === NEW_PART
-              ? (multiNames[`${productIndex}-${lineIndex}`] ?? line.pdfItemName).trim()
-              : multiPicks[`${productIndex}-${lineIndex}`]) || "")
-          : (multiNames[`${productIndex}-${lineIndex}`] ?? line.matchedItemName ?? ""),
+        matchedItemName: resolvedMulti(product, productIndex, line, lineIndex),
         totalQty: line.totalQty, unitPrice: line.unitPrice,
         createPart: multiPicks[`${productIndex}-${lineIndex}`] === NEW_PART,
       })).filter(line => line.matchedItemName && line.matchedItemName !== SKIP),
     }));
     if (products.some(product => product.lines.length === 0)) { setErr("每个款号至少保留一条部件明细"); return; }
+    if (products.some(p => p.lines.some(l => !validQty(l.totalQty)))) { setErr("本次承接数量必须为 0 至 2147483647 的整数"); return; }
     setBusy(true); setErr("");
     try {
       const res = await apiFetch("/api/orders/import-confirm-multi", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ head, pdfToken: draft.pdfToken, savePricing, products }),
+        body: JSON.stringify({ head, pdfToken: draft.pdfToken, savePricing, products, sourceFactoryId: sourceFactoryId || null,
+          targetFactoryId: draft.targetFactoryId ?? factoryId }),
       });
       if (!res.ok) { setErr((await res.json().catch(() => ({})))?.error ?? "导入失败"); return; }
       const result = await res.json();
@@ -144,6 +173,7 @@ export default function ImportClient() {
   if (!draft || !head) {
     return (
       <Card title="📥 订单导入" sub="上传委托加工合同 PDF 或图片，系统解析后供核对，确认无误再入库">
+        {importContext}
         <div
           onDragEnter={event => { event.preventDefault(); dragDepth.current += 1; setDragging(true); }}
           onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
@@ -175,6 +205,7 @@ export default function ImportClient() {
       product.productFound ? (!line.matchedItemName && (!multiPicks[`${pi}-${li}`] || (multiPicks[`${pi}-${li}`] === NEW_PART && !(multiNames[`${pi}-${li}`] ?? line.pdfItemName).trim())))
         : !(multiNames[`${pi}-${li}`] ?? line.matchedItemName ?? "").trim()));
     return <Card title="📥 多款号订单导入 · 核对" sub={`同一合同号 ${head.externalOrderNo} · ${draft.products.length} 个款号`}>
+      {importContext}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
         <Fld label="订单编号"><input className={inp} value={head.externalOrderNo} onChange={e => setHead({ ...head, externalOrderNo: e.target.value })} /></Fld>
         <Fld label="下单日期"><input className={inp} type="date" value={head.orderDate} onChange={e => setHead({ ...head, orderDate: e.target.value })} /></Fld>
@@ -187,7 +218,7 @@ export default function ImportClient() {
           <tbody>{product.lines.map((line, li) => <tr key={li} className="border-t border-app-border-light"><td className="px-3 py-2">{line.pdfItemName}</td>
             <td className="px-3 py-2">{!product.productFound ? <input className={inp} aria-label={`${product.productNo} 部件名`} value={multiNames[`${pi}-${li}`] ?? line.matchedItemName ?? ""} onChange={e => setMultiNames(current => ({ ...current, [`${pi}-${li}`]: e.target.value }))} /> : line.matchedItemName ?? <><select className={inp} value={multiPicks[`${pi}-${li}`] ?? ""} onChange={e => setMultiPicks(current => ({ ...current, [`${pi}-${li}`]: e.target.value }))}>
               <option value="">选择对应部件…</option>{product.availableItems.map(item => <option key={item} value={item}>{item}</option>)}<option value={NEW_PART}>＋ 新增部件</option><option value={SKIP}>跳过本行</option>
-            </select>{multiPicks[`${pi}-${li}`] === NEW_PART && <input className={inp + " mt-2"} aria-label={`${product.productNo} 新部件名称`} value={multiNames[`${pi}-${li}`] ?? line.pdfItemName} onChange={e => setMultiNames(current => ({ ...current, [`${pi}-${li}`]: e.target.value }))} />}</>}</td><td className="px-3 py-2 text-right">{line.totalQty.toLocaleString("zh-CN")}</td><td className="px-3 py-2 text-right">{line.unitPrice.toFixed(4)}</td></tr>)}</tbody></table>
+            </select>{multiPicks[`${pi}-${li}`] === NEW_PART && <input className={inp + " mt-2"} aria-label={`${product.productNo} 新部件名称`} value={multiNames[`${pi}-${li}`] ?? line.pdfItemName} onChange={e => setMultiNames(current => ({ ...current, [`${pi}-${li}`]: e.target.value }))} />}</>}</td><td className="px-3 py-2 text-right">{quantityInput(line, li, product.productNo, pi)}</td><td className="px-3 py-2 text-right">{line.unitPrice.toFixed(4)}</td></tr>)}</tbody></table>
       </div>)}
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={savePricing} disabled={hasUnknown} onChange={e => setSavePricing(e.target.checked)} />{hasUnknown ? "建立缺失款号的草稿核价" : "把订单单价更新到产品核价库"}</label>
       <p className="text-xs text-text-secondary mt-2">选择“新增部件”后将加入对应款号；勾选更新核价时同时保存订单单价。</p>
@@ -200,6 +231,7 @@ export default function ImportClient() {
   // ── 阶段二：核对 ──
   return (
     <Card title="📥 PDF 订单导入 · 核对" sub={`已解析：${fileName}`}>
+      {importContext}
       {/* 状态横幅 */}
       {draft.productFound ? (
         <div className="bg-mint-50 border-l-[3px] border-mint-400 text-[#065f46] rounded-btn px-4 py-3 text-sm mb-4">
@@ -244,7 +276,7 @@ export default function ImportClient() {
               <tr>
                 <th className="px-3 py-2.5 text-left w-[34%]">订单部件名</th>
                 <th className="px-3 py-2.5 text-left w-[42%]">产品库匹配</th>
-                <th className="px-3 py-2.5 text-right">合计数量</th>
+                <th className="px-3 py-2.5 text-right">本次承接数量</th>
                 <th className="px-3 py-2.5 text-right">订单核价</th>
                 <th className="px-3 py-2.5 text-right">库内核价</th>
               </tr>
@@ -276,7 +308,7 @@ export default function ImportClient() {
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-right">
-                      <span className="font-mono font-semibold text-text">{ln.totalQty.toLocaleString("zh-CN")}</span>
+                      {quantityInput(ln, i, head.productNo)}
                       {ln.mergedRows > 1 && <span className="ml-2 text-[11px] text-text-tertiary bg-[#f1f5f9] px-1.5 py-0.5 rounded">{ln.mergedRows} 行合并</span>}
                     </td>
                     <td className="px-3 py-2.5 text-right font-mono">{ln.unitPrice.toFixed(4)}</td>

@@ -7,6 +7,10 @@ const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Shanghai" }).fo
 const initial = () => [1, 2, 3].map(id => ({ id, orderId: id, token: `token-${id}`, orderNo: `ORDER-${id}`, productNo: "77711", partName: ["果汁瓶盖", "热蜂蜜瓶身", "已报工水瓶"][id - 1], stepNo: 1, craft: "手喷", demand: 50000, goodQty: id === 3 ? 500 : null, inboundQty: id === 3 ? 450 : null, lockedReason: id === 3 ? "已录实绩" : null,
   values: { planDate: today, lineId: 1, machineNos: [], plannedQty: 10000, workerCount: 2, workHours: 8, remark: "" } }));
 let rows = initial();
+const allocationSources = () => [
+  ...rows.filter(r => r.goodQty == null).map(r => ({ id: r.id, orderId: r.orderId, partName: r.partName, stepNo: r.stepNo, planDate: r.values.planDate, plannedQty: r.values.plannedQty, canDeduct: !r.lockedReason })),
+  ...initial().filter(r => r.goodQty == null).map(r => ({ id: 1000 + r.id, orderId: r.orderId, partName: r.partName, stepNo: r.stepNo, planDate: "2040-01-01", plannedQty: 20000, canDeduct: true })),
+];
 function balanceOf(row: typeof rows[0], effective = rows) {
   const group = effective.filter(r => r.orderId === row.orderId && r.partName === row.partName && r.stepNo === row.stepNo);
   const produced = (row.orderId === 9 || row.orderId === 3 ? 0 : 2000) + group.reduce((sum, r) => sum + (r.goodQty ?? 0), 0);
@@ -21,7 +25,8 @@ test.beforeAll(async () => {
     const url = new URL(request.url!, "http://127.0.0.1:15081");
     if (url.pathname === "/api/auth/session") return response.end("{}");
     if (url.pathname === "/api/plans/workbench/options") return response.end(JSON.stringify([
-      { orderId: 9, orderPartQtyId: 91, sourcePartId: 901, orderNo: "TEMP-ORDER", productNo: "NEW-900", partName: "临时产品", stepNo: 1, craft: "手喷", demand: 1000, remaining: 1000, token: "option-token" },
+      { orderId: 9, orderPartQtyId: 91, sourcePartId: 901, orderNo: "TEMP-ORDER", productNo: "NEW-900", partName: "临时产品", stepNo: 1, craft: "手喷", demand: 1000, remaining: 1000, token: "option-token",
+        balance: { orderId: 9, partName: "临时产品", stepNo: 1, demand: 1000, produced: 0, unreportedPlanned: 0, remainingToSchedule: 1000, actualFallbackCount: 0 }, allocationSources: [] },
     ]));
     if (url.pathname === "/api/plans/workbench/batch" && missingAddEndpoint) { response.statusCode = 404; return response.end(""); }
     if (["/api/plans/workbench", "/api/plans/workbench/batch"].includes(url.pathname) && request.method === "POST") {
@@ -62,7 +67,7 @@ test.beforeAll(async () => {
     }
     if (url.pathname === "/api/plans/workbench") {
       if (failRead && writes) { response.statusCode = 500; return response.end(JSON.stringify({ error: "模拟读取失败" })); }
-      return response.end(JSON.stringify({ rows: (autoCase ? rows.filter(r => r.id !== 4) : rows).map(row => ({ ...row, balance: missingBalances ? undefined : balanceOf(row) })), lines: [
+      return response.end(JSON.stringify({ allocationSources: missingBalances ? undefined : allocationSources(), rows: (autoCase ? rows.filter(r => r.id !== 4) : rows).map(row => ({ ...row, balance: missingBalances ? undefined : balanceOf(row) })), lines: [
         { id: 1, name: "A拉：手喷", craftType: "手喷", isActive: true, dailyLimit: 200000, machineNos: ["1 号机 (世通)", "2 号机 (世通)"] },
         { id: 2, name: "备用手喷拉", craftType: "手喷", isActive: true, dailyLimit: 100000, machineNos: [] },
       ] }));
@@ -81,7 +86,7 @@ test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: "sprayplan_session", value: token, url: "http://127.0.0.1:18401" }]);
 });
 
-test("展示订单总需求及累计统计，草稿经检查更新数量，编辑后恢复已保存口径，保存刷新保持结果", async ({ page }) => {
+test("数量随草稿即时更新，不发预览或写请求，检查后再编辑继续实时计算，保存刷新保持结果", async ({ page }) => {
   await page.goto("/schedule/table");
   await expect(page.getByRole("columnheader", { name: "订单总需求", exact: true })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "已生产 / 入库（本行）", exact: true })).toBeVisible();
@@ -89,13 +94,16 @@ test("展示订单总需求及累计统计，草稿经检查更新数量，编�
   await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("30,000");
   await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toHaveText("18,000");
   await page.getByLabel("计划 #1 计划数", { exact: true }).fill("8000");
-  await expect(page.getByText("当前统计按已保存排期；", { exact: false })).toBeVisible();
+  await expect(page.getByText("数量随草稿实时估算", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("28,000");
+  await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toHaveText("20,000");
+  expect(previews).toBe(0); expect(writes).toBe(0);
   await page.getByRole("button", { name: "检查改动（1）" }).click();
   await expect(page.getByLabel("计划 #1 订单总需求", { exact: true })).toHaveText("50,000");
   await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("28,000");
   await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toHaveText("20,000");
   await page.getByLabel("计划 #1 计划数", { exact: true }).fill("9000");
-  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("30,000");
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("29,000");
   await page.getByRole("button", { name: "检查改动（1）" }).click();
   await page.getByRole("button", { name: "确认统一保存（1）" }).click();
   await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toHaveText("19,000");
@@ -108,10 +116,45 @@ test("加量并自动扣减筛选外后续排期时，累计未报工计划及�
   await page.goto("/schedule/table");
   await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("40,000");
   await page.getByLabel("计划 #1 计划数", { exact: true }).fill("15000");
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("40,000");
+  expect(previews).toBe(0);
   await page.getByRole("button", { name: "检查改动（1）" }).click();
   await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("40,000");
   await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toHaveText("8,000");
   expect(writes).toBe(0);
+});
+
+test("输入未完成时提示，关闭自动扣减立即重算，过量不显示负补排", async ({ page }) => {
+  await page.goto("/schedule/table");
+  await page.getByLabel("计划 #1 计划数", { exact: true }).fill("");
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("—");
+  await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toContainText("输入中或无效");
+  await expect(page.getByLabel("计划 #1 累计已生产", { exact: true })).toHaveText("2,000");
+  await page.getByLabel("计划 #1 计划数", { exact: true }).fill("15000");
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("30,000");
+  await page.getByRole("checkbox", { name: "增加计划数时", exact: false }).uncheck();
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("35,000");
+  await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toHaveText("13,000");
+  await page.getByLabel("计划 #1 计划数", { exact: true }).fill("1000000");
+  await expect(page.getByLabel("计划 #1 尚需补排", { exact: true })).toHaveText("0");
+  expect(previews).toBe(0); expect(writes).toBe(0);
+});
+
+test("同组多行及筛选隐藏草稿参与实时统计，还原和放弃修改恢复数量", async ({ page }) => {
+  rows.push({ ...initial()[0], id: 4, values: { ...initial()[0].values, lineId: 2, plannedQty: 5000 } });
+  await page.goto("/schedule/table");
+  await page.getByLabel("计划 #4 计划数", { exact: true }).fill("3000");
+  await page.getByRole("combobox", { name: "筛选拉别" }).selectOption("1");
+  await expect(page.getByLabel("计划 #4 计划数", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("33,000");
+  await page.getByLabel("计划 #1 计划数", { exact: true }).fill("8000");
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("31,000");
+  await page.getByRole("button", { name: "还原本行", exact: true }).click();
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("33,000");
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "放弃全部修改" }).click();
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("35,000");
+  expect(previews).toBe(0); expect(writes).toBe(0);
 });
 
 test("统计接口未就绪时显示未加载，不能把缺失统计误显示为零", async ({ page }) => {
@@ -172,6 +215,8 @@ test("Excel 多行粘贴保留为草稿，回车向下，编辑后必须重新�
     element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
   });
   await expect(first).toHaveValue("8000"); await expect(page.getByLabel("计划 #2 备注")).toHaveValue("等待来料");
+  await expect(page.getByLabel("计划 #1 未报工计划", { exact: true })).toHaveText("28,000");
+  await expect(page.getByLabel("计划 #2 未报工计划", { exact: true })).toHaveText("29,000");
   await first.focus(); await first.press("Enter"); await expect(page.getByLabel("计划 #2 计划数")).toBeFocused();
   await page.getByRole("button", { name: "检查改动（2）" }).click();
   await expect(page.getByRole("region", { name: "统一保存预览" })).toBeVisible();
@@ -247,6 +292,7 @@ test("筛选栏增加临时产品排期，与原有修改统一预览和保存�
   await dialog.getByRole("button", { name: "加入排期草稿" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByLabel("新增排期 1 计划数")).toHaveValue("100");
+  await expect(page.getByLabel("新增排期 1 尚需补排", { exact: true })).toHaveText("900");
   expect(writes).toBe(0);
   await page.evaluate(() => window.scrollTo(0, 0));
   const footer = page.getByRole("region", { name: "排期保存操作", exact: true });

@@ -24,6 +24,7 @@ public record WorkbenchRow(int Id, string Token, string OrderNo, string ProductN
     int OrderId = 0, WorkbenchBalance? Balance = null);
 public record WorkbenchBalance(int OrderId, string PartName, int StepNo, long Demand, long Produced,
     long UnreportedPlanned, long RemainingToSchedule, int ActualFallbackCount);
+public record WorkbenchAllocationSource(int Id, int OrderId, string PartName, int StepNo, string PlanDate, long PlannedQty, bool CanDeduct);
 
 // 统一保存只接受计划字段，实绩、入库、库存及订单需求不在此接口的写入范围。
 [ApiController]
@@ -69,17 +70,20 @@ public class PlanWorkbenchController(AppDbContext db) : ControllerBase
         var orderIds = plans.Select(p => p.OrderId).Distinct().ToList();
         // 日期筛选仅决定显示行；统计覆盖这些订单在本厂区全部日期和拉别的有效计划。
         var allDates = await db.ProductionPlans.AsNoTracking().Where(p => p.DeletedAt == null && orderIds.Contains(p.OrderId))
-            .Select(p => new ProductionPlan { OrderId = p.OrderId, PartName = p.PartName, StepNo = p.StepNo,
+            .Select(p => new ProductionPlan { Id = p.Id, OrderId = p.OrderId, PartName = p.PartName, StepNo = p.StepNo, PlanDate = p.PlanDate,
+                Order = new Order { Status = p.Order!.Status },
                 PlannedQty = p.PlannedQty, Status = p.Status, GoodQty = p.GoodQty, ReportedQty = p.ReportedQty, InboundQty = p.InboundQty }).ToListAsync();
         var demands = plans.GroupBy(p => p.OrderId).Select(g => g.First()).SelectMany(p => p.Order!.PartQtys.Select(q => new { p.OrderId, q.PartName, q.Qty }))
             .GroupBy(q => (q.OrderId, q.PartName)).ToDictionary(g => g.Key, g => g.Sum(q => (long)q.Qty));
         var balances = allDates.GroupBy(p => (p.OrderId, p.PartName, p.StepNo)).ToDictionary(g => g.Key,
             g => Balance(g, demands.GetValueOrDefault((g.Key.OrderId, g.Key.PartName))));
-        var ids = plans.Select(p => p.Id).ToList();
+        var ids = allDates.Select(p => p.Id).ToList();
         var inbound = (await db.InboundApplications.Where(a => ids.Contains(a.SourcePlanId)).Select(a => a.SourcePlanId).ToListAsync()).ToHashSet();
         var lines = await db.ProductionLines.AsNoTracking().OrderBy(l => l.Name).ToListAsync();
         var machines = await db.Machines.AsNoTracking().Where(m => m.IsActive).ToListAsync();
         return Ok(new {
+            allocationSources = allDates.Where(p => !PlanDateRules.HasActuals(p)).Select(p => new WorkbenchAllocationSource(p.Id, p.OrderId,
+                p.PartName, p.StepNo, ScheduleCalc.Ymd(p.PlanDate), p.PlannedQty, Locked(p, inbound) == null)),
             rows = plans.Select(p => new WorkbenchRow(p.Id, Token(p), p.Order?.ExternalOrderNo ?? "—",
                 p.Order?.Product?.ProductNo ?? "待补产品", p.PartName, p.StepNo, p.Craft,
                 p.Order?.PartQtys.Where(q => q.PartName == p.PartName).Sum(q => (long)q.Qty) ?? 0,

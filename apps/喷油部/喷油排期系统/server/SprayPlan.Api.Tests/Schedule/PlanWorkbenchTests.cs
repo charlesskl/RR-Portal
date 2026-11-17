@@ -15,6 +15,7 @@ public class PlanWorkbenchTests : IAsyncLifetime
     HttpClient client = null!;
     static readonly DateTime Day = DateUtil.ParseUtc("2030-01-07"); // 周一
     record Data(List<WorkbenchRow> Rows);
+    record Snapshot(List<WorkbenchRow> Rows, List<WorkbenchAllocationSource> AllocationSources);
     public async Task InitializeAsync()
     {
         client = factory.CreateClient(); await factory.SeedAsync();
@@ -46,6 +47,50 @@ public class PlanWorkbenchTests : IAsyncLifetime
             inventory = await db.InventoryMoves.AsNoTracking().ToListAsync(), inbound = await db.InboundApplications.AsNoTracking().ToListAsync(),
             demand = await db.OrderPartQtys.AsNoTracking().ToListAsync() }); });
         return result;
+    }
+
+    [Fact]
+    public async Task AllocationSnapshotIncludesFutureEligibilityWithoutActualsDeletedOrOtherFactoryRows()
+    {
+        var future = await AddFuture(80, 120, part: "头");
+        var inbound = await AddFuture(60, 121, part: "头");
+        var actual = await AddFuture(50, 122, recorded: true, part: "头");
+        var deleted = await AddFuture(40, 123, part: "头");
+        var foreign = await AddFuture(30, 124, part: "头");
+        await factory.WithDbAsync(async db => {
+            db.InboundApplications.Add(new() { ApplicationNo = "FUTURE-INBOUND", SourcePlanId = inbound, Quantity = 1 });
+            (await db.ProductionPlans.FindAsync(deleted))!.DeletedAt = DateTime.UtcNow;
+            (await db.ProductionPlans.FindAsync(foreign))!.FactoryId = "HUADENG";
+            await db.SaveChangesAsync();
+        });
+        var protectedBefore = await ProtectedSnapshot();
+        var snapshot = (await client.GetFromJsonAsync<Snapshot>("/api/plans/workbench?from=2030-01-07&to=2030-01-07"))!;
+        Assert.DoesNotContain(snapshot.Rows, r => r.Id == future);
+        var source = snapshot.AllocationSources.Single(s => s.Id == future);
+        Assert.Equal(80, source.PlannedQty); Assert.True(source.CanDeduct); Assert.Equal("2030-05-07", source.PlanDate);
+        Assert.False(snapshot.AllocationSources.Single(s => s.Id == inbound).CanDeduct);
+        Assert.DoesNotContain(snapshot.AllocationSources, s => s.Id == actual || s.Id == deleted || s.Id == foreign || s.Id == 3);
+        Assert.Equal(protectedBefore, await ProtectedSnapshot());
+        var empty = (await client.GetFromJsonAsync<Snapshot>("/api/plans/workbench?from=2040-01-01&to=2040-01-01"))!;
+        Assert.Empty(empty.AllocationSources);
+    }
+
+    [Fact]
+    public async Task AddOptionsCarryCompleteInitialBalanceAndDeductibleSources()
+    {
+        var option = await NewProductOption();
+        Assert.Equal(1000, option.Balance!.RemainingToSchedule); Assert.Empty(option.AllocationSources!);
+        int planId = 0;
+        await factory.WithDbAsync(async db => {
+            var plan = new ProductionPlan { OrderId = option.OrderId, LineId = 1, PartName = option.PartName, StepNo = option.StepNo,
+                PlannedQty = 300, PlanDate = Day.AddDays(120) };
+            db.ProductionPlans.Add(plan); await db.SaveChangesAsync(); planId = plan.Id;
+            db.InboundApplications.Add(new() { ApplicationNo = "OPTION-INBOUND", SourcePlanId = plan.Id, Quantity = 1 });
+            await db.SaveChangesAsync();
+        });
+        var refreshed = Assert.Single((await client.GetFromJsonAsync<List<WorkbenchOption>>($"/api/plans/workbench/options?orderId={option.OrderId}"))!);
+        Assert.Equal(300, refreshed.Balance!.UnreportedPlanned); Assert.Equal(700, refreshed.Balance.RemainingToSchedule);
+        var source = Assert.Single(refreshed.AllocationSources!); Assert.Equal(planId, source.Id); Assert.False(source.CanDeduct);
     }
 
     [Theory]

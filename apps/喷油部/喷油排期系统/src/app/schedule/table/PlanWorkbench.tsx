@@ -1,14 +1,15 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { apiFetch } from "@/lib/apiFetch";
 import { invalidateClientCache } from "@/lib/clientCache";
-import { changed, draftOf, fields, pasteDrafts, shiftDraft, valuesOf, type Draft, type Field, type PlanValues, type WorkbenchBalance, type WorkbenchLine, type WorkbenchRow } from "@/lib/planWorkbench";
+import { changed, draftOf, fields, pasteDrafts, shiftDraft, valuesOf, type Draft, type Field, type PlanValues, type WorkbenchAllocationSource, type WorkbenchBalance, type WorkbenchLine, type WorkbenchRow } from "@/lib/planWorkbench";
+import { balanceKey, livePlanBalances } from "@/lib/livePlanBalances";
 
 import AddPlanDialog, { type PlanOption } from "./AddPlanDialog";
 import ExcessScheduleDetails, { type ExcessDetail } from "./ExcessScheduleDetails";
 
-type Data = { rows: WorkbenchRow[]; lines: WorkbenchLine[] };
+type Data = { rows: WorkbenchRow[]; lines: WorkbenchLine[]; allocationSources?: WorkbenchAllocationSource[] };
 type Transfer = { sourcePlanId: number; sourceDate: string; targetPlanId: number; targetDate: string; quantity: number; orderNo: string; partName: string; stepNo: number };
 type Preview = { adjustedPlans: number; allocationToken?: string; transfers?: Transfer[]; balances?: WorkbenchBalance[]; warnings: string[]; changes: { id: number; created?: boolean; orderNo?: string; partName?: string; automatic?: boolean; removed?: boolean; before: PlanValues; after: PlanValues }[] };
 const labels: Record<Field, string> = { planDate: "日期", lineId: "拉别", machineNos: "机台", plannedQty: "计划数", workerCount: "人数", workHours: "工时", remark: "备注" };
@@ -37,6 +38,8 @@ export default function PlanWorkbench({ orderId }: { orderId?: number }) {
   const table = useRef<HTMLTableElement>(null);
   const dirty = data.rows.filter(row => row.id < 0 || changed(row, drafts[row.id]));
   const visible = data.rows.filter(row => !lineFilter || String(row.values.lineId) === lineFilter);
+  const liveBalances = useMemo(() => livePlanBalances(data.rows, drafts, data.allocationSources, autoDeduct), [data.rows, drafts, data.allocationSources, autoDeduct]);
+  const checkedBalances = useMemo(() => new Map((preview?.balances ?? []).map(b => [balanceKey(b), b])), [preview]);
   const dirtyRef = useRef(false); dirtyRef.current = dirty.length > 0;
   const busyRef = useRef(false); busyRef.current = busy;
 
@@ -72,9 +75,15 @@ export default function PlanWorkbench({ orderId }: { orderId?: number }) {
   }, [additions]);
   function add(option: PlanOption, values: PlanValues) {
     const id = nextId.current--;
-    setData(current => ({ ...current, rows: [...current.rows, { id, token: "", orderId: option.orderId, orderNo: option.orderNo, productNo: option.productNo,
+    setData(current => {
+      const key = balanceKey(option);
+      const existing = current.rows.find(r => balanceKey(r) === key);
+      const allocationSources = existing || !option.allocationSources ? current.allocationSources
+        : [...(current.allocationSources ?? []).filter(s => balanceKey(s) !== key), ...option.allocationSources];
+      return { ...current, allocationSources, rows: [...current.rows, { id, token: "", orderId: option.orderId, orderNo: option.orderNo, productNo: option.productNo,
       partName: option.partName, stepNo: option.stepNo, craft: option.craft, demand: option.demand, goodQty: null, inboundQty: null, lockedReason: null,
-      values: { ...values, plannedQty: 0 } }] }));
+      balance: existing ? existing.balance : option.balance, values: { ...values, plannedQty: 0 } }] };
+    });
     setDrafts(current => ({ ...current, [id]: draftOf(values) })); setAdditions(current => ({ ...current, [id]: option }));
     setAddOpen(false); setLineFilter(""); edited();
   }
@@ -178,7 +187,7 @@ export default function PlanWorkbench({ orderId }: { orderId?: number }) {
     {excessDetails.length > 0 && <ExcessScheduleDetails details={excessDetails} />}
     {notice && <p role="status" className="mb-3 rounded-lg bg-mint-50 p-3 text-sm text-mint-700">{notice}</p>}
     {busy && <p role="status" className="mb-2 text-sm text-text-secondary">处理中…</p>}
-    <p className="mb-2 text-xs text-text-secondary">数量按同订单、部位、工序汇总本厂区全部日期及拉别，不跨工序相加。尚需补排 = max（订单总需求 − 累计已生产 − 未报工计划，0）。{preview?.balances ? "统计已计入本次检查的草稿和自动扣减，尚未保存。" : dirty.length ? "当前统计按已保存排期；请点击“检查改动”查看调整后数量。" : "当前统计按已保存排期。"}</p>
+    <p className="mb-2 text-xs text-text-secondary">数量按同订单、部位、工序汇总本厂区全部日期及拉别，不跨工序相加。尚需补排 = max（订单总需求 − 累计已生产 − 未报工计划，0）。{preview?.balances ? "统计已通过本次服务端检查，尚未保存。" : dirty.length ? "数量随草稿实时估算（按自动扣减开关和当前快照），尚未保存；保存前仍需检查改动。" : "当前统计按已保存排期。"}</p>
     <div className="max-h-[65vh] overflow-auto rounded-lg border border-app-border bg-white">
       <table ref={table} className="w-full min-w-[2050px] border-collapse text-sm">
         <thead className="sticky top-0 z-10 bg-mint-50 text-mint-700"><tr>
@@ -190,8 +199,9 @@ export default function PlanWorkbench({ orderId }: { orderId?: number }) {
         </tr></thead>
         <tbody>{visible.map((row, index) => {
           const value = drafts[row.id] ?? draftOf(row.values); const modified = row.id < 0 || changed(row, drafts[row.id]);
-          const sameGroup = (b: WorkbenchBalance) => b.orderId === row.orderId && b.partName === row.partName && b.stepNo === row.stepNo;
-          const balance = preview?.balances?.find(sameGroup) ?? row.balance ?? data.rows.find(r => r.balance && sameGroup(r.balance))?.balance;
+          const key = balanceKey(row); const checked = checkedBalances.get(key); const live = liveBalances.get(key);
+          const balance = checked ?? live?.balance; const issue = checked ? undefined : live?.issue;
+          const actualBalance = balance ?? row.balance;
           const statsLabel = row.id < 0 ? `新增排期 ${-row.id}` : `计划 #${row.id}`;
           return <tr key={row.id} className={`border-t border-app-border ${row.lockedReason ? "bg-gray-50 text-text-tertiary" : modified ? "bg-amber-50" : ""}`}>
             <td className="p-2"><input type="checkbox" aria-label={`选择计划 #${row.id}`} disabled={busy || !!row.lockedReason} checked={selected.includes(row.id)} onChange={e => setSelected(s => e.target.checked ? [...s, row.id] : s.filter(id => id !== row.id))} /></td>
@@ -217,9 +227,9 @@ export default function PlanWorkbench({ orderId }: { orderId?: number }) {
               </td>;
             })}
             <td className="p-2" aria-label={`${statsLabel} 订单总需求`}>{row.demand.toLocaleString()}</td>
-            <td className="p-2" aria-label={`${statsLabel} 累计已生产`}>{balance?.produced.toLocaleString() ?? "—"}{!!balance?.actualFallbackCount && <small className="block min-w-[140px] text-text-secondary">含 {balance.actualFallbackCount} 条历史报工未填良品数，按员工报数或原计划计入</small>}</td>
+            <td className="p-2" aria-label={`${statsLabel} 累计已生产`}>{actualBalance?.produced.toLocaleString() ?? "—"}{!!actualBalance?.actualFallbackCount && <small className="block min-w-[140px] text-text-secondary">含 {actualBalance.actualFallbackCount} 条历史报工未填良品数，按员工报数或原计划计入</small>}</td>
             <td className="p-2" aria-label={`${statsLabel} 未报工计划`}>{balance?.unreportedPlanned.toLocaleString() ?? "—"}</td>
-            <td className="p-2 font-semibold text-amber-700" aria-label={`${statsLabel} 尚需补排`}>{balance?.remainingToSchedule.toLocaleString() ?? "—"}{!balance && <small className="block min-w-[140px] font-normal text-text-secondary">统计未加载，请重新加载或检查改动</small>}</td>
+            <td className="p-2 font-semibold text-amber-700" aria-label={`${statsLabel} 尚需补排`}>{balance?.remainingToSchedule.toLocaleString() ?? "—"}{issue && <small className="block min-w-[140px] font-normal text-red-700">{issue}</small>}</td>
             <td className="p-2 whitespace-nowrap">{row.goodQty?.toLocaleString() ?? "—"} / {row.inboundQty?.toLocaleString() ?? "—"}</td>
             <td className="min-w-[100px] p-2 text-xs">{row.lockedReason ?? (row.id < 0 ? "新增待保存" : modified ? "待保存" : "未报工")}{modified && <button className="mt-1 block underline text-mint-700" disabled={busy} onClick={() => { if (row.id < 0) { removeNew(row.id); return; } setDrafts(s => { const next = { ...s }; delete next[row.id]; return next; }); edited(); }}>{row.id < 0 ? "移除新增" : "还原本行"}</button>}</td>
           </tr>;

@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiFetch";
-import { valuesOf, type PlanValues, type WorkbenchLine } from "@/lib/planWorkbench";
-export type PlanOption = { orderId: number; orderPartQtyId: number; sourcePartId: number; orderNo: string; productNo: string; partName: string; stepNo: number; craft: string; demand: number; remaining: number; token: string };
+import { valuesOf, type PlanValues, type WorkbenchAllocationSource, type WorkbenchBalance, type WorkbenchLine } from "@/lib/planWorkbench";
+export type PlanOption = { orderId: number; orderPartQtyId: number; sourcePartId: number; orderNo: string; productNo: string; partName: string; stepNo: number; craft: string; demand: number; remaining: number; token: string; balance?: WorkbenchBalance; allocationSources?: WorkbenchAllocationSource[] };
 const input = "w-full rounded-md border border-app-border bg-white px-3 py-2 text-sm";
 export default function AddPlanDialog({ date, lines, orderId, onClose, onAdd }: {
   date: string; lines: WorkbenchLine[]; orderId?: number; onClose: () => void; onAdd: (option: PlanOption, values: PlanValues) => void;

@@ -10,7 +10,8 @@ namespace SprayPlan.Api.Features.Plans;
 
 public record WorkbenchAddition(int ClientId, int OrderPartQtyId, int StepNo, string OptionToken, WorkbenchValues Values);
 public record WorkbenchOption(int OrderId, int OrderPartQtyId, int? SourcePartId, string OrderNo, string ProductNo,
-    string PartName, int StepNo, string Craft, long Demand, long Remaining, string Token);
+    string PartName, int StepNo, string Craft, long Demand, long Remaining, string Token,
+    WorkbenchBalance? Balance = null, List<WorkbenchAllocationSource>? AllocationSources = null);
 
 public static class WorkbenchOptions
 {
@@ -25,6 +26,8 @@ public static class WorkbenchOptions
         var anchors = orders.SelectMany(o => o.PartQtys).Where(q => q.SourcePartId.HasValue).Select(q => q.SourcePartId!.Value).Distinct().ToList();
         var productIds = await db.ProductParts.Where(p => anchors.Contains(p.Id)).Select(p => p.ProductId).Distinct().ToListAsync();
         var parts = await db.ProductParts.AsNoTracking().Where(p => productIds.Contains(p.ProductId)).ToListAsync();
+        var planIds = orders.SelectMany(o => o.Plans.Select(p => p.Id)).ToList();
+        var inbound = (await db.InboundApplications.Where(a => planIds.Contains(a.SourcePlanId)).Select(a => a.SourcePlanId).ToListAsync()).ToHashSet();
         var result = new List<WorkbenchOption>();
         foreach (var order in orders)
         foreach (var qty in order.PartQtys.Where(q => qtyIds == null || qtyIds.Contains(q.Id)))
@@ -39,12 +42,19 @@ public static class WorkbenchOptions
                 var total = order.Plans.Where(p => p.PartName == qty.PartName && p.StepNo == pass.StepNo)
                     .Sum(p => (long)(PlanDateRules.HasActuals(p) ? p.GoodQty ?? p.ReportedQty ?? p.PlannedQty : p.PlannedQty));
                 var remaining = Math.Max(0, demand - total);
+                var stage = order.Plans.Where(p => p.PartName == qty.PartName && p.StepNo == pass.StepNo).ToList();
+                var produced = stage.Where(PlanDateRules.HasActuals).Sum(p => (long)(p.GoodQty ?? p.ReportedQty ?? p.PlannedQty));
+                var planned = stage.Where(p => !PlanDateRules.HasActuals(p)).Sum(p => (long)p.PlannedQty);
+                var balance = new WorkbenchBalance(order.Id, qty.PartName, pass.StepNo, demand, produced, planned, remaining,
+                    stage.Count(p => PlanDateRules.HasActuals(p) && p.GoodQty == null));
+                var sources = stage.Where(p => !PlanDateRules.HasActuals(p)).OrderBy(p => p.Id).Select(p => new WorkbenchAllocationSource(p.Id, order.Id,
+                    p.PartName, p.StepNo, ScheduleCalc.Ymd(p.PlanDate), p.PlannedQty, !inbound.Contains(p.Id))).ToList();
                 var token = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {
                     orderId = order.Id, order.Status, order.UpdatedAt, qtyId = qty.Id, qty.PartName, qty.SourcePartId, demand, remaining,
                     pass.StepNo, pass.Craft, definitions = group.OrderBy(p => p.Id).Select(p => new { p.Id, p.Craft, p.CraftPasses, p.PartGroupId })
                 }))));
                 result.Add(new(order.Id, qty.Id, qty.SourcePartId, order.ExternalOrderNo, order.Product!.ProductNo,
-                    qty.PartName, pass.StepNo, pass.Craft, demand, remaining, token));
+                    qty.PartName, pass.StepNo, pass.Craft, demand, remaining, token, balance, sources));
             }
         }
         return result;

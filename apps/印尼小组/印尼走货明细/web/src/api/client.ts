@@ -88,6 +88,7 @@ export interface ShipmentSourceCell {
   display: string
   formula?: string
   error?: boolean
+  comments?: Array<{ author: string; text: string }>
 }
 export interface ShipmentImportSource {
   file?: string

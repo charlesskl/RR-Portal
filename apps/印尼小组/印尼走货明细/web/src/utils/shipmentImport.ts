@@ -134,7 +134,8 @@ export function parseShipmentWorkbook(wb: XLSX.WorkBook): ShipmentImportResult {
       return { address, label, value: error ? null : typeof raw === 'string' || typeof raw === 'boolean'
         || typeof raw === 'number' && Number.isFinite(raw) ? raw : null,
         display: cell?.w ?? (raw == null ? '' : String(raw)),
-        ...(cell?.f ? { formula: cell.f } : {}), ...(error ? { error: true } : {}) }
+        ...(cell?.f ? { formula: cell.f } : {}), ...(error ? { error: true } : {}),
+        ...(cell?.c?.length ? { comments: cell.c.map((comment: { a?: string; t?: string }) => ({ author: comment.a || '', text: comment.t || '' })) } : {}) }
     }
     // Keep header-level notes/rate as evidence, not as commands to overwrite a
     // container the user is already editing. Never execute imported formulas.

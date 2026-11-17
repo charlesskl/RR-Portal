@@ -18,6 +18,8 @@ import { consolidateShipmentItems } from './shipmentConsolidation'
 import { shipmentImages } from './shipmentImages'
 import { appendShipmentDocumentSheets, shipmentDocumentBatches } from './shipmentDocumentOverflow'
 import { stackShipmentDocumentSheets } from './shipmentDocumentStack'
+import { shipmentQuantityComments, type QuantityComment } from './shipmentQuantityComments'
+import { addWorksheetComments } from './worksheetComments'
 
 import { CUSTOMS_FIXED, effectiveCustomsCompany, sortShipmentItems, cartonLayout } from './shipmentOrder'
 export { CUSTOMS_FIXED, effectiveCustomsCompany } from './shipmentOrder'
@@ -1247,6 +1249,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
   fitCategoryColumn(wbObj)
   compactMainColumns(ws)
 
+  const quantityComments = new Map<string, QuantityComment[]>()
   const floatImages: { rowZeroIdx: number; bytes: Uint8Array; ext: string; position: number }[] = []
   const imageCounts = new Map<number, number>()
   sorted.forEach((it, i) => {
@@ -1291,6 +1294,10 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
     setCell(ws, ri, 11, it.qty || 0, 'n')
     const paperRope = isPaperRope(m?.name_zh)
     setCell(ws, ri, 12, it.purchase_unit || (paperRope ? '米' : '个'), 's')
+    if (!selectedGroups) {
+      const comments = shipmentQuantityComments(it.sources, String(ws[`M${ri + 1}`]?.v || ''))
+      if (comments.length) quantityComments.set(`L${ri + 1}`, comments)
+    }
     // AO is per declaration unit; N is per purchase unit for the L quantity.
     setCell(ws, ri, 13, '=IFERROR(AO' + (ri + 1) + '*K' + (ri + 1) + '/L' + (ri + 1) + '/$N$1,0)', 'n')
     setCell(ws, ri, 14, '=N' + (ri + 1) + '*L' + (ri + 1), 'n')
@@ -1647,6 +1654,8 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
     await addPackingGrandTotal(outZip, newName, mainTotalRow)
   }
   await showFullDocumentUnitPrices(outZip, newName)
+  const mainPath = (await workbookSheetParts(outZip)).get(newName)
+  if (mainPath) await addWorksheetComments(outZip, mainPath, quantityComments)
   return await outZip.generateAsync({ type: 'blob' })
 }
 
@@ -4460,8 +4469,14 @@ async function injectOoxmlImages(
   const sheetPath = 'xl/worksheets/sheet' + mainSheetIdx + '.xml'
   let sheetXml = await zip.file(sheetPath)!.async('string')
   sheetXml = sheetXml.replace(/<(?:\w+:)?drawing\b[^>]*\/>/g, '')
-  sheetXml = sheetXml.replace(/<\/(?:\w+:)?worksheet>/, match => `<drawing r:id="${newRid}"/>${match}`)
-  zip.file(sheetPath, sheetXml)
+  const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml')
+  const sheetRoot = sheetDoc.documentElement!
+  const drawing = sheetDoc.createElementNS(SPREADSHEET_NS, sheetRoot.prefix ? `${sheetRoot.prefix}:drawing` : 'drawing')
+  drawing.setAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'r:id', newRid)
+  const following = Array.from(sheetRoot.childNodes).find(node => node.nodeType === 1
+    && ['legacyDrawing', 'legacyDrawingHF', 'picture', 'oleObjects', 'controls', 'webPublishItems', 'tableParts', 'extLst'].includes((node as XmlElement).localName || ''))
+  sheetRoot.insertBefore(drawing, following || null)
+  zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc))
   let ct = await zip.file('[Content_Types].xml')!.async('string')
   if (!ct.includes('Extension="png"')) {
     ct = ct.replace(/<Types[^>]*>/, m => m + '<Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/>')

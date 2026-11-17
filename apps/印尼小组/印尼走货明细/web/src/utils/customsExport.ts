@@ -1438,7 +1438,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
 
   // xlsx-js-style 读取旧模板时只能还原填充色和数字格式，因此需补回
   // 模板的字体、对齐、换行和边框，否则表头会被压缩且文字串列。
-  const thinBorder = { style: 'thin', color: { rgb: '999999' } }
+  const thinBorder = { style: 'thin', color: { rgb: '000000' } }
   const border = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder }
   const headerBaseStyle = {
     font: { name: 'Microsoft YaHei', sz: 10, bold: true, color: { rgb: '1A1A2E' } },
@@ -2539,7 +2539,7 @@ async function ensureMainTableGrid(zip: JSZip, mainName: string, totalRow?: numb
     const side = stylesDoc.createElementNS(SPREADSHEET_NS, edge) as XmlElement
     side.setAttribute('style', 'thin')
     const color = stylesDoc.createElementNS(SPREADSHEET_NS, 'color') as XmlElement
-    color.setAttribute('rgb', 'FF999999')
+    color.setAttribute('rgb', 'FF000000')
     side.appendChild(color)
     gridBorder.appendChild(side)
   }

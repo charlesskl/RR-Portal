@@ -12,7 +12,7 @@ import { buildCustomsWorkbook, customsFormulaName, customsInvoicePrice, effectiv
 const projectRoot = fileURLToPath(new URL('..', import.meta.url))
 const excelSerial = (date: string) => Math.floor((new Date(date).getTime() - Date.UTC(1899, 11, 30)) / 86400000)
 
-async function cellBorderSides(bytes: ArrayBuffer, address: string, sheetPath = 'xl/worksheets/sheet2.xml') {
+async function cellBorderSides(bytes: ArrayBuffer, address: string, sheetPath = 'xl/worksheets/sheet2.xml', readColors = false) {
   const zip = await JSZip.loadAsync(bytes)
   const parser = new DOMParser()
   const sheet = parser.parseFromString(await zip.file(sheetPath)!.async('string'), 'application/xml')
@@ -28,7 +28,7 @@ async function cellBorderSides(bytes: ArrayBuffer, address: string, sheetPath = 
   const border = children(elements(styles, 'borders')[0], 'border')[borderId]
   return ['left', 'right', 'top', 'bottom'].map(edge => {
     const side = Array.from(border?.childNodes || []).find(node => (node as any).localName === edge) as any
-    return side?.getAttribute('style')
+    return readColors ? children(side, 'color')[0]?.getAttribute('rgb') : side?.getAttribute('style')
   })
 }
 
@@ -246,9 +246,11 @@ describe('deployment base paths', () => {
     expect(sheet.AT8?.f).toBe('SUM(AT4:AT6)')
     for (const address of ['A4', 'B4', 'AB4', 'AQ4', 'B5', 'AB5', 'AQ5', 'BD6']) {
       expect(await cellBorderSides(outputBytes, address)).toEqual(['thin', 'thin', 'thin', 'thin'])
+      expect(await cellBorderSides(outputBytes, address, undefined, true)).toEqual(Array(4).fill('FF000000'))
     }
     for (const column of ['A', 'B', 'L', 'P', 'Q', 'S', 'AT', 'BD']) {
       expect(await cellBorderSides(outputBytes, `${column}8`)).toEqual(['thin', 'thin', 'thin', 'thin'])
+      expect(await cellBorderSides(outputBytes, `${column}8`, undefined, true)).toEqual(Array(4).fill('FF000000'))
       expect(await cellFillId(outputBytes, `${column}8`)).toBe(0)
     }
     for (const address of ['B22', 'H22', 'B23', 'H23', 'B24', 'H33', 'B34', 'H34']) {

@@ -122,3 +122,39 @@ it.each(['rri', 'rrm'])('first-position imported consolidation retains source co
   expect(sheet.AA4.v).toBeCloseTo(consolidated[0].kg * consolidated[0].invoice_price, 9)
   expect(sheet.AA5.v).toBeCloseTo(consolidated[1].kg * consolidated[1].invoice_price, 9)
 }, 60000)
+
+it.each(['rri', 'rrm', 'legacy'])('same-carton CBM merges with carton count, counts once across separated rows and retains two-decimal display (%s)', async variant => {
+  const items = importRows(['shared-a', 'shared-b', 'separate', 'shared-c']).map((item, index) => ({
+    ...item, supplier: 'same', customs_company: 'Other', carton_group: index === 2 ? undefined : 'SHARED',
+    cartons: index === 2 ? 2 : 1, contract_no: 'SYN-C', invoice_no: 'SYN-I',
+    material_snapshot: { ...item.material_snapshot, length: index === 2 ? 50 : 30,
+      width: index === 2 ? 40 : 20, height: index === 2 ? 50 : 10 },
+  }))
+  const materials = new Map(items.map(item => [item.material_id, item.material_snapshot]))
+  const before = structuredClone(items)
+  const template = variant === 'legacy' ? 'template-customs.xlsx' : `template-customs-${variant}.xlsx`
+  const blob = await buildCustomsWorkbook({
+    templateBuffer: Uint8Array.from(readFileSync(new URL('../../public/' + template, import.meta.url))).buffer,
+    items, materials, productHs: new Map(), images: new Map(),
+    form: { customer: variant === 'rri' ? 'RRI' : 'RRM', containerNo: 'CARTON-CBM', rate: 1 },
+  })
+  const sheet = XLSX.read(await blob.arrayBuffer(), { type: 'array', cellNF: true }).Sheets['CARTON-CBM']
+  expect(items).toEqual(before)
+  expect([4, 5, 6, 7].map(row => sheet[`F${row}`].v)).toEqual(['shared-a', 'shared-b', 'separate', 'shared-c'])
+  for (const column of ['R', 'S', 'AT']) {
+    const col = XLSX.utils.decode_col(column)
+    expect(sheet['!merges']).toContainEqual({ s: { r: 3, c: col }, e: { r: 4, c: col } })
+    expect(sheet['!merges']).not.toContainEqual({ s: { r: 3, c: col }, e: { r: 6, c: col } })
+    expect(sheet[`${column}5`]?.v || '').toBe('')
+  }
+  expect(sheet.R4.f).toBe('AU4*AV4*AW4/1000000')
+  expect(sheet.R4.v).toBe(.006)
+  expect(sheet.S4.f).toBe('R4*AT4')
+  expect(sheet.S4.v).toBe(.006)
+  expect(sheet.S6.v).toBe(.2)
+  expect(sheet.S7.v).toBe(0)
+  expect(sheet.S9.f).toBe('SUM(S4:S7)')
+  expect(sheet.S9.v).toBeCloseTo(.206, 12)
+  for (const address of ['R4', 'S4', 'R6', 'S6', 'R7', 'S7', 'S9']) expect(sheet[address].z).toBe('0.00')
+  expect(XLSX.utils.format_cell(sheet.S9)).toBe('0.21')
+}, 60000)

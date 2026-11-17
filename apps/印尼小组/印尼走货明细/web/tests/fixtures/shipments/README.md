@@ -21,7 +21,7 @@ npm exec vite -- --config tests/fixtures/shipments/vite.config.ts
 - TEST-LOAD-FAILURE：延迟后返回 503。显示错误和重新加载，保存、导出按钮禁用。
 - TEST-SLOW-MATERIALS：详情返回后仍需等待延迟的物料读取，不能操作半加载的资料。
 - TEST-MERGED-CARTONS：两个采购来源的同物料合为一行，数量只读；共箱仅计一次，
-  方向键跳过隐藏的箱数格。
+  方向键跳过隐藏的箱数格；同箱的每箱／总立方数同样合并，箱数与 CBM 均只计一次，立方数显示两位小数。
 
 单元测试还覆盖跨虚拟窗口的整段复制、粘贴、填充，以及关闭/切换后迟到响应的隔离。
 

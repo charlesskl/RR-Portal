@@ -542,7 +542,7 @@ export default function ShipmentsPage() {
   }
   // 计算列辅助
   const num = (v: any) => Number(v) || 0
-  function calc(it: ShipmentItem & { sources?: ShipmentItem[] }): {
+  function calc(it: ShipmentItem & { sources?: ShipmentItem[] }, physicalCartons = num(it.cartons)): {
     m: any; grossTotal: number; netTotal: number; cbmEach: number; cbmTotal: number; invoiceAmount: number; purchaseAmount: number
   } {
     const m = it.material_id != null ? matMap.get(it.material_id) : null
@@ -555,7 +555,7 @@ export default function ShipmentsPage() {
       ? sourceTotals.reduce((total, source) => total + source.netTotal, 0)
       : shipmentNetTotalKg(it, m)
     const cbmEach = shipmentCbmPerCarton(m?.length, m?.width, m?.height)
-    const cbmTotal = cbmEach * num(it.cartons)
+    const cbmTotal = cbmEach * physicalCartons
     const invoiceAmount = num(it.invoice_price) * num(it.kg)
     const purchaseAmount = shipmentPurchaseAmount(it)
     return { m, grossTotal, netTotal, cbmEach, cbmTotal, invoiceAmount, purchaseAmount }
@@ -1206,7 +1206,7 @@ export default function ShipmentsPage() {
     const material = matMap.get(item.material_id!)
     const field = shipmentSheetFields[col]
     if (field) return mergedCellValue(row, field)
-    const calculated = calc(item)
+    const calculated = calc(item, consolidatedCartons[row]?.count ?? num(item.cartons))
     switch (col) {
       case 0: return row + 1
       case 1: return item.outbound_ids.map(id => `OUT-${id}`).join(' / ') || '未关联'
@@ -1219,8 +1219,8 @@ export default function ShipmentsPage() {
       case 15: return item.purchase_unit || (isPaperRope(material?.name_zh) ? '米' : '个')
       case 16: return calculated.grossTotal ? calculated.grossTotal.toFixed(2) : ''
       case 17: return calculated.netTotal ? calculated.netTotal.toFixed(2) : ''
-      case 18: return calculated.cbmEach ? calculated.cbmEach.toFixed(4) : ''
-      case 19: return calculated.cbmTotal ? calculated.cbmTotal.toFixed(4) : ''
+      case 18: return calculated.cbmEach ? calculated.cbmEach.toFixed(2) : ''
+      case 19: return calculated.cbmTotal ? calculated.cbmTotal.toFixed(2) : ''
       case 25: return item.invoice_price?.toFixed(4)
       case 26: return calculated.invoiceAmount ? calculated.invoiceAmount.toFixed(2) : ''
       case 32: return calculated.purchaseAmount.toFixed(2)
@@ -1410,10 +1410,10 @@ export default function ShipmentsPage() {
     const repeatedPacking = new Set(consolidatedItems
       .filter(group => !!group.material_snapshot?.shipment_outbound_link_group)
       .flatMap(group => group.sources.slice(1).map(source => source._rowKey)))
-    for (const it of items) {
+    for (const [index, it] of items.entries()) {
       const m = it.material_id != null ? matMap.get(it.material_id) : null
       if (!repeatedPacking.has(it._rowKey))
-        cbm += (Number(m?.length) || 0) * (Number(m?.width) || 0) * (Number(m?.height) || 0) / 1e6 * (Number(it.cartons) || 0)
+        cbm += shipmentCbmPerCarton(m?.length, m?.width, m?.height) * (cartonRows[index]?.count ?? (Number(it.cartons) || 0))
       const weightQty = shipmentWeightQuantity(m?.name_zh, it.qty)
       gross += shipmentGrossPerPc(m?.weight_per_carton, effectiveWeighingQty(it, m)) * weightQty
       net += shipmentNetTotalKg(it, m)
@@ -1574,7 +1574,7 @@ export default function ShipmentsPage() {
               <span><b>{tot.net.toFixed(2)} kg</b><small>净重合计</small></span>
               <span><b>{tot.gross.toFixed(2)} kg</b><small>毛重总重</small></span>
               <span><b>{tot.cartons}</b><small>总箱数</small></span>
-              <span><b>{tot.cbm.toFixed(4)}</b><small>总 CBM</small></span>
+              <span><b>{tot.cbm.toFixed(2)}</b><small>总 CBM</small></span>
               <span><b>{tot.amount.toFixed(2)}</b><small>采购金额</small></span>
             </div>
             <Space wrap className="shipment-actions">
@@ -1692,8 +1692,8 @@ export default function ShipmentsPage() {
               { title: '数量单位', width: 80, align: 'center', render: (_v, r) => r.purchase_unit || (isPaperRope(matMap.get(r.material_id!)?.name_zh) ? '米' : '个') },
               { title: '毛重总重', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.grossTotal ? c.grossTotal.toFixed(2) : '' } },
               { title: '净重总重', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.netTotal ? c.netTotal.toFixed(2) : '' } },
-              { title: '立方数/每箱', width: 100, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.cbmEach ? c.cbmEach.toFixed(4) : '' } },
-              { title: '总立方数', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.cbmTotal ? c.cbmTotal.toFixed(4) : '' } },
+              { title: '立方数/每箱', width: 100, align: 'right', onCell: (_, i) => ({ style: GRAY, rowSpan: consolidatedCartons[i!]?.span ?? 1 }), render: (_v, r) => { const c = calc(r); return c.cbmEach ? c.cbmEach.toFixed(2) : '' } },
+              { title: '总立方数', width: 90, align: 'right', onCell: (_, i) => ({ style: GRAY, rowSpan: consolidatedCartons[i!]?.span ?? 1 }), render: (_v, r, i) => { const c = calc(r, consolidatedCartons[i]?.count ?? num(r.cartons)); return c.cbmTotal ? c.cbmTotal.toFixed(2) : '' } },
               { title: '产品用途', width: 140, render: (_v, r, i) => fillable(i, 'product_use', <ShipmentTextCell value={r.product_use} onCommit={value => patchItem(i, 'product_use', value)} />) },
               { title: '合同号码', width: 180, render: (_v, r, i) => fillable(i, 'contract_no', <ShipmentTextCell value={r.contract_no} onCommit={value => patchItem(i, 'contract_no', value)} />) },
               { title: '合同日期', width: 155, render: (_v, r, i) => fillable(i, 'contract_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={shipmentDateOnly(r.contract_date) ? dayjs(shipmentDateOnly(r.contract_date)) : null} onChange={(v) => patchItem(i, 'contract_date', v ? v.format('YYYY-MM-DD') : '')} />) },

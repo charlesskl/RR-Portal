@@ -25,8 +25,8 @@ describe('每箱数量分段写法', () => {
 })
 
 describe('立方数/每箱', () => {
-  it('使用与导出表一致的长宽高换算公式', () => {
-    expect(shipmentCbmPerCarton(60, 50, 34)).toBeCloseTo(60 * 50 * 34 / 28316.75 * 0.0283)
+  it('厘米尺寸直接换成立方米，不引入英尺近似误差', () => {
+    expect(shipmentCbmPerCarton(60, 50, 34)).toBeCloseTo(.102, 12)
   })
 
   it.each([

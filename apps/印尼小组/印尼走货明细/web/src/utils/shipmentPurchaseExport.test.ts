@@ -91,3 +91,43 @@ it.each(['RRI', 'RRM'])('真实模板按采购数量计价，千克单价换算�
   reimported.forEach((row, i) => expect(shipmentPurchaseAmount(row.item)).toBeCloseTo(expected[i], 9))
   expect(rows).toEqual(before)
 }, 60000)
+
+it.each(['rri', 'rrm', 'legacy'])('主明细：同供应商重复出现时相邻总额仍合并，毛净重显示两位小数（%s）', async variant => {
+  const items = ['A', 'A', 'B', 'A', 'A', 'C'].map((supplier, index) => ({
+    material_id: -index - 1, qty: 1, kg: .3, price: index + 1, currency: 'US$', supplier, purchase_unit: '个',
+    customs_company: '合成报关公司', weighing_qty: 1, contract_no: 'SYN-C', invoice_no: 'SYN-I',
+    material_snapshot: { product_code: `SYN-${index}`, name_zh: `合成物料${index}`, unit_kg: 'KGM',
+      import_source: { sheet: '源明细', row: index + 2, cells: [], context: [] }, weight_per_carton: index === 0 ? 3 : .4, net_per_pc: .3 },
+  }))
+  const before = structuredClone(items)
+  const template = variant === 'legacy' ? 'template-customs.xlsx' : `template-customs-${variant}.xlsx`
+  const blob = await buildCustomsWorkbook({
+    templateBuffer: Uint8Array.from(readFileSync(new URL('../../public/' + template, import.meta.url))).buffer,
+    items, materials: new Map(items.map(item => [item.material_id, item.material_snapshot])), productHs: new Map(), images: new Map(),
+    form: { customer: variant === 'rri' ? 'RRI' : 'RRM', containerNo: 'SUPPLIER-RUNS', rate: 1 },
+  })
+  const book = XLSX.read(await blob.arrayBuffer(), { type: 'array', cellNF: true }), sheet = book.Sheets['SUPPLIER-RUNS']
+  expect(items).toEqual(before)
+  expect(items.map((_, index) => sheet[`D${index + 4}`].v)).toEqual(items.map(item => item.material_snapshot.product_code))
+  const merges = (sheet['!merges'] || []).filter(range => range.s.c === 42)
+  expect(merges).toEqual([
+    { s: { r: 3, c: 42 }, e: { r: 4, c: 42 } },
+    { s: { r: 6, c: 42 }, e: { r: 7, c: 42 } },
+  ])
+  expect(sheet.AQ4.f).toBe('SUM(AP4:AP5,AP7:AP8)')
+  for (const row of [5, 7, 8]) {
+    expect(sheet[`AQ${row}`]?.f).toBeUndefined()
+    expect(sheet[`AQ${row}`]?.v || '').toBe('')
+  }
+  items.forEach((item, index) => expect(Number(sheet[`AP${index + 4}`].v)).toBeCloseTo(shipmentPurchaseAmount(item), 9))
+  expect(sheet.AQ6.f).toBe('SUM(AP6)')
+  expect(sheet.AQ9.f).toBe('SUM(AP9)')
+  expect(sheet.P4.v).toBe(3)
+  expect(sheet.P5.v).toBe(.4)
+  expect(sheet.P4.f).toBe('ROUND(BA4*L4,2)')
+  for (const row of [4, 5, 6, 7, 8, 9, 11]) {
+    for (const column of ['P', 'Q']) expect(sheet[`${column}${row}`].z?.replaceAll('_ ', '')).toBe('0.00')
+  }
+  expect(XLSX.utils.format_cell(sheet.P4)).toBe('3.00')
+  expect(XLSX.utils.format_cell(sheet.P5)).toBe('0.40')
+}, 60000)

@@ -1300,8 +1300,8 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
     const weightDivisor = paperRope ? '/1000' : ''
     setCell(ws, ri, 15, '=ROUND(BA' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
     setCell(ws, ri, 16, '=ROUND(BB' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
-    setCell(ws, ri, 17, '=AU' + (ri + 1) + '*AV' + (ri + 1) + '*AW' + (ri + 1) + '/28316.75*0.0283', 'n')
-    setCell(ws, ri, 18, '=R' + (ri + 1) + '*' + (it.carton_group ? String(Number(it.cartons) || 0) : 'AT' + (ri + 1)), 'n')
+    setCell(ws, ri, 17, '=AU' + (ri + 1) + '*AV' + (ri + 1) + '*AW' + (ri + 1) + '/1000000', 'n')
+    setCell(ws, ri, 18, '=R' + (ri + 1) + '*AT' + (ri + 1), 'n')
     setCell(ws, ri, 20, it.product_use || '', 's')
     setCell(ws, ri, 21, it.contract_no || '', 's')
     if (it.contract_date) setCell(ws, ri, 22, excelDate(it.contract_date), 'n')
@@ -1375,10 +1375,10 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
     ws[XLSX.utils.encode_cell({ r: ri, c: 16 })].v = Number(netTotal.toFixed(2))
     const cbmEach = shipmentCbmPerCarton(m?.length, m?.width, m?.height)
     ws[XLSX.utils.encode_cell({ r: ri, c: 17 })].v = cbmEach
-    ws[XLSX.utils.encode_cell({ r: ri, c: 18 })].v = cbmEach * (Number(it.cartons) || 0)
+    ws[XLSX.utils.encode_cell({ r: ri, c: 18 })].v = cbmEach * cartonRows[i].count
   })
 
-  // 合计不再跨行合并：合并单元格会吞掉明细行之间的横向边框。
+  // 同一分组可分散在多个位置；仅合并各个相邻连续段，不改变明细顺序。
   // 将不连续的明细行压缩成 SUM 可接受的单元格/区间引用。
   const groupedSumFormula = (column: string, indexes: number[]) => {
     const rows = indexes.map(index => index + 4)
@@ -1393,12 +1393,15 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
   }
   const mergeGroupedTotal = (column: number, indexes: number[]) => {
     if (indexes.length < 2) return
-    const contiguous = indexes.every((index, position) => position === 0 || index === indexes[position - 1] + 1)
-    if (!contiguous) return
-    ;(ws['!merges'] ||= []).push({
-      s: { r: indexes[0] + 3, c: column },
-      e: { r: indexes[indexes.length - 1] + 3, c: column },
-    })
+    for (let start = 0; start < indexes.length;) {
+      let end = start
+      while (end + 1 < indexes.length && indexes[end + 1] === indexes[end] + 1) end++
+      if (end > start) (ws['!merges'] ||= []).push({
+        s: { r: indexes[start] + 3, c: column },
+        e: { r: indexes[end] + 3, c: column },
+      })
+      start = end + 1
+    }
   }
 
   // 发票金额合计优先按合同号汇总；没有合同号时按报关公司汇总。
@@ -1473,7 +1476,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
       }
       if (!(ws as any)[addr].z && format?.z) (ws as any)[addr].z = format.z
       // 发票合计(AB)和采购总额(AQ)原模板按分组跨行合并，模板样式没有内部横线。
-      // 取消合并后为每一格明确补齐四边，避免相邻明细之间仍然断线。
+      // 每格补齐边框；实际跨行合并范围由连续分组决定。
       if (c === 27 || c === 42) {
         ;(ws as any)[addr].s = {
           ...((ws as any)[addr].s || {}),
@@ -1520,7 +1523,8 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
       const columnIndex = XLSX.utils.decode_col(column)
       setCell(ws, totalRi, columnIndex, `=SUM(${column}${firstDataRow}:${column}${lastDataRow})`, 'n')
       const cell: any = (ws as any)[`${column}${mainTotalRow}`]
-      cell.z = column === 'S' ? '0.0000' : column === 'AT' ? '0' : '0.00'
+      cell.z = column === 'AT' ? '0' : '0.00'
+      cell.v = sorted.reduce((sum, _, index) => sum + (Number(ws[`${column}${index + 4}`]?.v) || 0), 0)
       cell.s = {
         ...cell.s,
         font: { name: 'Microsoft YaHei', sz: 10, bold: true, color: { rgb: '1A1A2E' } },
@@ -1543,7 +1547,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
   // 按字段用途强制数字格式，避免模板样例行的货币格式串列。
   const fixedFormats: Record<number, string> = {
     0: '0', 10: '0.0000', 11: '0.0000', 13: '"HK$"#,##0.0000', 14: '"HK$"#,##0.0000',
-    15: '0.00', 16: '0.00', 17: '0.0000', 18: '0.0000',
+    15: '0.00', 16: '0.00', 17: '0.00', 18: '0.00',
     22: 'yyyy/m/d', 24: 'yyyy/m/d', 25: '"US$"#,##0.0000', 26: '"US$"#,##0.0000',
     27: '"US$"#,##0.0000', 29: 'yyyy/m/d', 31: 'yyyy/m/d', 38: 'yyyy/m/d',
     45: '0', 46: '0.0000', 47: '0.0000', 48: '0.0000', 50: '0',
@@ -1729,13 +1733,15 @@ export async function mergeMainCartonCells(zip: JSZip, mainName: string, layout:
   const data = directChild(root, 'sheetData')!
   layout.forEach((entry, i) => {
     if (entry.span <= 1) return
-    const merge = doc.createElementNS(SPREADSHEET_NS, 'mergeCell')
-    merge.setAttribute('ref', `AT${i + 4}:AT${i + entry.span + 3}`)
-    merges!.appendChild(merge)
-    for (let n = i + 1; n < i + entry.span; n++) {
-      const row = directChildren(data, 'row').find(r => rowNumber(r) === n + 4)
-      const cell = row && directChildren(row, 'c').find(c => c.getAttribute('r') === `AT${n + 4}`)
-      if (cell) clearXmlCell(cell)
+    for (const column of ['R', 'S', 'AT']) {
+      const merge = doc.createElementNS(SPREADSHEET_NS, 'mergeCell')
+      merge.setAttribute('ref', `${column}${i + 4}:${column}${i + entry.span + 3}`)
+      merges!.appendChild(merge)
+      for (let n = i + 1; n < i + entry.span; n++) {
+        const row = directChildren(data, 'row').find(r => rowNumber(r) === n + 4)
+        const cell = row && directChildren(row, 'c').find(c => c.getAttribute('r') === `${column}${n + 4}`)
+        if (cell) clearXmlCell(cell)
+      }
     }
   })
   merges.setAttribute('count', String(directChildren(merges, 'mergeCell').length))
@@ -2352,10 +2358,8 @@ async function restoreTemplateDocumentStyles(
     }
   }
   const derivedFonts = new Map<string, string>()
-  const styleForDeclaration = (baseStyle: string, unit?: string) => {
-    const precision = shipmentDeclarationPrecision(unit)
-    if (precision == null) return baseStyle
-    const key = `${baseStyle}|declaration:${precision}`
+  const styleWithDecimalPlaces = (baseStyle: string, precision: number) => {
+    const key = `${baseStyle}|decimals:${precision}`
     const cached = derivedStyles.get(key)
     if (cached) return cached
     const formats = rawStyles.getElementsByTagName('numFmts')[0]
@@ -2493,7 +2497,11 @@ async function restoreTemplateDocumentStyles(
           rawStyle = rawMainStyles.get(`${sourceColumn}4`)
           if (rawStyle) rawStyle = styleWithFill(rawStyle,
             rawMainStyles.get(sourceColumn === 'E' ? 'E3' : `A${sourceRow}`) || rawStyle)
-          if (rawStyle && sourceColumn === 'K') rawStyle = styleForDeclaration(rawStyle, outputUnits[Number(match[2]) - 4])
+          if (rawStyle && sourceColumn === 'K') {
+            const precision = shipmentDeclarationPrecision(outputUnits[Number(match[2]) - 4])
+            if (precision != null) rawStyle = styleWithDecimalPlaces(rawStyle, precision)
+          }
+          if (rawStyle && ['P', 'Q', 'R', 'S'].includes(sourceColumn)) rawStyle = styleWithDecimalPlaces(rawStyle, 2)
           if (rawStyle && ['Z', 'AA', 'AB'].includes(match[1])) rawStyle = styleForCurrency(rawStyle, 'US$')
           if (rawStyle && ['AO', 'AP', 'AQ'].includes(match[1])) {
             rawStyle = styleForCurrency(rawStyle, outputCurrencies[Number(match[2]) - 4] || '¥')

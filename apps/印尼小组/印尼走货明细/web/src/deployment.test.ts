@@ -215,7 +215,7 @@ describe('deployment base paths', () => {
     expect(sheet.AP4).toMatchObject({ f: 'AO4*K4' })
     expect(sheet.P4).toMatchObject({ f: 'ROUND(BA4*L4,2)' })
     expect(sheet.Q4).toMatchObject({ f: 'ROUND(BB4*L4,2)' })
-    expect(sheet.R4).toMatchObject({ f: 'AU4*AV4*AW4/28316.75*0.0283' })
+    expect(sheet.R4).toMatchObject({ f: 'AU4*AV4*AW4/1000000' })
     expect(['AU', 'AV', 'AW', 'AX', 'AY', 'AZ', 'BA', 'BB', 'BC', 'BD'].map(col => sheet[`${col}3`]?.v)).toEqual([
       '长\nLength', '宽\nWidth', '高\nHeight', '物料编码', '每箱数量',
       '每箱重量', '单个毛重', '单个净重', '卡板', '',
@@ -301,7 +301,8 @@ describe('deployment base paths', () => {
     expect(await cellFillId(outputBytes, 'BB6')).toBe(await cellFillId(outputBytes, 'A6'))
     expect(sheet.E4?.s?.fgColor?.rgb).toBe(sheet.E3?.s?.fgColor?.rgb)
     expect(sheet.E4?.s?.fgColor?.rgb).not.toBe(sheet.A4?.s?.fgColor?.rgb)
-    expect(sheet.P4?.z).toBe(templateSheet.P4?.z)
+    expect(sheet.P4?.z).toBe('0.00')
+    expect(sheet.Q4?.z).toBe('0.00')
     expect(sheet['!cols']?.[0]?.width).toBeLessThan(templateSheet['!cols']?.[0]?.width || Infinity)
     expect(sheet['!cols']?.[19]?.width).toBeLessThan(templateSheet['!cols']?.[19]?.width || Infinity)
     for (const column of [13, 14, 28, 29, 30, 31, 32, 33, 34, 35, 36]) {

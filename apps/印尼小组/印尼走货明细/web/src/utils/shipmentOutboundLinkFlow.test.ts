@@ -6,7 +6,7 @@ import { linkShipmentOutboundBatches } from './shipmentOutboundBatchLink'
 import { consolidateShipmentItems } from './shipmentConsolidation'
 import { parseShipmentPacking } from './shipmentWeight'
 import { cartonLayout } from './shipmentOrder'
-import { shipmentGrossPerPc, shipmentNetTotalKg, shipmentWeightQuantity } from './shipmentWeight'
+import { shipmentCbmPerCarton, shipmentGrossPerPc, shipmentNetTotalKg, shipmentWeightQuantity } from './shipmentWeight'
 import { shipmentPurchaseAmount } from './shipmentPurchase'
 import type { Material } from '../api/client'
 
@@ -133,7 +133,7 @@ it('validates the original physical packing total after splitting source allocat
   expect(result.warn.some((message: string) => message.includes('分段合计'))).toBe(false)
 })
 
-it('counts physical CBM once for the new multi-batch link while preserving distinct and legacy packing totals', () => {
+it('counts CBM once per physical carton even when packing rows or legacy metadata differ', () => {
   const material = { id: 66, name_zh: '中边模', unit_kg: 'KGM', length: 30, width: 20, height: 10 }
   const original = { _rowKey: 1, material_id: 66, material_snapshot: undefined as Material | undefined,
     qty: 10, kg: 2.0001, cartons: 2, qty_per_carton: '1/4 2/6' }
@@ -146,16 +146,17 @@ it('counts physical CBM once for the new multi-batch link while preserving disti
   const totals = (items: typeof linked) => {
     const matMap = new Map(items.map(item => [item.material_id, item.material_snapshot!]))
     const context = createContext({ items, matMap, consolidatedItems: consolidateShipmentItems(items, matMap),
-      cartonRows: cartonLayout(items, matMap), shipmentNetTotalKg, shipmentGrossPerPc, shipmentWeightQuantity, shipmentPurchaseAmount,
+      cartonRows: cartonLayout(items, matMap), shipmentCbmPerCarton, shipmentNetTotalKg, shipmentGrossPerPc, shipmentWeightQuantity, shipmentPurchaseAmount,
       effectiveWeighingQty: () => 0 })
     return runInContext(ts.transpileModule(`(${totalHandler})()`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context)
   }
   expect(totals(linked)).toMatchObject({ cbm: .012, cartons: 2, qty: 10, amount: 26 })
   expect(totals(linked).kg).toBeCloseTo(2.0001, 8)
   const distinctPacking = linked.map((item, index) => index ? { ...item, qty_per_carton: '1/2 2/4' } : item)
-  expect(totals(distinctPacking).cbm).toBe(.024)
+  // Packing contents may differ within the same physical carton group.
+  expect(totals(distinctPacking).cbm).toBe(.012)
   const distinctGroup = linked.map((item, index) => index ? { ...item, carton_group: 'other' } : item)
   expect(totals(distinctGroup).cbm).toBe(.024)
   const legacy = linked.map(item => ({ ...item, material_snapshot: { ...item.material_snapshot!, shipment_outbound_link_group: undefined } }))
-  expect(totals(legacy).cbm).toBe(.024)
+  expect(totals(legacy).cbm).toBe(.012)
 })

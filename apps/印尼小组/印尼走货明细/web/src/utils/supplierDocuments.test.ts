@@ -971,11 +971,11 @@ describe('supplier document export', () => {
     expect(borderEdges(outputStyles, packingXml, 'A32')).not.toContain('top')
     expect(borderEdges(outputStyles, packingXml, 'K32')).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
     expect(borderEdges(outputStyles, packingXml, 'K32')).not.toContain('top')
-    expect(borderStyle(outputStyles, packingXml, 'A24', 'bottom')).toBe('thin')
-    expect(borderStyle(outputStyles, packingXml, 'K30', 'bottom')).toBe('thin')
+    expect(borderStyle(outputStyles, packingXml, 'A24', 'bottom')).toBe(null)
+    expect(borderStyle(outputStyles, packingXml, 'K30', 'bottom')).toBe(null)
     expect(borderStyle(outputStyles, packingXml, 'D31', 'bottom')).toBe(null)
     expect(borderStyle(outputStyles, packingXml, 'K31', 'bottom')).toBe(null)
-    expect(borderStyle(outputStyles, packingXml, 'A24', 'bottom', true)).toBe('FFE0E0E0')
+    expect(borderStyle(outputStyles, packingXml, 'A24', 'top')).toBe(null)
     expect(borderStyle(outputStyles, packingXml, 'K30', 'right', true)).toBe('FF000000')
     expect(borderStyle(outputStyles, packingXml, 'K32', 'bottom')).toBe('medium')
     // 发票的装运口岸/目的地分组行以及总值大写行也必须完整闭合。
@@ -1215,7 +1215,7 @@ describe('supplier document export', () => {
     const outputStyles = await outputZip.file('xl/styles.xml')!.async('string')
     const packingXml = await worksheetXml(outputZip, '装箱单')
     // RRI 装箱单严格遵循确认稿：顶部与标签条浅紫，资料/明细白底，
-    // 合计仅 D:K 浅紫，合计后的空白行仍保留完整表格线。
+    // 合计仅 D:K 浅紫；明细无内部横线，合计后的封底行保留竖线和底框。
     for (const address of ['A1', 'K7', 'A8', 'K8', 'D10', 'K10', 'D12', 'K12', 'A15', 'C15', 'D16', 'K16', 'D22', 'K22', 'A24', 'K24', 'D32', 'K32']) {
       expect(fillColor(outputStyles, packingXml, address)).toBe('FFCCCCFF')
     }
@@ -1227,12 +1227,12 @@ describe('supplier document export', () => {
     expect(borderEdges(outputStyles, packingXml, 'A33')).not.toContain('top')
     expect(borderEdges(outputStyles, packingXml, 'K33')).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
     expect(borderEdges(outputStyles, packingXml, 'K33')).not.toContain('top')
-    expect(borderStyle(outputStyles, packingXml, 'A25', 'bottom')).toBe('thin')
-    expect(borderStyle(outputStyles, packingXml, 'K31', 'bottom')).toBe('thin')
+    expect(borderStyle(outputStyles, packingXml, 'A25', 'bottom')).toBe(null)
+    expect(borderStyle(outputStyles, packingXml, 'K31', 'bottom')).toBe(null)
     expect(borderStyle(outputStyles, packingXml, 'D32', 'bottom')).toBe(null)
     expect(borderStyle(outputStyles, packingXml, 'K32', 'bottom')).toBe(null)
-    expect(borderStyle(outputStyles, packingXml, 'A25', 'bottom', true)).toBe('FFE0E0E0')
-    expect(borderStyle(outputStyles, packingXml, 'K31', 'bottom', true)).toBe('FFE0E0E0')
+    expect(borderStyle(outputStyles, packingXml, 'A25', 'top')).toBe(null)
+    expect(borderStyle(outputStyles, packingXml, 'K31', 'top')).toBe(null)
     expect(borderStyle(outputStyles, packingXml, 'A25', 'right', true)).toBe('FF000000')
     expect(borderStyle(outputStyles, packingXml, 'K33', 'bottom')).toBe('medium')
   })

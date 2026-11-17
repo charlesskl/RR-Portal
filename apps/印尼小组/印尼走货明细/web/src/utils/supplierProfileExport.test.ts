@@ -42,3 +42,31 @@ it.each(['RRI', 'RRM'])('same-company alias cannot erase the selected seller arc
   }
   expect(profiles).toEqual(before)
 }, 60000)
+
+it.each(['RRI', 'RRM'])('contract signing places recognize Hong Kong addresses for each seller without leaking to other groups (%s)', async customer => {
+  const profiles = [
+    ['Room 805, South Seas Centre, Tower II, Mody Road, Kowloon, HONGKONG.', 'HONGKONG'],
+    ['Room 9, Kowloon, Hong Kong', 'HONGKONG'],
+    ['No. 1 Test Road, Dongguan', 'DONGGUAN'],
+    ['Synthetic address without a recognized city', ''],
+  ].map(([addressEn, place], index) => ({ keyword: `合成卖方${index}`, full: `合成卖方${index}有限公司`,
+    nameEn: `Synthetic Seller ${index} Limited`, addressZh: '合成测试地址', addressEn,
+    phone: '000-SYNTHETIC', email: 'synthetic@example.com', contact: 'Synthetic Contact', place }))
+  const items = profiles.map((profile, index) => ({ material_id: index + 1, qty: 1, kg: 1, price: 2,
+    currency: 'US$', supplier: profile.keyword, customs_company: profile.full, contract_no: `SYN-C-${index}`, invoice_no: `SYN-I-${index}` }))
+  const blob = await buildCustomsWorkbook({
+    templateBuffer: Uint8Array.from(readFileSync(new URL(`../../public/template-customs-${customer.toLowerCase()}.xlsx`, import.meta.url))).buffer,
+    supplierProfiles: profiles, items, materials: new Map(items.map(item => [item.material_id, {
+      id: item.material_id, name_zh: `合成物料${item.material_id}`, product_code: `SYN-${item.material_id}`, unit_kg: 'KGM',
+    }])), productHs: new Map(), images: new Map(), form: { customer, containerNo: 'SIGNING-PLACE', rate: 1 },
+  })
+  const book = XLSX.read(await blob.arrayBuffer(), { type: 'array' })
+  const sheet = book.Sheets[customer === 'RRI' ? '实业合同' : '全球合同']
+  for (const profile of profiles) {
+    const sellerAddress = Object.entries(sheet).find(([address, cell]) => /^C\d+$/.test(address)
+      && String(cell?.v || '').includes(profile.addressEn))
+    expect(sellerAddress, profile.keyword).toBeTruthy()
+    const row = sellerAddress![0].slice(1)
+    expect(sheet[`H${row}`]?.v || '', profile.addressEn).toBe(profile.place)
+  }
+}, 60000)

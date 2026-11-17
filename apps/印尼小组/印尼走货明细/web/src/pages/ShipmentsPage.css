@@ -160,6 +160,7 @@
 }
 
 .shipment-sheet-heading { position: relative; padding-right: 10px; }
+.shipment-sheet-heading-label { display: block; overflow: hidden; text-overflow: ellipsis; }
 .shipment-sheet-resize {
   position: absolute;
   right: -8px;

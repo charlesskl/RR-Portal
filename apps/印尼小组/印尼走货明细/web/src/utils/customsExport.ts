@@ -665,8 +665,8 @@ function populateLinkedDocuments(
       setPreservingStyle(groupContractSheet, `C${contractSellerRow}`, name)
       setPreservingStyle(groupContractSheet, `C${contractSellerRow + 1}`, english)
       setPreservingStyle(groupContractSheet, `C${contractSellerRow + 2}`, address)
-      const city = seller?.addressEn?.match(/\b(Shenzhen|Dongguan|Huizhou|Heyuan|Guangzhou|Foshan|Zhongshan|Jiangmen|Xiamen|Ningbo|Shanghai|Suzhou|Wenzhou|Yiwu)\b/i)?.[1]
-      setPreservingStyle(groupContractSheet, `H${contractSellerRow + 2}`, city?.toUpperCase() || '')
+      const city = seller?.addressEn?.match(/\b(Hong\s*Kong|Shenzhen|Dongguan|Huizhou|Heyuan|Guangzhou|Foshan|Zhongshan|Jiangmen|Xiamen|Ningbo|Shanghai|Suzhou|Wenzhou|Yiwu)\b/i)?.[1]
+      setPreservingStyle(groupContractSheet, `H${contractSellerRow + 2}`, city?.toUpperCase().replace(/^HONG\s*KONG$/, 'HONGKONG') || '')
     }
     const signatureRow = findLabelRow(groupContractSheet, 'D', slot.contractRows[1] + 1, contractEnd, /卖方|The Sellers/i)
     if (signatureRow) setPreservingStyle(groupContractSheet, `E${signatureRow}`, combined)
@@ -3381,9 +3381,13 @@ async function restoreLinkedTemplateFormulas(
         const targetRow = table.finalStart + offset
         const row = rows.get(targetRow)
         if (!row) return
-        const sourceRow = offset <= section.end - section.start ? section.start + offset : section.start
+        const preferredRow = offset <= section.end - section.start ? section.start + offset : section.start
         for (const cell of directChildren(row, 'c')) {
           const column = cellColumn(cell.getAttribute('r') || '')
+          // Some sample rows omit a formula inside the original detail range.
+          // Reuse this section's first-row rule just as for an expanded row,
+          // rather than leaving a different direct-reference fallback behind.
+          const sourceRow = template[`${column}${preferredRow}`]?.f ? preferredRow : section.start
           const source = template[`${column}${sourceRow}`]
           if (!source?.f) continue
           let formula = rebindDocumentFormula(source.f, {
@@ -3624,7 +3628,7 @@ function resizeLinkedTableXml(
   return new XMLSerializer().serializeToString(doc)
 }
 
-// 合同、发票和装箱单的空白明细行及合计行在原模板中只有部分单元格
+// 合同和发票的空白明细行及合计行在原模板中只有部分单元格
 // 带边框，动态扩展后会留下缺口，因此表头到合计行统一补齐四边。
 // 发票还要覆盖“装运口岸/目的地”分组行和“总值大写”行，避免表格上下两端断线。
 // 装箱单按标准模板补齐顶部资料框、明细表和页尾空白行的颜色与格线。
@@ -4010,14 +4014,14 @@ async function ensureLinkedTableGrid(
       fillRange('A', range.detailStart, 'K', range.end - 1, whiteFillId)
       fillRange('A', range.end, 'C', range.end, whiteFillId)
       fillRange('D', range.end, 'K', range.end, purpleFillId)
-      // 参考装箱单：黑色竖线、浅灰细横线；紫色合计区跨两行，不在中间划线。
+      // 装箱单明细及跨两行的合计区只保留黑色竖线，不打印内部横线。
       for (let rowNo = range.detailStart; rowNo <= range.end; rowNo++) {
         for (let columnIndex = firstColumn; columnIndex <= lastColumn; columnIndex++) {
           const cell = ensureCell(rowNo, columnIndex)
           cell.setAttribute('s', styleWithEdgeStyles(cell.getAttribute('s') || '0', {
             left: 'thin', right: 'thin', top: null,
-            bottom: rowNo === range.end && columnIndex >= 3 ? null : 'thin',
-          }, { bottom: 'FFE0E0E0' }))
+            bottom: null,
+          }))
         }
       }
       const spacerRowNo = range.end + 1

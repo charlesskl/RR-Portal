@@ -83,9 +83,6 @@ export function linkShipmentOutboundBatches<T extends BatchRow>(
   if (new Set(linked.map(item => shipmentScope(item, materials))).size > 1
     || new Set(linked.map(item => item.currency || '¥')).size > 1)
     throw new Error('所选批次的供应商、报关公司或币种不同，请分别关联')
-  const partitions = new Set([...rows.filter(item => item._rowKey !== rowKey), ...linked]
-    .map(item => item.po_no?.trim().toUpperCase().match(/^IRR[IM]/)?.[0]).filter(Boolean))
-  if (partitions.size > 1) throw new Error('关联后会混合 RRI 与 RRM 的 PO，请拆柜处理')
   if (linked.length > 1) {
     if (!groupId || groupId.length > 64) throw new Error('关联分组无效，请重新打开关联出库')
     const snapshot = linked[0].material_snapshot || currentMaterial

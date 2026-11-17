@@ -98,8 +98,9 @@ it('a delayed virtual header callback cannot reverse a newer drag after its fram
   for (const left of [200, 800]) {
     rail.scrollLeft = left; sync.railScroll(left); frame!()
   }
-  // Only the virtual body may update the header; no competing native write.
-  expect(header.scrollLeft).toBe(0)
+  // Imperative virtual scrolls do not emit onVirtualScroll. The helper must
+  // update the native header even when the body proxy reports success.
+  expect(header.scrollLeft).toBe(800)
   sync.headerScroll(200)
   expect(rail.scrollLeft).toBe(800)
   header.scrollLeft = 800; sync.headerScroll(800)
@@ -108,6 +109,18 @@ it('a delayed virtual header callback cannot reverse a newer drag after its fram
   header.scrollLeft = 450; sync.headerScroll(450)
   expect(rail.scrollLeft).toBe(450)
   sync.dispose()
+})
+
+it('imperative virtual-body scrolls synchronize the header without waiting for a callback', () => {
+  const t = setup()
+  t.scrollBody.mockImplementation(() => true)
+  for (const left of [400, 1700, 800, 0]) {
+    t.rail.scrollLeft = left
+    t.sync.railScroll(left); t.flush()
+    expect(t.header.scrollLeft).toBe(left)
+    expect(t.rail.scrollLeft).toBe(left)
+    expect(t.scrollBody).toHaveBeenLastCalledWith(left)
+  }
 })
 
 it('a long drag caches geometry between resizes and avoids duplicate virtual updates at the same position', () => {

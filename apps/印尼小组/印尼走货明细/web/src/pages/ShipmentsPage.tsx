@@ -573,13 +573,11 @@ export default function ShipmentsPage() {
     if (s.startsWith('IRRM')) return 'RRM'
     return ''
   }
-  // 拉料后：单一分区→自动填客户；混合 IRRI+IRRM→拦截提示（不允许混柜）
+  // PO prefixes may suggest an empty customer, but never replace the selected
+  // contract/invoice entity. RRI and RRM source batches may share a container.
   function applyPartition(merged: ShipmentItem[]) {
+    if (String(form.getFieldsValue().customer || '').trim()) return
     const parts = new Set(merged.map(it => partitionOf(it.po_no)).filter(Boolean))
-    if (parts.size > 1) {
-      message.warning('本票混合了 RRI 与 RRM 的 PO，不允许混柜，请拆成两票')
-      return
-    }
     if (parts.size === 1) form.setFieldsValue({ customer: [...parts][0] })
   }
 
@@ -1035,8 +1033,6 @@ export default function ShipmentsPage() {
     if (!v.load_date) warn.push('整柜信息：未填写装柜日期，导出文件名将标注“未填装柜日期”')
     if (!v.rate || v.rate <= 0) hard.push('整柜信息：汇率必须 > 0')
     if (!items.length) warn.push('没有任何明细行（对应旧系统“未勾选需填物料”）')
-    const parts = new Set(items.map(it => partitionOf(it.po_no)).filter(Boolean))
-    if (parts.size > 1) hard.push('本票混合了 RRI 与 RRM 的 PO，不允许混柜，请拆成两票')
     // 警告需要物料毛/净重：按 material_id 批量取
     const ids = [...new Set(items.map(it => it.material_id).filter((x): x is number => x != null && x > 0))]
     const matById = new Map<number, any>(matMap)
@@ -1080,6 +1076,7 @@ export default function ShipmentsPage() {
   async function exportShipmentExcel() {
     if (!editing) { message.warning('请先打开一票走货'); return }
     const v = form.getFieldsValue()
+    if (!String(v.customer || '').trim()) { message.warning('请在“走货基本资料”中选择客户／合同发票主体'); return }
     const rep = await computeValidation()
     if (rep.hard.length || rep.warn.length) {
       setValReport(rep)
@@ -1527,7 +1524,7 @@ export default function ShipmentsPage() {
         }}>
           <Row gutter={12}>
             <Col span={5}>
-              <Form.Item name="customer" label="客户（分区 RRI/RRM，按 PO 前缀自动判定）">
+              <Form.Item name="customer" label="客户／合同发票主体" rules={[{ required: true, whitespace: true, message: '请选择客户／合同发票主体' }]}>
                 <AutoComplete
                   options={[{ value: 'RRI', label: 'RRI' }, { value: 'RRM', label: 'RRM' }, ...customers.map(c => ({ value: c, label: c }))]}
                   filterOption={(input, opt) => (opt?.label?.toString() ?? '').toLowerCase().includes(input.toLowerCase())}

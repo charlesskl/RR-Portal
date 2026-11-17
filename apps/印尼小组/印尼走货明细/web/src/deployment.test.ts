@@ -261,7 +261,7 @@ describe('deployment base paths', () => {
       expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet5.xml')).toEqual(['thin', 'thin', 'thin', 'thin'])
     }
     for (const address of ['A24', 'K30', 'A31', 'C31']) {
-      expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet5.xml'), address).toEqual(['thin', 'thin', null, 'thin'])
+      expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet5.xml'), address).toEqual(['thin', 'thin', null, null])
     }
     // Approved packing layout: the purple total area spans two rows without
     // an internal horizontal line; its closing row retains a medium bottom.

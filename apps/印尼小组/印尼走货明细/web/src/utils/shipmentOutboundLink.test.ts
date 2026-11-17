@@ -55,8 +55,11 @@ it('rejects mismatched material, repeat links, deleted row and conflicting units
   expect(() => linkShipmentOutbound([{ ...row, purchase_unit: 'KGM' }], 1, source, material, materials)).toThrow('单位')
   expect(linkShipmentOutbound([{ ...row, purchase_unit: 'pcs' }], 1, source, material, materials)[0]).toMatchObject({ outbound_id: 75 })
 })
-it('protects shared carton group and rejects RRI/RRM mixing', () => {
+it('protects shared carton groups while allowing RRI/RRM batches in one container', () => {
   expect(() => linkShipmentOutbound([{ ...row, carton_group: 'group' }], 1, { ...source, supplier: 'B' }, material, materials)).toThrow('合并箱数')
   expect(linkShipmentOutbound([{ ...row, carton_group: 'group' }], 1, source, material, materials)[0].carton_group).toBe('group')
-  expect(() => linkShipmentOutbound([row, { ...row, _rowKey: 2, po_no: 'IRRMHS01' }], 1, source, material, materials)).toThrow('RRI')
+  const other = { ...row, _rowKey: 2, po_no: 'IRRMHS01' }
+  const mixed = linkShipmentOutbound([row, other], 1, source, material, materials)
+  expect(mixed[0]).toMatchObject({ outbound_id: source.outbound_id, po_no: source.po_no })
+  expect(mixed[1]).toBe(other)
 })

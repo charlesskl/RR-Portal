@@ -147,11 +147,18 @@ describe('one packing row linked to multiple outbound batches', () => {
     [{ source: { ...sources[0], material_id: 999 }, qty: 9000 }, allocations[1]],
     [{ source: { ...sources[0], purchase_unit: 'KGM' }, qty: 9000 }, allocations[1]],
     [{ source: { ...sources[0], price: undefined }, qty: 9000 }, allocations[1]],
-    [{ source: { ...sources[0], po_no: 'IRRMHS1' }, qty: 9000 }, allocations[1]],
   ].map(selected => ({ selected })))('rejects invalid/mismatched/incomplete selections atomically: $selected', ({ selected }) => {
     const before = structuredClone(row)
     expect(() => link(row, selected)).toThrow()
     expect(row).toEqual(before)
+  })
+
+  it('allows RRI/RRM source batches in one packing row without losing source prices or charge ratios', () => {
+    const mixed = link(row, [{ source: { ...sources[0], po_no: 'IRRMHS1' }, qty: 9000 }, allocations[1]])
+    expect(mixed.map(item => [item.po_no, item.qty, item.price, item.purchase_charge_ratio]))
+      .toEqual([['IRRMHS1', 9000, .2, 1], ['IRRIHS2', 20000, .3, .9]])
+    expect(mixed.reduce((sum, item) => sum + shipmentPurchaseAmount(item), 0)).toBe(7200)
+    expect(mixed.reduce((sum, item) => sum + item.kg!, 0)).toBeCloseTo(row.kg, 8)
   })
 
   it.each(['supplier', 'customs_company', 'currency'])('keeps distinct document boundaries for %s', field => {

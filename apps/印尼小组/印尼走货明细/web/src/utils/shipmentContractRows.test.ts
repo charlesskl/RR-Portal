@@ -48,3 +48,52 @@ it('RRI contracts six and eight contain no stale sample serials, empty multiplic
     expect(Number(main['K' + row].v) * Number(main['Z' + row].v)).toBeCloseTo(amounts[serial - 8], 8)
   }
 }, 60000)
+
+it('a missing price formula in the seventh RRI contract row inherits the same template lookup as preceding rows', async () => {
+  const items = Array.from({ length: 7 }, (_, index) => ({ material_id: index + 1, qty: 1,
+    kg: index === 6 ? .024 : 10, price: index === 6 ? 284.74 : 20, currency: 'US$',
+    contract_no: 'SYN-C', invoice_no: 'SYN-I' }))
+  const blob = await buildCustomsWorkbook({
+    templateBuffer: Uint8Array.from(readFileSync(new URL('../../public/template-customs-rri.xlsx', import.meta.url))).buffer,
+    items, materials: new Map(items.map(item => [item.material_id, { id: item.material_id,
+      name_zh: item.material_id === 7 ? '纸绳1.5MM' : `合成物料${item.material_id}`, product_code: `SYN-${item.material_id}`,
+      unit_kg: item.material_id === 7 ? 'TNE' : 'KGM' }])),
+    productHs: new Map(), images: new Map(), form: { customer: 'RRI', containerNo: 'SYN-FORMULA' },
+  })
+  const book = XLSX.read(await blob.arrayBuffer(), { type: 'array' }), sheet = book.Sheets['实业合同']
+  for (let row = 24; row <= 30; row++) {
+    expect(sheet[`F${row}`]?.f).toMatch(/^LOOKUP\(/)
+    expect(sheet[`F${row}`]?.f).toContain(`'SYN-FORMULA'!A:A=A${row}`)
+    expect(sheet[`F${row}`]?.f).toContain("'SYN-FORMULA'!Z:Z")
+    expect(sheet[`F${row}`]?.F).toBe(`F${row}`)
+  }
+  expect(book.Sheets['SYN-FORMULA'].K10.v).toBe(.024)
+  expect(Number(book.Sheets['SYN-FORMULA'].Z10.v) * .024).toBeCloseTo(284.74, 8)
+}, 60000)
+
+it('all contract detail columns keep lookup formulas in later groups, including description cells C118 and C119', async () => {
+  const items = Array.from({ length: 15 }, (_, index) => ({ material_id: index + 1, qty: 1, kg: 1, price: 2,
+    currency: 'US$', contract_no: `SYN-C-${index < 7 ? 1 : index < 13 ? 2 : 3}`,
+    invoice_no: `SYN-I-${index < 7 ? 1 : index < 13 ? 2 : 3}` }))
+  const blob = await buildCustomsWorkbook({
+    templateBuffer: Uint8Array.from(readFileSync(new URL('../../public/template-customs-rri.xlsx', import.meta.url))).buffer,
+    items, materials: new Map(items.map(item => [item.material_id, { id: item.material_id,
+      product_code: 'SYN-' + item.material_id, name_zh: '合成物料' + item.material_id, name_en: 'Synthetic ' + item.material_id, unit_kg: 'KGM' }])),
+    productHs: new Map(), images: new Map(), form: { customer: 'RRI', containerNo: 'SYN-DESCRIPTION' },
+  })
+  const book = XLSX.read(await blob.arrayBuffer(), { type: 'array' }), sheet = book.Sheets['实业合同']
+  const rows = Object.entries(sheet).filter(([address, cell]) => /^A\d+$/.test(address)
+    && cell.t === 'n' && Number.isInteger(cell.v) && cell.v > 0).map(([address]) => address.slice(1))
+  expect(rows).toHaveLength(items.length)
+  for (const row of rows) {
+    for (const column of ['B', 'C', 'D', 'E', 'F']) {
+      expect(sheet[`${column}${row}`]?.f, `${column}${row}`).toMatch(/^LOOKUP\(/)
+      expect(sheet[`${column}${row}`]?.f).toContain(`'SYN-DESCRIPTION'!A:A=A${row}`)
+    }
+    expect(sheet[`G${row}`]?.f).toBe(`F${row}*D${row}`)
+  }
+  for (const row of [118, 119]) {
+    expect(sheet[`C${row}`]?.f).toContain("'SYN-DESCRIPTION'!G:G&'SYN-DESCRIPTION'!F:F")
+    expect(sheet[`C${row}`]?.F).toBe(`C${row}`)
+  }
+}, 60000)

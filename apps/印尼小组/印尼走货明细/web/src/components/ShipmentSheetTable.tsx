@@ -251,7 +251,9 @@ export default function ShipmentSheetTable<T extends object>({ fields, onEdits, 
         ? cloneElement(rendered, { children: preview }) : preview
     },
     title: <div className="shipment-sheet-heading">
-      {typeof column.title === 'function' ? column.title({}) : column.title}
+      <span className="shipment-sheet-heading-label" title={typeof column.title === 'string' ? column.title : undefined}>
+        {typeof column.title === 'function' ? column.title({}) : column.title}
+      </span>
       <span className="shipment-sheet-resize" role="separator" aria-label={`调整第 ${col + 1} 列宽`} onPointerDown={event => {
         event.preventDefault(); event.stopPropagation(); resizeCleanup.current?.()
         const x = event.clientX; const original = widths[col] || Number(column.width) || 120

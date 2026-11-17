@@ -1,7 +1,8 @@
 interface ScrollElement { scrollLeft: number; scrollWidth: number; clientWidth: number }
 interface ScrollPorts {
   elements: () => { header: ScrollElement | null; rail: ScrollElement | null }
-  // Return true when the virtual body owns header synchronization as well.
+  // Imperative virtual-list scrollTo changes its body offset without emitting
+  // onVirtualScroll, so the native header must be synchronized explicitly.
   scrollBody: (left: number) => boolean | void
   requestFrame: (callback: () => void) => number
   cancelFrame: (frame: number) => void
@@ -35,10 +36,8 @@ export function createShipmentHorizontalScroll(ports: ScrollPorts) {
     appliedLeft = value
     // The header can already be correct while virtual rows still lag behind.
     // Always update the list through its public proxy, never native holder X.
-    const virtualSync = ports.scrollBody(value)
-    // rc-table synchronizes its header from the virtual body's callback. A
-    // second native header write starts another competing scroll/update loop.
-    if (!virtualSync && header && Math.abs(header.scrollLeft - value) > .5) header.scrollLeft = value
+    ports.scrollBody(value)
+    if (header && Math.abs(header.scrollLeft - value) > .5) header.scrollLeft = value
     mirror(value)
   }
   return {

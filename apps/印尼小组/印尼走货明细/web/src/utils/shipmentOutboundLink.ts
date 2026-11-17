@@ -61,7 +61,5 @@ export function linkShipmentOutbound<T extends LinkableShipmentRow>(rows: readon
   }
   if (row.carton_group && shipmentScope(row, materials) !== shipmentScope(next, materials))
     throw new Error('关联后供应商或报关公司变化，请先取消该行的合并箱数再关联')
-  const partitions = new Set(rows.map(r => (r._rowKey === rowKey ? next : r).po_no?.trim().toUpperCase().match(/^IRR[IM]/)?.[0]).filter(Boolean))
-  if (partitions.size > 1) throw new Error('关联后会混合 RRI 与 RRM 的 PO，请拆柜处理')
   return rows.map(r => r._rowKey === rowKey ? next : r)
 }

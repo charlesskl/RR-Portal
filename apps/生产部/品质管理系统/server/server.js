@@ -184,6 +184,90 @@ function _ocrDocumentNumbers(source, allowGeneric = true) {
     deliveryConflict: candidates.size > 1 };
 }
 
+/* Match delivery columns by meaning, not a fixed position. Only header labels
+   are folded: fullwidth/space-separated PO and SKU values remain source data. */
+function _ocrDeliverySchema(cells, partial = false) {
+  const keys = cells.map(value => String(value).replace(/<br\s*\/?>/gi, '').normalize('NFKC').replace(/\s+/g, ''));
+  const patterns = {
+    sequence: /^(序号|序號|序|序次|行号|行號|NO\.?)$/i,
+    order: /^(订单编号|订单号|訂單編號|訂單號|客户订单号|客戶訂單號|P\.?O\.?(?:\/?NO\.?)?)$/i,
+    sku: /^(货号|貨號|ITEM(?:NO\.?)?)$/i,
+    name: /^(货品名称|貨品名稱|产品名称|產品名稱|配件名称|配件名稱|品名|名称|名稱|货名|貨名|DESCRIPTION)$/i,
+    unit: /^(单位|單位)$/,
+    delivered: /^(?:(?:本次|本单|本單)?(?:交货|交貨|送货|送貨|到货|到貨)|实送|實送)(?:数量|數量|数|數)$/,
+  };
+  const matches = Object.fromEntries(Object.entries(patterns).map(([key, pattern]) =>
+    [key, keys.flatMap((value, index) => pattern.test(value) ? [index] : [])]));
+  const identity = ['sequence', 'order', 'sku', 'name', 'unit'];
+  if (identity.some(key => !matches[key].length) &&
+      (!partial || ['sequence', 'order', 'sku'].some(key => !matches[key].length))) return null;
+  const legacy = identity.every((key, index) => matches[key].includes(index));
+  const hasOrderQuantity = keys.some(key => /^(?:订单|訂單|订货|訂貨|合同|总|總|累计|累計|未交|欠)(?:交货|交貨)?(?:数量|數量|数|數)$/.test(key));
+  if (!partial && !legacy && !hasOrderQuantity && !matches.delivered.length) return null;
+  return { keys, valid: Object.values(matches).every(indexes => indexes.length === 1),
+    ...Object.fromEntries(Object.entries(matches).map(([key, indexes]) => [key, indexes[0]])) };
+}
+
+/* Preserve real cell boundaries from TSV, fullwidth table rules and wrapped
+   Markdown cells. Never infer missing columns from ordinary spaces, or attach
+   a following independently framed/numbered row to an incomplete goods row. */
+function _normalizeOcrDeliveryRows(source, splitRow) {
+  const rows = String(source).split(/\r?\n/), output = [];
+  let active = null;
+  const encode = value => value.replace(/&/g, '&amp;').replace(/\|/g, '&#124;').replace(/\\/g, '&#92;');
+  const render = cells => '|' + cells.map(encode).join('|') + '|';
+  const read = (line, format) => format === 'tab' ? line.split('\t') : splitRow(line.trim().replace(/｜/g, '|'));
+  const footer = line => /^(?:```|合计|合計|总计|總計|TOTAL|备注[：:]|備註[：:]|收货人|收貨人|送货人|送貨人|胶箱[：:]|膠箱[：:])/i.test(line.trim());
+  for (let i = 0; i < rows.length; i++) {
+    let original = rows[i];
+    const format = original.includes('\t') ? 'tab' : /[|｜]/.test(original) ? 'pipe' : null;
+    let cells = format ? read(original, format) : [];
+    // A header label may itself wrap physically inside one positioned cell.
+    // Three independent identity labels establish a header, not a goods row.
+    if (format && _ocrDeliverySchema(cells, true)) {
+      for (let joined = 0; joined < 4 && i + 1 < rows.length; joined++) {
+        if (_ocrDeliverySchema(cells)?.valid) break;
+        if (format === 'pipe' && /[|｜]\s*$/.test(original)) break;
+        const next = rows[i + 1];
+        if (!next.trim() || footer(next) || /^\s*[|｜]/.test(next)) break;
+        const nextCells = read(next, format);
+        if (_ocrDeliverySchema(nextCells, true) || /^\d+\s*(?:[|｜\t]|$)/.test(next.trim())) break;
+        const combined = original + (format === 'tab' ? '\n' : '<br>') + next;
+        const joinedCells = read(combined, format);
+        if (joinedCells.length > 32) break;
+        original = combined; cells = joinedCells; i++;
+      }
+    }
+    const schema = format && _ocrDeliverySchema(cells);
+    if (schema) {
+      active = { format, width: cells.length, schema };
+      output.push(render(schema.keys));
+      continue;
+    }
+    if (!active || format !== active.format || footer(original)) {
+      output.push(original);
+      continue;
+    }
+    let combined = original, current = cells;
+    // A closed short Markdown row is malformed, rather than a wrapped cell.
+    for (let joined = 0; current.length < active.width && joined < 4 && i + 1 < rows.length; joined++) {
+      if (format === 'pipe' && /[|｜]\s*$/.test(combined)) break;
+      const next = rows[i + 1];
+      if (!next.trim() || footer(next) || /^\s*[|｜]/.test(next)) break;
+      const nextCells = read(next, format);
+      const orderContinuation = current.length - 1 === active.schema.order && /[-/]$/.test(current.at(-1).trim()) &&
+        /^\d+[A-Za-z0-9._/-]*$/.test(nextCells[0].trim());
+      if (_ocrDeliverySchema(nextCells) || nextCells.length >= active.width ||
+          !orderContinuation && /^\d+$/.test(String(nextCells[active.schema.sequence] || '').trim()) && nextCells.length > 1) break;
+      combined += format === 'tab' ? '\n' + next : '<br>' + next;
+      current = read(combined, format);
+      i++;
+    }
+    output.push(render(current.map(value => value.replace(/\r?\n/g, '<br>'))));
+  }
+  return output.join('\n');
+}
+
 /* ── 送货单 OCR 文本 → 结构化字段（确定性解析，不依赖模型指令遵循）── */
 function parseDeliveryNote(text, options = {}) {
   const fields = { date: '', supplier: '', deliveryNo: '', orderNo: '', type: '来料', items: [] };
@@ -245,6 +329,8 @@ function parseDeliveryNote(text, options = {}) {
         return '\n' + rows.join('\n') + '\n';
       }).join('');
   }
+  rawText = _normalizeOcrDeliveryRows(rawText, splitRow);
+
   /* Markdown may contain a physical newline inside a contract-number cell.
      Join only a bounded, column-preserving continuation of that same cell.
      A new pipe-prefixed row or an unpositioned suffix is never attached. */
@@ -625,41 +711,49 @@ function parseDeliveryNote(text, options = {}) {
       const contractColumnsLayout = cOrder >= 0 && /^合同[编編][号號]$/.test(headKeys[cOrder]) && /^(NO\.?|序号|序號)$/i.test(headKeys[0]);
       const cColor = find(/^[颜顏]色$/), cCartons = find(/^箱[数數]$/), cRemark = find(/^(备注|備註|備注)$/);
       const cBalance = find(/^本[单單]送[货貨][数數]/), cModel = find(/^[型模][号號]$/);
-      const deliveryLayoutHeaders = [/^(序号|序號|序|NO\.?)$/i, /^(订单编号|订单号|訂單編號|訂單號)$/,
-        /^(货号|貨號)$/, /^(货品名称|貨品名稱|品名|名称|名稱)$/, /^(单位|單位)$/];
-      const deliveryColumnsLayout = deliveryLayoutHeaders.every((pattern, index) => pattern.test(headKeys[index] || ''));
+      let delivery = _ocrDeliverySchema(head);
+      const deliveryColumnsLayout = delivery !== null;
       if (deliveryColumnsLayout) {
-        const delivered = headKeys.map((name, index) => /^(本次交[货貨]|交[货貨]|送[货貨]|实送|實送)[数數]量$/.test(name) ? index : -1).filter(index => index >= 0);
-        if (delivered.length !== 1 || deliveryLayoutHeaders.some(pattern => headKeys.filter(name => pattern.test(name)).length !== 1)) {
+        if (!delivery.valid) {
           fields.items = [_pendingOcrItem(String(text || ''))];
           fields.orderNo = '';
           fields.manualReviewRequired = true;
           return fields;
         }
-        cQty = delivered[0];
+        cQty = delivery.delivered;
       }
       let lastNo = '', lastOrder = '';
       const seenFull = new Set();   /* 已出现的完整明细（货号|品名），用于复读残行识别 */
       for (const row of tbl.slice(hi + 1)) {
         const cells = splitRow(row);
         if (cells.every(c => !c)) continue;   /* 空白可能是分页间隔，不能截断后续真实明细 */
-        // Only a complete repeated header is non-business text; keep partial and ambiguous rows.
-        if (cells.length === head.length && cells.every((value, index) => value.replace(/\s+/g, '') === headKeys[index])) continue;
-        if (contractColumnsLayout && /^(?:[（(]?大[写寫][）)]?|合[计計]人民[币幣](?:\s*[（(]大[写寫][）)])?)$/.test(cells[0] || '') && !cells[cQty] && !cells[cName]) continue;
-        if ((componentColumnsLayout || contractColumnsLayout) && cells.length !== head.length) { fields.items.push(_pendingOcrItem(row)); continue; }
         if (deliveryColumnsLayout) {
+          const nextHeader = _ocrDeliverySchema(cells);
+          if (nextHeader) { delivery = nextHeader; continue; }
+          const keys = cells.map(value => value.replace(/\s+/g, ''));
+          if (keys.some(key => /数量|數量|送货数|送貨數|QTY/i.test(key)) &&
+              keys.some(key => /^(货号|貨號|品名|货品名称|貨品名稱|产品名称|產品名稱|配件名称|配件名稱|名称|名稱|DESCRIPTION)$/i.test(key))) {
+            delivery = null;
+          }
+          if (!delivery || !delivery.valid) { fields.items.push(_pendingOcrItem(row)); continue; }
+          cQty = delivery.delivered;
           if (/^(合计|合計|总计|總計|TOTAL)(?:[：:]|$)/i.test(cells[0] || '')) continue;
-          const quantity = cells[cQty] || '', unit = cells[4] || '';
-          if (cells.length !== head.length || !/^\d+$/.test(cells[0]) || (!cells[2] && !cells[3]) ||
+          const quantity = cells[cQty] || '', unit = cells[delivery.unit] || '';
+          if (cells.length !== delivery.keys.length || !/^\d+$/.test(cells[delivery.sequence] || '') ||
+              (!cells[delivery.sku] && !cells[delivery.name]) ||
               !/^(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)*$/.test(quantity) ||
               !/^(个|個|PCS|件|套|卷|张|張|桶|KG|米|箱|包|条|條|颗|顆|千克|克|G)$/i.test(unit)) {
             fields.items.push(_pendingOcrItem(row));
           } else {
-            fields.items.push({ productNo: cells[2], productName: cells[3], qty: quantityText(quantity, unit),
-              unit, orderNo: cells[1].replace(/\s+/g, ''), _seq: cells[0] });
+            fields.items.push({ productNo: cells[delivery.sku], productName: cells[delivery.name], qty: quantityText(quantity, unit),
+              unit, orderNo: cells[delivery.order].replace(/\s+/g, ''), _seq: cells[delivery.sequence] });
           }
           continue;
         }
+        // Only a complete repeated header is non-business text; keep partial and ambiguous rows.
+        if (cells.length === head.length && cells.every((value, index) => value.replace(/\s+/g, '') === headKeys[index])) continue;
+        if (contractColumnsLayout && /^(?:[（(]?大[写寫][）)]?|合[计計]人民[币幣](?:\s*[（(]大[写寫][）)])?)$/.test(cells[0] || '') && !cells[cQty] && !cells[cName]) continue;
+        if ((componentColumnsLayout || contractColumnsLayout) && cells.length !== head.length) { fields.items.push(_pendingOcrItem(row)); continue; }
         const raw = i => (i >= 0 && i < cells.length ? cells[i] : '');
         const numeric = v => /^\d[\d,.]*(?:\s*[/／].*)?$/.test(v);
         /* 合并品名格会令后续所有列左移；短一格时即便下一列金额也是数字，也应按行宽校正。 */

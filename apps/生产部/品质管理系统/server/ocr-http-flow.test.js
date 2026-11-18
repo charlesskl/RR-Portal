@@ -90,6 +90,39 @@ test('isolated real OCR HTTP, explicit save, SQLite and reopen retain rows and p
   assert.deepEqual(left.json.fields.items.map(row => [row.orderNo,row.productNo,row.productName,row.qty,row.cartons,row.remark]),
     [['PO-SYNTH','SKU001','甲身体','40','4','4*10'], ['PO-SYNTH','SKU001','乙身体','16','1',''], ['PO-SYNTH','SKU001','丙身体','42','3','2*16+10']]);
   assert.equal((await request('/api/ai/ocr-parse', 'POST', {text:componentRaw}, viewer)).status,403);
+  // A delivery note may arrive with OCR-inserted spaces in its headings. Two
+  // computers must map the same nine goods, including each PO and the actual
+  // delivery count, rather than the different order quantity or packing count.
+  const deliveryHead = ['序号','PO/NO','货号','货品名称','订单数量','单位','送货数量','包装方式','备注'];
+  const deliveryRows = ['J1','R1','L1','M1','V1','A2','B2','G2','D2'].map((style, i) => [
+    String(i + 10), i < 5 ? 'PO-SYNTH/10080' : 'PO-SYNTH/10081',
+    i < 4 ? 'SKU3013' : i === 4 ? 'SKU-CDU-24' : 'SKU-CDU-B',
+    '合成吊牌(' + style + '款)', '5000', 'PCS', '1200', '1包*1200', '√',
+  ]);
+  const deliveryTable = headings => '```markdown\n| ' + headings.join(' | ') + ' |\n|' +
+    headings.map(() => '---').join('|') + '|\n' +
+    deliveryRows.map(row => '| ' + row.join(' | ') + ' |').join('\n') + '\n```';
+  const expectedDeliveries = deliveryRows.map(row => [row[1], row[2], row[3], '1200', 'PCS']);
+  for (const headings of [deliveryHead, deliveryHead.map(label => label.replace(/[\u4e00-\u9fff]/g, '$& ').trim())]) {
+    const text = deliveryTable(headings);
+    const firstComputer = await request('/api/ai/ocr-parse', 'POST', {text}, admin);
+    const secondComputer = await request('/api/ai/ocr-parse', 'POST', {text}, otherComputer);
+    assert.equal(firstComputer.status, 200); assert.equal(secondComputer.status, 200);
+    assert.deepEqual(firstComputer.json, secondComputer.json);
+    assert.equal(firstComputer.json.needsManualReview, false);
+    assert.deepEqual(firstComputer.json.fields.items.map(row =>
+      [row.orderNo,row.productNo,row.productName,row.qty,row.unit]), expectedDeliveries);
+  }
+  const shiftedDeliveryRow = deliveryRows[0].filter((_cell, index) => index !== 6);
+  const malformedDelivery = await request('/api/ai/ocr-parse', 'POST', {
+    text: '| ' + deliveryHead.join(' | ') + ' |\n| ' + shiftedDeliveryRow.join(' | ') + ' |',
+  }, otherComputer);
+  assert.equal(malformedDelivery.status, 200);
+  assert.equal(malformedDelivery.json.fields.items.length, 1);
+  assert.equal(malformedDelivery.json.fields.items[0].qty, '', 'shifted packing text is not a delivered quantity');
+  assert.equal(malformedDelivery.json.fields.items[0].quantityNeedsReview, true);
+  assert.equal(malformedDelivery.json.needsManualReview, true);
+  assert.equal(modelCalls, 0, 'both computers reparse text without invoking the image provider');
   const paperRaw = '订单号 产品名称 规格型号 数量 单价 金额 重量 备注\nPO-26001 30721 甲贴纸 80 1.5\nPO-26001 30721 LED贴纸 80 1.5\n备注：\n制单人：合成人员';
   const paper = await request('/api/ai/ocr-parse', 'POST', {text:paperRaw}, admin);
   assert.equal(paper.status,200); assert.equal(paper.json.fields.items.length,2);

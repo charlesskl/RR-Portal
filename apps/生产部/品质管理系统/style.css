@@ -277,6 +277,13 @@ html, body {
   overflow: hidden;
   transition: var(--trans);
 }
+.dashboard-detail-trigger { cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.dashboard-detail-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.summary-card.dashboard-detail-trigger > span { display: block; }
+.kpi-chip.dashboard-detail-trigger { text-align: center; }
+.dashboard-detail-trigger:hover .card-value, .dashboard-detail-trigger:hover .kpi-val { text-decoration: underline; }
+.supplier-detail-modes [hidden] { display: none !important; }
+.dashboard-supplier-detail-table { min-width: 740px; }
 .summary-card:hover { border-color: var(--border-hi); transform: translateY(-1px); }
 .summary-card::after {
   content: '';
@@ -647,6 +654,26 @@ input:disabled { opacity: .55; cursor: not-allowed; }
 /* ════════════════════════════════════════
    SUPPLIER CARDS
 ════════════════════════════════════════ */
+/* 档案筛选独立于名单维护，不改变已有记录。 */
+.partner-archive-filters {
+  padding: 14px 16px; margin-bottom: 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--bg-card);
+}
+.partner-filter-controls { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; }
+.partner-filter-controls label { display: flex; flex-direction: column; gap: 6px; color: var(--text-dim); font-size: 12px; }
+.partner-filter-search { flex: 1 1 230px; min-width: 0; }
+.partner-filter-search .search-input { width: 100%; min-width: 0; }
+.partner-filter-controls .filter-date { min-width: 146px; }
+.partner-filter-controls .btn-secondary { min-height: 34px; }
+.partner-filter-summary { margin-top: 10px; color: var(--text-muted); font-size: 12px; }
+.partner-filter-summary.is-error { color: var(--red); }
+@media (max-width: 520px) {
+  .partner-filter-search { flex-basis: 100%; }
+  .partner-filter-controls label:not(.partner-filter-search) { flex: 1 1 140px; min-width: 0; }
+  .partner-filter-controls .filter-date, .partner-filter-controls .filter-select { width: 100%; min-width: 0; }
+}
+
 .supplier-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(270px,1fr));
@@ -672,6 +699,23 @@ input:disabled { opacity: .55; cursor: not-allowed; }
 .supplier-card.risk-mid::before  { background: var(--yellow); }
 .supplier-card.risk-high::before { background: var(--red); }
 .supplier-name { font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--text-hi); margin-bottom: 10px; }
+.supplier-detail-trigger { border: 1px solid transparent; font: inherit; color: inherit; cursor: pointer; }
+.supplier-detail-trigger .stat-num, .supplier-detail-trigger .stat-lbl { display: block; }
+.supplier-detail-trigger:hover, .supplier-detail-trigger:focus-visible { border-color: var(--accent); outline: 2px solid var(--accent-dim); outline-offset: 1px; }
+.supplier-detail-trigger:hover .stat-num { text-decoration: underline; }
+.modal.supplier-detail-modal { width: min(1280px, calc(100vw - 32px)); max-height: 90vh; }
+.supplier-detail-modal .modal-header { gap: 12px; }
+#supplierDetailTitle { overflow-wrap: anywhere; }
+.supplier-detail-toolbar { padding: 12px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.supplier-detail-modes { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+#supplierDetailSummary, #supplierDetailPageInfo { font-size: 12px; color: var(--text-dim); }
+.supplier-detail-scroll { min-height: 0; margin: 0 16px; border-radius: 0; overflow: auto; }
+.supplier-detail-table { min-width: 1550px; }
+.supplier-detail-table .supplier-detail-text { min-width: 150px; max-width: 280px; white-space: normal; overflow-wrap: anywhere; }
+.supplier-detail-table .supplier-detail-number { text-align: right; font-variant-numeric: tabular-nums; }
+.supplier-detail-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 12px 16px; flex-shrink: 0; }
+.supplier-detail-footer > div { display: flex; flex-wrap: wrap; gap: 8px; }
+
 .supplier-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 10px; }
 .stat-item { text-align: center; background: var(--bg-hover); border-radius: var(--radius); padding: 8px 4px; }
 .stat-num  { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: var(--text-hi); }
@@ -3142,3 +3186,108 @@ body.theme-light #loginPassword {
   color: #001018; font-weight: 700;
 }
 
+
+/* QA 申请表填写与预览 */
+.modal.qa-application-modal { width: min(1060px, 96vw); max-height: 92vh; }
+.qa-form-tabs { display: flex; gap: 8px; padding: 12px 16px 0; flex-shrink: 0; }
+.qa-application-body { min-height: 0; }
+.qa-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.qa-form-grid .form-group > span { font-size: 12px; color: var(--text-dim); }
+.qa-form-grid .form-input { width: 100%; min-width: 0; }
+.qa-form-grid textarea { resize: vertical; line-height: 1.6; }
+.qa-form-wide { grid-column: 1 / -1; }
+.qa-record-info { font-size: 12px; line-height: 1.6; color: var(--text-dim); margin: 0 0 14px; }
+.qa-test-options { margin: 16px 0; border: 1px solid var(--border); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-main); }
+.qa-test-options summary { cursor: pointer; color: var(--text-hi); }
+.qa-check-options, .qa-test-grid { display: grid; gap: 10px; margin-top: 14px; }
+.qa-check-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.qa-test-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.qa-check-options label, .qa-test-grid label { display: flex; align-items: flex-start; gap: 6px; }
+.qa-preview-scroll { overflow: auto; background: var(--bg-hover); padding: 14px; }
+#qaApplicationForm[hidden], #qaApplicationPreview[hidden] { display: none; }
+.qa-export-host { position: fixed; left: -10000px; top: 0; width: 794px; pointer-events: none; }
+.action-btn.qa { color: var(--accent); border-color: var(--accent-dim); }
+@media (max-width: 800px) { .qa-form-grid, .qa-test-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .qa-form-grid, .qa-test-grid, .qa-check-options { grid-template-columns: minmax(0, 1fr); } }
+
+/* A4 模板：固定字号与表格口径，独立于系统深浅色和移动端样式。 */
+.qa-paper, .qa-paper * { box-sizing: border-box !important; }
+.qa-paper { width: 794px !important; height: 1123px !important; padding: 36px 70px 26px !important; background: #fff !important; color: #111 !important; font: 11px/1.2 'Times New Roman', 'Songti SC', 'SimSun', serif !important; margin: 0 auto !important; flex-shrink: 0 !important; }
+.qa-paper .qa-paper-header { position: relative !important; text-align: center !important; height: 64px !important; }
+.qa-paper .qa-template-logo { position: absolute !important; left: 8px !important; top: 0 !important; width: 59px !important; height: 45px !important; object-fit: contain !important; }
+.qa-paper .qa-company-en { height: 21px !important; font-size: 15.5px !important; line-height: 21px !important; padding-left: 58px !important; white-space: nowrap !important; }
+.qa-paper .qa-company-cn { font-size: 18px !important; line-height: 22px !important; }
+.qa-paper .qa-document-title { font-size: 16px !important; line-height: 20px !important; }
+.qa-paper .qa-report-meta { height: 22px !important; display: flex !important; align-items: center !important; justify-content: space-between !important; gap: 12px !important; font-size: 11px !important; }
+.qa-paper .qa-report-meta > span:last-child { max-width: 56% !important; overflow-wrap: anywhere !important; }
+.qa-paper .qa-report-meta b { font-weight: 400 !important; font-size: 10px !important; }
+.qa-paper .qa-check { width: 9px !important; height: 9px !important; display: inline-block !important; vertical-align: baseline !important; border: 1px solid #111 !important; margin-right: 4px !important; position: relative !important; background: white !important; flex-shrink: 0 !important; }
+.qa-paper .qa-check.checked::after { content: '✓' !important; position: absolute !important; left: 0 !important; top: -4px !important; font: bold 13px/13px Arial, sans-serif !important; color: #111 !important; }
+.qa-paper .qa-form-table { table-layout: fixed !important; width: 100% !important; border-collapse: collapse !important; border: 1px solid #111 !important; margin: 0 !important; font: inherit !important; }
+.qa-paper .qa-form-table tr, .qa-paper .qa-tests tr { background: #fff !important; transition: none !important; }
+.qa-paper .qa-form-table th, .qa-paper .qa-form-table td { border: 1px solid #111 !important; padding: 2px 4px !important; color: #111 !important; font: inherit !important; letter-spacing: 0 !important; text-transform: none !important; white-space: normal !important; overflow-wrap: anywhere !important; vertical-align: middle !important; }
+.qa-paper .qa-form-table th { text-align: center !important; font-weight: 400 !important; }
+.qa-paper .qa-data-row { height: 34px !important; }
+.qa-paper .qa-data-row td { font-size: 11px !important; line-height: 13px !important; }
+.qa-paper .qa-stage-row { height: 28px !important; }
+.qa-paper .qa-choice { display: inline-block !important; margin-right: 14px !important; white-space: nowrap !important; }
+.qa-paper .qa-description-label { height: 153px !important; }
+.qa-paper .qa-form-table .qa-description-cell { padding: 0 !important; }
+.qa-paper .qa-description-heading { height: 21px !important; line-height: 20px !important; padding: 0 2px !important; border-bottom: 1px solid #111 !important; white-space: nowrap !important; font-size: 10px !important; }
+.qa-paper .qa-description-content { height: 132px !important; padding: 0 4px !important; line-height: 22px !important; white-space: pre-wrap !important; overflow-wrap: anywhere !important; background: repeating-linear-gradient(to bottom, transparent 0, transparent 21px, #444 21px, #444 22px) !important; }
+.qa-paper .qa-purpose-row { height: 23px !important; }
+.qa-paper .qa-standard-row { height: 25px !important; }
+.qa-paper .qa-standard-row td { font-size: 10px !important; }
+.qa-paper .qa-standard-row .qa-choice { margin-right: 12px !important; }
+.qa-paper .qa-form-table .qa-tests-cell { padding: 0 !important; }
+.qa-paper .qa-test-columns { display: flex !important; width: 100% !important; }
+.qa-paper .qa-tests { table-layout: fixed !important; width: 50% !important; border-collapse: collapse !important; border: 0 !important; font: 9.5px/1.15 'Times New Roman', 'Songti SC', 'SimSun', serif !important; }
+.qa-paper .qa-tests + .qa-tests { border-left: 1px solid #111 !important; }
+.qa-paper .qa-tests thead tr { position: static !important; height: 22px !important; background: #fff !important; }
+.qa-paper .qa-tests th { font-size: 8.5px !important; font-weight: 700 !important; padding: 2px 0 !important; border: 0 !important; border-bottom: 1px solid #111 !important; text-align: left !important; }
+.qa-paper .qa-tests thead th:first-child { font-size: 11px !important; padding-left: 2px !important; }
+.qa-paper .qa-tests tbody tr { height: 20px !important; }
+.qa-paper .qa-tests td { font-size: 9.5px !important; border: 0 !important; padding: 1px 2px !important; }
+.qa-paper .qa-tests .qa-test-name { white-space: nowrap !important; font-size: 9px !important; padding-right: 0 !important; }
+.qa-paper .qa-test-name .qa-check { width: 8px !important; height: 8px !important; margin-right: 3px !important; }
+.qa-paper .qa-test-cn { white-space: nowrap !important; }
+.qa-paper .qa-result-box { text-align: center !important; }
+.qa-paper .qa-result-box .qa-check { width: 8px !important; height: 8px !important; margin-right: 0 !important; }
+.qa-paper .qa-ss { display: block !important; width: 90% !important; height: 12px !important; border-bottom: 1px solid #111 !important; }
+.qa-paper .qa-tests .qa-safety-heading td { font-size: 11px !important; font-weight: 700 !important; }
+.qa-paper .qa-conclusion-row { height: 24px !important; }
+.qa-paper .qa-detail-row { height: 22px !important; }
+.qa-paper .qa-form-table .qa-comments { height: 80px !important; padding: 0 !important; background: repeating-linear-gradient(to bottom, transparent 0, transparent 19px, #444 19px, #444 20px) !important; }
+.qa-paper .qa-sign-row { height: 22px !important; }
+.qa-paper .qa-distribution-row { height: 24px !important; }
+.qa-paper .qa-distribution-row td { font-size: 10px !important; }
+.qa-paper .qa-paper-footer { display: flex !important; justify-content: space-between !important; padding: 4px 16px 0 !important; font-size: 11px !important; color: #111 !important; }
+
+.qa-paper .qa-form-table th, .qa-paper .qa-form-table td { background-color: #fff !important; }
+
+/* 实体横线保证浏览器预览及 PDF 截图中的留白栏位一致。 */
+.qa-paper .qa-description-body { height: 132px !important; position: relative !important; }
+.qa-paper .qa-ruled-lines { position: absolute !important; inset: 0 !important; pointer-events: none !important; }
+.qa-paper .qa-ruled-lines span { display: block !important; height: 22px !important; border-bottom: 1px solid #555 !important; }
+.qa-paper .qa-description-content { background: transparent !important; position: relative !important; }
+.qa-paper .qa-comment-lines { height: 80px !important; }
+.qa-paper .qa-comment-lines span { display: block !important; height: 20px !important; border-bottom: 1px solid #555 !important; }
+.qa-paper .qa-stage-row th, .qa-paper .qa-purpose-row th, .qa-paper .qa-standard-row th { font-size: 10px !important; white-space: nowrap !important; padding: 2px !important; }
+.qa-paper .qa-report-meta { height: auto !important; min-height: 22px !important; }
+
+/* QA 预览按可用宽度缩放；原始 A4 尺寸保留给导出使用。 */
+.qa-preview-panel, .qa-application-body, .qa-preview-scroll { min-width: 0; }
+.qa-preview-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+#qaPreviewScale { color: var(--text-dim); font-size: 12px; }
+.qa-preview-warning { color: var(--red); font-size: 12px; margin: 0 0 10px; }
+.qa-preview-warning[hidden] { display: none; }
+.qa-preview-stage { position: relative; margin: 0 auto; overflow: hidden; }
+.qa-preview-stage .qa-paper { margin: 0 !important; transform-origin: 0 0; }
+.qa-paper table { min-width: 0 !important; max-width: 100% !important; }
+
+/* QA 申请保存状态与重试。 */
+.qa-save-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 16px 0; flex-shrink: 0; }
+.qa-save-status { color: var(--text-dim); font-size: 12px; line-height: 1.5; }
+.qa-save-status.is-error { color: var(--red); }
+#qaReload[hidden] { display: none; }
+.qa-application-modal .modal-footer { flex-wrap: wrap; }

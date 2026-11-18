@@ -158,10 +158,10 @@
       <div class="topbar-title" id="pageTitle">质量仪表板</div>
     </div>
     <div class="topbar-kpis" id="topbarKpis">
-      <div class="kpi-chip green"><span class="kpi-label">今日通过率</span><span class="kpi-val" id="kpiPassRate">--%</span></div>
-      <div class="kpi-chip red"><span class="kpi-label">本周FAIL数</span><span class="kpi-val" id="kpiWeekFail">--</span></div>
-      <div class="kpi-chip yellow"><span class="kpi-label">高风险供应商</span><span class="kpi-val" id="kpiHighRisk">--</span></div>
-      <div class="kpi-chip blue"><span class="kpi-label">本周验货批次</span><span class="kpi-val" id="kpiWeekBatch">--</span></div>
+      <button type="button" class="kpi-chip green dashboard-detail-trigger" onclick="openDashboardDetails('today-pass', this)" aria-haspopup="dialog" title="查看今日通过率对应明细"><span class="kpi-label">今日通过率</span><span class="kpi-val" id="kpiPassRate">--%</span></button>
+      <button type="button" class="kpi-chip red dashboard-detail-trigger" onclick="openDashboardDetails('week-fail', this)" aria-haspopup="dialog" title="查看本周FAIL数对应明细"><span class="kpi-label">本周FAIL数</span><span class="kpi-val" id="kpiWeekFail">--</span></button>
+      <button type="button" class="kpi-chip yellow dashboard-detail-trigger" onclick="openDashboardDetails('high-risk', this)" aria-haspopup="dialog" title="查看高风险供应商对应明细"><span class="kpi-label">高风险供应商</span><span class="kpi-val" id="kpiHighRisk">--</span></button>
+      <button type="button" class="kpi-chip blue dashboard-detail-trigger" onclick="openDashboardDetails('week-all', this)" aria-haspopup="dialog" title="查看本周验货批次对应明细"><span class="kpi-label">本周验货批次</span><span class="kpi-val" id="kpiWeekBatch">--</span></button>
     </div>
     <div class="topbar-right">
       <label class="theme-switch" title="切换主题">
@@ -372,6 +372,7 @@
         <div class="section-header mb16">
           <span class="section-title">供应商质量档案</span>
         </div>
+        <div class="partner-archive-filters" id="partnerFilters_supplier"></div>
         <div id="supplierCards"></div>
       </div>
 
@@ -384,6 +385,7 @@
         <div class="section-header mb16">
           <span class="section-title">客户档案</span>
         </div>
+        <div class="partner-archive-filters" id="partnerFilters_customer"></div>
         <div id="customerCards"></div>
       </div>
 
@@ -396,6 +398,7 @@
         <div class="section-header mb16">
           <span class="section-title">加工类型档案</span>
         </div>
+        <div class="partner-archive-filters" id="partnerFilters_processType"></div>
         <div id="processTypeCards"></div>
       </div>
     </div>
@@ -655,6 +658,34 @@
   <div class="page" id="page-users"></div>
 
 </main>
+
+<!-- 供应商卡片：只读验货/FAIL 明细，关闭后保留原档案筛选。 -->
+<div class="modal-overlay" id="supplierDetailOverlay" onclick="if(event.target===this)closeSupplierDetails()" onkeydown="supplierDetailKeydown(event)">
+  <section class="modal supplier-detail-modal" role="dialog" aria-modal="true" aria-labelledby="supplierDetailTitle" aria-describedby="supplierDetailSummary">
+    <div class="modal-header">
+      <span id="supplierDetailTitle">供应商验货明细</span>
+      <button type="button" class="modal-close" id="supplierDetailClose" onclick="closeSupplierDetails()" aria-label="关闭明细">✕</button>
+    </div>
+    <div class="supplier-detail-toolbar">
+      <div class="supplier-detail-modes">
+        <button type="button" class="mode-tab" id="supplierDetailMode_all" onclick="setSupplierDetailMode('all')" aria-pressed="true">全部验货</button>
+        <button type="button" class="mode-tab" id="supplierDetailMode_fail" onclick="setSupplierDetailMode('fail')" aria-pressed="false">FAIL 批次</button>
+        <button type="button" class="mode-tab" id="supplierDetailMode_pass" onclick="setSupplierDetailMode('pass')" aria-pressed="false" hidden>通过批次</button>
+        <button type="button" class="mode-tab" id="supplierDetailMode_suppliers" onclick="setSupplierDetailMode('suppliers')" aria-pressed="false" hidden>供应商列表</button>
+      </div>
+      <div id="supplierDetailSummary" role="status" aria-live="polite"></div>
+    </div>
+    <div class="table-wrap supplier-detail-scroll" id="supplierDetailTable" tabindex="0" role="region" aria-label="验货明细表格"></div>
+    <div class="supplier-detail-footer">
+      <span id="supplierDetailPageInfo" role="status" aria-live="polite"></span>
+      <div>
+        <button type="button" class="btn-secondary" id="supplierDetailPrev" onclick="changeSupplierDetailPage(-1)">上一页</button>
+        <button type="button" class="btn-secondary" id="supplierDetailNext" onclick="changeSupplierDetailPage(1)">下一页</button>
+        <button type="button" class="btn-secondary" onclick="closeSupplierDetails()">关闭</button>
+      </div>
+    </div>
+  </section>
+</div>
 
 <!-- ═══════════════ MODAL: REJECT (反审核退回) ═══════════════ -->
 <div class="modal-overlay" id="rejectOverlay" onclick="if(event.target===this)closeRejectModal()">
@@ -938,6 +969,7 @@
 
 <script src="sso.js"></script><!-- 门户SSO免登：必须在 qc-backend.js / app.js 之前 -->
 <script src="report_export.js"></script>
+<script src="qa-application.js?v=20261118"></script>
 <script src="qc-backend.js?v=20261111-excel-draft"></script><!-- 后端同步层：必须在 app.js 之前 -->
 <script src="app.js?v=20261112-contract-review"></script>
 <script src="ai-ocr.js?v=20261112-contract-review"></script><!-- AI(百炼)识别，劫持 startOcr -->

@@ -255,7 +255,8 @@ html.qc-mobile table { min-width: 860px; }
 /* 报告画布（IQC/日报/周报/月报）固定 794px 版面，不参与移动端表格横向滚动，
    否则窄屏导出 PDF 时右側会被截断 */
 html.qc-mobile #iqc-canvas table,
-html.qc-mobile #rpt-canvas table { min-width: 0; }
+html.qc-mobile #rpt-canvas table,
+html.qc-mobile .qa-paper table { min-width: 0; }
 html.qc-mobile th,
 html.qc-mobile td {
   padding-top: 10px;

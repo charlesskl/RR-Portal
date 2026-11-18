@@ -1233,6 +1233,14 @@ const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS record_tombstones (
     id INTEGER PRIMARY KEY, deletedAt TEXT
   );
+  CREATE TABLE IF NOT EXISTS qa_applications (
+    recordId INTEGER PRIMARY KEY,
+    data TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL,
+    updatedBy TEXT NOT NULL
+  );
 `;
 
 const toNum = (v) => (v === '' || v === null || v === undefined || isNaN(Number(v))) ? null : Number(v);
@@ -1777,6 +1785,56 @@ function sessionResponse(session, companyId) {
   return { ok: true, user: Auth.publicUser(session.user), companies: [companyId], csrfToken: session.csrfToken };
 }
 
+/* QA 申请独立保存，不改写验货记录或审核状态；版本号防止多窗口覆盖。 */
+const QA_FIELD_LIMITS = { customer:120, productName:180, productNo:100, department:80, requester:80,
+  ageGrade:40, source:80, receivedDate:10, sampleQty:60, description:2000, reportNo:100,
+  stage:10, purpose:180, language:2 };
+function validatedQAData(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input) ||
+      Object.keys(input).some(key => !Object.hasOwn(QA_FIELD_LIMITS, key) && !['standards','tests'].includes(key))) Auth.fail(400, 'QA申请数据格式不正确');
+  const data = {};
+  for (const [key,limit] of Object.entries(QA_FIELD_LIMITS)) {
+    if (typeof input[key] !== 'string' || input[key].length > limit || input[key].includes('\0')) Auth.fail(400, 'QA字段格式或长度不正确：' + key);
+    data[key] = input[key];
+  }
+  if (data.receivedDate && !/^\d{4}-\d{2}-\d{2}$/.test(data.receivedDate) ||
+      !['','ES/EP','FEP','PP','PS','Others'].includes(data.stage) || !['zh','en'].includes(data.language)) Auth.fail(400, 'QA日期、阶段或语言无效');
+  for (const [key,allowed] of [['standards',['0','1','2','3']], ['tests',[
+    ...Array.from({length:21},(_,i) => 'L'+i), ...Array.from({length:21},(_,i) => 'R'+i).filter(v => v !== 'R8'),
+  ]]]) {
+    if (!Array.isArray(input[key]) || input[key].length > allowed.length || input[key].some(v => typeof v !== 'string' || !allowed.includes(v))) Auth.fail(400, 'QA测试项目无效');
+    data[key] = [...new Set(input[key])].sort();
+  }
+  return data;
+}
+function readQAApplication(db, recordId) {
+  const row = db.prepare('SELECT * FROM qa_applications WHERE recordId=?').get(recordId);
+  return row ? { ...row, data:JSON.parse(row.data) } : null;
+}
+function saveQAApplication(db, recordId, body, username) {
+  if (!body || !Number.isSafeInteger(body.baseVersion) || body.baseVersion < 0) Auth.fail(400, '请先读取QA申请的最新版本');
+  const data = validatedQAData(body.data);
+  const json = JSON.stringify(data);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if (!db.prepare('SELECT id FROM records WHERE id=?').get(recordId)) Auth.fail(404, '验货记录已不存在，QA申请未保存');
+    const current = readQAApplication(db, recordId);
+    if ((current?.version || 0) !== body.baseVersion) {
+      if (current && current.version > body.baseVersion && JSON.stringify(current.data) === json) { db.exec('COMMIT'); return current; }
+      Auth.fail(409, 'QA申请已被其他窗口或账号修改，本次未覆盖；当前填写内容已在本机保留，请核对已保存版本');
+    }
+    if (current && JSON.stringify(current.data) === json) { db.exec('COMMIT'); return current; }
+    const now = new Date().toISOString();
+    const version = (current?.version || 0) + 1;
+    db.prepare(`INSERT INTO qa_applications(recordId,data,version,createdAt,updatedAt,updatedBy) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(recordId) DO UPDATE SET data=excluded.data,version=excluded.version,updatedAt=excluded.updatedAt,updatedBy=excluded.updatedBy`)
+      .run(recordId,json,version,current?.createdAt || now,now,username);
+    const result = readQAApplication(db, recordId);
+    db.exec('COMMIT');
+    return result;
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+}
+
 /* ════════ HTTP 工具 ════════ */
 function sendJson(res, code, obj) {
   const body = JSON.stringify(obj);
@@ -2031,6 +2089,17 @@ const server = http.createServer(async (req, res) => {
     const db = _dbs.get(companyId), user = session.user;
     if (!db) Auth.fail(503, '品质系统尚未就绪');
 
+    if (p === '/api/qa-application' && ['GET','POST'].includes(req.method)) {
+      Auth.requirePermission(user, 'records', 'v');
+      const rawId = url.searchParams.get('recordId');
+      const recordId = Number(rawId);
+      if (!/^[1-9]\d*$/.test(rawId || '') || !Number.isSafeInteger(recordId)) Auth.fail(400, '验货记录编号无效');
+      if (!db.prepare('SELECT id FROM records WHERE id=?').get(recordId)) Auth.fail(404, '验货记录已不存在');
+      if (req.method === 'GET') return sendJson(res, 200, { ok:true, application:readQAApplication(db,recordId) });
+      Auth.requirePermission(user, 'records', 'e');
+      const body = await readBody(req);
+      return sendJson(res, 200, { ok:true, application:saveQAApplication(db,recordId,body,user.username) });
+    }
     if (p === '/api/bootstrap' && req.method === 'GET') {
       const data = getBootstrap(db);
       const readRecords = ['dashboard', 'records', 'review', 'analysis', 'daily', 'weekly', 'monthly', 'yearly', 'supplier-report'].some(menu => Auth.can(user, menu, 'v'));

@@ -410,6 +410,8 @@ async function logout() {
 
 /* ── 显示 / 隐藏登录页 ── */
 function _showLogin() {
+  if (typeof closeQAApplication === 'function') closeQAApplication(true);
+  if (typeof closeSupplierDetails === 'function') closeSupplierDetails(false);
   document.getElementById('loginScreen').style.display  = 'flex';
   document.getElementById('appWrapper').style.display   = 'none';
   renderCompanySelector();   /* 登录页显示厂区选择并高亮当前厂区 */
@@ -1086,6 +1088,12 @@ function toggleSidebar() {
 /* ════════════════════════════════════════
    §5  TOP-BAR KPIs
 ════════════════════════════════════════ */
+function dashboardHighRiskSuppliers(data) {
+  return Object.entries(groupBy(data, 'supplier'))
+    .filter(([,rows]) => rows.length >= 2 && rows.filter(isFail).length / rows.length >= 0.15)
+    .map(([name]) => name);
+}
+
 function updateTopKpis() {
   try {
     const data = recs();
@@ -1099,11 +1107,7 @@ function updateTopKpis() {
     const weekR  = data.filter(r => r.date >= ws && r.date <= we);
     const weekF  = weekR.filter(r => isFail(r)).length;
 
-    const byS = groupBy(data, 'supplier');
-    const hiRisk = Object.values(byS).filter(list => {
-      if (list.length < 2) return false;
-      return list.filter(r => isFail(r)).length / list.length >= 0.15;
-    }).length;
+    const hiRisk = dashboardHighRiskSuppliers(data).length;
 
     setText('kpiPassRate',  rateT);
     setText('kpiWeekFail',  weekF);
@@ -1183,41 +1187,92 @@ function renderSummaryCards(data) {
   const failCnt  = data.filter(r => isFail(r)).length;
   const passCnt  = total - failCnt;
   const passRate = total ? fmtPct(passCnt / total) : '0.0%';
-  const totalQty = data.reduce((s, r) => s + (r.qty || 0), 0);
+  const totalQty = data.reduce((s, r) => s + (Number(r.qty) || 0), 0);
   const ws = weekStart(), we = weekEnd(ws);
   const weekR = data.filter(r => r.date >= ws && r.date <= we);
 
   el.innerHTML = `
-    <div class="summary-card green">
-      <div class="card-icon">✓</div>
-      <div class="card-label">总体通过率</div>
-      <div class="card-value text-green">${passRate}</div>
-      <div class="card-sub">${passCnt} / ${total} 非REJ批次</div>
-    </div>
-    <div class="summary-card red">
-      <div class="card-icon">✕</div>
-      <div class="card-label">总 FAIL 批次</div>
-      <div class="card-value text-red">${failCnt}</div>
-      <div class="card-sub">本周 ${weekR.filter(r=>isFail(r)).length} 批</div>
-    </div>
-    <div class="summary-card accent">
-      <div class="card-icon">⬡</div>
-      <div class="card-label">累计验货批次</div>
-      <div class="card-value">${total}</div>
-      <div class="card-sub">本周 ${weekR.length} 批</div>
-    </div>
-    <div class="summary-card blue">
-      <div class="card-icon">◈</div>
-      <div class="card-label">累计来料数量</div>
-      <div class="card-value">${(totalQty/10000).toFixed(1)}<span style="font-size:14px">万</span></div>
-      <div class="card-sub">共 ${totalQty.toLocaleString()} 件</div>
-    </div>
-    <div class="summary-card yellow">
-      <div class="card-icon">◉</div>
-      <div class="card-label">活跃供应商</div>
-      <div class="card-value text-yellow">${Object.keys(groupBy(data,'supplier')).length}</div>
-      <div class="card-sub">家参与本期验货</div>
-    </div>`;
+    <button type="button" class="summary-card green dashboard-detail-trigger" onclick="openDashboardDetails('month-pass', this)" aria-haspopup="dialog" title="查看当前统计范围的非 REJ 明细">
+      <span class="card-icon" aria-hidden="true">✓</span>
+      <span class="card-label">总体通过率</span>
+      <span class="card-value text-green">${passRate}</span>
+      <span class="card-sub">${passCnt} / ${total} 非REJ批次</span>
+    </button>
+    <button type="button" class="summary-card red dashboard-detail-trigger" onclick="openDashboardDetails('month-fail', this)" aria-haspopup="dialog" title="查看当前统计范围的 FAIL 明细">
+      <span class="card-icon" aria-hidden="true">✕</span>
+      <span class="card-label">总 FAIL 批次</span>
+      <span class="card-value text-red">${failCnt}</span>
+      <span class="card-sub">本周 ${weekR.filter(r=>isFail(r)).length} 批</span>
+    </button>
+    <button type="button" class="summary-card accent dashboard-detail-trigger" onclick="openDashboardDetails('month-all', this)" aria-haspopup="dialog" title="查看当前统计范围的全部验货明细">
+      <span class="card-icon" aria-hidden="true">⬡</span>
+      <span class="card-label">累计验货批次</span>
+      <span class="card-value">${total}</span>
+      <span class="card-sub">本周 ${weekR.length} 批</span>
+    </button>
+    <button type="button" class="summary-card blue dashboard-detail-trigger" onclick="openDashboardDetails('month-qty', this)" aria-haspopup="dialog" title="查看累计来料数量的逐批明细">
+      <span class="card-icon" aria-hidden="true">◈</span>
+      <span class="card-label">累计来料数量</span>
+      <span class="card-value">${(totalQty/10000).toFixed(1)}<span style="font-size:14px">万</span></span>
+      <span class="card-sub">共 ${totalQty.toLocaleString()} 件</span>
+    </button>
+    <button type="button" class="summary-card yellow dashboard-detail-trigger" onclick="openDashboardDetails('month-suppliers', this)" aria-haspopup="dialog" title="查看当前统计范围的供应商及验货明细">
+      <span class="card-icon" aria-hidden="true">◉</span>
+      <span class="card-label">活跃供应商</span>
+      <span class="card-value text-yellow">${Object.keys(groupBy(data,'supplier')).length}</span>
+      <span class="card-sub">家参与本期验货</span>
+    </button>`;
+}
+
+/* 顶部按今日/本周/全部日期，大卡片按所选月份；与统计值保持同一口径。 */
+function openDashboardDetails(type, trigger = null) {
+  if (!canView('dashboard')) { showToast('当前账号无权限访问', 'error'); return; }
+  const config = {
+    'month-pass':{ title:'总体通过率', mode:'pass' },
+    'month-fail':{ title:'总 FAIL 批次', mode:'fail' },
+    'month-all':{ title:'累计验货批次', mode:'all' },
+    'month-qty':{ title:'累计来料数量', mode:'all' },
+    'month-suppliers':{ title:'活跃供应商', mode:'suppliers', showSuppliers:true },
+    'today-pass':{ title:'今日通过率', mode:'pass', strictPass:true },
+    'week-fail':{ title:'本周 FAIL 数', mode:'fail' },
+    'week-all':{ title:'本周验货批次', mode:'all' },
+    'high-risk':{ title:'高风险供应商', mode:'suppliers', showSuppliers:true },
+  }[type];
+  const overlay = document.getElementById('supplierDetailOverlay');
+  if (!config || !overlay) return;
+  const today = todayStr(), from = weekStart(), to = weekEnd(from);
+  const month = _dashMonth || '';
+  const scope = type.startsWith('month-') ? (month ? '来料月份 ' + month : '全部月份')
+    : type === 'today-pass' ? '今日 ' + today + '（来料日期或检验日期）'
+    : type.startsWith('week-') ? '本周来料日期 ' + from + ' 至 ' + to
+    : '全部日期 · 累计至少 2 批且 FAIL 比例 ≥ 15%';
+  _supplierDetailView = { source:'dashboard', type, ...config, scope, month, today, from, to,
+    company:getCompany(), username:_liveUser()?.username, page:0, trigger };
+  overlay.classList.add('show');
+  renderSupplierDetails();
+  document.getElementById('supplierDetailClose')?.focus();
+}
+
+function dashboardDetailRecords(view) {
+  const data = recs();
+  if (view.type.startsWith('month-')) return view.month ? data.filter(r => r.date && r.date.startsWith(view.month)) : data;
+  if (view.type === 'today-pass') return data.filter(r => r.date === view.today || r.inspDate === view.today);
+  if (view.type.startsWith('week-')) return data.filter(r => r.date >= view.from && r.date <= view.to);
+  if (view.type === 'high-risk') {
+    const names = new Set(dashboardHighRiskSuppliers(data));
+    return data.filter(r => names.has(r.supplier || '未知'));
+  }
+  return [];
+}
+
+function openDashboardSupplierRows(name) {
+  const view = _supplierDetailView;
+  if (!view || view.source !== 'dashboard' || !view.showSuppliers || !canView('dashboard')) return;
+  if (!dashboardDetailRecords(view).some(r => (r.supplier || '未知') === name)) return;
+  view.supplierFilter = name;
+  view.mode = 'all';
+  renderSupplierDetails();
+  document.getElementById('supplierDetailMode_suppliers')?.focus();
 }
 
 /* ════════════════════════════════════════
@@ -1337,6 +1392,30 @@ function chartDailyTrend(data) {
   });
 }
 
+/* 仪表板环形图：名称和占比常驻外侧，连线对应到各扇区。 */
+function dashboardPieLabelOptions() {
+  const colors = _cc();
+  return {
+    type: 'pie',
+    radius: ['38%', '56%'],
+    center: ['50%', '44%'],
+    avoidLabelOverlap: true,
+    minShowLabelAngle: 0,
+    label: {
+      show: true, position: 'outside', alignTo: 'labelLine',
+      distanceToLabelLine: 4, bleedMargin: 8,
+      fontSize: 11, fontWeight: 600, lineHeight: 14,
+      color: colors.textHi, overflow: 'break',
+      formatter: p => `${p.name}\n${p.percent.toFixed(0)}%`,
+    },
+    labelLine: {
+      show: true, length: 10, length2: 10, smooth: false,
+      lineStyle: { color: colors.labelLine, width: 1.2 },
+    },
+    labelLayout: { moveOverlap: 'shiftY', hideOverlap: false },
+  };
+}
+
 /* 2. 判定结果饼图 */
 function chartResultPie(data) {
   const c = makeChart('chartResultPie');
@@ -1360,9 +1439,7 @@ function chartResultPie(data) {
     },
     legend:{ bottom:4, textStyle:{ color:_cc().text, fontSize:10 }, itemWidth:10, itemHeight:10 },
     series:[{
-      type:'pie', radius:['48%','72%'], center:['50%','44%'],
-      label:{ show:false },
-      emphasis:{ label:{ show:true, fontSize:13, fontWeight:'bold', color:_cc().textHi } },
+      ...dashboardPieLabelOptions(),
       data:[
         { value:pass, name:'PASS',   itemStyle:{ color:'#00e596' } },
         { value:fail, name:'REJ',    itemStyle:{ color:'#ff3d5a' } },
@@ -1525,21 +1602,11 @@ function chartClientPie(data) {
     main.push({ name: '其他', value: otherVal });
   }
 
-  /* 计算每项占比，用于按项控制标签显示 */
-  const totalVal = main.reduce((s, d) => s + d.value, 0) || 1;
-  /* 分配颜色 + 按占比控制标签/引导线 */
-  const SHOW_PCT = 8;   /* >= 8% 才显示外部标签 */
-  const list = main.map((d, i) => {
-    const pct = d.value / totalVal * 100;
-    const showLbl = pct >= SHOW_PCT;
-    return {
-      value:     d.value,
-      name:      d.name,
-      itemStyle: { color: d.name === '其他' ? '#4a5568' : COLS[i % COLS.length] },
-      label:     { show: showLbl },
-      labelLine: { show: showLbl },
-    };
-  });
+  const list = main.map((d, i) => ({
+    value: d.value,
+    name: d.name,
+    itemStyle: { color: d.name === '其他' ? '#4a5568' : COLS[i % COLS.length] },
+  }));
 
   c.setOption({
     backgroundColor: 'transparent',
@@ -1563,35 +1630,7 @@ function chartClientPie(data) {
       pageIconInactiveColor: _cc().pageInactive,
     },
     series: [{
-      type:              'pie',
-      radius:            ['42%', '62%'],
-      center:            ['50%', '42%'],
-      avoidLabelOverlap: true,           /* 恢复自动避让，配合按项控制 */
-      minShowLabelAngle: 8,
-      label: {
-        show:       true,
-        position:   'outside',
-        fontSize:   11,
-        fontWeight: 600,
-        lineHeight: 14,
-        color:      _cc().textHi,
-        formatter:  p => `${p.name}\n${p.percent.toFixed(0)}%`,
-      },
-      labelLine: {
-        show:      true,
-        length:    14,
-        length2:   14,
-        smooth:    false,
-        lineStyle: { color: _cc().labelLine, width: 1.2 },
-      },
-      labelLayout:  { hideOverlap: true },  /* 仍存在的重叠标签自动隐藏 */
-      emphasis: {
-        label: {
-          show:      true,
-          fontSize:  12,
-          formatter: p => `${p.name}\n${p.percent.toFixed(1)}%`,
-        },
-      },
+      ...dashboardPieLabelOptions(),
       data: list,
     }],
   });
@@ -2042,7 +2081,71 @@ function renderSuppliers() {
   renderPartners('supplier');
   renderPartners('customer');
   renderPartners('processType');
-  const data = recs();
+  filterSupplierCards();
+}
+
+function ensurePartnerArchiveFilters(type) {
+  const wrap = document.getElementById('partnerFilters_' + type);
+  if (!wrap || wrap.dataset.ready) return;
+  const label = { supplier:'供应商', customer:'客户', processType:'加工类型' }[type];
+  wrap.innerHTML = `<div class="partner-filter-controls">
+    <label class="partner-filter-search" for="partnerSearch_${type}">搜索${label} / 款式
+      <input type="search" class="search-input" id="partnerSearch_${type}" placeholder="输入名称或款式关键词" oninput="filterPartnerArchives('${type}')">
+    </label>
+    ${type === 'supplier' ? `<label for="partnerRisk_${type}">风险等级
+      <select class="filter-select" id="partnerRisk_${type}" onchange="filterPartnerArchives('${type}')">
+        <option value="">全部等级</option><option value="high">高风险</option>
+        <option value="mid">风险</option><option value="low">正常</option><option value="fresh">暂无验货记录</option>
+      </select></label>` : ''}
+    <label for="partnerDateFrom_${type}">来料开始日期
+      <input type="date" class="filter-date" id="partnerDateFrom_${type}" onchange="filterPartnerArchives('${type}')">
+    </label>
+    <label for="partnerDateTo_${type}">来料结束日期
+      <input type="date" class="filter-date" id="partnerDateTo_${type}" onchange="filterPartnerArchives('${type}')">
+    </label>
+    <button type="button" class="btn-secondary" onclick="resetPartnerArchiveFilters('${type}')">重置筛选</button>
+  </div><div class="partner-filter-summary" id="partnerFilterSummary_${type}" role="status" aria-live="polite"></div>`;
+  wrap.dataset.ready = '1';
+}
+
+function partnerArchiveFilters(type) {
+  const value = key => (document.getElementById(key + '_' + type)?.value || '').trim();
+  const from = value('partnerDateFrom'), to = value('partnerDateTo');
+  return { search:value('partnerSearch').toLocaleLowerCase(), risk:value('partnerRisk'), from, to,
+    dated:!!(from || to), invalid:!!(from && to && from > to) };
+}
+
+function partnerArchiveRecords(records, filters) {
+  if (filters.invalid) return [];
+  if (!filters.dated) return records;
+  return records.filter(r => typeof r.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.date) &&
+    (!filters.from || r.date >= filters.from) && (!filters.to || r.date <= filters.to));
+}
+
+function partnerArchiveSummary(type, filters, visible, total) {
+  const el = document.getElementById('partnerFilterSummary_' + type);
+  if (!el) return;
+  el.classList.toggle('is-error', filters.invalid);
+  el.textContent = filters.invalid ? '开始日期不能晚于结束日期，请调整筛选条件。'
+    : `显示 ${visible} / ${total} 个档案 · ${filters.dated ? '按来料日期 ' + (filters.from || '不限') + ' 至 ' + (filters.to || '不限') + ' 统计' : '全部日期'}`;
+}
+
+function filterPartnerArchives(type) {
+  if (type === 'supplier') filterSupplierCards();
+  else renderPartnerCards(type);
+}
+
+function resetPartnerArchiveFilters(type) {
+  ['partnerSearch','partnerRisk','partnerDateFrom','partnerDateTo'].forEach(key => {
+    const el = document.getElementById(key + '_' + type);
+    if (el) el.value = '';
+  });
+  filterPartnerArchives(type);
+}
+
+function filterSupplierCards() {
+  const filters = partnerArchiveFilters('supplier');
+  const data = partnerArchiveRecords(recs(), filters);
   const byS  = groupBy(data, 'supplier');
   const el   = document.getElementById('supplierCards');
   if (!el) return;
@@ -2054,31 +2157,171 @@ function renderSuppliers() {
     const qty   = arr.reduce((s,r)=>s+(Number(r.qty)||0), 0);
     const prods = [...new Set(arr.map(r=>r.productName).filter(Boolean))].slice(0,3).join('、');
     const last  = arr.map(r=>r.date).sort().reverse()[0]||'-';
-    return { name, total:arr.length, fail, pass:arr.length-fail, rate, risk, qty, prods, last };
+    return { name, total:arr.length, fail, pass:arr.length-fail, rate, risk, qty, prods, last,
+      searchText:[name, ...arr.map(r => r.productName)].filter(Boolean).join(' ').toLocaleLowerCase() };
   }).sort((a,b)=>b.rate-a.rate);
 
   /* 名单内但还没有验货记录的供应商：直接出卡片（0 批次），排在有记录的后面 */
   const recorded = new Set(Object.keys(byS));
-  managedNames('supplier').filter(n => !recorded.has(n)).forEach(n => {
-    list.push({ name:n, total:0, fail:0, pass:0, rate:0, risk:'low', qty:0, prods:'', last:'-', fresh:true });
+  managedNames('supplier').filter(n => !filters.dated && !filters.invalid && !recorded.has(n)).forEach(n => {
+    list.push({ name:n, total:0, fail:0, pass:0, rate:0, risk:'low', qty:0, prods:'', last:'-', fresh:true, searchText:n.toLocaleLowerCase() });
   });
 
+  const visible = list.filter(s => (!filters.search || s.searchText.includes(filters.search)) &&
+    (!filters.risk || (filters.risk === 'fresh' ? s.fresh : !s.fresh && s.risk === filters.risk)));
+  partnerArchiveSummary('supplier', filters, visible.length, list.length);
+  if (!visible.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-text">没有符合筛选条件的供应商档案</div><div class="empty-sub">请调整筛选条件或点击「重置筛选」</div></div>';
+    return;
+  }
   const RL = { low:'正常', mid:'风险', high:'高风险' };
-  el.innerHTML = '<div class="supplier-grid">' + list.map(s => `
+  el.innerHTML = '<div class="supplier-grid">' + visible.map(s => `
     <div class="supplier-card risk-${s.risk}">
       <span class="risk-badge ${s.risk}">${s.fresh ? '新录入' : RL[s.risk]}</span>
-      <div class="supplier-name">${s.name}</div>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">${s.fresh ? '暂无验货记录' : (s.prods||'多品类')}</div>
+      <div class="supplier-name">${_esc(s.name)}</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">${s.fresh ? '暂无验货记录' : (_esc(s.prods)||'多品类')}</div>
       <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:8px">
         <span>来料 ${s.qty.toLocaleString()} 件</span>
-        <span>最近: ${s.last}</span>
+        <span>最近: ${_esc(s.last)}</span>
       </div>
       <div class="supplier-stats">
-        <div class="stat-item"><div class="stat-num">${s.total}</div><div class="stat-lbl">验货批次</div></div>
-        <div class="stat-item"><div class="stat-num" style="color:${s.fail>0?'var(--red)':'var(--green)'}">${s.fail}</div><div class="stat-lbl">FAIL批次</div></div>
+        <button type="button" class="stat-item supplier-detail-trigger" data-supplier="${_esc(s.name)}" onclick="openSupplierDetails(this.dataset.supplier, 'all', this)" aria-haspopup="dialog" title="查看验货明细">
+          <span class="stat-num">${s.total}</span><span class="stat-lbl">验货批次</span>
+        </button>
+        <button type="button" class="stat-item supplier-detail-trigger" data-supplier="${_esc(s.name)}" onclick="openSupplierDetails(this.dataset.supplier, 'fail', this)" aria-haspopup="dialog" title="查看 FAIL 明细">
+          <span class="stat-num" style="color:${s.fail>0?'var(--red)':'var(--green)'}">${s.fail}</span><span class="stat-lbl">FAIL批次</span>
+        </button>
         <div class="stat-item"><div class="stat-num" style="color:${s.fresh?'var(--text-dim)':s.risk==='high'?'var(--red)':s.risk==='mid'?'var(--yellow)':'var(--green)'}">${s.fresh ? '—' : (s.rate*100).toFixed(0)+'%'}</div><div class="stat-lbl">退货率</div></div>
       </div>
     </div>`).join('') + '</div>';
+}
+
+/* 从卡片统计进入只读明细，使用与卡片相同的日期范围和审核口径。 */
+let _supplierDetailView = null;
+const SUPPLIER_DETAIL_PAGE_SIZE = 50;
+
+function openSupplierDetails(supplier, mode = 'all', trigger = null) {
+  if (!canView('suppliers')) { showToast('当前账号无权限访问', 'error'); return; }
+  const overlay = document.getElementById('supplierDetailOverlay');
+  const filters = partnerArchiveFilters('supplier');
+  if (!overlay || filters.invalid) return;
+  _supplierDetailView = { supplier, mode:mode === 'fail' ? 'fail' : 'all', filters,
+    company:getCompany(), username:_liveUser()?.username, page:0, trigger };
+  overlay.classList.add('show');
+  renderSupplierDetails();
+  document.getElementById('supplierDetailClose')?.focus();
+}
+
+function renderSupplierDetails(page = 0) {
+  const view = _supplierDetailView;
+  if (!view) return;
+  const dashboard = view.source === 'dashboard';
+  if (!canView(dashboard ? 'dashboard' : 'suppliers') || view.company !== getCompany() || view.username !== _liveUser()?.username) {
+    closeSupplierDetails(false); return;
+  }
+  const base = dashboard ? dashboardDetailRecords(view) : partnerArchiveRecords(recs(), view.filters)
+    .filter(r => (r.supplier || '未知') === view.supplier);
+  const all = view.supplierFilter ? base.filter(r => (r.supplier || '未知') === view.supplierFilter) : base;
+  const failed = all.filter(isFail);
+  const passed = all.filter(r => view.strictPass ? isPass(r) : !isFail(r));
+  const suppliers = Object.entries(groupBy(base, 'supplier')).map(([name,records]) => {
+    const fail = records.filter(isFail).length;
+    return { name, total:records.length, fail, rate:fail / records.length,
+      qty:records.reduce((sum,r) => sum + (Number(r.qty) || 0), 0),
+      last:records.map(r => r.date || '').sort().reverse()[0] || '—' };
+  }).sort((a,b) => b.rate-a.rate || b.total-a.total || a.name.localeCompare(b.name));
+  const grouped = view.mode === 'suppliers';
+  const rows = grouped ? suppliers : (view.mode === 'fail' ? failed : view.mode === 'pass' ? passed : all).slice()
+    .sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')) ||
+      String(b.id).localeCompare(String(a.id), undefined, { numeric:true }));
+  const pages = Math.max(1, Math.ceil(rows.length / SUPPLIER_DETAIL_PAGE_SIZE));
+  view.page = Math.max(0, Math.min(pages - 1, Math.trunc(Number(page)) || 0));
+  const offset = view.page * SUPPLIER_DETAIL_PAGE_SIZE;
+  const visible = rows.slice(offset, offset + SUPPLIER_DETAIL_PAGE_SIZE);
+  const passLabel = view.strictPass ? 'PASS 批次' : '非 REJ 批次';
+  const modeLabel = grouped ? '供应商列表' : view.mode === 'fail' ? 'FAIL 明细' : view.mode === 'pass' ? passLabel + '明细' : '验货明细';
+  const title = document.getElementById('supplierDetailTitle');
+  if (title) title.textContent = (dashboard ? view.title + (view.supplierFilter ? ' · ' + view.supplierFilter : '') : view.supplier) + ' · ' + modeLabel;
+  const summary = document.getElementById('supplierDetailSummary');
+  const scope = dashboard ? view.scope : view.filters.dated
+    ? '来料日期 ' + (view.filters.from || '不限') + ' 至 ' + (view.filters.to || '不限') : '全部日期';
+  const quantity = grouped ? base.reduce((sum,r) => sum + (Number(r.qty) || 0), 0) : rows.reduce((sum,r) => sum + (Number(r.qty) || 0), 0);
+  if (summary) summary.textContent = '已审核验货记录 · ' + scope +
+    (grouped ? ` · 共 ${suppliers.length} 家供应商 / ${base.length} 批` : ` · 共 ${rows.length} 批`) +
+    ` · 来料 ${quantity.toLocaleString()} 件` + (view.mode === 'pass' ? ` · ${passLabel} ${passed.length}/${all.length}（${all.length ? fmtPct(passed.length/all.length) : view.strictPass ? 'N/A' : '0.0%'}）` : '');
+  [['all',all.length,'全部验货'],['fail',failed.length,'FAIL 批次'],['pass',passed.length,passLabel],['suppliers',suppliers.length,'供应商列表']].forEach(([mode,count,label]) => {
+    const button = document.getElementById('supplierDetailMode_' + mode);
+    if (!button) return;
+    button.hidden = mode === 'pass' ? !dashboard : mode === 'suppliers' ? !view.showSuppliers : false;
+    button.textContent = label + '（' + count + '）';
+    button.setAttribute('aria-pressed', String(view.mode === mode));
+    button.classList.toggle('active', view.mode === mode);
+  });
+  const wrap = document.getElementById('supplierDetailTable');
+  const cell = value => value == null || value === '' ? '—' : _esc(value);
+  const number = value => value == null || value === '' || !Number.isFinite(Number(value)) ? '—' : Number(value).toLocaleString();
+  if (wrap) {
+    if (!visible.length) {
+      wrap.innerHTML = '<div class="empty-state"><div class="empty-text">当前范围内暂无' + (grouped ? '供应商' : view.mode === 'fail' ? ' FAIL ' : '验货') + '记录</div></div>';
+    } else if (grouped) {
+      wrap.innerHTML = `<table class="dashboard-supplier-detail-table"><thead><tr>
+        <th>供应商</th><th>验货批次</th><th>FAIL 批次</th><th>退货率</th><th>来料数</th><th>最近来料日期</th><th>明细</th>
+        </tr></thead><tbody>${visible.map(s => `<tr><td>${cell(s.name)}</td><td>${s.total}</td><td>${s.fail}</td>
+          <td>${fmtPct(s.rate)}</td><td>${number(s.qty)}</td><td>${cell(s.last)}</td>
+          <td><button type="button" class="action-btn" data-supplier="${_esc(s.name)}" onclick="openDashboardSupplierRows(this.dataset.supplier)">查看验货明细</button></td></tr>`).join('')}</tbody></table>`;
+    } else {
+      wrap.innerHTML = `<table class="supplier-detail-table"><thead><tr>
+          <th>序号</th><th>来料日期</th><th>供应商</th><th>送货单号</th><th>PO号</th><th>货号</th><th>款式名称</th>
+          <th>客户</th><th>来料数</th><th>抽查数</th><th>不良数</th><th>判定</th><th>不良描述</th><th>检验员</th><th>备注</th>
+        </tr></thead><tbody>${visible.map((r,i) => `<tr data-record-id="${_esc(r.id)}">
+          <td title="记录编号 ${_esc(r.id)}">${offset+i+1}</td><td>${cell(r.date)}</td><td>${cell(r.supplier || '未知')}</td>
+          <td>${cell(r.deliveryNo)}</td><td>${cell(r.orderNo)}</td><td>${cell(r.productNo)}</td>
+          <td class="supplier-detail-text">${cell(r.productName)}</td><td>${cell(r.client)}</td>
+          <td class="supplier-detail-number">${number(r.qty)}</td><td class="supplier-detail-number">${number(r.sampleQty)}</td>
+          <td class="supplier-detail-number">${number(r.fail)}</td>
+          <td><span class="badge ${isFail(r) ? 'badge-rej' : isPass(r) ? 'badge-pass' : r.result === 'COND' ? 'badge-cond' : 'badge-hold'}">${cell(r.result)}</span></td>
+          <td class="supplier-detail-text">${cell(r.defect)}</td><td>${cell(r.qc)}</td><td class="supplier-detail-text">${cell(r.remark)}</td>
+        </tr>`).join('')}</tbody></table>`;
+    }
+    wrap.scrollTop = 0;
+    wrap.scrollLeft = 0;
+  }
+  const count = document.getElementById('supplierDetailPageInfo');
+  if (count) count.textContent = rows.length ? `第 ${offset+1}–${offset+visible.length} ${grouped ? '家' : '条'} / 共 ${rows.length} ${grouped ? '家' : '条'} · 第 ${view.page+1}/${pages} 页` : '共 0 ' + (grouped ? '家' : '条');
+  const prev = document.getElementById('supplierDetailPrev'), next = document.getElementById('supplierDetailNext');
+  if (prev) prev.disabled = view.page === 0;
+  if (next) next.disabled = view.page >= pages - 1;
+}
+
+function setSupplierDetailMode(mode) {
+  if (!_supplierDetailView) return;
+  const view = _supplierDetailView;
+  const allowed = ['all','fail', ...(view.source === 'dashboard' ? ['pass'] : []), ...(view.showSuppliers ? ['suppliers'] : [])];
+  view.mode = allowed.includes(mode) ? mode : 'all';
+  if (view.mode === 'suppliers') view.supplierFilter = null;
+  renderSupplierDetails();
+}
+
+function changeSupplierDetailPage(delta) {
+  if (_supplierDetailView) renderSupplierDetails(_supplierDetailView.page + delta);
+}
+
+function closeSupplierDetails(restoreFocus = true) {
+  const trigger = _supplierDetailView?.trigger;
+  _supplierDetailView = null;
+  document.getElementById('supplierDetailOverlay')?.classList.remove('show');
+  const wrap = document.getElementById('supplierDetailTable');
+  if (wrap) wrap.innerHTML = '';
+  if (restoreFocus && trigger?.isConnected) trigger.focus();
+}
+
+function supplierDetailKeydown(event) {
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeSupplierDetails(); return; }
+  if (event.key !== 'Tab') return;
+  const buttons = [...document.querySelectorAll('#supplierDetailOverlay button:not(:disabled):not([hidden])')];
+  const first = buttons[0], last = buttons[buttons.length-1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+  if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
 }
 
 /* ════════════════════════════════════════
@@ -2216,7 +2459,7 @@ function filterRecords() {
                全部 ${filteredRecs.length} 条（数据量大时可能卡顿）
                <button class="action-btn" onclick="_recordsShowAll=false;filterRecords()">只显示前 ${RECORDS_PAGE_SIZE} 条</button>
              </div>` : '');
-    wrap.innerHTML = capBar + `<table id="recordsTable" style="table-layout:fixed;width:100%;min-width:1778px">
+    wrap.innerHTML = capBar + `<table id="recordsTable" style="table-layout:fixed;width:100%;min-width:1902px">
       <colgroup>
         <col style="width:36px"/>   <!-- 复选框 -->
         <col style="width:44px"/>   <!-- # -->
@@ -2237,7 +2480,7 @@ function filterRecords() {
         <col style="width:150px"/>  <!-- 不良现象 -->
         <col style="width:62px"/>   <!-- 判定 -->
         <col style="width:68px"/>   <!-- 检验员 -->
-        <col style="width:136px"/>  <!-- 操作 -->
+        <col style="width:260px"/>  <!-- 操作 -->
       </colgroup>
       <thead><tr>
         <th class="col-check">
@@ -2315,6 +2558,7 @@ function filterRecords() {
             ${delBtn}
             ${lockBtn}
             <button class="action-btn iqc" onclick="exportIQCReport(${r.id})" title="导出IQC检验报告">IQC</button>
+            <button type="button" class="action-btn qa" onclick="openQAApplication(${r.id}, this)" title="填写并导出 QA 申请表">QA申请表</button>
           </td>
         </tr>`;
       }).join('')}</tbody></table>`;
@@ -2554,6 +2798,7 @@ function canManagePartners() { return can('managePartners'); }
 
 /* 名单维护面板：供应商管理 / 客户管理 两个页面各自调用 */
 function renderPartners(type) {
+  ensurePartnerArchiveFilters(type);
   const wrap = document.getElementById('partnerMgr_' + type);
   if (!wrap) return;
   const label  = { supplier:'供应商名单', customer:'客户名单', processType:'加工类型名单' }[type] || type;
@@ -2579,22 +2824,29 @@ function renderPartnerCards(type) {
   if (!conf) return;
   const el = document.getElementById(conf.el);
   if (!el) return;
+  const filters = partnerArchiveFilters(type);
+  const data = partnerArchiveRecords(state.records, filters);
+  const grouped = groupBy(data, conf.field);
   const list = managedNames(type).map(n => {
-    const arr  = state.records.filter(r => r[conf.field] === n);
+    const arr  = grouped[n] || [];
     const last = arr.map(r => r.date).filter(Boolean).sort().reverse()[0] || '-';
-    return { name:n, total:arr.length, last, fresh:arr.length === 0 };
-  }).sort((a,b) => (a.fresh?1:0)-(b.fresh?1:0) || b.total-a.total || a.name.localeCompare(b.name));
-  if (!list.length) {
-    el.innerHTML = '<div style="color:var(--text-muted);font-size:12px">暂无，请先在上方名单添加</div>';
+    return { name:n, total:arr.length, last, fresh:arr.length === 0,
+      searchText:[n, ...arr.map(r => r.productName)].filter(Boolean).join(' ').toLocaleLowerCase() };
+  }).filter(s => !filters.invalid && (!filters.dated || !s.fresh))
+    .sort((a,b) => (a.fresh?1:0)-(b.fresh?1:0) || b.total-a.total || a.name.localeCompare(b.name));
+  const visible = list.filter(s => !filters.search || s.searchText.includes(filters.search));
+  partnerArchiveSummary(type, filters, visible.length, list.length);
+  if (!visible.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-text">没有符合筛选条件的档案</div><div class="empty-sub">请调整筛选条件、点击「重置筛选」或在上方名单添加</div></div>';
     return;
   }
-  el.innerHTML = '<div class="supplier-grid">' + list.map(s => `
+  el.innerHTML = '<div class="supplier-grid">' + visible.map(s => `
     <div class="supplier-card risk-low">
       <span class="risk-badge low">${s.fresh ? '新录入' : '正常'}</span>
-      <div class="supplier-name">${s.name}</div>
+      <div class="supplier-name">${_esc(s.name)}</div>
       <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:6px">
         <span>${s.total} 条验货记录</span>
-        <span>最近: ${s.last}</span>
+        <span>最近: ${_esc(s.last)}</span>
       </div>
     </div>`).join('') + '</div>';
 }

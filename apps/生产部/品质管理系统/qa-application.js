@@ -173,8 +173,16 @@
     const context = session;
     if (!context || context.loading || !context.editable || busy) return;
     const data = formValues();
-    context.dirty = JSON.stringify(data) !== context.savedJSON;
-    if (!context.dirty) return;
+    const previous = context.lastModel;
+    context.lastModel = data;
+    // A pending write may still commit the value that the user just reverted.
+    context.dirty = !!context.pending || JSON.stringify(data) !== context.savedJSON;
+    if (!context.dirty) {
+      clearTimeout(context.timer);
+      if (previous) removeMatchingDraft(context,JSON.stringify(previous));
+      saveStatus(context,context.version > 0 ? '内容与已保存版本一致' : '尚未保存，填写后会自动保存');
+      return;
+    }
     keepDraft(context,data);
     if (context.conflicted) { saveStatus(context,'申请存在版本冲突，当前填写内容已保留，请核对已保存版本。',true); return; }
     saveStatus(context,context.localKept ? (context.loaded ? '本机已暂存，等待自动保存…' : '本机已暂存，请点击「重试读取」后继续保存。') : '本机暂存失败，请复制填写内容后重试保存。',!context.localKept || !context.loaded);
@@ -186,7 +194,11 @@
     const data = supplied || (session === context ? formValues() : context.lastModel);
     if (!data) return false;
     const json = JSON.stringify(data);
-    if (context.version > 0 && json === context.savedJSON) return true;
+    if (context.version > 0 && json === context.savedJSON) {
+      context.lastModel = data;
+      removeMatchingDraft(context,json);
+      return true;
+    }
     keepDraft(context,data);
     saveStatus(context,'正在保存申请…');
     const operation = (async () => {
@@ -331,7 +343,7 @@
     if (context) {
       clearTimeout(context.timer);
       const data = formValues();
-      if (!context.loading && JSON.stringify(data) !== context.savedJSON && context.editable) {
+      if (!context.loading && (context.pending || JSON.stringify(data) !== context.savedJSON) && context.editable) {
         keepDraft(context,data);
         if (!force) {
           const pending = flushApplication(context);

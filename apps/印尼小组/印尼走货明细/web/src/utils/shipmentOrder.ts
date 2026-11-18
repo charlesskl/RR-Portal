@@ -7,18 +7,22 @@ export function effectiveCustomsCompany(
   return (item.customs_company || material?.customs_company || fallback || CUSTOMS_FIXED).trim()
 }
 
-export function shipmentKeepsImportOrder(items: readonly { material_snapshot?: unknown; sources?: readonly { material_snapshot?: unknown }[] }[]) {
-  const imported = (item: { material_snapshot?: unknown }) => !!(item.material_snapshot && typeof item.material_snapshot === 'object'
+interface ShipmentOrderSource { outbound_id?: number; material_snapshot?: unknown }
+
+export function shipmentKeepsSourceOrder(items: readonly (ShipmentOrderSource & { sources?: readonly ShipmentOrderSource[] })[]) {
+  const fromSource = (item: ShipmentOrderSource) => Number(item.outbound_id) > 0 || !!(item.material_snapshot && typeof item.material_snapshot === 'object'
     && 'import_source' in item.material_snapshot && item.material_snapshot.import_source)
-  return items.some(item => imported(item) || item.sources?.some(imported))
+  return items.some(item => fromSource(item) || item.sources?.some(fromSource))
 }
 
-// Imported shipments keep their saved/file order in both editor and export.
+// Excel imports and outbound pulls keep their saved/source order in editor
+// and export. An outbound allocation already has a meaningful append order;
+// grouping by company/supplier here would silently rearrange it after pulling.
 // Catalog-only shipments retain the original company/supplier ordering.
-export function sortShipmentItems<T extends { material_id?: number; customs_company?: string; supplier?: string; carton_group?: string; material_snapshot?: unknown }>(
+export function sortShipmentItems<T extends { outbound_id?: number; material_id?: number; customs_company?: string; supplier?: string; carton_group?: string; material_snapshot?: unknown }>(
   items: readonly T[], materials: ReadonlyMap<number, Material>, fallback = CUSTOMS_FIXED,
 ): T[] {
-  if (shipmentKeepsImportOrder(items)) return [...items]
+  if (shipmentKeepsSourceOrder(items)) return [...items]
   const mat = (it: T) => it.material_id != null ? materials.get(it.material_id) : undefined
   const ordered = [...items].sort((a, b) => {
     const ca = effectiveCustomsCompany(a, mat(a), fallback), cb = effectiveCustomsCompany(b, mat(b), fallback)

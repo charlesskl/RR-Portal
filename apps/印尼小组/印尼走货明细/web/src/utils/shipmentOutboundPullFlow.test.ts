@@ -53,6 +53,17 @@ it('拉入保留原采购单价和真实剩余数量，同时带入来源采购�
   expect(state.makeItem.mock.calls[0][1]).toBe(400)
   expect(state.makeItem.mock.calls[0][2].poInfo.it).toMatchObject({ price: .12, purchase_charge_ratio: 100 / 101 })
 })
+it('反向勾选并异步刷新物料后，仍按出库来源列表顺序整批追加', async () => {
+  const { state, pull } = setup()
+  state.sources.push({ ...state.sources[0], outbound_id: 8, material_id: 67 })
+  state.materials.unshift({ id: 67, name_zh: '合成工具' })
+  state.selectedOutIds = ['8', '7']
+  await pull()
+  expect(state.appendItems).toHaveBeenCalledWith([
+    { material_id: 66, outbound_id: 7, qty: 400, price: .12 },
+    { material_id: 67, outbound_id: 8, qty: 1000, price: .12 },
+  ])
+})
 it('按钮连点也只追加一次，重新读取发现额度归零则不追加', async () => {
   const first = setup()
   await Promise.all([first.pull(), first.pull()])

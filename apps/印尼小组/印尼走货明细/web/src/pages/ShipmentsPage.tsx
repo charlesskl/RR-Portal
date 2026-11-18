@@ -1872,7 +1872,7 @@ export default function ShipmentsPage() {
             onSearch={setOutFilter} onChange={(e) => !e.target.value && setOutFilter('')} />
           <Button type="primary" loading={outPulling} disabled={!selectedOutIds.length || outLoading} onClick={pullFromOutbound}>📥 拉物料到本走货</Button>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            仅显示尚有剩余的出库，已扣除本柜已拉入的数量（含未保存明细）；全部拉入后自动隐藏，部分拉入只带入剩余量。
+            按列表顺序追加至本柜，勾选先后不影响排列。仅显示尚有剩余的出库，已扣除本柜已拉入的数量（含未保存明细）；全部拉入后自动隐藏，部分拉入只带入剩余量。
           </Typography.Text>
         </Space>
         <Table

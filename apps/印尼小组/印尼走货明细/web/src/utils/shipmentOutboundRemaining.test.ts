@@ -36,6 +36,14 @@ it('按最新剩余额度规划拉入，重复勾选同一出库只拉一次', (
   const rows = [{ outbound_id: 74, qty: 8000 }]
   expect(planOutboundPull(sources, rows, [74, 74, 75]).map(row => [row.outbound_id, row.remaining_qty])).toEqual([[74, 150], [75, 82]])
 })
+it('跨页或反向勾选仍沿用来源列表顺序，已拉入数量和选中集合不变', () => {
+  const selected = [75, 70, 74, 75]
+  const rows = [{ outbound_id: 74, qty: 8000 }]
+  const before = structuredClone({ sources, rows, selected })
+  expect(planOutboundPull(sources, rows, selected).map(row => [row.outbound_id, row.remaining_qty]))
+    .toEqual([[70, 9000], [74, 150], [75, 82]])
+  expect({ sources, rows, selected }).toEqual(before)
+})
 it('所选一笔失效则整次拦截，提示具体 OUT 单，不部分拉入', () => {
   expect(() => planOutboundPull(sources, [{ outbound_id: 70, qty: 9000 }], [74, 70])).toThrow('OUT-70')
   expect(() => planOutboundPull(sources, [], [999])).toThrow('OUT-999')

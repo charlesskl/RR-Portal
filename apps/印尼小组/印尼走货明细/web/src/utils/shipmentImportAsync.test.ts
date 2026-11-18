@@ -126,6 +126,9 @@ it('image failure locations require explicit acknowledgement and a rejected pare
   expect(fixture.message.success).not.toHaveBeenCalled()
   const firstReview = fixture.imageReview.confirm.mock.calls[0][0]
   expect(firstReview.title).toBe('1 行图片需要核对')
+  expect(firstReview.okText).toBe('继续导入，仅异常行保留旧图')
+  expect(JSON.stringify(firstReview.content)).toContain('已成功读取新图片的行')
+  expect(JSON.stringify(firstReview.content)).toContain('全部图片替换旧图')
   expect(JSON.stringify(firstReview.content)).toContain('合成表')
   expect(JSON.stringify(firstReview.content)).toContain('65')
   firstReview.onOk(); await confirming

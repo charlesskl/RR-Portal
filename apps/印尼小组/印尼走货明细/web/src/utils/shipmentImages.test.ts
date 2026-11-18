@@ -146,3 +146,38 @@ it('压缩图片后释放位图，过大文件在解码前拒绝', async () => {
   await expect(compressShipmentImage({ size: 32 * 1024 * 1024 + 1 } as Blob)).rejects.toThrow('32 MB')
   expect(decode).toHaveBeenCalledOnce()
 })
+
+it.each([false, true])('多图和重复定位全部导入后替换旧图库，保存重读保留全部新图（已关联=%s）', async linked => {
+  vi.stubGlobal('DOMParser', DOMParser)
+  const positions = new Map([[8, [1, 1]], [17, [2, 3, 4]], [36, [5, 6]], [102, [7, 8, 7, 8]]])
+  const workbook = XLSX.utils.book_new()
+  const values = Array.from({ length: 102 }, () => [] as (string | number)[])
+  values[0] = ['货号', '产品中文名称', '图片', '送货数量']
+  for (const row of positions.keys()) values[row - 1] = ['SYN-' + row, '合成物料' + row, '', row]
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(values), '明细')
+  const zip = await JSZip.loadAsync(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }))
+  zip.file('xl/worksheets/_rels/sheet1.xml.rels', '<Relationships><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>')
+  zip.file('xl/drawings/_rels/drawing1.xml.rels', '<Relationships>' + Array.from({ length: 8 }, (_, i) => `<Relationship Id="image${i + 1}" Target="../media/image${i + 1}.png"/>`).join('') + '</Relationships>')
+  for (let n = 1; n <= 8; n++) zip.file(`xl/media/image${n}.png`, String(n))
+  zip.file('xl/drawings/drawing1.xml', '<xdr:wsDr xmlns:xdr="urn:drawing" xmlns:a="urn:art" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' + [...positions].flatMap(([row, photos]) => photos.map(n => `<xdr:oneCellAnchor><xdr:from><xdr:row>${row - 1}</xdr:row><xdr:col>2</xdr:col></xdr:from><xdr:pic><a:blip r:embed="image${n}"/></xdr:pic></xdr:oneCellAnchor>`)).join('') + '</xdr:wsDr>')
+  const rows = parseShipmentWorkbook(workbook).rows
+  await loadShipmentImages(zip, rows, async file => photo(Number(file.name.match(/image(\d+)/)![1])))
+  expect(rows.map(row => row.row)).toEqual([8, 17, 36, 102])
+  expect(rows.map(row => shipmentImages(row.item.material_snapshot).length)).toEqual([1, 3, 2, 2])
+  expect(rows.every(row => row.warnings.length === 0)).toBe(true)
+  const existing = rows.map((row, index) => ({ material_id: index + 1, outbound_id: linked ? index + 10 : undefined,
+    qty: 123, kg: 45, price: 6, po_no: 'SYN-PO',
+    material_snapshot: { ...row.item.material_snapshot, id: index + 1, image: photo(99), shipment_images: [photo(99), photo(100)] } }))
+  const before = structuredClone(existing)
+  const materials = new Map(existing.map(row => [row.material_id, row.material_snapshot]))
+  const targets = rows.map((_, i) => i)
+  const next = JSON.parse(JSON.stringify(applyShipmentImport(existing, materials, rows.map(row => row.item), targets)))
+  for (const [index, row] of rows.entries()) {
+    expect(shipmentImages(next[index].material_snapshot)).toEqual(shipmentImages(row.item.material_snapshot))
+    expect(shipmentImages(next[index].material_snapshot)).not.toContain(photo(99))
+    expect(shipmentImages(next[index].material_snapshot)).not.toContain(photo(100))
+    if (linked) expect(next[index]).toMatchObject({ outbound_id: existing[index].outbound_id, qty: 123, kg: 45, price: 6, po_no: 'SYN-PO' })
+  }
+  expect(existing).toEqual(before)
+  expect([...materials.values()].every(material => shipmentImages(material).includes(photo(99)))).toBe(true)
+})

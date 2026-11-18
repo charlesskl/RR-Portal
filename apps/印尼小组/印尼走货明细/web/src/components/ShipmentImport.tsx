@@ -133,10 +133,10 @@ export default function ShipmentImport({ existing, materials, onImport }: {
           const proceed = await new Promise<boolean>(resolve => {
             modal.confirm({
               title: `${imageIssues.length} 行图片需要核对`,
-              content: <div><p>下列图片未能读取或无法唯一匹配。继续导入将保留已有图片；新增明细不会附上这些图片。</p>
+              content: <div><p>已成功读取新图片的行，会使用本次 Excel 的全部图片替换旧图。下列异常行的新图片未完整读取或超过大小限制，继续导入时仅这些行保留旧图；新增明细暂不带图。</p>
                 <ul style={{ maxHeight: 280, overflow: 'auto', paddingLeft: 20 }}>{imageIssues.map(({ row, warnings }) =>
                   <li key={row.key}>{row.sheet} 第 {row.row} 行：{warnings.join('；')}</li>)}</ul></div>,
-              okText: '确认导入，保留已有图片', cancelText: '返回核对',
+              okText: '继续导入，仅异常行保留旧图', cancelText: '返回核对',
               onOk: () => { resolve(true) }, onCancel: () => { resolve(false) },
             })
           })

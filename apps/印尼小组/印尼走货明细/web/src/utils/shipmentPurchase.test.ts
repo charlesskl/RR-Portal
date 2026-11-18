@@ -1,5 +1,26 @@
 import { expect, it } from 'vitest'
-import { receiptChargeRatio, shipmentChargeQuantity, shipmentDeclarationPrice, shipmentPurchaseAmount } from './shipmentPurchase'
+import { receiptChargeRatio, shipmentChargeQuantity, shipmentDeclarationPrice, shipmentPurchaseAmount, shipmentPurchaseLineAmount, shipmentPurchaseTotal } from './shipmentPurchase'
+import { consolidateShipmentItems } from './shipmentConsolidation'
+
+it('采购金额先逐行舍入再汇总，原单价和换算基础保留精度', () => {
+  const rows = [18.98, 3.304, 151.564, 284.68, 60.72].map(price => Object.freeze({ price, qty: 1, kg: 2 }))
+  expect(rows.map(shipmentPurchaseLineAmount)).toEqual([18.98, 3.30, 151.56, 284.68, 60.72])
+  expect(shipmentPurchaseTotal(rows)).toBe(519.24)
+  expect(rows.map(shipmentPurchaseAmount)).toEqual([18.98, 3.304, 151.564, 284.68, 60.72])
+  expect(shipmentDeclarationPrice(rows[1])).toBe(1.652)
+})
+
+it.each([[1.005, 1.01], [-1.005, -1.01], [.000529, 0]])('采购金额 %s 使用采购单的分位舍入规则', (price, amount) => {
+  expect(shipmentPurchaseLineAmount({ price, qty: 1 })).toBe(amount)
+})
+
+it('同物料分批出库先合并原金额，再按最终明细行舍入', () => {
+  const rows = [1, 2].map(outbound_id => ({ material_id: 1, price: .334, qty: 1, kg: 1, outbound_id, supplier: 'S' }))
+  const groups = consolidateShipmentItems(rows, new Map([[1, { id: 1, name_zh: '合成物料', unit_kg: 'KGM' }]]))
+  expect(groups).toHaveLength(1)
+  expect(shipmentPurchaseTotal(groups)).toBe(.67)
+  expect(shipmentPurchaseTotal(rows)).toBe(.66)
+})
 
 it.each([
   { qty: 3667, kg: 502.379, paid: 3630, price: .227, amount: 824.01 },

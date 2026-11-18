@@ -11,7 +11,7 @@ import { sortShipmentItems, cartonLayout, cartonGroupKey, shipmentScope } from '
 import { withShipmentInvoicePrices } from '../utils/shipmentInvoice'
 import { consolidateShipmentItems } from '../utils/shipmentConsolidation'
 import { createCartonGroupId } from '../utils/cartonGroupId'
-import { receiptChargeRatio, shipmentChargeQuantity, shipmentDeclarationPrice, shipmentPurchaseAmount } from '../utils/shipmentPurchase'
+import { receiptChargeRatio, shipmentChargeQuantity, shipmentDeclarationPrice, shipmentPurchaseLineAmount, shipmentPurchaseTotal } from '../utils/shipmentPurchase'
 import ShipmentImport from '../components/ShipmentImport'
 import ShipmentImportSource from '../components/ShipmentImportSource'
 import ShipmentImages from '../components/ShipmentImages'
@@ -557,7 +557,7 @@ export default function ShipmentsPage() {
     const cbmEach = shipmentCbmPerCarton(m?.length, m?.width, m?.height)
     const cbmTotal = shipmentCbmTotal(cbmEach, physicalCartons)
     const invoiceAmount = num(it.invoice_price) * num(it.kg)
-    const purchaseAmount = shipmentPurchaseAmount(it)
+    const purchaseAmount = shipmentPurchaseLineAmount(it)
     return { m, grossTotal, netTotal, cbmEach, cbmTotal, invoiceAmount, purchaseAmount }
   }
 
@@ -1423,7 +1423,7 @@ export default function ShipmentsPage() {
       qty: items.reduce((s, it) => s + (it.qty ?? 0), 0),
       kg:  items.reduce((s, it) => s + (it.kg ?? 0), 0),
       cartons: cartonRows.reduce((s, row) => s + row.count, 0),
-      amount: items.reduce((s, it) => s + shipmentPurchaseAmount(it), 0),
+      amount: shipmentPurchaseTotal(consolidatedItems),
       cbm, gross, net,
     }
   }, [items, matMap, consolidatedItems, cartonRows])

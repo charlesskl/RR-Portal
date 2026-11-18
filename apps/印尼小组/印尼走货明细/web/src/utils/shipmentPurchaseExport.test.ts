@@ -3,7 +3,8 @@ import { expect, it } from 'vitest'
 import * as XLSX from 'xlsx'
 import { buildCustomsWorkbook } from './customsExport'
 import { parseShipmentWorkbook } from './shipmentImport'
-import { shipmentPurchaseAmount } from './shipmentPurchase'
+import { shipmentPurchaseAmount, shipmentPurchaseLineAmount, shipmentPurchaseTotal } from './shipmentPurchase'
+import { roundPurchaseContractAmount, setPurchaseContractLineAmounts } from './purchaseContractWorkbook'
 import { withShipmentInvoicePrices } from './shipmentInvoice'
 import { consolidateShipmentItems } from './shipmentConsolidation'
 
@@ -28,7 +29,7 @@ it.each(['RRI', 'RRM'])('免费备品：数量不减、申报公斤取2位、采
   expected.forEach((amount, i) => {
     const r = i + 4
     expect(sheet['AP' + r].v).toBeCloseTo(amount, 9)
-    expect(sheet['AP' + r].f).toBe('AO' + r + '*K' + r)
+    expect(sheet['AP' + r].f).toBe('ROUND(AO' + r + '*K' + r + ',2)')
     expect(sheet['AA' + r].v).toBeCloseTo(amount, 9)
     expect(sheet['O' + r].v).toBeCloseTo(amount, 9)
     expect(sheet['AO' + r].v * sheet['K' + r].v).toBeCloseTo(amount, 9)
@@ -76,10 +77,10 @@ it.each(['RRI', 'RRM'])('真实模板按采购数量计价，千克单价换算�
     expect(shipmentPurchaseAmount(displayed[i])).toBeCloseTo(amount, 9)
     expect(displayed[i].invoice_price * displayed[i].kg).toBeCloseTo(amount, 9)
     expect(sheet['AO' + row].v).toBeCloseTo(amount / displayed[i].kg, 9)
-    expect(sheet['AP' + row].v).toBeCloseTo(amount, 9)
+    expect(sheet['AP' + row].v).toBe(shipmentPurchaseLineAmount(displayed[i]))
     expect(sheet['AA' + row].v).toBeCloseTo(amount, 9)
     expect(sheet['O' + row].v).toBeCloseTo(amount / 7.2, 9)
-    expect(sheet['AP' + row].f).toBe('AO' + row + '*K' + row)
+    expect(sheet['AP' + row].f).toBe('ROUND(AO' + row + '*K' + row + ',2)')
   })
   expect(sheet.L4.v).toBe(300000)
   expect(sheet.K4.v).toBe(87)
@@ -130,4 +131,67 @@ it.each(['rri', 'rrm', 'legacy'])('主明细：同供应商重复出现时相邻
   }
   expect(XLSX.utils.format_cell(sheet.P4)).toBe('3.00')
   expect(XLSX.utils.format_cell(sheet.P5)).toBe('0.40')
+}, 60000)
+
+it.each(['rri', 'rrm', 'legacy'].flatMap(variant => [true, false].map(mainOnly => ({ variant, mainOnly }))))('采购金额与采购单逐行一致，519.248 应为 519.24（$variant，mainOnly=$mainOnly）', async ({ variant, mainOnly }) => {
+  const quantities = [13000, 2800, 2800, 11000, 5500]
+  const prices = [.00146, .00118, .05413, .02588, .01104]
+  const weights = [5.20, .70, 19.15, 136.73, 22]
+  const amounts = [18.98, 3.30, 151.56, 284.68, 60.72]
+  const materials = new Map(quantities.map((_, i) => [i + 1, {
+    id: i + 1, product_code: 'SYN-' + i, name_zh: '合成物料' + i, unit_kg: 'KGM',
+  }]))
+  const items = quantities.map((qty, i) => ({ material_id: i + 1, outbound_id: i + 1, qty, kg: weights[i], price: prices[i],
+    currency: 'US$', supplier: '合成供应商', customs_company: '合成报关公司', po_no: 'SYN-PO', purchase_unit: '个' }))
+  const before = structuredClone(items)
+  const template = variant === 'legacy' ? 'template-customs.xlsx' : `template-customs-${variant}.xlsx`
+  const output = await buildCustomsWorkbook({
+    templateBuffer: Uint8Array.from(readFileSync(new URL('../../public/' + template, import.meta.url))).buffer,
+    mainOnly, items, materials, productHs: new Map(), images: new Map(),
+    form: { customer: variant === 'rri' ? 'RRI' : 'RRM', containerNo: 'PURCHASE-CENTS', rate: 1 },
+  })
+  const book = XLSX.read(await output.arrayBuffer(), { type: 'array', cellNF: true })
+  const sheet = book.Sheets['PURCHASE-CENTS']
+  const poSheet: XLSX.WorkSheet = {}
+  for (const [i, amount] of amounts.entries()) {
+    const r = i + 4
+    setPurchaseContractLineAmounts(poSheet, r, weights[i], quantities[i] * prices[i], 2, 'KGM')
+    expect(sheet[`AP${r}`].v).toBe(poSheet[`G${r}`].v)
+    expect(sheet[`AP${r}`].v).toBe(amount)
+    expect(sheet[`AP${r}`].f).toBe(`ROUND(AO${r}*K${r},2)`)
+    expect(roundPurchaseContractAmount(sheet[`AO${r}`].v * sheet[`K${r}`].v)).toBe(amount)
+    expect(XLSX.utils.format_cell(sheet[`AP${r}`])).toBe('US$' + amount.toFixed(2))
+    expect(sheet[`AO${r}`].v).toBeCloseTo(quantities[i] * prices[i] / weights[i], 12)
+  }
+  expect(sheet.AQ4.v).toBe(519.24)
+  expect(sheet.AQ4.f).toBe('SUM(AP4:AP8)')
+  expect(XLSX.utils.format_cell(sheet.AQ4)).toBe('US$519.24')
+  const imported = parseShipmentWorkbook(book).rows.filter(row => row.sheet === 'PURCHASE-CENTS').map(row => row.item)
+  expect(imported).toHaveLength(5)
+  expect(shipmentPurchaseTotal(imported)).toBe(519.24)
+  expect(items).toEqual(before)
+}, 60000)
+
+it.each(['rri', 'rrm', 'legacy'])('币种符号保留，采购金额与合计两位小数，微小单价保留有效精度（%s）', async variant => {
+  const currencies = ['US$', '¥', 'HK$', 'IDR', '€', '£', '¥(JPY)']
+  const items = currencies.map((currency, i) => ({ material_id: i + 1, qty: 10000, kg: 10000, price: .000529,
+    currency, supplier: '合成供应商-' + i, customs_company: '合成报关公司', purchase_unit: '个' }))
+  const materials = new Map(items.map(item => [item.material_id, { id: item.material_id, product_code: 'SYN-' + item.material_id,
+    name_zh: '合成物料' + item.material_id, unit_kg: 'PCE' }]))
+  const template = variant === 'legacy' ? 'template-customs.xlsx' : `template-customs-${variant}.xlsx`
+  const output = await buildCustomsWorkbook({
+    templateBuffer: Uint8Array.from(readFileSync(new URL('../../public/' + template, import.meta.url))).buffer,
+    items, materials, productHs: new Map(), images: new Map(),
+    form: { customer: variant === 'rri' ? 'RRI' : 'RRM', containerNo: 'CURRENCY-CENTS', rate: 1 },
+  })
+  const sheet = XLSX.read(await output.arrayBuffer(), { type: 'array', cellNF: true }).Sheets['CURRENCY-CENTS']
+  for (const [i, currency] of currencies.entries()) {
+    const r = i + 4, label = currency === '¥(JPY)' ? '¥' : currency
+    expect(sheet[`AO${r}`].v).toBe(.000529)
+    expect(sheet[`AO${r}`].z).toContain('0.0000########')
+    for (const col of ['AP', 'AQ']) {
+      expect(sheet[`${col}${r}`].v).toBe(5.29)
+      expect(XLSX.utils.format_cell(sheet[`${col}${r}`])).toBe(label + '5.29')
+    }
+  }
 }, 60000)

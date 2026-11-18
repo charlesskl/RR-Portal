@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx'
 import { expect, it } from 'vitest'
 import { shipmentCbmPerCarton, shipmentCbmTotal, shipmentGrossPerPc, shipmentNetTotalKg, shipmentWeightQuantity } from './shipmentWeight'
 import { applyShipmentSheetEdits } from './shipmentSheet'
-import { shipmentPurchaseAmount } from './shipmentPurchase'
+import { shipmentPurchaseAmount, shipmentPurchaseLineAmount, shipmentPurchaseTotal } from './shipmentPurchase'
 import { buildCustomsWorkbook } from './customsExport'
 import { parseShipmentWorkbook } from './shipmentImport'
 
@@ -65,7 +65,7 @@ it('真实页面计算及合并来源汇总不会将吨值当千克', () => {
   expect(source).toBeTruthy()
   const context = createContext({ matMap: new Map([[1, { unit_kg: 'TNE', name_zh: '纸绳', net_per_pc: .0014 }]]),
     num: (value: unknown) => Number(value) || 0, shipmentNetTotalKg, shipmentWeightQuantity, shipmentGrossPerPc,
-    shipmentCbmPerCarton, shipmentCbmTotal, shipmentPurchaseAmount, effectiveWeighingQty: () => 0, consolidatedItems: [], cartonRows: [],
+    shipmentCbmPerCarton, shipmentCbmTotal, shipmentPurchaseAmount, shipmentPurchaseLineAmount, shipmentPurchaseTotal, effectiveWeighingQty: () => 0, consolidatedItems: [], cartonRows: [],
     items: [{ material_id: 1, qty: 20000, kg: .028 }] })
   const js = ts.transpile(source + `; calc({ material_id: 1, qty: 20000, kg: .028, sources: [
     { material_id: 1, qty: 10000, kg: .01 }, { material_id: 1, qty: 10000, kg: .018 }

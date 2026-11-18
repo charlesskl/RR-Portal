@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx'
 import { expect, it, vi } from 'vitest'
 import { formatShipmentDeclaration, roundedShipmentDeclaration, shipmentDeclarationPrecision } from './shipmentDeclaration'
 import { consolidateShipmentItems } from './shipmentConsolidation'
-import { shipmentPurchaseAmount } from './shipmentPurchase'
+import { shipmentPurchaseAmount, shipmentPurchaseLineAmount } from './shipmentPurchase'
 import { shipmentOptionalNumber } from './shipmentDisplay'
 import { withShipmentInvoicePrices } from './shipmentInvoice'
 import { buildCustomsWorkbook } from './customsExport'
@@ -114,7 +114,8 @@ it('真实模板先汇总再取舍，导入行金额保留，过小数量明确�
     expect(sheet.K4.v).toBe(.01)
     expect(sheet.AP4.v).toBe(100)
     expect(sheet.K5.v).toBe(502.38)
-    expect(sheet.AP5.v).toBeCloseTo(shipmentPurchaseAmount(imported), 8)
+    expect(sheet.AP5.v).toBe(shipmentPurchaseLineAmount(imported))
+    expect(sheet.AO5.v * sheet.K5.v).toBeCloseTo(shipmentPurchaseAmount(imported), 8)
     await expect(buildCustomsWorkbook({ ...input, items: [{ ...imported, kg: .004 }] })).rejects.toThrow('取舍后为零')
   } finally { vi.unstubAllGlobals() }
 }, 60000)

@@ -1,3 +1,5 @@
+import { roundPurchaseContractAmount } from './purchaseAmount'
+
 export interface ShipmentPurchaseItem {
   price?: number; qty?: number; kg?: number; outbound_id?: number; material_snapshot?: unknown
   purchase_charge_ratio?: number
@@ -30,6 +32,17 @@ export function shipmentUsesDeclarationPrice(item: ShipmentPurchaseItem) {
 // kg, sets, etc.). Never multiply a per-piece price by declaration weight.
 export function shipmentPurchaseAmount(item: ShipmentPurchaseItem) {
   return (Number(item.price) || 0) * shipmentChargeQuantity(item)
+}
+
+// Round only the final, consolidated line, as in the purchase contract. Keep
+// the raw calculation above for allocation and declaration-unit conversion.
+export function shipmentPurchaseLineAmount(item: ShipmentPurchaseItem) {
+  return roundPurchaseContractAmount(shipmentPurchaseAmount(item))
+}
+
+export function shipmentPurchaseTotal(items: readonly ShipmentPurchaseItem[]) {
+  const cents = items.reduce((sum, item) => sum + Math.round(shipmentPurchaseLineAmount(item) * 100), 0)
+  return roundPurchaseContractAmount(cents / 100)
 }
 
 // K is the declaration quantity: kilograms, tonnes, pieces, etc. according to J.

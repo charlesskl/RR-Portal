@@ -38,7 +38,7 @@ const FORMULA_NAME_PREFIXES = ['五金配件', '塑胶件', '搪胶件', '毛绒
 
 const PURCHASE_CURRENCY_FORMATS: Record<string, string> = {
   'IDR': '"IDR"#,##0.0000',
-  '¥': '¥#,##0.0000',
+  '¥': '"¥"#,##0.0000',
   'HK$': '"HK$"#,##0.0000',
   'US$': '"US$"#,##0.0000',
   '€': '"€"#,##0.0000',
@@ -46,8 +46,9 @@ const PURCHASE_CURRENCY_FORMATS: Record<string, string> = {
   '¥(JPY)': '"¥"#,##0',
 }
 
-function purchaseCurrencyFormat(currency?: string) {
-  return PURCHASE_CURRENCY_FORMATS[currency || '¥'] || '#,##0.0000'
+function purchaseCurrencyFormat(currency?: string, amount = false) {
+  const format = PURCHASE_CURRENCY_FORMATS[currency || '¥'] || '#,##0.0000'
+  return amount ? format.replace(/#,##0(?:\.0+)?/, '#,##0.00') : format
 }
 
 export function customsFormulaName(item: CustomsItem, material?: Material, customsCompany = '') {
@@ -61,7 +62,7 @@ export function customsFormulaName(item: CustomsItem, material?: Material, custo
 }
 
 import { customsInvoicePrice, customsInvoiceFormula, invoiceCustomsCompany } from './shipmentInvoice'
-import { shipmentDeclarationPrice, shipmentPurchaseAmount } from './shipmentPurchase'
+import { shipmentDeclarationPrice, shipmentPurchaseAmount, shipmentPurchaseLineAmount, shipmentPurchaseTotal } from './shipmentPurchase'
 import { formatShipmentDeclaration, normalizeShipmentDeclarations, roundedShipmentDeclaration, shipmentDeclarationPrecision } from './shipmentDeclaration'
 import { shipmentDateOnly, shipmentPurchaseDates } from './shipmentDates'
 import { formatShipmentPallet } from './shipmentDisplay'
@@ -1338,14 +1339,12 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
     else if (it.contract_date) setCell(ws, ri, 38, excelDate(it.contract_date), 'n')
     setCell(ws, ri, 39, it.po_no || '', 's')
     setCell(ws, ri, 40, declarationPrice, 'n')
-    // Converted declaration-unit price × K preserves the original PO-unit amount.
-    setCell(ws, ri, 41, '=AO' + (ri + 1) + '*K' + (ri + 1), 'n')
-    ws[XLSX.utils.encode_cell({ r: ri, c: 41 })].v = purchaseAmount
-    const fmt = purchaseCurrencyFormat(it.currency)
-    ;['AO', 'AP'].forEach((_col, j) => {
-      const addr = XLSX.utils.encode_cell({ r: ri, c: 40 + j })
-      if ((ws as any)[addr]) (ws as any)[addr].z = fmt
-    })
+    // Match the PO's per-line ROUND(...,2); display formatting alone leaves
+    // fractional cents in SUM and changes the supplier total on recalculation.
+    setCell(ws, ri, 41, '=ROUND(AO' + (ri + 1) + '*K' + (ri + 1) + ',2)', 'n')
+    ws[`AP${ri + 1}`].v = shipmentPurchaseLineAmount(it)
+    ws[`AO${ri + 1}`].z = purchaseCurrencyFormat(it.currency)
+    ws[`AP${ri + 1}`].z = purchaseCurrencyFormat(it.currency, true)
     setCell(ws, ri, 43, effCustoms(it) || tf.exportCompany, 's')
     setCell(ws, ri, 44, it.bl_head || tf.blHead, 's')
     setCell(ws, ri, 45, cartonRows[i].count, 'n')
@@ -1443,8 +1442,8 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
   for (const indexes of supplierGroups.values()) {
     const firstIndex = indexes[0]
     setCell(ws, firstIndex + 3, 42, groupedSumFormula('AP', indexes), 'n')
-    ws[`AQ${firstIndex + 4}`].v = indexes.reduce((sum, index) => sum + (Number(ws[`AP${index + 4}`]?.v) || 0), 0)
-    ;(ws as any)[XLSX.utils.encode_cell({ r: firstIndex + 3, c: 42 })].z = purchaseCurrencyFormat(sorted[firstIndex].currency)
+    ws[`AQ${firstIndex + 4}`].v = shipmentPurchaseTotal(indexes.map(index => sorted[index]))
+    ws[`AQ${firstIndex + 4}`].z = purchaseCurrencyFormat(sorted[firstIndex].currency, true)
     mergeGroupedTotal(42, indexes)
   }
   if (sorted.length) ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 3 + sorted.length - 1, c: 55 } })
@@ -1727,9 +1726,19 @@ async function fitMainAmountColumns(zip: JSZip, mainName: string, source: XLSX.W
   const parser = new DOMParser(), serializer = new XMLSerializer()
   const sheet = parser.parseFromString(await sheetFile.async('string'), 'application/xml')
   const styles = parser.parseFromString(await stylesFile.async('string'), 'application/xml')
-  const root = sheet.documentElement as XmlElement, xfs = styleCollection(styles.documentElement as XmlElement, 'cellXfs')
+  const root = sheet.documentElement as XmlElement, styleRoot = styles.documentElement as XmlElement
+  const xfs = styleCollection(styleRoot, 'cellXfs')
   const data = directChild(root, 'sheetData')
   if (!xfs || !data) return
+  // Template restoration also restores its four-decimal purchase formats.
+  // Reapply the generated AP/AQ amount formats while retaining currency signs.
+  let formats = styleCollection(styleRoot, 'numFmts')
+  if (!formats) {
+    formats = styles.createElementNS(SPREADSHEET_NS, 'numFmts') as XmlElement
+    styleRoot.insertBefore(formats, styleRoot.firstChild)
+  }
+  const byCode = new Map(directChildren(formats, 'numFmt').map(format => [format.getAttribute('formatCode') || '', format.getAttribute('numFmtId') || '']))
+  let nextFormat = Math.max(163, ...[...byCode.values()].map(Number)) + 1
   const amounts = new Set(['Z', 'AA', 'AB', 'AO', 'AP', 'AQ'])
   for (const column of amounts) {
     const index = XLSX.utils.decode_col(column) + 1
@@ -1745,21 +1754,33 @@ async function fitMainAmountColumns(zip: JSZip, mainName: string, source: XLSX.W
   for (const row of directChildren(data, 'row')) {
     if (rowNumber(row) < 4) continue
     for (const cell of directChildren(row, 'c')) {
-      if (!amounts.has(cellColumn(cell.getAttribute('r') || ''))) continue
+      const address = cell.getAttribute('r') || '', column = cellColumn(address)
+      if (!amounts.has(column)) continue
+      const code = ['AP', 'AQ'].includes(column) && source[address]?.t === 'n' ? source[address].z : undefined
+      let formatId = code ? byCode.get(code) : undefined
+      if (code && !formatId) {
+        formatId = String(nextFormat++)
+        const format = styles.createElementNS(SPREADSHEET_NS, 'numFmt') as XmlElement
+        format.setAttribute('numFmtId', formatId); format.setAttribute('formatCode', code)
+        formats.appendChild(format); byCode.set(code, formatId)
+      }
       const baseId = cell.getAttribute('s') || '0'
-      let id = fittedStyles.get(baseId)
+      const key = `${baseId}:${formatId || ''}`
+      let id = fittedStyles.get(key)
       if (!id) {
         const base = baseStyles[Number(baseId)] || baseStyles[0]
         if (!base) continue
         const xf = base.cloneNode(true) as XmlElement
+        if (formatId) { xf.setAttribute('numFmtId', formatId); xf.setAttribute('applyNumberFormat', '1') }
         let alignment = directChild(xf, 'alignment')
         if (!alignment) { alignment = styles.createElementNS(SPREADSHEET_NS, 'alignment') as XmlElement; xf.insertBefore(alignment, directChild(xf, 'protection') || directChild(xf, 'extLst') || null) }
         alignment.setAttribute('wrapText', '0'); alignment.setAttribute('shrinkToFit', '1'); xf.setAttribute('applyAlignment', '1')
-        id = String(directChildren(xfs, 'xf').length); xfs.appendChild(xf); fittedStyles.set(baseId, id)
+        id = String(directChildren(xfs, 'xf').length); xfs.appendChild(xf); fittedStyles.set(key, id)
       }
       cell.setAttribute('s', id)
     }
   }
+  formats.setAttribute('count', String(directChildren(formats, 'numFmt').length))
   xfs.setAttribute('count', String(directChildren(xfs, 'xf').length))
   zip.file(path, serializer.serializeToString(sheet)); zip.file('xl/styles.xml', serializer.serializeToString(styles))
 }

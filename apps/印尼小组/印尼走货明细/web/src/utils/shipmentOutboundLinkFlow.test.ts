@@ -7,7 +7,7 @@ import { consolidateShipmentItems } from './shipmentConsolidation'
 import { parseShipmentPacking } from './shipmentWeight'
 import { cartonLayout } from './shipmentOrder'
 import { shipmentCbmPerCarton, shipmentCbmTotal, shipmentGrossPerPc, shipmentNetTotalKg, shipmentWeightQuantity } from './shipmentWeight'
-import { shipmentPurchaseAmount } from './shipmentPurchase'
+import { shipmentPurchaseAmount, shipmentPurchaseLineAmount, shipmentPurchaseTotal } from './shipmentPurchase'
 import type { Material } from '../api/client'
 
 const text = readFileSync(new URL('../pages/ShipmentsPage.tsx', import.meta.url), 'utf8')
@@ -146,7 +146,7 @@ it('counts CBM once per physical carton even when packing rows or legacy metadat
   const totals = (items: typeof linked) => {
     const matMap = new Map(items.map(item => [item.material_id, item.material_snapshot!]))
     const context = createContext({ items, matMap, consolidatedItems: consolidateShipmentItems(items, matMap),
-      cartonRows: cartonLayout(items, matMap), shipmentCbmPerCarton, shipmentCbmTotal, shipmentNetTotalKg, shipmentGrossPerPc, shipmentWeightQuantity, shipmentPurchaseAmount,
+      cartonRows: cartonLayout(items, matMap), shipmentCbmPerCarton, shipmentCbmTotal, shipmentNetTotalKg, shipmentGrossPerPc, shipmentWeightQuantity, shipmentPurchaseAmount, shipmentPurchaseLineAmount, shipmentPurchaseTotal,
       effectiveWeighingQty: () => 0 })
     return runInContext(ts.transpileModule(`(${totalHandler})()`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context)
   }

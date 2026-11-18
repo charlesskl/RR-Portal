@@ -3,6 +3,7 @@ import { expect, it } from 'vitest'
 import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 import { DOMParser } from '@xmldom/xmldom'
+import { shipmentPurchaseTotal } from './shipmentPurchase'
 import { buildCustomsWorkbook } from './customsExport'
 
 const ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
@@ -23,7 +24,7 @@ it.each(['rri', 'rrm', 'legacy'])('金额完整显示、合同和发票保留有
   const bytes = await blob.arrayBuffer(), zip = await JSZip.loadAsync(bytes)
   const book = XLSX.read(bytes, { type: 'array', cellNF: true, cellStyles: true }), main = book.Sheets.DISPLAY
   expect(main.AQ4.f).toBe('SUM(AP4:AP7)')
-  expect(main.AQ4.v).toBeCloseTo(items.reduce((sum, item) => sum + item.qty * item.price, 0), 8)
+  expect(main.AQ4.v).toBeCloseTo(shipmentPurchaseTotal(items), 8)
   for (const col of ['Z', 'AA', 'AB', 'AO', 'AP', 'AQ']) expect(main['!cols']?.[XLSX.utils.decode_col(col)]?.wch).toBeGreaterThanOrEqual(21)
   for (const [address, price] of [['Z4', .0652], ['AO4', .0652], ['Z5', .000529]] as const) {
     expect(main[address].v).toBeCloseTo(price, 10)

@@ -27,7 +27,7 @@ it.each(['rri', 'rrm', 'legacy'].flatMap(variant => [true, false].map(mainOnly =
   expect(sheet.L6.c?.map((c: { t?: string }) => c.t)).toEqual(['5pcs备品'])
   expect(sheet.M3.c).toBeUndefined()
   expect(sheet.K4.v).toBe(4178); expect(sheet.L4.v).toBe(38328)
-  expect(sheet.AP4.v).toBeCloseTo(37968 * .2, 8); expect(sheet.AP4.f).toBe('AO4*K4')
+  expect(sheet.AP4.v).toBeCloseTo(37968 * .2, 8); expect(sheet.AP4.f).toBe('ROUND(AO4*K4,2)')
   expect(sheet.AP6.v).toBe(0); expect(items).toEqual(before)
   const zip = await JSZip.loadAsync(bytes)
   const sheetNumber = mainOnly ? 1 : 2

@@ -31,6 +31,7 @@ import { shipmentSheetFields, type SheetEdit } from '../utils/shipmentSheet'
 import { remainingOutboundQuantity } from '../utils/shipmentOutboundLink'
 import { linkShipmentOutboundBatches } from '../utils/shipmentOutboundBatchLink'
 import { outboundCandidates, planOutboundPull } from '../utils/shipmentOutboundRemaining'
+import { orderOutboundByShipmentImport } from '../utils/shipmentOutboundOrder'
 import type { ShipmentImportItem } from '../utils/shipmentImport'
 import { applyShipmentImport } from '../utils/shipmentImportApply'
 import { MATERIAL_CATEGORIES } from '../utils/engineeringImport'
@@ -270,7 +271,7 @@ export default function ShipmentsPage() {
   }, [baseMatMap, rawItems])
   const orderedItems = (values: ShipmentItem[]) => withShipmentInvoicePrices(sortShipmentItems(values, matMap), matMap).map((it, i) => ({ ...it, seq: i + 1 }))
   const items = useMemo(() => orderedItems(rawItems), [rawItems, matMap])
-  const outCandidates = useMemo(() => outboundCandidates(outRows, items), [outRows, items])
+  const outCandidates = useMemo(() => outboundCandidates(orderOutboundByShipmentImport(outRows, items, matMap), items), [outRows, items, matMap])
   const selectedOutIds = outSel.filter(key => outCandidates.some(row => String(row.outbound_id) === String(key)))
   const sheetRevision = useRef({ rawItems, matMap, session: 0 })
   const sheetWritePending = useRef(false)
@@ -698,7 +699,7 @@ export default function ShipmentsPage() {
     try {
       const { data } = await api.get<OutByMat[]>('/outbound/allocatable', { params: editing?.id ? { shipment_id: editing.id } : {} })
       if (!unchanged()) return
-      const sources = Array.isArray(data) ? data : []
+      const sources = orderOutboundByShipmentImport(Array.isArray(data) ? data : [], original.rawItems, original.matMap)
       setOutRows(sources)
       const picked = planOutboundPull(sources, original.rawItems, selected)
       const [matToPo, materialResponse] = await Promise.all([
@@ -1872,7 +1873,7 @@ export default function ShipmentsPage() {
             onSearch={setOutFilter} onChange={(e) => !e.target.value && setOutFilter('')} />
           <Button type="primary" loading={outPulling} disabled={!selectedOutIds.length || outLoading} onClick={pullFromOutbound}>📥 拉物料到本走货</Button>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            按列表顺序追加至本柜，勾选先后不影响排列。仅显示尚有剩余的出库，已扣除本柜已拉入的数量（含未保存明细）；全部拉入后自动隐藏，部分拉入只带入剩余量。
+            优先按本柜已导入 Excel 的原行序排列，未匹配的出库放在后面；拉入也按此顺序追加，勾选先后不影响排列。仅显示扣除本柜已拉入数量（含未保存明细）后的剩余量。
           </Typography.Text>
         </Space>
         <Table

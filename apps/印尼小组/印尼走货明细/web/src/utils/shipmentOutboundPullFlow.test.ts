@@ -3,6 +3,7 @@ import { createContext, runInContext } from 'node:vm'
 import ts from 'typescript'
 import { expect, it, vi } from 'vitest'
 import { planOutboundPull } from './shipmentOutboundRemaining'
+import { orderOutboundByShipmentImport } from './shipmentOutboundOrder'
 
 // Execute the actual UI pull handler against mock APIs, never production data.
 const sourceText = readFileSync(new URL('../pages/ShipmentsPage.tsx', import.meta.url), 'utf8')
@@ -23,7 +24,7 @@ function setup() {
     items, sources, materials, selectedOutIds: ['7'], outLoading: false,
     outRequest: { current: 0 }, outPullPending: { current: null },
     sheetRevision: { current: { rawItems: items, matMap: new Map(), session: 1 } }, editing: { id: 14 },
-    planOutboundPull,
+    planOutboundPull, orderOutboundByShipmentImport,
     api: { get: vi.fn(async (url: string) => ({ data: url === '/outbound/allocatable' ? sources : materials })) },
     buildMatToPo: vi.fn(async () => new Map()),
     makeItem: vi.fn((m, qty, opts) => ({ material_id: m.id, outbound_id: opts.outboundId, qty, price: opts.poInfo?.it.price })),
@@ -62,6 +63,21 @@ it('反向勾选并异步刷新物料后，仍按出库来源列表顺序整批�
   expect(state.appendItems).toHaveBeenCalledWith([
     { material_id: 66, outbound_id: 7, qty: 400, price: .12 },
     { material_id: 67, outbound_id: 8, qty: 1000, price: .12 },
+  ])
+})
+it('确认拉入时重新按 Excel 原行序排列，不受最新接口返回及勾选顺序影响', async () => {
+  const { state, pull } = setup()
+  const source = (row: number) => ({ sheet: '源明细', row, cells: [], context: [] })
+  Object.assign(state.items[0], { outbound_id: undefined, material_snapshot: { id: 66, import_source: source(20) } })
+  state.items.push(Object.assign({ _rowKey: 2, material_id: -2, outbound_id: 0, qty: 0 },
+    { material_snapshot: { id: 67, import_source: source(8) } }))
+  state.sources.push({ ...state.sources[0], outbound_id: 8, material_id: 67 })
+  state.materials.push({ id: 67, name_zh: '合成工具' })
+  state.selectedOutIds = ['7', '8']
+  await pull()
+  expect(state.appendItems).toHaveBeenCalledWith([
+    { material_id: 67, outbound_id: 8, qty: 1000, price: .12 },
+    { material_id: 66, outbound_id: 7, qty: 1000, price: .12 },
   ])
 })
 it('按钮连点也只追加一次，重新读取发现额度归零则不追加', async () => {

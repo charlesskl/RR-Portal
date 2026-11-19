@@ -1,0 +1,69 @@
+name: Deploy synthetic settlement trial
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - deploy/settlement-trial/**
+      - .github/workflows/settlement-trial.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: settlement-trial
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prepare trial account verifiers
+        shell: bash
+        env:
+          PASS_A: ${{ secrets.SETTLEMENT_TRIAL_A_PASSWORD }}
+          PASS_B: ${{ secrets.SETTLEMENT_TRIAL_B_PASSWORD }}
+          SSH_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -eu
+          [[ "$SSH_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]
+          test "${#PASS_A}" -ge 24 && test "${#PASS_B}" -ge 24 && test "$PASS_A" != "$PASS_B" || exit 1
+          for letter in A B; do
+            key="PASS_$letter"
+            hash=$(printf '%s\n' "${!key}" | htpasswd -niBC 11 trial | cut -d: -f2)
+            [[ "$hash" == '$2'* && ${#hash} == 60 ]]
+            echo "::add-mask::$hash"
+            echo "SETTLEMENT_TRIAL_${letter}_HASH=$hash" >> "$GITHUB_ENV"
+          done
+      - name: Deploy isolated HTTPS service
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          envs: RELEASE_SHA,SETTLEMENT_TRIAL_A_HASH,SETTLEMENT_TRIAL_B_HASH
+          script: |
+            set -eu
+            cd /opt/rr-portal
+            git fetch origin main
+            test "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA"
+            target="/opt/rr-settlement-trial/$RELEASE_SHA"
+            mkdir -p "$target"
+            git archive -o "$target/release.tar" "$RELEASE_SHA:deploy/settlement-trial"
+            tar xf "$target/release.tar" -C "$target"
+            cd "$target"
+            python3 build.py
+            docker compose -p rr-settlement-trial -f compose.yml up -d --wait
+      - name: Verify both accounts over public HTTPS
+        env:
+          SETTLEMENT_TRIAL_A_PASSWORD: ${{ secrets.SETTLEMENT_TRIAL_A_PASSWORD }}
+          SETTLEMENT_TRIAL_B_PASSWORD: ${{ secrets.SETTLEMENT_TRIAL_B_PASSWORD }}
+        run: python3 deploy/settlement-trial/verify.py https://8.148.146.194

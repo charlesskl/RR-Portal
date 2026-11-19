@@ -34,6 +34,9 @@ function assertLabelsAndLines(instance, width) {
     const points = line.shape.points;
     assert.ok(points.length>=3, name+' has a bent guide line');
     assert.ok(Math.hypot(points.at(-1)[0]-points.at(-2)[0],points.at(-1)[1]-points.at(-2)[1])>=8, name+' horizontal guide segment has space');
+    const guideLength = points.slice(1).reduce((length, point, index) =>
+      length + Math.hypot(point[0]-points[index][0], point[1]-points[index][1]), 0);
+    assert.ok(guideLength<=110, name+' guide line stays near the ring even in wide charts');
     const box = text.getBoundingRect().clone();box.applyTransform(text.getComputedTransform());
     const closestX = Math.max(box.x,Math.min(slice.shape.cx,box.x+box.width));
     const closestY = Math.max(box.y,Math.min(slice.shape.cy,box.y+box.height));
@@ -41,7 +44,7 @@ function assertLabelsAndLines(instance, width) {
     assert.ok(box.x>=-1 && box.x+box.width<=width+1 && box.y>=-1 && box.y+box.height<=241, name+' label fits the chart');
   }
 }
-for (const width of [240,280,500]) {
+for (const width of [240,280,500,1000]) {
   test('94/3/3 result labels keep their guide lines at width '+width,()=>{
     const rows=Array.from({length:100},(_,i)=>({result:i<94?'PASS':i<97?'REJ':'COND'}));
     const instance=chart(width,'chartResultPie',rows);
@@ -62,4 +65,10 @@ test('customer labels use the same connected outside layout',()=>{
   const rows=shares.flatMap(([client,count])=>Array.from({length:count},()=>({client})));
   const instance=chart(280,'chartClientPie',rows);
   try { assertLabelsAndLines(instance,280); } finally { instance.dispose(); }
+});
+
+test('rounded 97/2/2 result labels stay close on a wide card',()=>{
+  const rows=Array.from({length:1000},(_,i)=>({result:i<965?'PASS':i<982?'REJ':'COND'}));
+  const instance=chart(1200,'chartResultPie',rows);
+  try { assertLabelsAndLines(instance,1200); } finally { instance.dispose(); }
 });

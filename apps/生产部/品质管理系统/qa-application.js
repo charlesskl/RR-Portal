@@ -46,6 +46,21 @@
     if (now.auth !== expected.auth || now.user !== expected.user || now.username !== expected.username ||
         now.csrfToken !== expected.csrfToken || now.company !== expected.company) throw new Error('登录或子公司已切换，请重新打开申请表');
   }
+  function generationDate() {
+    return typeof todayStr === 'function' ? todayStr() : _todayStr();
+  }
+  function syncGenerationDate(context = session) {
+    if (!context) return false;
+    const date = generationDate();
+    const input = document.getElementById('qa_receivedDate');
+    const changed = input.value !== date;
+    context.generationDate = date;
+    input.value = date;
+    return changed;
+  }
+  function sameEditableValues(left, right) {
+    return JSON.stringify({ ...left, receivedDate:'' }) === JSON.stringify({ ...right, receivedDate:'' });
+  }
   function formValues() {
     const result = {};
     ['customer','productName','productNo','department','requester','ageGrade','source','receivedDate',
@@ -82,8 +97,9 @@
   }
   function applyValues(data) {
     for (const key of ['customer','productName','productNo','department','requester','ageGrade','source','receivedDate','sampleQty','description','reportNo','stage','purpose','language']) {
-      if (typeof data[key] === 'string') document.getElementById('qa_' + key).value = data[key];
+      if (key !== 'receivedDate' && typeof data[key] === 'string') document.getElementById('qa_' + key).value = data[key];
     }
+    document.getElementById('qa_receivedDate').value = session?.generationDate || generationDate();
     document.querySelectorAll('[name="qa_standard"],[name="qa_test"]').forEach(el => {
       const list = el.name === 'qa_standard' ? data.standards : data.tests;
       el.checked = Array.isArray(list) && list.includes(el.value);
@@ -144,17 +160,20 @@
       context.conflicted = false;
       applyValues(application?.data || context.defaults);
       const draft = readDraft(context);
+      let restoredDraft = false;
       if (preferSaved) {
         if (draft) removeMatchingDraft(context,JSON.stringify(draft.data));
-      } else if (draft && JSON.stringify(draft.data) !== context.savedJSON) {
+      } else if (draft && !sameEditableValues(draft.data, application?.data || context.defaults)) {
         applyValues(draft.data);
+        restoredDraft = true;
         if (draft.baseVersion !== context.version && !(draft.baseVersion === null && context.version === 0)) context.conflicted = true;
-      } else if (application && draft) removeMatchingDraft(context,context.savedJSON);
+      } else if (application && draft) removeMatchingDraft(context,JSON.stringify(draft.data));
       context.loading = false;
       context.dirty = JSON.stringify(formValues()) !== context.savedJSON;
       updateControls(context);
       if (context.conflicted) saveStatus(context,'本机未保存内容与已保存版本不同，已保留本机内容；请核对后再选择采用已保存版本。',true);
-      else if (context.dirty) { keepDraft(context,formValues()); saveStatus(context,'已恢复本机暂存内容，等待自动保存…'); scheduleSave(context); }
+      else if (context.dirty && context.editable) { keepDraft(context,formValues()); saveStatus(context,restoredDraft ? '已恢复本机暂存内容，等待自动保存…' : '日期已更新为生成当天，等待自动保存…'); scheduleSave(context); }
+      else if (context.dirty) saveStatus(context,'已读取申请，日期按生成当天显示（当前账号只读）');
       else saveStatus(context,application ? savedMessage(application) : '尚未保存，填写后会自动保存' + (context.editable ? '' : '（当前账号只读）'));
     } catch (error) {
       if (session !== context) return;
@@ -172,6 +191,7 @@
   function changedApplication() {
     const context = session;
     if (!context || context.loading || !context.editable || busy) return;
+    syncGenerationDate(context);
     const data = formValues();
     const previous = context.lastModel;
     context.lastModel = data;
@@ -256,8 +276,8 @@
           <p class="qa-record-info" id="qaRecordInfo"></p>
           <div class="qa-form-grid">
             ${field('customer','客户', 'text', 'maxlength="120"')}${field('productName','产品名称', 'text', 'maxlength="180"')}${field('productNo','产品编号', 'text', 'maxlength="100"')}
-            ${field('department','申请部门', 'text', 'maxlength="80"')}${field('requester','申请人', 'text', 'maxlength="80"')}${field('ageGrade','年龄（选填）', 'text', 'maxlength="40"')}
-            ${field('source','样板来源', 'text', 'maxlength="80"')}${field('receivedDate','到板日期', 'date')}${field('sampleQty','样板数量', 'text', 'maxlength="60" placeholder="填写实际送样数量，如 3 PCS"')}
+            ${field('department','申请部门', 'text', 'maxlength="80"')}${field('requester','申请人（实际姓名）', 'text', 'maxlength="80" placeholder="请填写实际申请人姓名"')}${field('ageGrade','年龄（选填）', 'text', 'maxlength="40"')}
+            ${field('source','样板来源', 'text', 'maxlength="80"')}${field('receivedDate','到板日期（生成当天）', 'date', 'readonly')}${field('sampleQty','样板数量', 'text', 'maxlength="60" placeholder="填写实际送样数量，如 3 PCS"')}
             <label class="form-group qa-form-wide"><span>样板描述</span><textarea class="form-input" id="qa_description" rows="5" maxlength="2000" placeholder="填写样板状态、测试要求或需要说明的内容"></textarea></label>
             ${field('reportNo','报告编号（可修改）', 'text', 'maxlength="100"')}
             <label class="form-group"><span>报告语言</span><select class="form-input" id="qa_language"><option value="zh">中文报告</option><option value="en">ENG.REP</option></select></label>
@@ -287,7 +307,7 @@
     overlay.querySelector('#qaEditTab').onclick = () => showPanel(false);
     overlay.querySelector('#qaPreviewTab').onclick = () => showPanel(true);
     overlay.querySelector('#qaExport').onclick = exportQAApplicationPDF;
-    overlay.querySelector('#qaSave').onclick = () => { void flushApplication(session); };
+    overlay.querySelector('#qaSave').onclick = () => { syncGenerationDate(); void flushApplication(session); };
     overlay.querySelector('#qaReload').onclick = () => { if (session) void loadApplication(session,session.conflicted); };
     overlay.querySelector('#qaApplicationForm').addEventListener('input',changedApplication);
     overlay.querySelector('#qaApplicationForm').addEventListener('change',changedApplication);
@@ -316,12 +336,12 @@
       const record = data.find(r => String(r.id) === String(recordId));
       if (!record) throw new Error('找不到对应的验货记录，请刷新后重试');
       const overlay = ensureDialog();
-      const today = typeof todayStr === 'function' ? todayStr() : _todayStr();
-      session = { ...identity, record:{ ...record }, trigger,loading:true,loaded:false,version:null,conflicted:false };
+      const today = generationDate();
+      session = { ...identity, record:{ ...record }, trigger,generationDate:today,loading:true,loaded:false,version:null,conflicted:false };
       previewFit = true;
       const defaults = { customer:record.client ?? '', productName:record.productName ?? '', productNo:record.productNo ?? '',
-        department:'品质部', requester:identity.user.name || identity.username, ageGrade:'', source:'来料',
-        receivedDate:/^\d{4}-\d{2}-\d{2}$/.test(record.date || '') ? record.date : '', sampleQty:'', description:'',
+        department:'品质部', requester:'', ageGrade:'', source:'来料',
+        receivedDate:today, sampleQty:'', description:'',
         reportNo:'QA-' + today.replace(/-/g,'') + '-' + record.id, language:'zh', stage:'', purpose:'' };
       for (const [key, v] of Object.entries(defaults)) document.getElementById('qa_' + key).value = String(v);
       overlay.querySelectorAll('input[type="checkbox"]').forEach(el => { el.checked = false; });
@@ -363,6 +383,8 @@
     try {
       checkActor(session);
       if (preview) {
+        const dateChanged = syncGenerationDate();
+        if (dateChanged && session.loaded && session.editable) changedApplication();
         const wrap = document.getElementById('qaPreviewViewport');
         const stage = document.createElement('div');
         stage.className = 'qa-preview-stage';
@@ -456,6 +478,8 @@
       const missing = _rptCheckDeps();
       if (missing.length) throw new Error('PDF 库未加载，请刷新后重试');
       if (!context.loaded) throw new Error('请先读取已保存申请，避免覆盖其他窗口的内容');
+      syncGenerationDate(context);
+      if (!value('requester').trim()) { document.getElementById('qa_requester').focus(); throw new Error('请填写实际申请人姓名'); }
       busy = true;
       updateControls(context);
       if (context.editable && !await flushApplication(context)) throw new Error('申请尚未成功保存，请查看保存提示并重试');
@@ -481,7 +505,7 @@
       checkActor(context);
       if (session !== context) throw new Error('申请表已关闭，请重新打开后导出');
       const safe = value => String(value || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'').slice(0,60);
-      pdf.save('QA申请表_' + safe(context.record.supplier || '供应商') + '_' + safe(model.productNo || '样板') + '_' + (typeof todayStr==='function'?todayStr():_todayStr()).replace(/-/g,'') + '.pdf');
+      pdf.save('QA申请表_' + safe(context.record.supplier || '供应商') + '_' + safe(model.productNo || '样板') + '_' + model.receivedDate.replace(/-/g,'') + '.pdf');
       showToast('QA 申请表 PDF 已生成','success');
     } catch (error) { showToast('QA申请表生成失败：' + error.message,'error'); }
     finally {

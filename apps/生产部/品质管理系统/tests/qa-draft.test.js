@@ -6,17 +6,17 @@ function harness(){
  const fields=['customer','productName','productNo','department','requester','ageGrade','source','receivedDate','sampleQty','description','reportNo','stage','purpose','language'];
  const elements=new Map();
  function el(id){if(!elements.has(id))elements.set(id,{value:'',hidden:false,disabled:false,textContent:'',classList:{toggle(){},remove(){}},replaceChildren(){}});return elements.get(id);}
- const data=Object.fromEntries(fields.map(k=>[k,k==='sampleQty'?'3':'']));Object.assign(data,{standards:[],tests:[]});
+ const data=Object.fromEntries(fields.map(k=>[k,k==='sampleQty'?'3':k==='receivedDate'?'2026-11-19':'']));Object.assign(data,{standards:[],tests:[]});
  for(const k of fields)el('qa_'+k).value=data[k];
- const storage=new Map(),timers=new Map();let seq=0,requests=[];
+ const storage=new Map(),timers=new Map();let seq=0,requests=[],day='2026-11-19';
  const auth={company:'dg-xingxin',csrfToken:'synthetic',user:{enabled:true,username:'fixture'}};
  const window={__QC_AUTH:auth,addEventListener(){},__QC_REQUEST:async(_url,options)=>new Promise(resolve=>requests.push({body:JSON.parse(options.body),resolve}))};
- const c=vm.createContext({window,URL,AbortController,location:{href:'http://127.0.0.1/'},document:{currentScript:null,getElementById:el,querySelectorAll:()=>[]},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},getCompany:()=>auth.company,canView:()=>true,effPerms:()=>({records:{e:1}}),QC_COMPANIES:[{id:auth.company}],setTimeout:fn=>{timers.set(++seq,fn);return seq},clearTimeout:id=>timers.delete(id),console});
+ const c=vm.createContext({window,URL,AbortController,location:{href:'http://127.0.0.1/'},document:{currentScript:null,getElementById:el,querySelectorAll:()=>[]},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},todayStr:()=>day,getCompany:()=>auth.company,canView:()=>true,effPerms:()=>({records:{e:1}}),QC_COMPANIES:[{id:auth.company}],setTimeout:fn=>{timers.set(++seq,fn);return seq},clearTimeout:id=>timers.delete(id),console});
  let src=fs.readFileSync(path.join(__dirname,'../qa-application.js'),'utf8');
- src=src.replace(/\}\)\(\);\s*$/, 'window.fixture={set:c=>session=c,changedApplication,saveApplication,flushApplication,closingWrites,draftKey};})();');vm.runInContext(src,c);
- const context={auth,user:auth.user,username:'fixture',company:auth.company,csrfToken:'synthetic',editable:true,loaded:true,loading:false,version:1,record:{id:1},savedJSON:JSON.stringify(data)};
+ src=src.replace(/\}\)\(\);\s*$/, 'window.fixture={set:c=>session=c,changedApplication,saveApplication,flushApplication,closingWrites,draftKey,applyValues,formValues,syncGenerationDate,sameEditableValues};})();');vm.runInContext(src,c);
+ const context={auth,user:auth.user,username:'fixture',company:auth.company,csrfToken:'synthetic',editable:true,loaded:true,loading:false,version:1,record:{id:1},generationDate:day,savedJSON:JSON.stringify(data)};
  window.fixture.set(context);
- return {context,storage,timers,requests,window,fixture:window.fixture,change:v=>{el('qa_sampleQty').value=v;window.fixture.changedApplication()},ack:async(i=0)=>{const q=requests[i];q.resolve({ok:true,json:async()=>({ok:true,application:{recordId:1,version:i+2,data:q.body.data,updatedAt:'2026-11-18T00:00:00Z',updatedBy:'fixture'}})});await new Promise(resolve=>setImmediate(resolve))}};
+ return {context,storage,timers,requests,window,el,setDay:v=>day=v,fixture:window.fixture,change:v=>{el('qa_sampleQty').value=v;window.fixture.changedApplication()},ack:async(i=0)=>{const q=requests[i];q.resolve({ok:true,json:async()=>({ok:true,application:{recordId:1,version:i+2,data:q.body.data,updatedAt:'2026-11-18T00:00:00Z',updatedBy:'fixture'}})});await new Promise(resolve=>setImmediate(resolve))}};
 }
 test('reverting unsaved edits removes their draft and cancels autosave',()=>{
  const h=harness();h.change('5');assert.equal(h.storage.size,1);h.change('3');
@@ -34,4 +34,25 @@ test('an unsuccessful write retains the latest reverted value locally',async()=>
  const h=harness();h.change('5');const first=h.fixture.saveApplication(h.context);h.change('3');h.window.closeQAApplication();
  h.requests[0].resolve({ok:false,status:503,json:async()=>({ok:false,error:'offline'})});await first;await Promise.all(h.fixture.closingWrites.values());
  assert.equal(JSON.parse([...h.storage.values()][0]).data.sampleQty,'3');
+});
+
+test('loading a saved applicant preserves the actual name and uses the generation date',()=>{
+ const h=harness();
+ h.fixture.applyValues({requester:'张三',receivedDate:'2026-10-30',sampleQty:'8 PCS',description:'已填写的样板描述',standards:[],tests:[]});
+ const fields=h.fixture.formValues();
+ assert.equal(fields.requester,'张三');assert.equal(fields.receivedDate,'2026-11-19');
+ assert.equal(fields.sampleQty,'8 PCS');assert.equal(fields.description,'已填写的样板描述');
+});
+test('regenerating on another day updates the date without changing the applicant',()=>{
+ const h=harness();h.el('qa_requester').value='实际申请人';h.setDay('2026-11-20');
+ assert.equal(h.fixture.syncGenerationDate(h.context),true);
+ assert.equal(h.fixture.formValues().receivedDate,'2026-11-20');
+ assert.equal(h.fixture.formValues().requester,'实际申请人');
+ assert.equal(h.context.generationDate,'2026-11-20');
+});
+test('generation-date-only differences do not turn a saved equivalent draft into a conflict',()=>{
+ const h=harness();const original={...h.fixture.formValues(),requester:'实际申请人'};
+ assert.equal(h.fixture.sameEditableValues(original,{...original,receivedDate:'2026-11-18'}),true);
+ assert.equal(h.fixture.sameEditableValues(original,{...original,requester:'另一个申请人'}),false);
+ assert.equal(h.fixture.sameEditableValues(original,{...original,sampleQty:'9'}),false);
 });

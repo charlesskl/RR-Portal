@@ -122,15 +122,20 @@ public partial class PurchaseOrdersController(ISqlConnectionFactory factory) : C
     }
 
     [HttpGet("{id:int}")]
-    public async Task<IActionResult> Get(int id)
+    public async Task<IActionResult> Get(int id, [FromQuery] int? shipment_id = null)
     {
         using var c = factory.Create();
         var po = await c.QueryFirstOrDefaultAsync("SELECT * FROM purchase_orders WHERE id=@id", new { id });
         if (po == null) return NotFound(new { error = "not found" });
         if (po.merged_into_id != null)
             return Conflict(new { error = "采购单已合并，请打开合并后的采购单", merged_into_id = po.merged_into_id });
-        var items = (await c.QueryAsync(@"
-            WITH receipt_totals AS (
+        var allocationSql = shipment_id.HasValue ? ShipmentPurchaseBasis.AllocationsSql
+            : "SELECT NULL::int AS po_item_id, 0::numeric AS qty, 0::int AS shipment_id WHERE FALSE";
+        var items = (await c.QueryAsync($@"
+            WITH purchase_allocations AS ({allocationSql}), prior_paid AS (
+                SELECT po_item_id, SUM(qty) AS qty FROM purchase_allocations
+                WHERE @shipmentId<=0 OR shipment_id<@shipmentId GROUP BY po_item_id
+            ), receipt_totals AS (
                 SELECT po_item_id, SUM(qty) AS received_qty, SUM(spare_qty) AS spare_qty
                 FROM po_receipts
                 GROUP BY po_item_id
@@ -138,11 +143,16 @@ public partial class PurchaseOrdersController(ISqlConnectionFactory factory) : C
             SELECT i.*,
                    COALESCE(r.received_qty, 0) AS received_qty,
                    COALESCE(r.spare_qty, 0) AS spare_qty,
+                   i.id AS purchase_basis_id,
+                   CASE WHEN @shipmentId IS NOT NULL AND r.received_qty+r.spare_qty>0
+                        THEN GREATEST(r.received_qty-COALESCE(pp.qty,0),0)
+                        ELSE NULL END AS purchase_charge_limit,
                    GREATEST(COALESCE(i.purchase_qty, i.qty, 0) - COALESCE(r.received_qty, 0), 0) AS shortage_qty
             FROM po_items i
             LEFT JOIN receipt_totals r ON r.po_item_id = i.id
+            LEFT JOIN prior_paid pp ON pp.po_item_id=i.id
             WHERE i.po_id=@id
-            ORDER BY i.id", new { id })).ToList();
+            ORDER BY i.id", new { id, shipmentId=shipment_id })).ToList();
         var dict = (IDictionary<string, object?>)po!;
         dict["items"] = items;
         return Ok(dict);

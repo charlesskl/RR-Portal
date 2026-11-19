@@ -7,11 +7,13 @@ export interface LinkableShipmentRow {
   _rowKey?: number; material_id?: number; material_snapshot?: Material; outbound_id?: number
   qty?: number; purchase_unit?: string; carton_group?: string; supplier?: string; customs_company?: string
   purchase_charge_ratio?: number
+  purchase_basis_id?: number; purchase_charge_limit?: number | null
   po_no?: string; po_date?: string; price?: number; currency?: string
 }
 export interface ShipmentOutboundSource {
   outbound_id: number; material_id?: number; allocatable_qty?: number; purchase_unit?: string
   purchase_charge_ratio?: number
+  purchase_basis_id?: number; purchase_charge_limit?: number | null
   po_no?: string; po_date?: string; supplier?: string; customs_company?: string; price?: number; currency?: string
 }
 export function shipmentQuantityUnit(value?: string, materialName?: unknown) {
@@ -52,6 +54,7 @@ export function linkShipmentOutbound<T extends LinkableShipmentRow>(rows: readon
     supplier: source.supplier || material.supplier || '', customs_company: source.customs_company || material.customs_company || row.customs_company,
     price: source.price ?? row.price, currency: source.currency || row.currency, purchase_unit: source.purchase_unit || (isPaperRope(material.name_zh) ? '米' : '个'),
     purchase_charge_ratio: source.purchase_charge_ratio ?? 1,
+    purchase_basis_id: source.purchase_basis_id, purchase_charge_limit: source.purchase_charge_limit,
   }
   if (row.material_snapshot) {
     // Keep the local packing/weight snapshot; use the explicitly confirmed identity.

@@ -22,6 +22,91 @@ namespace IndoShipping.Api.Tests;
 
 public class ShipmentOutboundLinkTests
 {
+    private static async Task SetPaidStock(Fixture f)
+    {
+        await f.Db.ExecuteAsync("""
+            INSERT INTO purchase_orders(id,po_no) VALUES (1,'SYN-PAID-2500');
+            INSERT INTO po_items(id,po_id,material_id,purchase_unit) VALUES (1,1,66,'个');
+            UPDATE po_receipts SET po_item_id=1,qty=2500,spare_qty=25 WHERE id=1;
+            UPDATE outbound SET po_item_id=1,qty=2525 WHERE id=1;
+            """);
+    }
+
+    private static JsonElement FirstRow(IActionResult result) =>
+        JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(result).Value).GetProperty("items")[0];
+
+    [Fact]
+    public async Task Paid_stock_first_2520_physical_units_charge_2500_not_a_proportional_discount()
+    {
+        await using var f = await Fixture.Create(); if (f is null) return;
+        await SetPaidStock(f);
+        var body = Body(2520); body.items![0].price=1.362m; body.items[0].kg=957.6m;
+        var id=Id(await f.Controller.Create(body));
+        var row=FirstRow(await f.Controller.Get(id));
+        Assert.Equal(1,row.GetProperty("purchase_basis_id").GetInt32());
+        Assert.Equal(2500m,row.GetProperty("purchase_charge_limit").GetDecimal());
+        Assert.Equal(2520m,row.GetProperty("qty").GetDecimal());
+        Assert.Equal(957.6m,row.GetProperty("kg").GetDecimal());
+        Assert.Equal(1.362m,row.GetProperty("price").GetDecimal());
+        Assert.Equal(3405m,Math.Min(row.GetProperty("qty").GetDecimal(),row.GetProperty("purchase_charge_limit").GetDecimal())*row.GetProperty("price").GetDecimal());
+        var spareId=Id(await f.Controller.Create(Body(5)));
+        Assert.Equal(0m,FirstRow(await f.Controller.Get(spareId)).GetProperty("purchase_charge_limit").GetDecimal());
+        Assert.Equal(2500m,FirstRow(await f.Controller.Get(id)).GetProperty("purchase_charge_limit").GetDecimal());
+        Assert.Equal(2525m,await f.Db.ExecuteScalarAsync<decimal>("SELECT qty FROM outbound WHERE id=1"));
+        Assert.Equal(25m,await f.Db.ExecuteScalarAsync<decimal>("SELECT spare_qty FROM po_receipts WHERE id=1"));
+    }
+
+    [Fact]
+    public async Task Lightweight_basis_refresh_and_purchase_picker_use_current_container_context()
+    {
+        await using var f=await Fixture.Create(); if(f is null)return;
+        await SetPaidStock(f);
+        await f.Db.ExecuteAsync("ALTER TABLE po_items ADD qty numeric DEFAULT 2500, ADD purchase_qty numeric DEFAULT 2500");
+        var purchase=new PurchaseOrdersController(new SqlConnectionFactory(f.Connection));
+        var first=Id(await f.Controller.Create(Body(1000)));
+        var next=JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await purchase.Get(1,0)).Value).GetProperty("items")[0];
+        Assert.Equal(1500m,next.GetProperty("purchase_charge_limit").GetDecimal());
+        var editing=JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await purchase.Get(1,first)).Value).GetProperty("items")[0];
+        Assert.Equal(2500m,editing.GetProperty("purchase_charge_limit").GetDecimal());
+        var refreshed=JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.PurchaseBasis("1")).Value)[0];
+        Assert.Equal(1500m,refreshed.GetProperty("purchase_charge_limit").GetDecimal());
+        Assert.Equal(2500m,JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.PurchaseBasis("1",first)).Value)[0].GetProperty("purchase_charge_limit").GetDecimal());
+        Assert.IsType<BadRequestObjectResult>(await f.Controller.PurchaseBasis("0,not-an-id"));
+    }
+
+    [Fact]
+    public async Task Multiple_outbound_batches_and_containers_share_one_paid_PO_quantity()
+    {
+        await using var f=await Fixture.Create(); if(f is null)return;
+        await SetPaidStock(f);
+        await f.Db.ExecuteAsync("UPDATE outbound SET qty=1000 WHERE id=1; INSERT INTO outbound(id,qty,material_id,po_item_id) VALUES(2,1525,66,1)");
+        var first=Id(await f.Controller.Create(Body(1000)));
+        var secondBody=Body(1520); secondBody.items![0].outbound_id=2;
+        var second=Id(await f.Controller.Create(secondBody));
+        Assert.Equal(2500m,FirstRow(await f.Controller.Get(first)).GetProperty("purchase_charge_limit").GetDecimal());
+        Assert.Equal(1500m,FirstRow(await f.Controller.Get(second)).GetProperty("purchase_charge_limit").GetDecimal());
+        var thirdBody=Body(5); thirdBody.items![0].outbound_id=2;
+        var third=Id(await f.Controller.Create(thirdBody));
+        Assert.Equal(0m,FirstRow(await f.Controller.Get(third)).GetProperty("purchase_charge_limit").GetDecimal());
+        // Reading/editing an old container excludes its own and later allocations.
+        Assert.Equal(1500m,FirstRow(await f.Controller.Get(second)).GetProperty("purchase_charge_limit").GetDecimal());
+    }
+
+    [Fact]
+    public async Task Earlier_paid_allocation_changes_invalidate_later_paged_detail_versions()
+    {
+        await using var f=await Fixture.Create(); if(f is null)return;
+        await SetPaidStock(f);
+        var firstBody=Body(1000);var first=Id(await f.Controller.Create(firstBody));
+        var second=Id(await f.Controller.Create(Body(1520)));
+        var metadata=JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(second,0,1)).Value);
+        var version=metadata.GetProperty("items_version").GetString();
+        firstBody.items![0].qty=900;
+        Assert.IsType<OkObjectResult>(await f.Controller.Update(first,firstBody));
+        Assert.IsType<ConflictObjectResult>(await f.Controller.Get(second,0,1,version));
+        Assert.Equal(1600m,FirstRow(await f.Controller.Get(second)).GetProperty("purchase_charge_limit").GetDecimal());
+    }
+
     [Fact]
     public async Task Linked_packing_JSON_roundtrips_over_HTTP_with_explicit_zeros_and_unchanged_stock()
     {
@@ -239,6 +324,8 @@ public class ShipmentOutboundLinkTests
         var result = Assert.IsType<OkObjectResult>(await new OutboundController(new SqlConnectionFactory(f.Connection)).Allocatable(null));
         var source = JsonSerializer.SerializeToElement(result.Value)[0];
         Assert.Equal(15100m / 15251m, source.GetProperty("purchase_charge_ratio").GetDecimal(), 20);
+        Assert.Equal(15100m, source.GetProperty("purchase_charge_limit").GetDecimal());
+        Assert.Equal(1, source.GetProperty("purchase_basis_id").GetInt32());
         Assert.Equal(.3032m, source.GetProperty("price").GetDecimal());
         Assert.Equal(15251m, source.GetProperty("allocatable_qty").GetDecimal());
         // Other-container allocations reduce physical capacity, not the fee ratio.
@@ -246,6 +333,9 @@ public class ShipmentOutboundLinkTests
         result = Assert.IsType<OkObjectResult>(await new OutboundController(new SqlConnectionFactory(f.Connection)).Allocatable(null));
         var remaining = JsonSerializer.SerializeToElement(result.Value)[0];
         Assert.Equal(6251m, remaining.GetProperty("allocatable_qty").GetDecimal());
+        Assert.Equal(6100m, remaining.GetProperty("purchase_charge_limit").GetDecimal());
+        var editing=JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await new OutboundController(new SqlConnectionFactory(f.Connection)).Allocatable(id)).Value)[0];
+        Assert.Equal(15100m, editing.GetProperty("purchase_charge_limit").GetDecimal());
         Assert.Equal(source.GetProperty("purchase_charge_ratio").GetDecimal(), remaining.GetProperty("purchase_charge_ratio").GetDecimal());
         var row = JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(await f.Controller.Get(id)).Value).GetProperty("items")[0];
         Assert.Equal(source.GetProperty("purchase_charge_ratio").GetDecimal(), row.GetProperty("purchase_charge_ratio").GetDecimal());

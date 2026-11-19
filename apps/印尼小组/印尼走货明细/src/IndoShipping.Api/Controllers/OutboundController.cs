@@ -391,7 +391,12 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
     {
         using var c = factory.Create();
         var rows = await c.QueryAsync($@"
-            WITH receipt_basis AS ({ShipmentPurchaseBasis.ReceiptBasisSql}), allocations AS (
+            WITH receipt_basis AS ({ShipmentPurchaseBasis.ReceiptBasisSql}),
+            purchase_allocations AS ({ShipmentPurchaseBasis.AllocationsSql}),
+            prior_paid AS (
+                SELECT po_item_id, SUM(qty) AS qty FROM purchase_allocations
+                WHERE @shipmentId IS NULL OR shipment_id<@shipmentId GROUP BY po_item_id
+            ), allocations AS (
                 SELECT outbound_id,
                        SUM(qty) FILTER (WHERE shipment_id <> COALESCE(@shipmentId, -1)) AS allocated_other,
                        SUM(qty) FILTER (WHERE shipment_id = @shipmentId) AS allocated_current
@@ -408,11 +413,16 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
                    COALESCE(a.allocated_current, 0) AS allocated_current,
                    GREATEST(COALESCE(o.qty, 0) - COALESCE(a.allocated_other, 0), 0) AS allocatable_qty,
                    i.price, i.currency, i.purchase_unit, po.order_date AS po_date, m.customs_company,
-                   COALESCE(rb.purchase_charge_ratio, 1) AS purchase_charge_ratio
+                   COALESCE(rb.purchase_charge_ratio, 1) AS purchase_charge_ratio,
+                   i.id AS purchase_basis_id,
+                   CASE WHEN rb.purchase_received_qty > 0
+                        THEN GREATEST(rb.purchase_paid_qty-COALESCE(pp.qty, 0), 0)
+                        ELSE NULL END AS purchase_charge_limit
             FROM outbound o
             LEFT JOIN allocations a ON a.outbound_id=o.id
             LEFT JOIN po_items i ON i.id=o.po_item_id
             LEFT JOIN receipt_basis rb ON rb.po_item_id=i.id
+            LEFT JOIN prior_paid pp ON pp.po_item_id=i.id
             LEFT JOIN purchase_orders po ON po.id=i.po_id
             LEFT JOIN materials m ON m.id=o.material_id
             LEFT JOIN tool_materials t ON t.material_id=m.id

@@ -11,7 +11,7 @@ import { sortShipmentItems, cartonLayout, cartonGroupKey, shipmentScope } from '
 import { withShipmentInvoicePrices } from '../utils/shipmentInvoice'
 import { consolidateShipmentItems } from '../utils/shipmentConsolidation'
 import { createCartonGroupId } from '../utils/cartonGroupId'
-import { receiptChargeRatio, shipmentChargeQuantity, shipmentDeclarationPrice, shipmentPurchaseLineAmount, shipmentPurchaseTotal } from '../utils/shipmentPurchase'
+import { receiptChargeRatio, shipmentChargeQuantity, shipmentDeclarationPrice, shipmentPurchaseLineAmount, shipmentPurchaseTotal, withShipmentPurchaseBasis, refreshShipmentPurchaseBasis } from '../utils/shipmentPurchase'
 import ShipmentImport from '../components/ShipmentImport'
 import ShipmentImportSource from '../components/ShipmentImportSource'
 import ShipmentImages from '../components/ShipmentImages'
@@ -59,6 +59,8 @@ interface ShipmentSummary {
 
 interface ShipmentItem {
   purchase_charge_ratio?: number
+  purchase_basis_id?: number
+  purchase_charge_limit?: number | null
   _rowKey?: number
   material_snapshot?: Material
   carton_no?: string
@@ -96,6 +98,8 @@ interface ShipmentDetail extends ShipmentSummary {
 
 interface OutByMat {
   purchase_charge_ratio?: number
+  purchase_basis_id?: number
+  purchase_charge_limit?: number | null
   outbound_id: number
   po_item_id?: number
   material_id?: number
@@ -269,7 +273,7 @@ export default function ShipmentsPage() {
       result.set(item.material_id, item.material_snapshot)
     return result
   }, [baseMatMap, rawItems])
-  const orderedItems = (values: ShipmentItem[]) => withShipmentInvoicePrices(sortShipmentItems(values, matMap), matMap).map((it, i) => ({ ...it, seq: i + 1 }))
+  const orderedItems = (values: ShipmentItem[]) => withShipmentInvoicePrices(withShipmentPurchaseBasis(sortShipmentItems(values, matMap)), matMap).map((it, i) => ({ ...it, seq: i + 1 }))
   const items = useMemo(() => orderedItems(rawItems), [rawItems, matMap])
   const outCandidates = useMemo(() => outboundCandidates(orderOutboundByShipmentImport(outRows, items, matMap), items), [outRows, items, matMap])
   const selectedOutIds = outSel.filter(key => outCandidates.some(row => String(row.outbound_id) === String(key)))
@@ -461,7 +465,7 @@ export default function ShipmentsPage() {
     try {
       const { data: poList } = await api.get<any[]>('/purchase')
       const recent = poList.slice(0, 200)
-      const dets = await Promise.all(recent.map(p => api.get<any>(`/purchase/${p.id}`).then(r => r.data).catch(() => null)))
+      const dets = await Promise.all(recent.map(p => api.get<any>(`/purchase/${p.id}`, { params: { shipment_id: editing?.id ?? 0 } }).then(r => r.data).catch(() => null)))
       for (const po of dets.filter(Boolean)) {
         for (const it of (po.items ?? [])) {
           if (!it.material_id) continue
@@ -473,6 +477,16 @@ export default function ShipmentsPage() {
       }
     } catch {}
     return matToPo
+  }
+
+  async function readPurchaseBasis(values: ShipmentItem[], shipmentId?: number): Promise<ShipmentItem[]> {
+    const ids = [...new Set(values.filter(item => Number(item.purchase_basis_id) > 0).map(item => item.purchase_basis_id!))]
+    const requests = []
+    for (let index = 0; index < ids.length; index += 500) requests.push(api.get<Array<{ purchase_basis_id: number; purchase_charge_limit: number | null }>>('/shipments/purchase-basis', {
+      params: { ids: ids.slice(index, index + 500).join(','), shipment_id: shipmentId },
+    }))
+    const responses = await Promise.all(requests)
+    return refreshShipmentPurchaseBasis(values, responses.flatMap(response => response.data))
   }
 
   // 公共：物料 + 数量 → 走货明细行（poInfo 来自 buildMatToPo；poNo/productUse 可覆盖）
@@ -490,6 +504,8 @@ export default function ShipmentsPage() {
       purchase_unit: poInfo?.it?.purchase_unit || (isPaperRope(m.name_zh) ? '米' : '个'),
       price: poInfo?.it?.price ?? 0,
       purchase_charge_ratio: receiptChargeRatio(poInfo?.it),
+      purchase_basis_id: poInfo?.it?.purchase_basis_id,
+      purchase_charge_limit: poInfo?.it?.purchase_charge_limit,
       currency: poInfo?.it?.currency ?? 'US$',
       po_no: opts.poNo ?? poInfo?.po?.po_no ?? '',
       po_date: poInfo?.po?.order_date ?? '',
@@ -654,7 +670,7 @@ export default function ShipmentsPage() {
         throw new Error('明细已变化，请重新核对后关联')
       if (sources.some(source => {
         const previous = linkRows.find(r => r.outbound_id === source.outbound_id)
-        return !previous || ['material_id', 'po_no', 'po_date', 'supplier', 'price', 'currency', 'purchase_unit', 'purchase_charge_ratio', 'customs_company', 'code', 'name_zh', 'spec'].some(key =>
+        return !previous || ['material_id', 'po_no', 'po_date', 'supplier', 'price', 'currency', 'purchase_unit', 'purchase_charge_ratio', 'purchase_basis_id', 'purchase_charge_limit', 'customs_company', 'code', 'name_zh', 'spec'].some(key =>
           previous[key as keyof OutByMat] !== source[key as keyof OutByMat])
       })) {
         setLinkRows(data); setLinkConfirmed(false)
@@ -712,7 +728,7 @@ export default function ShipmentsPage() {
         if (!m) throw new Error(`OUT-${o.outbound_id} 的物料资料不可用，请刷新后重试`)
         const poInfo = {
           po: { po_no: o.po_no, order_date: o.po_date, supplier: o.supplier },
-          it: { price: o.price, currency: o.currency, purchase_unit: o.purchase_unit, purchase_charge_ratio: o.purchase_charge_ratio },
+          it: { price: o.price, currency: o.currency, purchase_unit: o.purchase_unit, purchase_charge_ratio: o.purchase_charge_ratio, purchase_basis_id: o.purchase_basis_id, purchase_charge_limit: o.purchase_charge_limit },
         }
         return makeItem(m, o.remaining_qty, {
           poInfo: o.po_no ? poInfo : (m.id ? matToPo.get(m.id) : undefined),
@@ -854,6 +870,7 @@ export default function ShipmentsPage() {
     savePending.current = session
     setSaving(true)
     let createResultUnknown = false
+    let savedShipmentId = editing?.id
     try {
       const v = await form.validateFields()
       if (!unchanged()) { message.info('资料已变化，本次尚未保存，请重新核对后保存'); return false }
@@ -887,6 +904,7 @@ export default function ShipmentsPage() {
         createResultUnknown = true
         const { data } = await api.post<{ id: number }>('/shipments', body)
         createResultUnknown = false
+        savedShipmentId = data.id
         if (!sameSession()) { load(); return true }
         // Keep the new server ID even if later material writes fail, so retry
         // updates this shipment instead of creating a second one.
@@ -928,6 +946,11 @@ export default function ShipmentsPage() {
           ? '部分内容已保存，物料资料尚未完整写回；撤回后需再次保存，请重试'
           : '部分内容已保存，后续修改和撤回历史仍保留；撤回后需再次保存')
         load(); return false
+      }
+      if (items.some(item => Number(item.purchase_basis_id) > 0)) {
+        const refreshed = await readPurchaseBasis(items, savedShipmentId)
+        if (!unchanged()) { message.info('资料已保存，明细已变化，请重新核对后保存'); load(); return false }
+        setItems(refreshed, false)
       }
       setEditing(prev => prev ? {
         ...prev, customer: v.customer ?? '', container_no: v.container_no ?? '', status: v.status ?? 'draft',
@@ -1128,6 +1151,8 @@ export default function ShipmentsPage() {
           if (parsed) images.set(m.id, parsed)
         } catch {}
       }))
+      const exportItems = items.some(item => Number(item.purchase_basis_id) > 0)
+        ? await readPurchaseBasis(items, creating ? undefined : editing.id) : items
       // 4) 生成
       const form2 = {
         customer: v.customer, containerNo: v.container_no, containerCount: v.container_count,
@@ -1150,7 +1175,7 @@ export default function ShipmentsPage() {
       }
       const fname = customsFileName(form2)
       const blob = await buildCustomsWorkbook({
-        templateBuffer, indonesiaTemplateBuffer, items, materials, productHs, images, form: form2,
+        templateBuffer, indonesiaTemplateBuffer, items: exportItems, materials, productHs, images, form: form2,
         supplierProfiles: dictionaries.suppliers || [],
       })
       const a = document.createElement('a')

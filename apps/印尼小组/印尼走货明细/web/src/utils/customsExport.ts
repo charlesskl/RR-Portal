@@ -62,7 +62,7 @@ export function customsFormulaName(item: CustomsItem, material?: Material, custo
 }
 
 import { customsInvoicePrice, customsInvoiceFormula, invoiceCustomsCompany } from './shipmentInvoice'
-import { shipmentDeclarationPrice, shipmentPurchaseAmount, shipmentPurchaseLineAmount, shipmentPurchaseTotal } from './shipmentPurchase'
+import { shipmentDeclarationPrice, shipmentPurchaseAmount, shipmentPurchaseLineAmount, shipmentPurchaseTotal, withShipmentPurchaseBasis } from './shipmentPurchase'
 import { formatShipmentDeclaration, normalizeShipmentDeclarations, roundedShipmentDeclaration, shipmentDeclarationPrecision } from './shipmentDeclaration'
 import { shipmentDateOnly, shipmentPurchaseDates } from './shipmentDates'
 import { formatShipmentPallet } from './shipmentDisplay'
@@ -71,6 +71,8 @@ export { customsInvoicePrice } from './shipmentInvoice'
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
 export interface CustomsItem {
   purchase_charge_ratio?: number
+  purchase_basis_id?: number
+  purchase_charge_limit?: number | null
   material_snapshot?: unknown
   outbound_id?: number
   material_id?: number
@@ -1172,7 +1174,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
     // 仅用于展示及分组；发票计算另取明确的报关公司，不使用默认值。
     return effectiveCustomsCompany(it, m, tf.exportCompany)
   }
-  const sorted = sortShipmentItems(consolidateShipmentItems(normalizeShipmentDeclarations(items, materials), materials, tf.exportCompany), materials, tf.exportCompany)
+  const sorted = sortShipmentItems(consolidateShipmentItems(withShipmentPurchaseBasis(normalizeShipmentDeclarations(items, materials)), materials, tf.exportCompany), materials, tf.exportCompany)
     .map(item => roundedShipmentDeclaration(item, matOf(item) || (item.material_snapshot as Material | undefined)))
   sorted.forEach((item, index) => {
     if (shipmentPurchaseAmount(item) !== 0 && !(Number(item.kg) > 0))

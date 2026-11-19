@@ -12,6 +12,28 @@ namespace IndoShipping.Api.Controllers;
 [Route("api/shipments")]
 public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
 {
+    [HttpGet("purchase-basis")]
+    public async Task<IActionResult> PurchaseBasis([FromQuery] string? ids, [FromQuery] int? shipment_id = null)
+    {
+        var parsed = (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
+        if (parsed.Length is 0 or > 2000 || parsed.Any(value => !int.TryParse(value, out var id) || id<=0))
+            return BadRequest(new { error="采购计费明细无效" });
+        using var c=factory.Create();
+        var rows=await c.QueryAsync($@"
+            WITH receipts AS ({ShipmentPurchaseBasis.ReceiptBasisSql}),
+            allocations AS ({ShipmentPurchaseBasis.AllocationsSql}), prior_paid AS (
+                SELECT po_item_id,SUM(qty) AS qty FROM allocations
+                WHERE @shipmentId IS NULL OR shipment_id<@shipmentId GROUP BY po_item_id
+            )
+            SELECT p.id AS purchase_basis_id,
+                   CASE WHEN r.purchase_received_qty>0 THEN GREATEST(r.purchase_paid_qty-COALESCE(a.qty,0),0)
+                        ELSE NULL END AS purchase_charge_limit
+            FROM po_items p LEFT JOIN receipts r ON r.po_item_id=p.id
+            LEFT JOIN prior_paid a ON a.po_item_id=p.id WHERE p.id=ANY(@itemIds)",
+            new { shipmentId=shipment_id, itemIds=parsed.Select(int.Parse).Distinct().ToArray() });
+        return Ok(rows);
+    }
+
     [HttpGet]
     public async Task<IActionResult> List()
     {
@@ -50,8 +72,8 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
         // purchasing/stock activity must not invalidate every open shipment.
         // Include ALL fallback candidates, not just a currently unique match,
         // so candidate insertion/removal and PO/material reassignment are caught.
-        var metadata = await c.QuerySingleAsync<(int total, string version)>(@"
-            WITH shipment_rows AS (
+        var metadata = await c.QuerySingleAsync<(int total, string version)>($@"
+            WITH purchase_allocations AS ({ShipmentPurchaseBasis.AllocationsSql}), shipment_rows AS (
                 SELECT id, seq, xmin::text AS row_version, outbound_id, material_id, po_no
                 FROM shipment_items WHERE shipment_id=@id
             ), linked_outbound AS (
@@ -80,7 +102,10 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
                        COALESCE((SELECT md5(string_agg(r.id::text || ':' || r.row_version, ',' ORDER BY r.id)) FROM relevant_receipts r), '') || ':' ||
                        COALESCE((SELECT md5(string_agg(p.id::text || ':' || p.row_version, ',' ORDER BY p.id)) FROM relevant_items p), '') || ':' ||
                        COALESCE((SELECT md5(string_agg(o.id::text || ':' || o.row_version, ',' ORDER BY o.id)) FROM linked_outbound o), '') || ':' ||
-                       COALESCE((SELECT md5(string_agg(po.id::text || ':' || po.row_version, ',' ORDER BY po.id)) FROM relevant_orders po), ''))
+                       COALESCE((SELECT md5(string_agg(po.id::text || ':' || po.row_version, ',' ORDER BY po.id)) FROM relevant_orders po), '') || ':' ||
+                       COALESCE((SELECT md5(string_agg(pa.id::text || ':' || pa.row_version, ',' ORDER BY pa.id))
+                                 FROM purchase_allocations pa WHERE pa.shipment_id<@id
+                                   AND EXISTS (SELECT 1 FROM relevant_items p WHERE p.id=pa.po_item_id)), ''))
             FROM shipment_rows si", new { id }, tx);
         if (version != null && version != metadata.version)
             return Conflict(new { error = "走货单在加载期间已被修改，请重新加载" });
@@ -90,10 +115,18 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
                        SUM(octet_length(COALESCE(material_snapshot::text, ''))) OVER (ORDER BY seq, id) AS snapshot_bytes
                 FROM (SELECT id, seq, material_snapshot FROM shipment_items WHERE shipment_id=@id
                       ORDER BY seq, id LIMIT @take OFFSET @skip) batch
-            ), receipt_basis AS ({ShipmentPurchaseBasis.ReceiptBasisSql})
+            ), receipt_basis AS ({ShipmentPurchaseBasis.ReceiptBasisSql}),
+            purchase_allocations AS ({ShipmentPurchaseBasis.AllocationsSql}), prior_paid AS (
+                SELECT po_item_id, SUM(qty) AS qty FROM purchase_allocations
+                WHERE shipment_id<@id GROUP BY po_item_id
+            )
             SELECT si.*,
                    COALESCE(NULLIF(pi.purchase_unit, ''), NULLIF(si.purchase_unit, ''), '个') AS purchase_unit,
-                   COALESCE(rb.purchase_charge_ratio, 1) AS purchase_charge_ratio
+                   COALESCE(rb.purchase_charge_ratio, 1) AS purchase_charge_ratio,
+                   pi.id AS purchase_basis_id,
+                   CASE WHEN rb.purchase_received_qty > 0
+                        THEN GREATEST(rb.purchase_paid_qty-COALESCE(pp.qty, 0), 0)
+                        ELSE NULL END AS purchase_charge_limit
             FROM shipment_items si
             JOIN page_keys pk ON pk.id=si.id
                 AND (NOT @paged OR pk.page_row=1 OR pk.snapshot_bytes<=@budget)
@@ -106,6 +139,7 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
             ) matched ON TRUE
             LEFT JOIN po_items pi ON pi.id=COALESCE(o.po_item_id, matched.id)
             LEFT JOIN receipt_basis rb ON rb.po_item_id=pi.id
+            LEFT JOIN prior_paid pp ON pp.po_item_id=pi.id
             WHERE si.shipment_id=@id
             ORDER BY si.seq, si.id", new { id, take = paged ? limit ?? 10 : (int?)null,
                 skip = offset ?? 0, paged, budget = 4 * 1024 * 1024 }, tx)).ToList();

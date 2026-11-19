@@ -1,6 +1,6 @@
 import type { Material } from '../api/client'
 import type { CustomsItem } from './customsExport'
-import { effectiveCustomsCompany, sortShipmentItems, shipmentKeepsImportOrder } from './shipmentOrder'
+import { effectiveCustomsCompany, sortShipmentItems, shipmentKeepsSourceOrder } from './shipmentOrder'
 import { invoiceCustomsCompany } from './shipmentInvoice'
 import { shipmentChargeQuantity, shipmentPurchaseAmount } from './shipmentPurchase'
 import { isPaperRope, parseShipmentPacking, shipmentWeightQuantity } from './shipmentWeight'
@@ -30,7 +30,7 @@ export function consolidateShipmentItems<T extends BatchItem>(
   // Supplementary allocations from the same outbound can have no packing
   // data. Attach them only to one unambiguous packed row of that material.
   const ordered = sortShipmentItems(items, materials, fallback)
-  const keepImportOrder = shipmentKeepsImportOrder(items)
+  const keepSourceOrder = shipmentKeepsSourceOrder(items)
   const lastCompanySource = new Map<string, T>()
   for (const item of ordered) lastCompanySource.set(invoiceCustomsCompany(item, materials.get(item.material_id!)), item)
   const supplementKey = (item: T) => {
@@ -146,9 +146,9 @@ export function consolidateShipmentItems<T extends BatchItem>(
     // Do not infer counts from these labels or overwrite the source batches.
     group.carton_no = [...new Set(group.sources.map(source => text(source.carton_no)).filter(Boolean))].join(' / ')
     group.po_no = [...new Set(group.sources.map(source => text(source.po_no)).filter(Boolean))].join(' / ')
-    // Catalog-only lists retain their last-batch position. Imported lists keep
-    // the first file position; surcharge ownership is carried separately below.
-    if (!keepImportOrder) { groups.delete(key); groups.set(key, group) }
+    // Catalog-only lists retain their last-batch position. Excel/outbound rows
+    // keep the first source position; surcharge ownership is carried below.
+    if (!keepSourceOrder) { groups.delete(key); groups.set(key, group) }
   })
   return [...groups.values()].map(group => ({ ...group,
     // A merged import keeps its first file position. Preserve surcharge

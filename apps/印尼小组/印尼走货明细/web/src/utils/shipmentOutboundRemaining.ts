@@ -29,9 +29,12 @@ export function planOutboundPull<T extends AllocatableOutbound>(
   const ids = [...new Set(selectedIds)]
   if (!ids.length) throw new Error('请先勾选出库物料')
   const candidates = new Map(outboundCandidates(sources, items).map(row => [row.outbound_id, row]))
-  return ids.map(id => {
+  for (const id of ids) {
     const row = candidates.get(id)
     if (!row) throw new Error(`OUT-${id} 已无剩余可拉数量，请重新选择`)
-    return row
-  })
+  }
+  // Checkbox click order (including cross-page selection) must not reorder
+  // the source list. Balances above still validate the entire selection first.
+  const selected = new Set(ids)
+  return [...candidates.values()].filter(row => selected.has(row.outbound_id))
 }

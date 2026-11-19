@@ -244,7 +244,7 @@ it.each(['RRI', 'RRM'])('零重量有采购金额的末批不得被合并隐藏�
     form: { containerNo: 'ZERO-LAST-BATCH', customer, rate: 7.2 } })).rejects.toThrow('第 2 行（彩盒-FSC）有采购金额')
 }, 60000)
 
-it.each(['RRI', 'RRM'])('共箱先按共享顺序排序，页面与导出保留原合同附加费归属（%s）', async customer => {
+it.each(['RRI', 'RRM'])('共箱保留首次出库位置，页面与导出仍按最后来源批次确定合同附加费归属（%s）', async customer => {
   const rows = [
     { ...batches[0], qty: 10, kg: 10, cartons: 2, carton_group: 'G', contract_no: 'A', invoice_no: 'A' },
     { ...batches[1], qty: 10, kg: 10, cartons: 1, carton_group: 'H', contract_no: 'B', invoice_no: 'B', outbound_id: 76 },
@@ -270,8 +270,10 @@ it.each(['RRI', 'RRM'])('共箱先按共享顺序排序，页面与导出保留�
   expect([sheet.V4.v, sheet.V5.v]).toEqual(['A', 'B'])
   expect([sheet.K4.v, sheet.K5.v]).toEqual([20, 10])
   expect([sheet.AT4.v, sheet.AT5.v]).toEqual([2, 1])
-  expect(sheet.Z4.f).not.toContain('1248')
-  expect(sheet.Z5.f).toContain('1248')
+  // The last source batch belongs to A; consolidation moves its quantity to
+  // A's first position without assigning that surcharge to the following B.
+  expect(sheet.Z4.f).toContain('1248')
+  expect(sheet.Z5.f).not.toContain('1248')
   expect(Number(sheet.K4.v) * Number(sheet.Z4.v)).toBeCloseTo(amount(before, 'A'), 9)
   expect(Number(sheet.K5.v) * Number(sheet.Z5.v)).toBeCloseTo(amount(before, 'B'), 9)
 }, 60000)

@@ -1,0 +1,12 @@
+* { box-sizing: border-box }
+body { margin: 0; background: #f4f7f6; color: #17372d; font: 1rem/1.6 system-ui, sans-serif }
+main { max-width: 62rem; margin: 6vh auto; padding: clamp(1rem, 4vw, 3rem); background: white }
+header p { color: #49685d }
+nav { display: flex; gap: .6rem; margin-block: 1.5rem }
+nav a { padding: .4rem .8rem; color: #165140; border: 1px solid #638277; border-radius: .3rem }
+nav a[aria-current] { color: white; background: #165140 }
+strong { margin-inline-start: .5rem; font: 600 1.6rem system-ui }
+.scroll { overflow-x: auto }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums }
+td, th { padding: .7rem; text-align: start; white-space: nowrap; border-bottom: 1px solid #dee6e2 }
+th { background: #edf3ef }

@@ -1,0 +1,27 @@
+header {
+	Cache-Control "private, no-store"
+	Vary Authorization
+	Referrer-Policy no-referrer
+	X-Content-Type-Options nosniff
+	Content-Security-Policy "default-src 'none'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+}
+
+handle_path /settlements/trial-a/* {
+	basic_auth bcrypt trial-a {
+		trial-a {$SETTLEMENT_TRIAL_A_HASH}
+	}
+	root * {$TRIAL_SITE_ROOT:/srv}/trial-a
+	file_server
+}
+
+handle_path /settlements/trial-b/* {
+	basic_auth bcrypt trial-b {
+		trial-b {$SETTLEMENT_TRIAL_B_HASH}
+	}
+	root * {$TRIAL_SITE_ROOT:/srv}/trial-b
+	file_server
+}
+
+handle {
+	respond 404
+}

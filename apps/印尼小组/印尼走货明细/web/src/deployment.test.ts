@@ -367,7 +367,7 @@ describe('deployment base paths', () => {
     }
     // Generic invoice names use the declaration-name column; auxiliary packing
     // follows that invoice by serial using the approved array formula.
-    expect(workbook.Sheets['发票'].D9?.f).toBe("'TEST-CNTR'!E4")
+    expect(workbook.Sheets['发票'].D9?.f).toContain("UNIQUE(_xlws.FILTER('TEST-CNTR'!E:E,'TEST-CNTR'!AR:AR=")
     expect(workbook.Sheets['装箱单 (2)'].B10?.f).toContain("XLOOKUP($A10,'发票'!$B:$B,'发票'!$D:$D)")
     expect(workbook.Sheets['装箱单 (2)'].B10?.F).toBe('B10:H10')
     expect(workbook.Sheets['装箱单 (2)'].B10?.v).toBe(workbook.Sheets['发票'].D9?.v)

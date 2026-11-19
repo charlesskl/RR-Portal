@@ -529,12 +529,13 @@ describe('supplier document export', () => {
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
     ;['千克', '个', '套', '米', '个'].forEach((unit, i) => {
       expect(wb.Sheets['发票'][`G${i + 9}`].v).toBe(unit)
-      expect(wb.Sheets['发票'][`G${i + 9}`].f).toContain(`'UNIT-TEST'!J${i + 4}`)
+      expect(wb.Sheets['发票'][`G${i + 9}`].f).toContain("'UNIT-TEST'!$J:$J")
       const declarationQuantity = i === 0 ? original[i].kg : original[i].qty
       const paidAmount = original[i].qty * original[i].price * original[i].purchase_charge_ratio
       const main = wb.Sheets['UNIT-TEST']
       const invoice = wb.Sheets['发票']
-      expect(invoice[`F${i + 9}`]).toMatchObject({ f: `'UNIT-TEST'!K${i + 4}`, v: declarationQuantity })
+      expect(invoice[`F${i + 9}`].v).toBe(declarationQuantity)
+      expect(invoice[`F${i + 9}`].f).toContain(`SUMIFS('UNIT-TEST'!$K:$K,'UNIT-TEST'!$E:$E,$D${i + 9}`)
       expect(main[`J${i + 4}`].v).toBe(codes[i])
       expect(main[`K${i + 4}`].v).toBe(declarationQuantity)
       expect(main[`L${i + 4}`].v).toBe(original[i].qty)
@@ -559,16 +560,22 @@ describe('supplier document export', () => {
     })
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
     const invoice = wb.Sheets['发票']
-    expect(invoice.F9).toMatchObject({ f: "'WEIGHT-TEST'!K4", v: 0.17 })
-    expect(invoice.F10).toMatchObject({ f: "'WEIGHT-TEST'!K5", v: 13.31 })
+    expect(invoice.F9.v).toBe(0.17)
+    expect(invoice.F9.f).toContain("'WEIGHT-TEST'!$A:$A=$B9")
+    expect(invoice.F9.F).toBe('F9:L9')
+    expect(invoice.F10.v).toBe(13.31)
+    expect(invoice.F10.f).toContain("'WEIGHT-TEST'!$A:$A=$B10")
+    expect(invoice.F10.F).toBe('F10:L10')
     expect(invoice.G9.v).toBe('千克')
-    expect(invoice.G9.f).toContain("'WEIGHT-TEST'!J4")
+    expect(invoice.F9.f).toContain("'WEIGHT-TEST'!$J:$J")
     expect(invoice.G10.v).toBe('千克')
-    expect(invoice.G10.f).toContain("'WEIGHT-TEST'!J5")
+    expect(invoice.F10.f).toContain("'WEIGHT-TEST'!$J:$J")
     expect(invoice.F11.f).toBe('SUM(F9:F10)')
     expect(invoice.F11.v).toBeCloseTo(13.48, 8)
-    expect(invoice.I9.f).toBe('F9*H9')
-    expect(invoice.I10.f).toBe('F10*H10')
+    expect(invoice.I9.f).toBeUndefined()
+    expect(invoice.F9.f).toContain("XLOOKUP(1,_xlpm.match,'WEIGHT-TEST'!$AA:$AA,\"\")")
+    expect(invoice.I10.f).toBeUndefined()
+    expect(invoice.F10.f).toContain("XLOOKUP(1,_xlpm.match,'WEIGHT-TEST'!$AA:$AA,\"\")")
     // 主表送货数量和采购单位保持不变。
     expect(wb.Sheets['WEIGHT-TEST'].L4.v).toBe(600)
     expect(wb.Sheets['WEIGHT-TEST'].M4.v).toBe('个')
@@ -593,10 +600,9 @@ describe('supplier document export', () => {
     expect(invoice.D9.f).toContain('UNIQUE(')
     expect(invoice.D9.f).toContain("'DECLARATION'!AR:AR=$D$11")
     expect(invoice.E9.v).toBe('0|0|铁制|353MPa|无牌|1008|2.0mm-4.0mm')
-    expect(invoice.E9.f).toMatch(/^'商品汇总表'!D\d+$/)
-    expect(wb.Sheets['商品汇总表'][invoice.E9.f!.split('!')[1]].v).toBe(invoice.E9.v)
+    expect(invoice.E9.f).toContain("XLOOKUP(D9,'商品汇总表'!$B:$B,'商品汇总表'!$D:$D,\"\")")
     expect(invoice.E10?.v || '').toBe('')
-    expect(invoice.E10?.f).toBeUndefined()
+    expect(invoice.E10?.f).toContain("XLOOKUP(D10,'商品汇总表'!$B:$B,'商品汇总表'!$D:$D,\"\")")
   })
   it('groups only the generic invoice by customs company and totals each group', async () => {
     const items = [
@@ -623,7 +629,7 @@ describe('supplier document export', () => {
         expect(invoice[`C${row}`].f).toContain(`XLOOKUP(D${row},'商品汇总表'!$B:$B,'商品汇总表'!$A:$A,"")`)
         expect(invoice[`D${row}`].v).not.toBe(wb.Sheets['GROUP-TEST'][`F${mainRow}`].v)
         expect(wb.Sheets['GROUP-TEST'][`AR${mainRow}`].v).toBe(cell.v)
-        expect(invoice[`I${row}`].f).toBe(`F${row}*H${row}`)
+        expect(invoice[`I${row}`].f).toContain(`SUMIFS('GROUP-TEST'!$AA:$AA,'GROUP-TEST'!$E:$E,$D${row}`)
         expect(invoice[`I${row}`].v).toBeCloseTo(Number(invoice[`F${row}`].v) * Number(invoice[`H${row}`].v), 8)
       }
       expect(invoice[`F${totalRow}`].f).toBe(`SUM(F${detailRows[0]}:F${detailRows.at(-1)})`)
@@ -707,12 +713,7 @@ describe('supplier document export', () => {
     expect(invoice[`I${merged}`].v).toBe(120)
     expect(invoice[`H${merged}`]).toMatchObject({ v: 24, f: `IFERROR(I${merged}/F${merged},0)` })
     for (const [column, source] of Object.entries({ F: 'K', I: 'AA', J: 'P', K: 'Q', L: 'AT' })) {
-      expect(invoice[`${column}${merged}`].f).toMatch(/^SUM\(/)
-      const addresses = [...invoice[`${column}${merged}`].f!.matchAll(/'MERGE-TEST'!([A-Z]+)(\d+)(?::\1(\d+))?/g)]
-        .flatMap(match => Array.from({ length: Number(match[3] || match[2]) - Number(match[2]) + 1 },
-          (_, offset) => `${match[1]}${Number(match[2]) + offset}`))
-      expect(addresses).toHaveLength(2)
-      expect(addresses.every(address => address.startsWith(source))).toBe(true)
+      expect(invoice[`${column}${merged}`].f).toBe(`SUMIFS('MERGE-TEST'!$${source}:$${source},'MERGE-TEST'!$E:$E,$D${merged},'MERGE-TEST'!$AR:$AR,$D$14,'MERGE-TEST'!$B:$B,'MERGE-TEST'!$B$4,'MERGE-TEST'!$J:$J,'MERGE-TEST'!$J$4)`)
     }
     expect(invoice[`K${merged}`].v).toBe(2)
     expect(invoice[`L${merged}`].v).toBe(2)
@@ -749,7 +750,7 @@ describe('supplier document export', () => {
     const main = wb.Sheets['LARGE-MERGE'], invoice = wb.Sheets['发票']
     expect(Object.values(main).filter((cell: any) => /^LARGE-\d+$/.test(String(cell?.v)))).toHaveLength(256)
     for (const [column, source] of Object.entries({ F: 'K', I: 'AA', J: 'P', K: 'Q', L: 'AT' })) {
-      expect(invoice[`${column}9`].f).toBe(`SUM('LARGE-MERGE'!${source}4:${source}259)`)
+      expect(invoice[`${column}9`].f).toBe(`SUMIFS('LARGE-MERGE'!$${source}:$${source},'LARGE-MERGE'!$E:$E,$D9,'LARGE-MERGE'!$AR:$AR,$D$10)`)
     }
     expect(invoice.F9.v).toBe(256)
     expect(invoice.H9).toMatchObject({ f: 'IFERROR(I9/F9,0)', v: 20 })

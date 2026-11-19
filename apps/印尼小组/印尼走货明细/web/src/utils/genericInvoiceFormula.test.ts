@@ -30,7 +30,7 @@ it.each(['rri', 'rrm', 'legacy'])('发票按商品名查编号、公司筛选去
   inputZip.file(cataloguePath, new XMLSerializer().serializeToString(catalogueDoc))
   const names = ['PE胶袋', '无目录匹配的商品', 'PB螺丝', '说明书-FSC', 'PWB螺丝', '说明书-FSC', '彩盒']
   const materials = new Map(names.map((name, i) => [i + 1, { id: i + 1, name_zh: name, product_code: 'SYN-' + i,
-    hs_cn: name.includes('螺丝') ? '7318159090' : '9999999999', unit_kg: 'KGM', net_per_pc: 1 }]))
+    hs_cn: name.includes('螺丝') ? '7318159090' : '9999999999', unit_kg: i === 1 ? 'GRM' : i === 3 || i === 5 ? 'ROLL' : 'KGM', net_per_pc: 1 }]))
   const items = names.map((_, i) => ({ material_id: i + 1, outbound_id: i + 1, qty: i + 1, kg: i + 1,
     price: 2, currency: 'US$', cartons: 1, customs_company: i % 2 ? '乙公司' : '甲公司', supplier: 'Synthetic supplier' }))
   const before = structuredClone(items)
@@ -42,6 +42,9 @@ it.each(['rri', 'rrm', 'legacy'])('发票按商品名查编号、公司筛选去
   expect([9, 10, 11, 13, 14, 15].map(r => invoice[`B${r}`].v)).toEqual([1, 3, 7, 2, 4, 6])
   expect(invoice.C9.v).toBe('0012345678')
   expect(invoice.C10.v).toBe(7318159090)
+  expect(invoice.E10.f).toContain("XLOOKUP(D10,'商品汇总表'!$B:$B,'商品汇总表'!$D:$D,\"\")")
+  expect(invoice.E10.v).toBe('0|0|铁制|353MPa|无牌|1008|2.0mm-4.0mm')
+  expect(invoice.E13.v || '').toBe('')
   expect(invoice.C13.v || '').toBe('') // no catalogue match, no main-table HS fallback
   expect(invoice.C9.f).toBe('XLOOKUP(D9,\'商品汇总表\'!$B:$B,\'商品汇总表\'!$A:$A,"")')
   expect(invoice.D9.f).toContain("UNIQUE(_xlws.FILTER('O''Brien'!E:E,'O''Brien'!AR:AR=$D$12")
@@ -54,6 +57,23 @@ it.each(['rri', 'rrm', 'legacy'])('发票按商品名查编号、公司筛选去
     expect(invoice[`D${r}`].f).not.toContain('UNIQUE')
   }
   expect([invoice.D14.v, invoice.D15.v]).toEqual(['说明书-FSC', '说明书-FSC'])
+  for (const [column, source] of Object.entries({ F: 'K', I: 'AA', J: 'P', K: 'Q', L: 'AT' })) {
+    expect(invoice[`${column}10`].f).toBe(`SUMIFS('O''Brien'!$${source}:$${source},'O''Brien'!$E:$E,$D10,'O''Brien'!$AR:$AR,$D$12)`)
+  }
+  expect(invoice.H10.f).toBe('IFERROR(I10/F10,0)')
+  expect(invoice.G9.f).toContain("'O''Brien'!$E:$E=$D9")
+  expect(invoice.G9.f).toContain("'O''Brien'!$AR:$AR=$D$12")
+  expect(invoice.G9.f).toContain("'单位对照'!$A:$A,'单位对照'!$B:$B")
+  expect(invoice.F13.f).toContain('LET(')
+  expect(invoice.F13.f).toContain("'O''Brien'!$A:$A=$B13")
+  expect(invoice.F13.f).toContain("'O''Brien'!$E:$E=$D13")
+  expect(invoice.F13.f).toContain("'O''Brien'!$AR:$AR=$D$16")
+  expect(invoice.F13.f).toContain('HSTACK(')
+  expect(invoice.F13.F).toBe('F13:L13')
+  expect(invoice.G13.v).toBe('克')
+  expect(invoice.G14.v).toBe('卷')
+  expect(invoice.G15.v).toBe('卷')
+  for (const column of ['G', 'H', 'I', 'J', 'K', 'L']) expect(invoice[`${column}13`].f).toBeUndefined()
   expect(invoice.F10.v).toBe(8)
   expect(invoice.I10.v).toBe(16)
   expect(invoice.I17.v).toBe(56)

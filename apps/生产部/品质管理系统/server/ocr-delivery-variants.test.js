@@ -289,3 +289,13 @@ test('a later renamed and reordered delivery header cannot reuse earlier order q
     item.qty === '' && JSON.stringify(item).includes('PO2026/10081')),
   'A renamed later section must be mapped correctly or retain the complete goods source for review');
 });
+
+// A damaged delivery header must not fall back to the generic first-match parser.
+test('missing SKU header with competing actual-delivery columns requires review', () => {
+  needsReview('|序号|PO/NO|货品名称|订单数量|单位|送货数量|送货数量|\n' +
+    '|1|PO-SYNTH|合成件|5000|PCS|1200|600|');
+});
+test('missing unit header and shifted numeric packing cannot supply delivery quantity', () => {
+  needsReview('|序号|PO/NO|货号|货品名称|订单数量|送货数量|包装方式|\n' +
+    '|1|PO-SYNTH|SKU-SYNTH|合成件|5000|900|');
+});

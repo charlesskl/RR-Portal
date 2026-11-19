@@ -199,10 +199,16 @@ function _ocrDeliverySchema(cells, partial = false) {
   const matches = Object.fromEntries(Object.entries(patterns).map(([key, pattern]) =>
     [key, keys.flatMap((value, index) => pattern.test(value) ? [index] : [])]));
   const identity = ['sequence', 'order', 'sku', 'name', 'unit'];
-  if (identity.some(key => !matches[key].length) &&
-      (!partial || ['sequence', 'order', 'sku'].some(key => !matches[key].length))) return null;
   const legacy = identity.every((key, index) => matches[key].includes(index));
   const hasOrderQuantity = keys.some(key => /^(?:订单|訂單|订货|訂貨|合同|总|總|累计|累計|未交|欠)(?:交货|交貨)?(?:数量|數量|数|數)$/.test(key));
+  // A recognizable but damaged delivery header must remain invalid here:
+  // falling through to generic parsing would pick the first competing quantity
+  // or accept a shifted packing number without the delivery-width checks.
+  const damagedDelivery = !partial && matches.sequence.length && matches.order.length &&
+    identity.filter(key => matches[key].length).length >= 4 &&
+    (hasOrderQuantity || matches.delivered.length);
+  if (identity.some(key => !matches[key].length) && !damagedDelivery &&
+      (!partial || ['sequence', 'order', 'sku'].some(key => !matches[key].length))) return null;
   if (!partial && !legacy && !hasOrderQuantity && !matches.delivered.length) return null;
   return { keys, valid: Object.values(matches).every(indexes => indexes.length === 1),
     ...Object.fromEntries(Object.entries(matches).map(([key, indexes]) => [key, indexes[0]])) };

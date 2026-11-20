@@ -13,7 +13,7 @@ function harness(){
  const window={__QC_AUTH:auth,addEventListener(){},__QC_REQUEST:async(_url,options)=>new Promise(resolve=>requests.push({body:JSON.parse(options.body),resolve}))};
  const c=vm.createContext({window,URL,AbortController,location:{href:'http://127.0.0.1/'},document:{currentScript:null,getElementById:el,querySelectorAll:()=>[]},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},todayStr:()=>day,getCompany:()=>auth.company,canView:()=>true,effPerms:()=>({records:{e:1}}),QC_COMPANIES:[{id:auth.company}],setTimeout:fn=>{timers.set(++seq,fn);return seq},clearTimeout:id=>timers.delete(id),console});
  let src=fs.readFileSync(path.join(__dirname,'../qa-application.js'),'utf8');
- src=src.replace(/\}\)\(\);\s*$/, 'window.fixture={set:c=>session=c,changedApplication,saveApplication,flushApplication,closingWrites,draftKey,applyValues,formValues,syncGenerationDate,sameEditableValues,applicationSelection,takeDescription};})();');vm.runInContext(src,c);
+ src=src.replace(/\}\)\(\);\s*$/, 'window.fixture={set:c=>session=c,changedApplication,saveApplication,flushApplication,closingWrites,draftKey,applyValues,formValues,syncGenerationDate,sameEditableValues,applicationSelection,fitDescription};})();');vm.runInContext(src,c);
  const context={auth,user:auth.user,username:'fixture',company:auth.company,csrfToken:'synthetic',editable:true,loaded:true,loading:false,version:1,record:{id:1},generationDate:day,savedJSON:JSON.stringify(data)};
  window.fixture.set(context);
  return {context,storage,timers,requests,window,el,setDay:v=>day=v,fixture:window.fixture,change:v=>{el('qa_sampleQty').value=v;window.fixture.changedApplication()},ack:async(i=0)=>{const q=requests[i];q.resolve({ok:true,json:async()=>({ok:true,application:{recordId:1,version:i+2,data:q.body.data,updatedAt:'2026-11-18T00:00:00Z',updatedBy:'fixture'}})});await new Promise(resolve=>setImmediate(resolve))}};
@@ -87,17 +87,12 @@ test('combined drafts and requests are isolated from the first individual record
  assert.equal(await pending,true);assert.equal(h.storage.size,0);
 });
 
-test('description continuation preserves numbered lines and Unicode without clipping or empty-page loops',()=>{
- const h=harness();
- const element={textContent:'',clientHeight:66,get scrollHeight(){
-  return this.textContent.split('\n').reduce((lines,line)=>lines+Math.max(1,Math.ceil(Array.from(line).length/20)),0)*22;
- }};
- const text='1. 简短款式\n2. '+ '长款式😀身体'.repeat(35)+'\n3. 最后一项 <b>原文</b>\n';
- const chunks=[];let rest=text;
- while(rest){const previous=rest;rest=h.fixture.takeDescription(element,rest);chunks.push(element.textContent);
-  assert.ok(element.scrollHeight<=element.clientHeight+1);assert.ok(rest.length<previous.length);assert.ok(chunks.length<100);
- }
- assert.equal(chunks.join(''),text);assert.ok(chunks.length>1);assert.ok(chunks.at(-1).includes('3. 最后一项'));
- assert.equal(h.fixture.takeDescription(element,''),'');
- assert.throws(()=>h.fixture.takeDescription({textContent:'',clientHeight:0,scrollHeight:22},'无法放下'),/无法排版/);
+test('single-page fitting rejects overflow without removing or changing numbered descriptions',()=>{
+ const h=harness(),text='1. 第一款😀\n2. '+ '完整保留的款式描述'.repeat(100);
+ const description={textContent:text,clientHeight:198,clientWidth:500,scrollHeight:5000,scrollWidth:2000,
+  style:{setProperty(key,value){this[key]=value}}};
+ const rules={innerHTML:''};
+ const paper={classList:{contains:()=>true},querySelector:selector=>selector==='.qa-description-content'?description:rules};
+ assert.equal(h.fixture.fitDescription(paper),false);assert.equal(description.textContent,text);
+ assert.ok(Number.parseFloat(description.style.fontSize)>=9,'do not hide overflow by shrinking text below the readable lower bound');
 });

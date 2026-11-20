@@ -3292,10 +3292,11 @@ body.theme-light #loginPassword {
 #qaReload[hidden] { display: none; }
 .qa-application-modal .modal-footer { flex-wrap: wrap; }
 
-/* 合并 QA 的描述续页：保持同一申请编号，不截断多选明细。 */
-.qa-paper.qa-description-continuation { position: relative !important; }
-.qa-paper.qa-description-continuation h2 { margin: 0 0 12px !important; font: bold 17px/24px 'SimSun', serif !important; color: #111 !important; }
-.qa-paper .qa-continuation-meta { font-size: 11px !important; line-height: 18px !important; overflow-wrap: anywhere !important; }
-.qa-paper.qa-description-continuation p { margin: 8px 0 !important; font-size: 11px !important; }
-.qa-paper .qa-continuation-content { height: 900px !important; border: 1px solid #111 !important; padding: 4px 8px !important; white-space: pre-wrap !important; overflow-wrap: anywhere !important; font: 11px/22px 'Times New Roman', 'Songti SC', 'SimSun', serif !important; }
-.qa-paper.qa-description-continuation .qa-paper-footer { position: absolute !important; left: 70px !important; right: 70px !important; bottom: 26px !important; }
+/* 合并 QA 保持单页：给描述增加空间，测试项与评论留白适当收紧。 */
+.qa-paper.qa-combined-paper .qa-description-label { height: 219px !important; }
+.qa-paper.qa-combined-paper .qa-description-body,
+.qa-paper.qa-combined-paper .qa-description-content { height: 198px !important; }
+.qa-paper.qa-combined-paper .qa-tests tbody tr { height: 18px !important; }
+.qa-paper.qa-combined-paper .qa-comments,
+.qa-paper.qa-combined-paper .qa-comment-lines { height: 56px !important; }
+.qa-paper.qa-combined-paper .qa-comment-lines span { height: 14px !important; }

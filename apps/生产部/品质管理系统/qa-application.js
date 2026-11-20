@@ -420,7 +420,6 @@
         stage.className = 'qa-preview-stage';
         stage.appendChild(buildPaper(formValues(), session));
         wrap.replaceChildren(stage);
-        if (session.recordIds) paginateDescription(stage,formValues(),session);
         wrap.scrollTop = 0;
         wrap.scrollLeft = 0;
       }
@@ -437,9 +436,18 @@
 
   function fitDescription(paper) {
     const description = paper.querySelector('.qa-description-content');
-    for (const size of [11,10,9]) {
-      description.style.fontSize = size + 'px';
-      if (description.scrollHeight <= description.clientHeight+1) return true;
+    const combined = paper.classList.contains('qa-combined-paper');
+    const layouts = combined
+      ? [[11,22,1],[11,18,1],[10,15,1],[10,14,2],[9,13,2],[9,12,3]]
+      : [[11,22,1],[10,22,1],[9,22,1]];
+    for (const [size,lineHeight,columns] of layouts) {
+      Object.assign(description.style,{ fontSize:size+'px',
+        columnCount:String(columns),columnGap:'12px',columnFill:'auto' });
+      description.style.setProperty('line-height',lineHeight+'px','important');
+      const rules = paper.querySelector('.qa-ruled-lines');
+      if (combined && rules) rules.innerHTML = Array.from({length:Math.floor(description.clientHeight/lineHeight)},
+        () => `<span style="height:${lineHeight}px !important"></span>`).join('');
+      if (description.scrollHeight <= description.clientHeight+1 && description.scrollWidth <= description.clientWidth+1) return true;
     }
     return false;
   }
@@ -452,28 +460,24 @@
     const available = viewport.clientWidth - parseFloat(styles.paddingLeft || 0) - parseFloat(styles.paddingRight || 0);
     if (available <= 0) return;
     const scale = previewFit ? Math.min(1, available / 794) : 1;
-    const papers = [...stage.querySelectorAll('.qa-paper')];
     stage.style.width = (794 * scale) + 'px';
-    stage.style.height = ((1123 * papers.length + 20 * (papers.length-1)) * scale) + 'px';
-    papers.forEach((page,index) => {
-      page.style.position = 'absolute';
-      page.style.top = ((1123+20) * index * scale) + 'px';
-      page.style.transform = 'scale(' + scale + ')';
-    });
+    stage.style.height = (1123 * scale) + 'px';
+    paper.style.transform = 'scale(' + scale + ')';
     if (previewFit) viewport.scrollLeft = 0;
     document.getElementById('qaPreviewScale').textContent = Math.round(scale * 100) + '%';
     document.getElementById('qaFitWidth').setAttribute('aria-pressed', String(previewFit));
     document.getElementById('qaOriginalSize').setAttribute('aria-pressed', String(!previewFit));
     const warning = document.getElementById('qaPreviewWarning');
-    const overflow = papers.some(page => page.scrollHeight > 1124 || page.scrollWidth > 795) ||
-      paper.querySelector('.qa-description-content').scrollHeight > 133;
+    const description = paper.querySelector('.qa-description-content');
+    const overflow = paper.scrollHeight > 1124 || paper.scrollWidth > 795 ||
+      description.scrollHeight > description.clientHeight+1 || description.scrollWidth > description.clientWidth+1;
     warning.hidden = !overflow;
-    warning.textContent = overflow ? '内容超出表格可用空间，请返回填写页精简后再导出。' : '';
+    warning.textContent = overflow ? '内容超出单页可用空间，请精简样板描述或减少合并记录后再导出；不会续页或截断内容。' : '';
   }
 
   function buildPaper(model, context) {
     const paper = document.createElement('article');
-    paper.className = 'qa-paper';
+    paper.className = 'qa-paper' + (context.recordIds ? ' qa-combined-paper' : '');
     const companyName = context.info.name.replace(/[A-D]$/, '') + '塑胶制品有限公司';
     const xingxin = context.company === 'dg-xingxin';
     const e = key => esc(model[key]);
@@ -505,43 +509,6 @@
     return paper;
   }
 
-  function takeDescription(element, remaining) {
-    element.textContent = remaining;
-    if (element.scrollHeight <= element.clientHeight+1) return '';
-    const chars = Array.from(remaining);
-    let low = 0, high = chars.length;
-    while (low < high) {
-      const mid = Math.ceil((low+high)/2);
-      element.textContent = chars.slice(0,mid).join('');
-      if (element.scrollHeight <= element.clientHeight+1) low = mid;
-      else high = mid-1;
-    }
-    if (!low) throw new Error('样板描述无法排版，请切回填写页后重新预览');
-    // Keep numbered entries together when a complete entry fits on the page.
-    const newline = chars.slice(0,low).lastIndexOf('\n');
-    if (newline > 0) low = newline+1;
-    element.textContent = chars.slice(0,low).join('');
-    return chars.slice(low).join('');
-  }
-  function paginateDescription(host, model, context) {
-    const first = host.querySelector('.qa-paper');
-    let remaining = takeDescription(first.querySelector('.qa-description-content'),model.description);
-    while (remaining) {
-      const page = document.createElement('article');
-      page.className = 'qa-paper qa-description-continuation';
-      page.innerHTML = `<h2>QA 申请表 - 样板描述（续）</h2>
-        <div class="qa-continuation-meta">报告编号：${esc(model.reportNo)}<br>申请人：${esc(model.requester)}　　日期：${esc(model.receivedDate)}</div>
-        <p>来源：合并 ${context.recordIds.length} 条验货记录</p>
-        <div class="qa-continuation-content"></div>
-        <footer class="qa-paper-footer"><span>HSQR0017</span><span></span></footer>`;
-      host.appendChild(page);
-      remaining = takeDescription(page.querySelector('.qa-continuation-content'),remaining);
-    }
-    const pages = [...host.querySelectorAll('.qa-paper')];
-    pages.forEach((page,index) => { page.querySelector('.qa-paper-footer span:last-child').textContent = 'Page: ' + (index+1) + ' OF ' + pages.length; });
-    return pages;
-  }
-
   async function exportQAApplicationPDF() {
     if (busy || !session) return;
     let host = null;
@@ -566,20 +533,15 @@
       await document.fonts.ready;
       await Promise.all([...paper.querySelectorAll('img')].map(img => img.decode()));
       await new Promise(resolve => requestAnimationFrame(resolve));
-      const pages = context.recordIds ? paginateDescription(host,model,context) : [paper];
-      if (!fitDescription(paper)) throw new Error('样板描述超过一页模板的可用空间，请精简后再导出');
+      if (!fitDescription(paper)) throw new Error('样板描述超出单页容量，请精简描述或减少合并记录后再导出');
       if ([...paper.querySelectorAll('.qa-data-row td')].some(td => td.scrollWidth > td.clientWidth+1)) throw new Error('基础资料内容过长，请调整文字后再导出');
-      if (pages.some(page => page.scrollHeight > 1124 || page.scrollWidth > 795)) throw new Error('申请表内容超出页面，请精简基础资料后再导出');
+      if (paper.scrollHeight > 1124 || paper.scrollWidth > 795) throw new Error('申请表内容超出单页，请精简基础资料后再导出');
+      const canvas = await html2canvas(paper,{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true,windowWidth:794,windowHeight:1123,scrollX:0,scrollY:0});
       const PDF = window.jspdf ? window.jspdf.jsPDF : jsPDF;
       const pdf = new PDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
-      for (let index=0; index<pages.length; index++) {
-        checkActor(context);
-        const canvas = await html2canvas(pages[index],{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true,windowWidth:794,windowHeight:1123,scrollX:0,scrollY:0});
-        if (index > 0) pdf.addPage();
-        const ratio = Math.min(210/canvas.width,297/canvas.height);
-        const width = canvas.width*ratio, height = canvas.height*ratio;
-        pdf.addImage(canvas.toDataURL('image/png'),'PNG',(210-width)/2,0,width,height,undefined,'FAST');
-      }
+      const ratio = Math.min(210/canvas.width,297/canvas.height);
+      const width = canvas.width*ratio, height = canvas.height*ratio;
+      pdf.addImage(canvas.toDataURL('image/png'),'PNG',(210-width)/2,0,width,height,undefined,'FAST');
       checkActor(context);
       if (session !== context) throw new Error('申请表已关闭，请重新打开后导出');
       const safe = value => String(value || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'').slice(0,60);

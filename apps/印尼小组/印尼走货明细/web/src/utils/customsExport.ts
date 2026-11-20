@@ -13,7 +13,7 @@ import { isPaperRope, shipmentCbmPerCarton, shipmentCbmTotal, shipmentNetTotalKg
 import { bindInvoiceLookupSerial, documentRow, rebindDocumentFormula, type DocumentTableLayout } from './documentTemplateFormula'
 import auxiliaryDocumentLayout from './auxiliaryDocumentLayout.json'
 import { AUXILIARY_TABLES, auxiliaryDetailFormulas } from './auxiliaryDocumentFormula'
-import { invoiceDetailGroups, invoiceDetailSumFormula } from './invoiceDetailGroups'
+import { invoiceDetailGroups } from './invoiceDetailGroups'
 import { consolidateShipmentItems } from './shipmentConsolidation'
 import { shipmentImages } from './shipmentImages'
 import { appendShipmentDocumentSheets, shipmentDocumentBatches } from './shipmentDocumentOverflow'
@@ -1621,7 +1621,7 @@ async function buildCustomsWorkbookBatch(input: CustomsExportInput, selectedGrou
   if (!input.mainOnly) await restoreApprovedAuxiliaryLayout(outZip)
   await ensureMainTableGrid(outZip, newName, mainTotalRow)
   await mergeMainCartonCells(outZip, newName, cartonRows)
-  if (!input.mainOnly) await groupGenericInvoice(outZip, newName, sorted.map(effCustoms), ws, wbObj.Sheets['商品汇总表'])
+  if (!input.mainOnly) await groupGenericInvoice(outZip, newName, sorted.map(effCustoms), ws, wbObj.Sheets['商品汇总表'], wbObj.Sheets['单位对照'])
   if (!input.mainOnly) await restoreAuxiliaryFormulas(outZip, sorted, form, newName)
   if (!input.mainOnly) await formatHengxinchangInvoiceFooters(outZip)
   if (!input.mainOnly) await compactEmptyInvoiceFooters(outZip)
@@ -2130,13 +2130,39 @@ async function formatHengxinchangInvoiceFooters(zip: JSZip) {
 }
 
 // 仅重排通用“发票”，不改变主明细及其他单据的顺序。
-async function groupGenericInvoice(zip: JSZip, mainName: string, companies: string[], main: XLSX.WorkSheet, catalogue?: XLSX.WorkSheet) {
+async function groupGenericInvoice(zip: JSZip, mainName: string, companies: string[], main: XLSX.WorkSheet, catalogue?: XLSX.WorkSheet, unitSheet?: XLSX.WorkSheet) {
   const parts = await workbookSheetParts(zip)
   const path = parts.get('发票')
   if (!path) return
   const parser = new DOMParser()
   const serializer = new XMLSerializer()
   const doc = parser.parseFromString(await zip.file(path)!.async('string'), 'application/xml')
+  const styles = parser.parseFromString(await zip.file('xl/styles.xml')!.async('string'), 'application/xml')
+  const xfs = styleCollection(styles.documentElement as XmlElement, 'cellXfs')!
+  const fills = styleCollection(styles.documentElement as XmlElement, 'fills')!
+  const greenStyles = new Map<string, string>()
+  let greenFill: string | undefined
+  const markMerged = (row: XmlElement) => {
+    if (greenFill == null) {
+      greenFill = String(directChildren(fills, 'fill').length)
+      const fill = styles.createElementNS(SPREADSHEET_NS, 'fill') as XmlElement
+      const pattern = styles.createElementNS(SPREADSHEET_NS, 'patternFill') as XmlElement
+      pattern.setAttribute('patternType', 'solid')
+      const color = styles.createElementNS(SPREADSHEET_NS, 'fgColor') as XmlElement
+      color.setAttribute('rgb', 'FFC6E0B4'); pattern.appendChild(color); fill.appendChild(pattern); fills.appendChild(fill)
+    }
+    for (const cell of directChildren(row, 'c')) {
+      if (!/^[C-M]$/.test(cellColumn(cell.getAttribute('r') || ''))) continue
+      const base = cell.getAttribute('s') || '0'
+      let id = greenStyles.get(base)
+      if (!id) {
+        const xf = directChildren(xfs, 'xf')[Number(base)].cloneNode(true) as XmlElement
+        xf.setAttribute('fillId', greenFill); xf.setAttribute('applyFill', '1')
+        id = String(directChildren(xfs, 'xf').length); xfs.appendChild(xf); greenStyles.set(base, id)
+      }
+      cell.setAttribute('s', id)
+    }
+  }
   const data = doc.getElementsByTagNameNS(SPREADSHEET_NS, 'sheetData')[0]
   const rows = Array.from(data.getElementsByTagNameNS(SPREADSHEET_NS, 'row'))
   const detail = rows.find(row => row.getAttribute('r') === '9')
@@ -2155,29 +2181,17 @@ async function groupGenericInvoice(zip: JSZip, mainName: string, companies: stri
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(index)
   })
-  // 商品名称引用主明细 E 列“套公式名称”，F 列保留完整中文名称供申报内容匹配。
+  // 商品名称引用主明细 E 列“套公式名称”；编号及申报内容按该名称查商品汇总表。
   const refs: Record<string, string> = { C: 'B', D: 'E', E: 'G', F: 'K', G: 'J', H: 'Z', I: 'AA', J: 'P', K: 'Q', L: 'AT' }
-  const normalizeName = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, '').normalize('NFKC')
-  const catalogueRows = new Map<string, number[]>()
-  if (catalogue) {
-    for (const address of Object.keys(catalogue)) {
-      if (!/^B\d+$/.test(address) || address === 'B1') continue
-      const name = normalizeName(catalogue[address]?.v)
-      if (!name) continue
-      catalogueRows.set(name, [...(catalogueRows.get(name) || []), Number(address.slice(1))])
+  const catalogueCodes = new Map<string, string | number>()
+  const catalogueDeclarations = new Map<string, string>()
+  for (const address of Object.keys(catalogue || {})) {
+    if (!/^B\d+$/.test(address)) continue
+    const name = String(catalogue![address]?.v ?? '').toLowerCase()
+    if (!catalogueCodes.has(name)) {
+      catalogueCodes.set(name, catalogue![`A${address.slice(1)}`]?.v ?? 0)
+      catalogueDeclarations.set(name, String(catalogue![`D${address.slice(1)}`]?.v ?? ''))
     }
-  }
-  const declaration = (index: number) => {
-    const row = index + 4
-    const candidates = catalogueRows.get(normalizeName(main[`F${row}`]?.v)) || []
-    const hs = String(main[`B${row}`]?.v ?? '').trim()
-    const sameHs = candidates.filter(r => String(catalogue?.[`A${r}`]?.v ?? '').trim() === hs)
-    const matches = sameHs.length ? sameHs : candidates
-    // 不按 HS 单独匹配，也不猜测相近品名；重名且内容冲突时保持空白。
-    if (!matches.length || new Set(matches.map(r => String(catalogue?.[`D${r}`]?.v ?? ''))).size !== 1) return undefined
-    const match = matches[0]
-    const value = String(catalogue?.[`D${match}`]?.v ?? '')
-    return value ? { value, formula: `'商品汇总表'!D${match}` } : undefined
   }
   // 主表公式尚未经过 Excel 重算，金额/重量的缓存需按同一规则计算。
   const sourceValue = (source: string, index: number): string | number => {
@@ -2197,11 +2211,12 @@ async function groupGenericInvoice(zip: JSZip, mainName: string, companies: stri
       cell.setAttribute('r', (cell.getAttribute('r') || '').replace(/\d+$/, String(number)))
       while (cell.firstChild) cell.removeChild(cell.firstChild)
       cell.removeAttribute('t')
+      cell.removeAttribute('cm')
     }
     data.appendChild(row)
     return row
   }
-  const put = (row: XmlElement, col: string, value: string | number, formula?: string) => {
+  const put = (row: XmlElement, col: string, value: string | number, formula?: string, spillCache = false) => {
     const ref = `${col}${row.getAttribute('r')}`
     let cell = (Array.from(row.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as XmlElement[]).find(c => c.getAttribute('r') === ref)
     if (!cell) {
@@ -2213,10 +2228,10 @@ async function groupGenericInvoice(zip: JSZip, mainName: string, companies: stri
       else row.appendChild(cell)
     }
     while (cell.firstChild) cell.removeChild(cell.firstChild)
-    cell.setAttribute('t', typeof value === 'number' ? 'n' : formula ? 'str' : 'inlineStr')
+    cell.setAttribute('t', typeof value === 'number' ? 'n' : formula || spillCache ? 'str' : 'inlineStr')
     if (formula) { const f = doc.createElementNS(SPREADSHEET_NS, 'f'); f.textContent = formula; cell.appendChild(f) }
-    const node = doc.createElementNS(SPREADSHEET_NS, typeof value === 'string' && !formula ? 'is' : 'v')
-    if (typeof value === 'string' && !formula) { const text = doc.createElementNS(SPREADSHEET_NS, 't'); text.textContent = value; node.appendChild(text) }
+    const node = doc.createElementNS(SPREADSHEET_NS, typeof value === 'string' && !formula && !spillCache ? 'is' : 'v')
+    if (typeof value === 'string' && !formula && !spillCache) { const text = doc.createElementNS(SPREADSHEET_NS, 't'); text.textContent = value; node.appendChild(text) }
     else node.textContent = String(value)
     cell.appendChild(node)
   }
@@ -2228,64 +2243,121 @@ async function groupGenericInvoice(zip: JSZip, mainName: string, companies: stri
   const detailGroups = new Map([...groups].map(([company, indices]) => [company, invoiceDetailGroups(indices.map(index => ({
     index, name: String(sourceValue('E', index)), hs: String(sourceValue('B', index)), unit: String(sourceValue('J', index)),
   })))]))
-  // Dense serials retain original first-appearance order, even when company groups reorder rows.
-  const serials = new Map([...detailGroups.values()].flat().map(indices => indices[0]).sort((a, b) => a - b)
-    .map((index, serial) => [index, serial + 1]))
+  const mainRef = (column: string) => formulaRef(mainName, `${column}:${column}`).replace(/^=/, '')
+  const units: Array<[string[], string]> = [
+    [['KGM', 'KG', 'KGS', '公斤', '千克'], '千克'],
+    [['TNE', 'TON', 'TONS', '吨'], '吨'],
+    [['ROLL', 'ROLLS', '卷'], '卷'],
+    [['PCE', 'PCS', 'PC', '个'], '个'],
+    [['SET', 'SETS', '套'], '套'],
+    [['M', 'MTR', '米'], '米'],
+  ]
+  const unitValues = new Map(units.flatMap(([codes, label]) => codes.map(code => [code, label] as const)))
+  for (const address of Object.keys(unitSheet || {})) {
+    if (!/^A\d+$/.test(address) || address === 'A1') continue
+    const code = String(unitSheet![address]?.v ?? '').trim().toUpperCase()
+    if (code) unitValues.set(code, String(unitSheet![`B${address.slice(1)}`]?.v ?? ''))
+  }
+  const unitFormula = (ref: string) => {
+    const fallback = units.reduceRight((otherwise, [codes, label]) =>
+      `IF(OR(${codes.map(code => `UPPER(TRIM(${ref}))="${code}"`).join(',')}),"${label}",${otherwise})`, ref)
+    return `_xlfn.XLOOKUP(UPPER(TRIM(${ref})),'单位对照'!$A:$A,'单位对照'!$B:$B,${fallback})`
+  }
+  // SUMIFS treats wildcards as patterns; these criteria represent literal names.
+  const criterion = (ref: string, value: string) => /[~*?]/.test(value)
+    ? `SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(${ref},"~","~~"),"*","~*"),"?","~?")` : ref
   for (const [company, indices] of groups) {
     const start = next
-    for (const members of detailGroups.get(company)!) {
+    const companyDetails = detailGroups.get(company)!
+    const totalRow = start + companyDetails.length
+    const names = companyDetails.map(members => String(sourceValue('E', members[0])))
+    const sourceNames = [...new Map(indices.map(index => {
+      const name = String(sourceValue('E', index)); return [name.toLowerCase(), name] as const
+    })).values()]
+    // UNIQUE must produce exactly these rows; incompatible HS/units and other repeated names stay separate.
+    const uniqueNames = names.every(name => name.trim()) && names.length === sourceNames.length
+      && names.every((name, index) => name.toLowerCase() === sourceNames[index].toLowerCase())
+      && new Set(names.map(name => name.toLowerCase())).size === names.length
+      && ![...groups.keys()].some(other => other !== company && other.toLowerCase() === company.toLowerCase())
+    for (const members of companyDetails) {
       const index = members[0]
       const row = makeRow(detail, next)
       for (const member of members) newRows.set(member, next)
       next++
-      put(row, 'B', serials.get(index)!)
+      // B must remain the actual main-table serial for company+serial LOOKUP.
+      put(row, 'B', Number(sourceValue('A', index)) || index + 1)
       for (const [col, source] of Object.entries(refs)) {
-        if (members.length > 1 && ['F', 'I', 'J', 'K', 'L'].includes(col)) {
-          const value = members.reduce((sum, member) => sum + (Number(sourceValue(source, member)) || 0), 0)
-          const references = members.map(member => formulaRef(mainName, `${source}${member + 4}`).replace(/^=/, ''))
-          put(row, col, value, invoiceDetailSumFormula(references))
+        if (col === 'C' || col === 'E') {
+          const name = String(sourceValue('E', index)).toLowerCase(), r = next - 1
+          const lookup = `_xlfn.XLOOKUP(D${r},'商品汇总表'!$B:$B,'商品汇总表'!$${col === 'C' ? 'A' : 'D'}:$${col === 'C' ? 'A' : 'D'},"")`
+          // A blank description remains blank; a numeric or text zero remains visible.
+          const formula = col === 'C' ? lookup : `IFNA(IF(COUNTBLANK(INDEX('商品汇总表'!$D:$D,MATCH(D${r},'商品汇总表'!$B:$B,0)))>0,"",${lookup}&""),"")`
+          put(row, col, (col === 'C' ? catalogueCodes : catalogueDeclarations).get(name) ?? '', formula)
           continue
         }
-        if (members.length > 1 && col === 'H') {
+        if (col === 'D') {
+          const cell = directChildren(row, 'c').find(cell => cell.getAttribute('r') === `D${next - 1}`)!
+          cell.removeAttribute('cm')
+          const formula = uniqueNames ? undefined : `IFERROR(LOOKUP(1,0/((${mainRef('AR')}=$D$${totalRow})*(${mainRef('A')}=B${next - 1})),${mainRef('E')}),"")`
+          // Spill children carry cached values, as in the native template, not inline text.
+          put(row, col, sourceValue('E', index), formula, uniqueNames)
+          continue
+        }
+        if (['F', 'I', 'J', 'K', 'L'].includes(col)) {
+          const value = members.reduce((sum, member) => sum + (Number(sourceValue(source, member)) || 0), 0)
+          if (uniqueNames || members.length > 1) {
+            const criteria = [mainRef('$E'), criterion(`$D${next - 1}`, String(sourceValue('E', index))),
+              mainRef('$AR'), criterion(`$D$${totalRow}`, company)]
+            // Same-name rows with different HS/unit must not be counted in both summaries.
+            if (!uniqueNames && companyDetails.some(other => other !== members
+              && String(sourceValue('E', other[0])).toLowerCase() === String(sourceValue('E', index)).toLowerCase())) {
+              criteria.push(mainRef('$B'), criterion(formulaRef(mainName, `$B$${index + 4}`).replace(/^=/, ''), String(sourceValue('B', index))),
+                mainRef('$J'), criterion(formulaRef(mainName, `$J$${index + 4}`).replace(/^=/, ''), String(sourceValue('J', index))))
+            }
+            put(row, col, value, `SUMIFS(${mainRef('$' + source)},${criteria.join(',')})`)
+          } else put(row, col, value, undefined, true)
+          continue
+        }
+        if (col === 'H') {
           const quantity = members.reduce((sum, member) => sum + (Number(sourceValue('K', member)) || 0), 0)
           const amount = members.reduce((sum, member) => sum + (Number(sourceValue('AA', member)) || 0), 0)
-          const rowNo = row.getAttribute('r')
-          put(row, col, quantity ? amount / quantity : 0, `IFERROR(I${rowNo}/F${rowNo},0)`)
+          const aggregate = uniqueNames || members.length > 1
+          put(row, col, aggregate ? (quantity ? amount / quantity : 0) : sourceValue('Z', index),
+            aggregate ? `IFERROR(I${next - 1}/F${next - 1},0)` : undefined)
           continue
         }
         if (col === 'G') {
-          const unitRef = formulaRef(mainName, `J${index + 4}`).replace(/^=/, '')
           const unit = String(sourceValue('J', index)).trim()
-          const units: Array<[string[], string]> = [
-            [['KGM', 'KG', 'KGS', '公斤', '千克'], '千克'],
-            [['TNE', 'TON', 'TONS', '吨'], '吨'],
-            [['ROLL', 'ROLLS', '卷'], '卷'],
-            [['PCE', 'PCS', 'PC', '个'], '个'],
-            [['SET', 'SETS', '套'], '套'],
-            [['M', 'MTR', '米'], '米'],
-          ]
-          const value = units.find(([codes]) => codes.includes(unit.toUpperCase()))?.[1] || unit
-          const formula = units.reduceRight((fallback, [codes, label]) =>
-            `IF(OR(${codes.map(code => `UPPER(TRIM(${unitRef}))="${code}"`).join(',')}),"${label}",${fallback})`, unitRef)
-          put(row, col, value, formula)
-          continue
-        }
-        if (col === 'I') {
-          const rowNo = row.getAttribute('r')
-          put(row, col, sourceValue('AA', index), `F${rowNo}*H${rowNo}`)
-          continue
-        }
-        if (col === 'E') {
-          const matches = [...new Map(members.map(declaration).filter(match => match != null)
-            .map(match => [match.value, match])).values()]
-          put(row, col, matches.map(match => match.value).join('\n'), matches.length
-            ? matches.map(match => match.formula).join('&CHAR(10)&') : undefined)
+          const aggregate = uniqueNames || members.length > 1
+          const lookup = uniqueNames
+            ? `_xlfn.XLOOKUP(1,(${mainRef('$E')}=$D${next - 1})*(${mainRef('$AR')}=$D$${totalRow}),${mainRef('$J')},"")`
+            : `_xlfn.XLOOKUP($B${next - 1},${mainRef('$A')},${mainRef('$J')},"")`
+          put(row, col, unitValues.get(unit.toUpperCase()) ?? unit,
+            aggregate ? `_xlfn.LET(_xlpm.unit,${lookup},${unitFormula('_xlpm.unit')})` : undefined, !aggregate)
           continue
         }
         const address = `${source}${index + 4}`
         put(row, col, sourceValue(source, index), formulaRef(mainName, address).replace(/^=/, ''))
       }
+      if (!uniqueNames && members.length === 1) {
+        const r = next - 1
+        const lookup = (source: string) => `_xlfn.XLOOKUP(1,_xlpm.match,${mainRef('$' + source)},"")`
+        const formula = `_xlfn.LET(_xlpm.match,(${mainRef('$A')}=$B${r})*(${mainRef('$E')}=$D${r})*(${mainRef('$AR')}=$D$${totalRow}),_xlpm.unit,${lookup('J')},_xlfn.HSTACK(${[lookup('K'), unitFormula('_xlpm.unit'), ...['Z', 'AA', 'P', 'Q', 'AT'].map(lookup)].join(',')}))`
+        put(row, 'F', sourceValue('K', index), formula)
+        const cell = directChildren(row, 'c').find(cell => cell.getAttribute('r') === `F${r}`)!
+        const f = directChild(cell, 'f')!
+        f.setAttribute('t', 'array'); f.setAttribute('ref', `F${r}:L${r}`); cell.setAttribute('cm', '1')
+      }
       put(row, 'M', '箱')
+      if (members.length > 1) markMerged(row)
+    }
+    if (uniqueNames) {
+      const firstRow = directChildren(data, 'row').find(row => rowNumber(row) === start)!
+      put(firstRow, 'D', names[0], `_xlfn.UNIQUE(_xlfn._xlws.FILTER(${mainRef('E')},${mainRef('AR')}=$D$${totalRow},""))`)
+      const cell = directChildren(firstRow, 'c').find(cell => cell.getAttribute('r') === `D${start}`)!
+      const formula = directChild(cell, 'f')!
+      // Approved templates retain XLDAPR cell metadata #1 for native spill formulas.
+      formula.setAttribute('t', 'array'); formula.setAttribute('ref', `D${start}:D${totalRow - 1}`); cell.setAttribute('cm', '1')
     }
     subtotalRows.push(next)
     const total = makeRow(subtotal, next++)
@@ -2327,6 +2399,9 @@ async function groupGenericInvoice(zip: JSZip, mainName: string, companies: stri
   if (merges) merges.setAttribute('count', String(merges.getElementsByTagNameNS(SPREADSHEET_NS, 'mergeCell').length))
   doc.getElementsByTagNameNS(SPREADSHEET_NS, 'dimension')[0]?.setAttribute('ref', `B1:M${lastRow}`)
   zip.file(path, serializer.serializeToString(doc))
+  fills.setAttribute('count', String(directChildren(fills, 'fill').length))
+  xfs.setAttribute('count', String(directChildren(xfs, 'xf').length))
+  zip.file('xl/styles.xml', serializer.serializeToString(styles))
   await ensureGenericInvoiceGrid(zip, path, lastRow)
   const workbook = parser.parseFromString(await zip.file('xl/workbook.xml')!.async('string'), 'application/xml')
   const sheetIndex = Array.from(workbook.getElementsByTagNameNS(SPREADSHEET_NS, 'sheet')).findIndex(sheet => sheet.getAttribute('name') === '发票')
@@ -2863,6 +2938,7 @@ async function restoreAuxiliaryFormulas(zip: JSZip, items: CustomsItem[], form: 
     const values = Object.fromEntries(directChildren(row, 'c').map(c => [cellColumn(c.getAttribute('r') || ''), valueOf(c)]))
     if (typeof values.B === 'number' && values.B > 0) details.set(values.B, values)
   }
+  const activeSerials = [...details.keys()].sort((a, b) => a - b)
   const sum = (column: string) => [...details.values()].reduce((total, row) => total + (Number(row[column]) || 0), 0)
   const number = [...new Set(items.map(item => item.contract_no?.trim()).filter(Boolean))].join(' / ')
   const date = excelDate(form.shipDate || form.loadDate || items.find(item => item.contract_date)?.contract_date || '')
@@ -2922,7 +2998,7 @@ async function restoreAuxiliaryFormulas(zip: JSZip, items: CustomsItem[], form: 
     // template serials. Only active invoice serials receive formulas/data.
     for (let r = table.start; r < total; r++) {
       for (const cell of directChildren(getRow(doc, r), 'c')) clearXmlCell(cell)
-      const serial = r - table.start + 1, values = details.get(serial)
+      const serial = activeSerials[r - table.start], values = details.get(serial)
       if (!values) continue
       put(doc, `A${r}`, serial)
       for (const [column, rule] of Object.entries(auxiliaryDetailFormulas(table.name, r))) {

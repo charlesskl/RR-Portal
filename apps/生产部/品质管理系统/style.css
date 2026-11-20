@@ -3300,3 +3300,14 @@ body.theme-light #loginPassword {
 .qa-paper.qa-combined-paper .qa-comments,
 .qa-paper.qa-combined-paper .qa-comment-lines { height: 56px !important; }
 .qa-paper.qa-combined-paper .qa-comment-lines span { height: 14px !important; }
+
+/* 描述文字和横线共用行盒，混排中英文时也不会逐行累积错位。 */
+.qa-paper .qa-description-rows { white-space: normal !important; }
+.qa-paper .qa-description-rows .qa-description-line {
+  min-height: var(--qa-description-line-height, 22px) !important;
+  line-height: calc(var(--qa-description-line-height, 22px) - 1px) !important;
+  margin: 0 !important; padding: 0 !important;
+  border-bottom: 1px solid #555 !important;
+  white-space: pre-wrap !important; break-inside: avoid;
+}
+.qa-paper.qa-combined-paper .qa-ruled-lines[hidden] { display: none !important; }

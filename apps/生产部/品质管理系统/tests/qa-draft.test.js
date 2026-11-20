@@ -13,7 +13,7 @@ function harness(){
  const window={__QC_AUTH:auth,addEventListener(){},__QC_REQUEST:async(_url,options)=>new Promise(resolve=>requests.push({body:JSON.parse(options.body),resolve}))};
  const c=vm.createContext({window,URL,AbortController,location:{href:'http://127.0.0.1/'},document:{currentScript:null,getElementById:el,querySelectorAll:()=>[]},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},todayStr:()=>day,getCompany:()=>auth.company,canView:()=>true,effPerms:()=>({records:{e:1}}),QC_COMPANIES:[{id:auth.company}],setTimeout:fn=>{timers.set(++seq,fn);return seq},clearTimeout:id=>timers.delete(id),console});
  let src=fs.readFileSync(path.join(__dirname,'../qa-application.js'),'utf8');
- src=src.replace(/\}\)\(\);\s*$/, 'window.fixture={set:c=>session=c,changedApplication,saveApplication,flushApplication,closingWrites,draftKey,applyValues,formValues,syncGenerationDate,sameEditableValues,applicationSelection,fitDescription};})();');vm.runInContext(src,c);
+ src=src.replace(/\}\)\(\);\s*$/, 'window.fixture={set:c=>session=c,changedApplication,saveApplication,flushApplication,closingWrites,draftKey,applyValues,formValues,syncGenerationDate,sameEditableValues,applicationSelection,fitDescription,singleNameInDescription};})();');vm.runInContext(src,c);
  const context={auth,user:auth.user,username:'fixture',company:auth.company,csrfToken:'synthetic',editable:true,loaded:true,loading:false,version:1,record:{id:1},generationDate:day,savedJSON:JSON.stringify(data)};
  window.fixture.set(context);
  return {context,storage,timers,requests,window,el,setDay:v=>day=v,fixture:window.fixture,change:v=>{el('qa_sampleQty').value=v;window.fixture.changedApplication()},ack:async(i=0)=>{const q=requests[i];q.resolve({ok:true,json:async()=>({ok:true,application:{recordId:1,version:i+2,data:q.body.data,updatedAt:'2026-11-18T00:00:00Z',updatedBy:'fixture'}})});await new Promise(resolve=>setImmediate(resolve))}};
@@ -95,4 +95,25 @@ test('single-page fitting rejects overflow without removing or changing numbered
  const paper={classList:{contains:()=>true},querySelector:selector=>selector==='.qa-description-content'?description:rules};
  assert.equal(h.fixture.fitDescription(paper),false);assert.equal(description.textContent,text);
  assert.ok(Number.parseFloat(description.style.fontSize)>=9,'do not hide overflow by shrinking text below the readable lower bound');
+});
+
+test('one record uses the same numbered description and blank product name as a combined application',()=>{
+ const h=harness();
+ const selected=h.fixture.applicationSelection(10197,[{id:10197,productName:'兔子公仔',productNo:'9283',client:'ZURU',supplier:'华登B'}],'2026-11-20');
+ assert.equal(selected.defaults.productName,'');assert.equal(selected.defaults.description,'1. 兔子公仔');
+ assert.equal(selected.defaults.productNo,'9283');assert.equal(selected.defaults.customer,'ZURU');
+ assert.equal(selected.record.id,10197);assert.equal(selected.recordIds,null);
+});
+test('opening a legacy single application moves its name into description and retains all existing notes',()=>{
+ const h=harness();h.fixture.applyValues({productName:'兔子公仔',description:'检查装配强度\n原有备注',requester:'王雨',sampleQty:'12',standards:[],tests:[]});
+ const actual=h.fixture.formValues();assert.equal(actual.productName,'');assert.equal(actual.description,'1. 兔子公仔\n检查装配强度\n原有备注');
+ assert.equal(actual.requester,'王雨');assert.equal(actual.sampleQty,'12');
+});
+test('a legacy name already listed in the description is not repeated or treated as a different draft',()=>{
+ const h=harness();const old={...h.fixture.formValues(),productName:'兔子公仔',description:'1. 兔子公仔\n检查装配强度'};
+ const current={...old,productName:''};
+ assert.equal(h.fixture.sameEditableValues(old,current),true);
+ const normalized=h.fixture.singleNameInDescription(old);assert.equal(normalized.description,current.description);assert.equal(normalized.productName,'');
+ assert.equal(h.fixture.singleNameInDescription(normalized).description,current.description);
+ assert.equal(h.fixture.sameEditableValues(old,{...current,description:current.description+'\n新增备注'}),false);
 });

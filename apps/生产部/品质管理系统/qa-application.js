@@ -58,8 +58,15 @@
     input.value = date;
     return changed;
   }
+  function singleNameInDescription(data, context = session) {
+    if (context?.recordIds || !data || typeof data.productName !== 'string' || !data.productName.trim()) return data;
+    const name = data.productName.trim();
+    const description = typeof data.description === 'string' ? data.description : '';
+    const listed = description.split('\n').some(line => line.trim().replace(/^\d+[.、．]\s*/, '') === name);
+    return { ...data, productName:'', description:listed ? description : '1. ' + name + (description ? '\n' + description : '') };
+  }
   function sameEditableValues(left, right) {
-    return JSON.stringify({ ...left, receivedDate:'' }) === JSON.stringify({ ...right, receivedDate:'' });
+    return JSON.stringify({ ...singleNameInDescription(left), receivedDate:'' }) === JSON.stringify({ ...singleNameInDescription(right), receivedDate:'' });
   }
   function formValues() {
     const result = {};
@@ -96,6 +103,7 @@
     }
   }
   function applyValues(data) {
+    data = singleNameInDescription(data);
     for (const key of ['customer','productName','productNo','department','requester','ageGrade','source','receivedDate','sampleQty','description','reportNo','stage','purpose','language']) {
       if (key !== 'receivedDate' && typeof data[key] === 'string') document.getElementById('qa_' + key).value = data[key];
     }
@@ -173,8 +181,8 @@
       context.dirty = JSON.stringify(formValues()) !== context.savedJSON;
       updateControls(context);
       if (context.conflicted) saveStatus(context,'本机未保存内容与已保存版本不同，已保留本机内容；请核对后再选择采用已保存版本。',true);
-      else if (context.dirty && context.editable) { keepDraft(context,formValues()); saveStatus(context,restoredDraft ? '已恢复本机暂存内容，等待自动保存…' : '日期已更新为生成当天，等待自动保存…'); scheduleSave(context); }
-      else if (context.dirty) saveStatus(context,'已读取申请，日期按生成当天显示（当前账号只读）');
+      else if (context.dirty && context.editable) { keepDraft(context,formValues()); saveStatus(context,restoredDraft ? '已恢复本机暂存内容，等待自动保存…' : '申请表已按当前规则更新，等待自动保存…'); scheduleSave(context); }
+      else if (context.dirty) saveStatus(context,'已读取申请，按当前填写规则显示（当前账号只读）');
       else saveStatus(context,application ? savedMessage(application) : '尚未保存，填写后会自动保存' + (context.editable ? '' : '（当前账号只读）'));
     } catch (error) {
       if (session !== context) return;
@@ -344,12 +352,12 @@
     const record = combined ? { id:'group:' + recordIds.join(','), supplier:unique('supplier').join('、') } : { ...records[0] };
     const defaults = {
       customer:unique('client').join('、').length <= 120 ? unique('client').join('、') : '',
-      productName:combined ? '' : String(record.productName ?? ''),
+      productName:'',
       productNo:productNos.join('、').length <= 100 ? productNos.join('、') : '',
       department:'品质部', requester:'', ageGrade:'', source:'来料',
       receivedDate:today, sampleQty:'',
-      description:combined ? records.map((item,index) => (index+1) + '. ' + (item.productName || '未填写款式名称') +
-        (productNos.length > 1 ? '（货号：' + (item.productNo || '未填写') + '）' : '')).join('\n') : '',
+      description:records.map((item,index) => (index+1) + '. ' + (item.productName || '未填写款式名称') +
+        (productNos.length > 1 ? '（货号：' + (item.productNo || '未填写') + '）' : '')).join('\n'),
       reportNo:'QA-' + today.replace(/-/g,'') + '-' + (combined ? 'M' + Date.now() : record.id),
       language:'zh', stage:'', purpose:'',
     };

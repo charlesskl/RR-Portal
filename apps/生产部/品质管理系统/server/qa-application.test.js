@@ -42,7 +42,7 @@ test.before(async()=>{
   insert.run('testadmin',Auth.hashPassword(password),'admin',1,null);
   insert.run('reader',Auth.hashPassword(password),'viewer',1,JSON.stringify({records:{v:1,e:0}}));
   insert.run('hidden',Auth.hashPassword(password),'viewer',1,JSON.stringify({records:{v:0,e:0}}));
-  db.prepare('INSERT INTO records(id,date,supplier,productNo,status,updatedAt) VALUES(?,?,?,?,?,?)').run(101,'2026-11-18',company,'77907','approved','2026-11-18T00:00:00Z');
+  for (const id of [101,102,103]) db.prepare('INSERT INTO records(id,date,supplier,productNo,status,updatedAt) VALUES(?,?,?,?,?,?)').run(id,'2026-11-18',company,'77907','approved','2026-11-18T00:00:00Z');
  });
  await start();admin=await login();reader=await login('reader');hidden=await login('hidden');
 });
@@ -88,4 +88,45 @@ test('malformed or oversized forms do not change the saved application',async()=
  }
  assert.equal((await request(endpoint(101),{session:admin,method:'POST',body:{data:model()}})).status,400);
  assert.deepEqual((await request(endpoint(101),{session:admin})).json.application,before);
+});
+
+const groupEndpoint = ids => '/api/qa-application?recordIds=' + ids;
+test('a combined application has a canonical independent version and persists after restart',async()=>{
+ const before=recordSnapshot(), single=(await request(endpoint(101),{session:admin})).json.application;
+ const group=model({productName:'',description:'1. 身体\n2. 透明配件',reportNo:'QA-combined-1'});
+ assert.equal((await request(groupEndpoint('102,101'),{session:admin})).json.application,null);
+ const saved=await request(groupEndpoint('102,101'),{method:'POST',session:admin,body:{baseVersion:0,data:group}});
+ assert.equal(saved.status,200);assert.equal(saved.json.application.recordId,'group:101,102');assert.equal(saved.json.application.version,1);
+ assert.deepEqual((await request(groupEndpoint('101,102'),{session:reader})).json.application.data,group);
+ assert.deepEqual((await request(endpoint(101),{session:admin})).json.application,single);
+ assert.equal((await request(groupEndpoint('101,103'),{session:admin})).json.application,null);
+ const conflict=await request(groupEndpoint('101,102'),{method:'POST',session:admin,body:{baseVersion:0,data:model()}});
+ assert.equal(conflict.status,409);
+ const retry=await request(groupEndpoint('101,102'),{method:'POST',session:admin,body:{baseVersion:0,data:group}});
+ assert.equal(retry.json.application.version,1);
+ const longer={...group,description:Array.from({length:50},(_,i)=>(i+1)+'. '+ '长款式名称'.repeat(12)).join('\n')};
+ const edit=await request(groupEndpoint('101,102'),{method:'POST',session:admin,body:{baseVersion:1,data:longer}});
+ assert.equal(edit.status,200);assert.equal(edit.json.application.version,2);
+ await stop();await start();
+ assert.deepEqual((await request(groupEndpoint('102,101'),{session:admin})).json.application.data,longer);
+ assert.equal(recordSnapshot(),before);
+});
+test('combined QA enforces permissions, company boundaries, valid selection and text limits atomically',async()=>{
+ const route=groupEndpoint('101,102');
+ const before=(await request(route,{session:admin})).json.application;
+ assert.equal((await request(route)).status,401);
+ assert.equal((await request(route,{session:hidden})).status,403);
+ assert.equal((await request(route,{session:reader,method:'POST',body:{baseVersion:2,data:model()}})).status,403);
+ assert.equal((await request(route,{session:admin,method:'POST',csrf:false,body:{baseVersion:2,data:model()}})).status,403);
+ const other=await login('testadmin',B);
+ assert.equal((await request(route,{session:other,company:B})).json.application,null);
+ for(const ids of ['101','101,101','101,0','101,-1','101,1.2','101,102x','101,9007199254740992',Array.from({length:101},(_,i)=>i+1).join(',')]) {
+  assert.equal((await request(groupEndpoint(ids),{session:admin})).status,400,ids);
+ }
+ assert.equal((await request(route+'&recordId=101',{session:admin})).status,400);
+ assert.equal((await request(route+'&recordIds=101,103',{session:admin})).status,400);
+ assert.equal((await request(groupEndpoint('101,999'),{session:admin})).status,404);
+ assert.equal((await request(groupEndpoint('101,999'),{session:admin,method:'POST',body:{baseVersion:0,data:model()}})).status,404);
+ assert.equal((await request(route,{session:admin,method:'POST',body:{baseVersion:2,data:model({description:'x'.repeat(24001)})}})).status,400);
+ assert.deepEqual((await request(route,{session:admin})).json.application,before);
 });

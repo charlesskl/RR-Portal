@@ -2693,6 +2693,11 @@ function _updateBatchBtn() {
   const selCount  = _selectedIds.size;
 
   if (btn) btn.disabled = selCount === 0;
+  const qaButton = document.getElementById('btnBatchQA');
+  if (qaButton) {
+    qaButton.disabled = selCount < 2 || !canView('records');
+    qaButton.textContent = '合并 QA 申请' + (selCount > 0 ? `（${selCount}条）` : '');
+  }
 
   if (countEl) {
     if (selCount > 0) {
@@ -2702,6 +2707,13 @@ function _updateBatchBtn() {
       countEl.style.display = 'none';
     }
   }
+}
+
+/* 多选仅用于生成申请，不改变验货记录或删除选择。 */
+function openSelectedQAApplication(trigger) {
+  const ids = _renderedRecordRows().filter(record => _selectedIds.has(record.id)).map(record => record.id);
+  if (ids.length < 2) { showToast('请先勾选至少两条验货记录', 'info'); return; }
+  void openQAApplication(ids, trigger);
 }
 
 /* ── 批量删除 ── */

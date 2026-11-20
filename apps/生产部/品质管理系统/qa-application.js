@@ -75,7 +75,7 @@
   function readDraft(context) {
     try {
       const raw = localStorage.getItem(draftKey(context));
-      if (!raw || raw.length > 16000) return null;
+      if (!raw || raw.length > (context.recordIds ? 100000 : 16000)) return null;
       const item = JSON.parse(raw);
       return item && item.company === context.company && item.username === context.username && String(item.recordId) === String(context.record.id) &&
         (item.baseVersion === null || Number.isSafeInteger(item.baseVersion) && item.baseVersion >= 0) && item.data && typeof item.data === 'object' ? item : null;
@@ -133,7 +133,8 @@
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(),12000);
     try {
-      const response = await window.__QC_REQUEST('/api/qa-application?recordId=' + encodeURIComponent(context.record.id),
+      const query = context.recordIds ? 'recordIds=' + encodeURIComponent(context.recordIds.join(',')) : 'recordId=' + encodeURIComponent(context.record.id);
+      const response = await window.__QC_REQUEST('/api/qa-application?' + query,
         { method,signal:controller.signal,...(body ? { headers:{'Content-Type':'application/json'},body:JSON.stringify(body) } : {}) });
       const result = await response.json();
       checkActor(context);
@@ -328,26 +329,53 @@
     return overlay;
   }
 
+  function applicationSelection(recordId, data, today) {
+    const combined = Array.isArray(recordId);
+    const ids = combined ? recordId : [recordId];
+    if (!ids.length || combined && (ids.length < 2 || ids.length > 100) ||
+        ids.some(id => !Number.isSafeInteger(Number(id)) || Number(id) < 1) || new Set(ids.map(Number)).size !== ids.length) {
+      throw new Error('合并申请请选择 2 至 100 条有效记录');
+    }
+    const records = ids.map(id => data.find(r => String(r.id) === String(id)));
+    if (records.some(record => !record)) throw new Error('找不到所选的验货记录，请刷新后重新选择');
+    const unique = key => [...new Set(records.map(record => String(record[key] ?? '').trim()).filter(Boolean))];
+    const productNos = unique('productNo');
+    const recordIds = combined ? ids.map(Number).sort((a,b) => a-b) : null;
+    const record = combined ? { id:'group:' + recordIds.join(','), supplier:unique('supplier').join('、') } : { ...records[0] };
+    const defaults = {
+      customer:unique('client').join('、').length <= 120 ? unique('client').join('、') : '',
+      productName:combined ? '' : String(record.productName ?? ''),
+      productNo:productNos.join('、').length <= 100 ? productNos.join('、') : '',
+      department:'品质部', requester:'', ageGrade:'', source:'来料',
+      receivedDate:today, sampleQty:'',
+      description:combined ? records.map((item,index) => (index+1) + '. ' + (item.productName || '未填写款式名称') +
+        (productNos.length > 1 ? '（货号：' + (item.productNo || '未填写') + '）' : '')).join('\n') : '',
+      reportNo:'QA-' + today.replace(/-/g,'') + '-' + (combined ? 'M' + Date.now() : record.id),
+      language:'zh', stage:'', purpose:'',
+    };
+    return { record,recordIds,records,defaults };
+  }
   async function openQAApplication(recordId, trigger = null) {
     try {
       if (busy) return;
       const identity = actor();
       const data = typeof state !== 'undefined' ? state.records : _getData();
-      const record = data.find(r => String(r.id) === String(recordId));
-      if (!record) throw new Error('找不到对应的验货记录，请刷新后重试');
-      const overlay = ensureDialog();
       const today = generationDate();
-      session = { ...identity, record:{ ...record }, trigger,generationDate:today,loading:true,loaded:false,version:null,conflicted:false };
+      const selection = applicationSelection(recordId,data,today);
+      // Finish the previous form before another selection can replace its fields.
+      if (session) closeQAApplication();
+      const overlay = ensureDialog();
+      session = { ...identity,...selection,trigger,generationDate:today,loading:true,loaded:false,version:null,conflicted:false };
       previewFit = true;
-      const defaults = { customer:record.client ?? '', productName:record.productName ?? '', productNo:record.productNo ?? '',
-        department:'品质部', requester:'', ageGrade:'', source:'来料',
-        receivedDate:today, sampleQty:'', description:'',
-        reportNo:'QA-' + today.replace(/-/g,'') + '-' + record.id, language:'zh', stage:'', purpose:'' };
-      for (const [key, v] of Object.entries(defaults)) document.getElementById('qa_' + key).value = String(v);
+      document.getElementById('qa_description').maxLength = selection.recordIds ? 24000 : 2000;
+      for (const [key, v] of Object.entries(selection.defaults)) document.getElementById('qa_' + key).value = String(v);
       overlay.querySelectorAll('input[type="checkbox"]').forEach(el => { el.checked = false; });
       session.defaults = formValues();
       session.savedJSON = JSON.stringify(session.defaults);
-      document.getElementById('qaRecordInfo').textContent = '来源记录：' + [record.supplier, record.productNo, record.productName].filter(Boolean).join(' · ');
+      document.getElementById('qaApplicationTitle').textContent = selection.recordIds ? 'QA 申请表（合并 ' + selection.records.length + ' 条）' : 'QA 申请表';
+      document.getElementById('qaRecordInfo').textContent = selection.recordIds
+        ? '已合并 ' + selection.records.length + ' 条记录，款式名称已按序填入样板描述；再次勾选相同记录可继续编辑此申请。'
+        : '来源记录：' + [selection.record.supplier, selection.record.productNo, selection.record.productName].filter(Boolean).join(' · ');
       showPanel(false);
       overlay.classList.add('show');
       const context = session;
@@ -382,6 +410,8 @@
     if (!session) return;
     try {
       checkActor(session);
+      document.getElementById('qaApplicationForm').hidden = preview;
+      document.getElementById('qaApplicationPreview').hidden = !preview;
       if (preview) {
         const dateChanged = syncGenerationDate();
         if (dateChanged && session.loaded && session.editable) changedApplication();
@@ -390,6 +420,7 @@
         stage.className = 'qa-preview-stage';
         stage.appendChild(buildPaper(formValues(), session));
         wrap.replaceChildren(stage);
+        if (session.recordIds) paginateDescription(stage,formValues(),session);
         wrap.scrollTop = 0;
         wrap.scrollLeft = 0;
       }
@@ -421,15 +452,20 @@
     const available = viewport.clientWidth - parseFloat(styles.paddingLeft || 0) - parseFloat(styles.paddingRight || 0);
     if (available <= 0) return;
     const scale = previewFit ? Math.min(1, available / 794) : 1;
+    const papers = [...stage.querySelectorAll('.qa-paper')];
     stage.style.width = (794 * scale) + 'px';
-    stage.style.height = (1123 * scale) + 'px';
-    paper.style.transform = 'scale(' + scale + ')';
+    stage.style.height = ((1123 * papers.length + 20 * (papers.length-1)) * scale) + 'px';
+    papers.forEach((page,index) => {
+      page.style.position = 'absolute';
+      page.style.top = ((1123+20) * index * scale) + 'px';
+      page.style.transform = 'scale(' + scale + ')';
+    });
     if (previewFit) viewport.scrollLeft = 0;
     document.getElementById('qaPreviewScale').textContent = Math.round(scale * 100) + '%';
     document.getElementById('qaFitWidth').setAttribute('aria-pressed', String(previewFit));
     document.getElementById('qaOriginalSize').setAttribute('aria-pressed', String(!previewFit));
     const warning = document.getElementById('qaPreviewWarning');
-    const overflow = paper.scrollHeight > 1124 || paper.scrollWidth > 795 ||
+    const overflow = papers.some(page => page.scrollHeight > 1124 || page.scrollWidth > 795) ||
       paper.querySelector('.qa-description-content').scrollHeight > 133;
     warning.hidden = !overflow;
     warning.textContent = overflow ? '内容超出表格可用空间，请返回填写页精简后再导出。' : '';
@@ -469,6 +505,43 @@
     return paper;
   }
 
+  function takeDescription(element, remaining) {
+    element.textContent = remaining;
+    if (element.scrollHeight <= element.clientHeight+1) return '';
+    const chars = Array.from(remaining);
+    let low = 0, high = chars.length;
+    while (low < high) {
+      const mid = Math.ceil((low+high)/2);
+      element.textContent = chars.slice(0,mid).join('');
+      if (element.scrollHeight <= element.clientHeight+1) low = mid;
+      else high = mid-1;
+    }
+    if (!low) throw new Error('样板描述无法排版，请切回填写页后重新预览');
+    // Keep numbered entries together when a complete entry fits on the page.
+    const newline = chars.slice(0,low).lastIndexOf('\n');
+    if (newline > 0) low = newline+1;
+    element.textContent = chars.slice(0,low).join('');
+    return chars.slice(low).join('');
+  }
+  function paginateDescription(host, model, context) {
+    const first = host.querySelector('.qa-paper');
+    let remaining = takeDescription(first.querySelector('.qa-description-content'),model.description);
+    while (remaining) {
+      const page = document.createElement('article');
+      page.className = 'qa-paper qa-description-continuation';
+      page.innerHTML = `<h2>QA 申请表 - 样板描述（续）</h2>
+        <div class="qa-continuation-meta">报告编号：${esc(model.reportNo)}<br>申请人：${esc(model.requester)}　　日期：${esc(model.receivedDate)}</div>
+        <p>来源：合并 ${context.recordIds.length} 条验货记录</p>
+        <div class="qa-continuation-content"></div>
+        <footer class="qa-paper-footer"><span>HSQR0017</span><span></span></footer>`;
+      host.appendChild(page);
+      remaining = takeDescription(page.querySelector('.qa-continuation-content'),remaining);
+    }
+    const pages = [...host.querySelectorAll('.qa-paper')];
+    pages.forEach((page,index) => { page.querySelector('.qa-paper-footer span:last-child').textContent = 'Page: ' + (index+1) + ' OF ' + pages.length; });
+    return pages;
+  }
+
   async function exportQAApplicationPDF() {
     if (busy || !session) return;
     let host = null;
@@ -493,15 +566,20 @@
       await document.fonts.ready;
       await Promise.all([...paper.querySelectorAll('img')].map(img => img.decode()));
       await new Promise(resolve => requestAnimationFrame(resolve));
+      const pages = context.recordIds ? paginateDescription(host,model,context) : [paper];
       if (!fitDescription(paper)) throw new Error('样板描述超过一页模板的可用空间，请精简后再导出');
       if ([...paper.querySelectorAll('.qa-data-row td')].some(td => td.scrollWidth > td.clientWidth+1)) throw new Error('基础资料内容过长，请调整文字后再导出');
-      if (paper.scrollHeight > 1124) throw new Error('申请表内容超出一页，请精简基础资料或描述后再导出');
-      const canvas = await html2canvas(paper,{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true,windowWidth:794,windowHeight:1123,scrollX:0,scrollY:0});
+      if (pages.some(page => page.scrollHeight > 1124 || page.scrollWidth > 795)) throw new Error('申请表内容超出页面，请精简基础资料后再导出');
       const PDF = window.jspdf ? window.jspdf.jsPDF : jsPDF;
       const pdf = new PDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
-      const ratio = Math.min(210/canvas.width,297/canvas.height);
-      const width = canvas.width*ratio, height = canvas.height*ratio;
-      pdf.addImage(canvas.toDataURL('image/png'),'PNG',(210-width)/2,0,width,height,undefined,'FAST');
+      for (let index=0; index<pages.length; index++) {
+        checkActor(context);
+        const canvas = await html2canvas(pages[index],{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true,windowWidth:794,windowHeight:1123,scrollX:0,scrollY:0});
+        if (index > 0) pdf.addPage();
+        const ratio = Math.min(210/canvas.width,297/canvas.height);
+        const width = canvas.width*ratio, height = canvas.height*ratio;
+        pdf.addImage(canvas.toDataURL('image/png'),'PNG',(210-width)/2,0,width,height,undefined,'FAST');
+      }
       checkActor(context);
       if (session !== context) throw new Error('申请表已关闭，请重新打开后导出');
       const safe = value => String(value || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'').slice(0,60);

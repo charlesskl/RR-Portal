@@ -13,7 +13,7 @@ function harness(){
  const window={__QC_AUTH:auth,addEventListener(){},__QC_REQUEST:async(_url,options)=>new Promise(resolve=>requests.push({body:JSON.parse(options.body),resolve}))};
  const c=vm.createContext({window,URL,AbortController,location:{href:'http://127.0.0.1/'},document:{currentScript:null,getElementById:el,querySelectorAll:()=>[]},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},todayStr:()=>day,getCompany:()=>auth.company,canView:()=>true,effPerms:()=>({records:{e:1}}),QC_COMPANIES:[{id:auth.company}],setTimeout:fn=>{timers.set(++seq,fn);return seq},clearTimeout:id=>timers.delete(id),console});
  let src=fs.readFileSync(path.join(__dirname,'../qa-application.js'),'utf8');
- src=src.replace(/\}\)\(\);\s*$/, 'window.fixture={set:c=>session=c,changedApplication,saveApplication,flushApplication,closingWrites,draftKey,applyValues,formValues,syncGenerationDate,sameEditableValues};})();');vm.runInContext(src,c);
+ src=src.replace(/\}\)\(\);\s*$/, 'window.fixture={set:c=>session=c,changedApplication,saveApplication,flushApplication,closingWrites,draftKey,applyValues,formValues,syncGenerationDate,sameEditableValues,applicationSelection,takeDescription};})();');vm.runInContext(src,c);
  const context={auth,user:auth.user,username:'fixture',company:auth.company,csrfToken:'synthetic',editable:true,loaded:true,loading:false,version:1,record:{id:1},generationDate:day,savedJSON:JSON.stringify(data)};
  window.fixture.set(context);
  return {context,storage,timers,requests,window,el,setDay:v=>day=v,fixture:window.fixture,change:v=>{el('qa_sampleQty').value=v;window.fixture.changedApplication()},ack:async(i=0)=>{const q=requests[i];q.resolve({ok:true,json:async()=>({ok:true,application:{recordId:1,version:i+2,data:q.body.data,updatedAt:'2026-11-18T00:00:00Z',updatedBy:'fixture'}})});await new Promise(resolve=>setImmediate(resolve))}};
@@ -55,4 +55,49 @@ test('generation-date-only differences do not turn a saved equivalent draft into
  assert.equal(h.fixture.sameEditableValues(original,{...original,receivedDate:'2026-11-18'}),true);
  assert.equal(h.fixture.sameEditableValues(original,{...original,requester:'另一个申请人'}),false);
  assert.equal(h.fixture.sameEditableValues(original,{...original,sampleQty:'9'}),false);
+});
+
+test('multiple selections number product names in the editable description and leave the product name blank',()=>{
+ const h=harness();
+ const records=[{id:9,productNo:'15780',productName:'黑粉拼接小公仔C普通款',client:'Zuru',supplier:'华登'},
+  {id:3,productNo:'15780',productName:'紫色怪A 普通款',client:'Zuru',supplier:'华登'}];
+ const selected=h.fixture.applicationSelection([9,3],records,'2026-11-20');
+ assert.equal(selected.record.id,'group:3,9');assert.deepEqual(Array.from(selected.recordIds),[3,9]);
+ assert.equal(selected.defaults.productName,'');assert.equal(selected.defaults.productNo,'15780');
+ assert.equal(selected.defaults.description,'1. 黑粉拼接小公仔C普通款\n2. 紫色怪A 普通款');
+ assert.equal(selected.defaults.sampleQty,'');assert.equal(selected.defaults.department,'品质部');assert.equal(selected.defaults.source,'来料');
+ assert.equal(selected.defaults.receivedDate,'2026-11-20');
+ assert.equal(h.fixture.applicationSelection([3,9],records,'2026-11-20').record.id,selected.record.id);
+ assert.notEqual(h.fixture.applicationSelection(3,records,'2026-11-20').record.id,selected.record.id);
+});
+test('different product numbers remain associated with each numbered description',()=>{
+ const h=harness();const records=[{id:1,productNo:'A-1',productName:'款式A'},{id:2,productNo:'B-2',productName:'款式B'}];
+ const selected=h.fixture.applicationSelection([1,2],records,'2026-11-20');
+ assert.equal(selected.defaults.productNo,'A-1、B-2');
+ assert.equal(selected.defaults.description,'1. 款式A（货号：A-1）\n2. 款式B（货号：B-2）');
+ for (const ids of [[],[1],[1,1],[1,999],[-1,2]]) assert.throws(()=>h.fixture.applicationSelection(ids,records,'2026-11-20'));
+});
+test('combined drafts and requests are isolated from the first individual record',async()=>{
+ const h=harness();h.context.record={id:'group:1,2'};h.context.recordIds=[1,2];
+ const originalRequest=h.window.__QC_REQUEST;
+ h.window.__QC_REQUEST=(url,options)=>{assert.match(url,/recordIds=1%2C2/);return originalRequest(url,options)};
+ h.change('12 PCS');assert.ok([...h.storage.keys()][0].endsWith(':group:1,2'));
+ const pending=h.fixture.saveApplication(h.context);
+ const q=h.requests[0];q.resolve({ok:true,json:async()=>({ok:true,application:{recordId:'group:1,2',version:2,data:q.body.data,updatedAt:'2026-11-20T00:00:00Z',updatedBy:'fixture'}})});
+ assert.equal(await pending,true);assert.equal(h.storage.size,0);
+});
+
+test('description continuation preserves numbered lines and Unicode without clipping or empty-page loops',()=>{
+ const h=harness();
+ const element={textContent:'',clientHeight:66,get scrollHeight(){
+  return this.textContent.split('\n').reduce((lines,line)=>lines+Math.max(1,Math.ceil(Array.from(line).length/20)),0)*22;
+ }};
+ const text='1. 简短款式\n2. '+ '长款式😀身体'.repeat(35)+'\n3. 最后一项 <b>原文</b>\n';
+ const chunks=[];let rest=text;
+ while(rest){const previous=rest;rest=h.fixture.takeDescription(element,rest);chunks.push(element.textContent);
+  assert.ok(element.scrollHeight<=element.clientHeight+1);assert.ok(rest.length<previous.length);assert.ok(chunks.length<100);
+ }
+ assert.equal(chunks.join(''),text);assert.ok(chunks.length>1);assert.ok(chunks.at(-1).includes('3. 最后一项'));
+ assert.equal(h.fixture.takeDescription(element,''),'');
+ assert.throws(()=>h.fixture.takeDescription({textContent:'',clientHeight:0,scrollHeight:22},'无法放下'),/无法排版/);
 });

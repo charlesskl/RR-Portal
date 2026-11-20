@@ -3272,7 +3272,8 @@ body.theme-light #loginPassword {
 .qa-paper .qa-description-content { background: transparent !important; position: relative !important; }
 .qa-paper .qa-comment-lines { height: 80px !important; }
 .qa-paper .qa-comment-lines span { display: block !important; height: 20px !important; border-bottom: 1px solid #555 !important; }
-.qa-paper .qa-stage-row th, .qa-paper .qa-purpose-row th, .qa-paper .qa-standard-row th { font-size: 10px !important; white-space: nowrap !important; padding: 2px !important; }
+.qa-paper .qa-stage-row th { font-size: 10px !important; white-space: nowrap !important; padding: 2px !important; }
+.qa-paper .qa-purpose-row th, .qa-paper .qa-standard-row th { font-size: 10px !important; line-height: 11px !important; white-space: normal !important; padding: 0 2px !important; }
 .qa-paper .qa-report-meta { height: auto !important; min-height: 22px !important; }
 
 /* QA 预览按可用宽度缩放；原始 A4 尺寸保留给导出使用。 */

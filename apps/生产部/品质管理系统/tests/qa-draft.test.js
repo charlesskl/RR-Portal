@@ -117,3 +117,15 @@ test('a legacy name already listed in the description is not repeated or treated
  assert.equal(h.fixture.singleNameInDescription(normalized).description,current.description);
  assert.equal(h.fixture.sameEditableValues(old,{...current,description:current.description+'\n新增备注'}),false);
 });
+
+
+test('legacy descriptions at the server limit remain saveable without losing the product name or notes',()=>{
+ const h=harness();const old={...h.fixture.formValues(),productName:'兔子公仔',description:'备'.repeat(2000)};
+ h.fixture.applyValues(old);const actual=h.fixture.formValues();
+ assert.equal(actual.description,old.description);assert.equal(actual.productName,old.productName);
+ assert.equal(h.fixture.sameEditableValues(old,actual),true);
+ const boundary={...old,description:'备'.repeat(1992)};
+ const moved=h.fixture.singleNameInDescription(boundary);
+ assert.equal(moved.description.length,2000);assert.equal(moved.productName,'');
+ assert.equal(moved.description,'1. 兔子公仔\n'+boundary.description);
+});

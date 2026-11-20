@@ -63,7 +63,11 @@
     const name = data.productName.trim();
     const description = typeof data.description === 'string' ? data.description : '';
     const listed = description.split('\n').some(line => line.trim().replace(/^\d+[.、．]\s*/, '') === name);
-    return { ...data, productName:'', description:listed ? description : '1. ' + name + (description ? '\n' + description : '') };
+    const numbered = listed ? description : '1. ' + name + (description ? '\n' + description : '');
+    // Keep valid legacy forms saveable when moving the name would exceed the server limit.
+    // Neither the original name nor notes may be truncated to force the new layout.
+    if (numbered.length > 2000) return data;
+    return { ...data, productName:'', description:numbered };
   }
   function sameEditableValues(left, right) {
     return JSON.stringify({ ...singleNameInDescription(left), receivedDate:'' }) === JSON.stringify({ ...singleNameInDescription(right), receivedDate:'' });

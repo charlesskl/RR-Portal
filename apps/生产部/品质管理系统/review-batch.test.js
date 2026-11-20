@@ -94,3 +94,37 @@ test('append and replacement import plans explicitly stage every new row as pend
   }
   assert.deepEqual(b.json('state.records'), b.records);
 });
+
+test('all review tabs expose record QA buttons with the existing records view permission',()=>{
+ const b=browser();b.ctx.canView=()=>true;
+ for(const tab of ['pending','rejected','approved']) {
+  b.run("setReviewTab('"+tab+"')");
+  const ids=b.records.filter(record=>record.status===tab).map(record=>record.id);
+  for(const id of ids)assert.ok(b.wrap.innerHTML.includes('openQAApplication('+id+', this)'));
+ }
+ assert.deepEqual(b.json('state.records'),b.records);assert.equal(b.writes.length,0);
+});
+test('combined review QA uses only current-tab selections in displayed order and preserves review state',()=>{
+ const b=browser(),calls=[];b.ctx.canView=()=>true;b.ctx.openQAApplication=(ids,trigger)=>calls.push({ids:Array.from(ids),trigger});
+ const button={};b.ctx.reviewQATrigger=button;
+ b.run('_reviewSelected.add(3);_reviewSelected.add(99);openReviewSelectedQAApplication(reviewQATrigger)');
+ assert.deepEqual(calls,[{ids:[2,1],trigger:button}]);
+ assert.deepEqual(b.json('state.records'),b.records);assert.equal(b.writes.length,0);
+ b.run("setReviewTab('rejected');_reviewSelected.add(4);openReviewSelectedQAApplication(reviewQATrigger)");
+ assert.equal(calls.length,1);assert.match(b.messages.at(-1).message,/至少两条/);
+});
+test('review QA selection button resets across tabs and stays disabled for empty or single selections',()=>{
+ const b=browser(),button={};const get=b.ctx.document.getElementById;
+ b.ctx.document.getElementById=id=>id==='btnReviewBatchQA'?button:get(id);b.ctx.canView=()=>true;
+ b.run('renderReviewPage()');assert.equal(button.disabled,false);assert.match(button.textContent,/2条/);
+ b.run("setReviewTab('approved')");assert.equal(button.disabled,true);
+ b.run('toggleReviewSelect(3)');assert.equal(button.disabled,true);assert.match(button.textContent,/1条/);
+ b.run('state.records=[];renderReviewPage()');assert.equal(button.disabled,true);assert.equal(button.textContent,'合并 QA 申请');
+});
+test('review-only visibility does not grant access to existing QA applications',()=>{
+ const b=browser(),button={},calls=[];const get=b.ctx.document.getElementById;
+ b.ctx.document.getElementById=id=>id==='btnReviewBatchQA'?button:get(id);b.ctx.canView=()=>false;b.ctx.openQAApplication=(...args)=>calls.push(args);
+ b.run('renderReviewPage();openReviewSelectedQAApplication()');
+ assert.equal(button.hidden,true);assert.equal(button.disabled,true);
+ assert.ok(!b.wrap.innerHTML.includes('openQAApplication('));assert.equal(calls.length,0);assert.equal(b.writes.length,0);
+});

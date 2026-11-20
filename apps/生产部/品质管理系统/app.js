@@ -5400,6 +5400,20 @@ function _reviewCounts() {
   return c;
 }
 
+function _reviewTabRecords() {
+  const list = state.records.filter(r => recStatus(r) === _reviewTab);
+  return list.sort((a,b) => _reviewTab === 'approved'
+    ? (b.reviewAt||'').localeCompare(a.reviewAt||'')
+    : (b.updatedAt||'').localeCompare(a.updatedAt||''));
+}
+
+function openReviewSelectedQAApplication(trigger) {
+  if (!canView('records')) { showToast('当前账号无权限查看 QA 申请', 'error'); return; }
+  const ids = _reviewTabRecords().filter(record => _reviewSelected.has(record.id)).map(record => record.id);
+  if (ids.length < 2) { showToast('请先勾选至少两条验货记录', 'info'); return; }
+  void openQAApplication(ids, trigger);
+}
+
 function renderReviewPage() {
   const wrap = document.getElementById('reviewTableWrap');
   if (!wrap) return;
@@ -5417,11 +5431,16 @@ function renderReviewPage() {
     if (btn) btn.classList.toggle('active', _reviewTab === t);
   });
 
-  const list = state.records.filter(r => recStatus(r) === _reviewTab);
+  const list = _reviewTabRecords();
   const visibleIds = new Set(list.map(r => r.id));
   _reviewSelected = new Set([..._reviewSelected].filter(id => visibleIds.has(id)));
-  if (_reviewTab === 'approved') list.sort((a,b) => (b.reviewAt||'').localeCompare(a.reviewAt||''));
-  else                           list.sort((a,b) => (b.updatedAt||'').localeCompare(a.updatedAt||''));
+  const canQA = canView('records');
+  const qaButton = document.getElementById('btnReviewBatchQA');
+  if (qaButton) {
+    qaButton.hidden = !canQA;
+    qaButton.disabled = !canQA || _reviewSelected.size < 2;
+    qaButton.textContent = '合并 QA 申请' + (_reviewSelected.size ? `（${_reviewSelected.size}条）` : '');
+  }
 
   if (!list.length) {
     const msg = { pending:'暂无待审核记录', rejected:'暂无被退回的记录', approved:'暂无已审核记录' }[_reviewTab];
@@ -5446,6 +5465,7 @@ function renderReviewPage() {
     if (canReview && st !== 'approved') ops.push(`<button class="action-btn" onclick="approveRecord(${r.id})">✓ 通过</button>`);
     if (canReview)                      ops.push(`<button class="action-btn" onclick="openRejectModal(${r.id})">反审核</button>`);
     if (canEdit && st !== 'approved')   ops.push(`<button class="action-btn" onclick="openEditModal(${r.id})">编辑</button>`);
+    if (canQA) ops.push(`<button type="button" class="action-btn qa" onclick="openQAApplication(${r.id}, this)" title="填写并导出 QA 申请表">QA申请表</button>`);
     const checked = _reviewSelected.has(r.id) ? 'checked' : '';
     return `<tr>
       <td style="text-align:center"><input type="checkbox" ${checked} onchange="toggleReviewSelect(${r.id})"></td>

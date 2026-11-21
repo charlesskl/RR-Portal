@@ -788,6 +788,7 @@ function openNewModal() {
   const titleId = { injection: 'injModalTitle', slush: 'slushModalTitle', spray: 'sprayModalTitle' }[currentTab];
   const bodyId  = { injection: 'injItemsBody', slush: 'slushItemsBody', spray: 'sprayItemsBody' }[currentTab];
   const prefix  = currentTab === 'injection' ? 'inj' : currentTab === 'slush' ? 'slush' : 'spray';
+  document.getElementById(modalId).dataset.orderUpdatedAt = '';
 
   document.getElementById(titleId).textContent = `新建${typeNames[currentTab]}`;
   document.getElementById(`${prefix}-id`).value = '';
@@ -795,6 +796,10 @@ function openNewModal() {
   if (orderNumElNew) orderNumElNew.value = '';
   const docNumElNew = document.getElementById(`${prefix}-doc_number`);
   if (docNumElNew) docNumElNew.value = '';
+  const productElNew = document.getElementById(`${prefix}-product_name`);
+  if (productElNew) productElNew.value = '';
+  const clientElNew = document.getElementById(`${prefix}-client_name`);
+  if (clientElNew) clientElNew.value = '';
   document.getElementById(`${prefix}-date`).value = new Date().toISOString().slice(0,10);
   document.getElementById(`${prefix}-order_type`).value = prefix === 'inj' ? '试模' : prefix === 'slush' ? '搪胶' : '喷油';
   const stgElNew = document.getElementById(`${prefix}-stage`);
@@ -843,6 +848,7 @@ function editOrder(id, isDuplicate = false) {
       const titleId = { injection: 'injModalTitle', slush: 'slushModalTitle', spray: 'sprayModalTitle' }[currentTab];
       const bodyId  = { injection: 'injItemsBody', slush: 'slushItemsBody', spray: 'sprayItemsBody' }[currentTab];
 
+      document.getElementById(modalId).dataset.orderUpdatedAt = isDuplicate ? '' : (order.updated_at || '');
       document.getElementById(titleId).textContent = isDuplicate ? `复制${typeNames[currentTab]}（新建）` : `编辑${typeNames[currentTab]} #${id}`;
       document.getElementById(`${prefix}-id`).value = isDuplicate ? '' : order.id;
       const orderNumElEdit = document.getElementById(`${prefix}-order_number`);
@@ -1246,6 +1252,8 @@ function saveOrder(type) {
     eng_name:     document.getElementById(`${prefix}-engineer`)?.value || null,
     receive_time:      (type === 'spray' ? document.getElementById('spray-receive_time')?.value      : null) || null,
     eng_complete_time: (type === 'spray' ? document.getElementById('spray-eng_complete_time')?.value : null) || null,
+    draft_id: window.activeOrderDraftId || null,
+    draft_version: window.activeOrderDraftVersion || null,
     items: type === 'injection' ? collectRows('injItemsBody', injFields)
          : type === 'slush'     ? collectRows('slushItemsBody', slushFields)
          :                        collectRows('sprayItemsBody', sprayFields),
@@ -1308,6 +1316,7 @@ function editAsmOrder(id) {
     .then(order => {
       if (order.error) { showToast(order.error, 'danger'); return; }
       if (!canModifyOrder(order.status)) { showToast('已报价单据请先审核驳回，再修改并重新报价', 'danger'); return; }
+      document.getElementById('asmModal').dataset.orderUpdatedAt = order.updated_at || '';
       document.getElementById('asmModalTitle').textContent = `编辑夹具申请单 #${id}`;
       document.getElementById('asm-id').value = order.id;
       document.getElementById('asm-order_number').value = order.order_number || '';
@@ -1382,6 +1391,8 @@ function saveAsmOrder() {
     workshop: document.getElementById('asm-workshop').value || null,
     status: document.getElementById('asm-status').value,
     items: items,
+    draft_id: window.activeOrderDraftId || null,
+    draft_version: window.activeOrderDraftVersion || null,
   };
   const url = id ? `/api/assembly/${id}` : '/api/assembly';
   const method = id ? 'PUT' : 'POST';
@@ -2427,6 +2438,7 @@ if (currentUser) {
 let _asmRowSeq = 0;
 
 function openNewAsmModal() {
+  document.getElementById('asmModal').dataset.orderUpdatedAt = '';
   document.getElementById('asmModalTitle').textContent = '新建夹具申请单';
   document.getElementById('asm-id').value = '';
   document.getElementById('asm-order_number').value = '';
@@ -2744,5 +2756,6 @@ setInterval(() => { loadOrders(); checkForNewCompletions(); }, 30000);
   </div>
 </div>
 
+<script src="order-drafts.js?v=1"></script>
 </body>
 </html>

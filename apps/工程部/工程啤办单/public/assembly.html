@@ -436,6 +436,7 @@ function fmtDateTime(s) {
 // ─── 新建/编辑 ────────────────────────────────────────────────────────────────
 let _rowSeq = 0;
 function openNewModal() {
+  document.getElementById('asmModal').dataset.orderUpdatedAt = '';
   document.getElementById('asmModalTitle').textContent = '新建夹具申请单';
   document.getElementById('asm-id').value = '';
   document.getElementById('asm-applicant').value = '';
@@ -463,6 +464,7 @@ function editOrder(id) {
         return;
       }
 
+      document.getElementById('asmModal').dataset.orderUpdatedAt = order.updated_at || '';
       document.getElementById('asmModalTitle').textContent = `编辑夹具申请单 #${id}`;
       document.getElementById('asm-id').value = order.id;
       document.getElementById('asm-applicant').value = order.created_by || '';
@@ -493,6 +495,7 @@ function editOrder(id) {
 // ─── 参考图片（上传/预览/删除）────────────────────────────────────────────────
 // asmImages: { name?: 服务端文件名, dataUrl: 预览用 dataURL 或图片URL, isNew?: bool }
 let asmImages = [];
+let asmImagesPending = 0;
 
 function asmImgUrl(orderId, name) { return `${API_BASE}/api/assembly-images/${orderId}/${name}`; }
 
@@ -545,16 +548,19 @@ async function onAsmImagesSelected() {
   const files = Array.from(_asmImgInput.files || []);
   if (!files.length) return;
   let added = 0;
-  for (const f of files) {
-    if (asmImages.length >= 10) { showToast('最多上传 10 张图片', 'warning'); break; }
-    if (!f.type.startsWith('image/')) continue;
-    try {
-      const dataUrl = await fileToResizedDataURL(f);
-      asmImages.push({ dataUrl, isNew: true });
-      added++;
-    } catch (e) { showToast('图片处理失败: ' + f.name, 'danger'); }
-  }
-  if (added) renderAsmImages();
+  asmImagesPending++;
+  try {
+    for (const f of files) {
+      if (asmImages.length >= 10) { showToast('最多上传 10 张图片', 'warning'); break; }
+      if (!f.type.startsWith('image/')) continue;
+      try {
+        const dataUrl = await fileToResizedDataURL(f);
+        asmImages.push({ dataUrl, isNew: true });
+        added++;
+      } catch (e) { showToast('图片处理失败: ' + f.name, 'danger'); }
+    }
+    if (added) renderAsmImages();
+  } finally { asmImagesPending--; }
 }
 
 // ─── 添加表格行 ───────────────────────────────────────────────────────────────
@@ -598,18 +604,20 @@ function onAsmRowImage(input) {
   input.value = '';
   if (!file) return;
   if (!file.type.startsWith('image/')) { showToast('请选择图片文件', 'warning'); return; }
+  const tr = input.closest('tr');
+  tr._imgPending = true; tr._imgError = false;
   fileToResizedDataURL(file)
     .then(dataUrl => {
-      const tr = input.closest('tr');
       tr._img = { name: tr._img?.name || null, dataUrl };
       renderAsmRowImage(tr);
     })
-    .catch(() => showToast('图片处理失败: ' + file.name, 'danger'));
+    .catch(() => { tr._imgError = true; showToast('图片处理失败: ' + file.name, 'danger'); })
+    .finally(() => { tr._imgPending = false; });
 }
 
 function clearAsmRowImage(el) {
   const tr = el.closest('tr');
-  tr._img = {};
+  tr._img = {}; tr._imgError = false;
   renderAsmRowImage(tr);
 }
 
@@ -665,6 +673,7 @@ function saveOrder() {
     items:         items,
     images:        asmImages.filter(im => !im.isNew).map(im => im.name),
     new_images:    asmImages.filter(im => im.isNew).map(im => im.dataUrl),
+    draft_id: window.activeOrderDraftId || null,
   };
 
   const url    = id ? `/api/assembly/${id}` : '/api/assembly';
@@ -1051,5 +1060,6 @@ document.getElementById('autoRefresh').addEventListener('change', e => setAutoRe
 setAutoRefresh(document.getElementById('autoRefresh').checked);
 </script>
 
+<script src="order-drafts.js?v=1"></script>
 </body>
 </html>

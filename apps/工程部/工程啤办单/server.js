@@ -166,8 +166,8 @@ function getOrderById(type, id) {
   return { ...order, items };
 }
 
-function createOrder(type, header, items) {
-  const data = loadData();
+function createOrder(type, header, items, draftId) {
+  const data = draftId ? structuredClone(loadData()) : loadData();
   const now = new Date().toISOString();
   const id = data.nextId++;
   const order = { id, ...header, status: header.status || '待生产', created_at: now, updated_at: now };
@@ -177,12 +177,13 @@ function createOrder(type, header, items) {
       data[`${type}_items`].push({ id: data.nextId++, order_id: id, sort_order: i, ...it });
     });
   }
+  if (draftId) data.order_drafts = data.order_drafts.filter(d => d.id !== draftId);
   saveData(data);
   return getOrderById(type, id);
 }
 
-function updateOrder(type, id, header, items) {
-  const data = loadData();
+function updateOrder(type, id, header, items, draftId) {
+  const data = draftId ? structuredClone(loadData()) : loadData();
   const idx = data[`${type}_orders`].findIndex(o => o.id === +id);
   if (idx === -1) return null;
   const previous = data[`${type}_orders`][idx];
@@ -198,6 +199,7 @@ function updateOrder(type, id, header, items) {
       data[`${type}_items`].push({ id: data.nextId++, order_id: +id, sort_order: i, ...it });
     });
   }
+  if (draftId) data.order_drafts = data.order_drafts.filter(d => d.id !== draftId);
   saveData(data);
   return getOrderById(type, id);
 }
@@ -346,7 +348,7 @@ const ASM_IMG_MAX_BYTES = 5 * 1024 * 1024; // 单张解码后 ≤5MB（前端已
 
 // keepList=要保留的已有文件名（非数组=保留全部旧图），newImages=base64 dataURL 数组。
 // 返回最终文件名列表；不在列表内的旧文件一并删除。
-function persistAsmImages(orderId, keepList, newImages, existingList) {
+function persistAsmImages(orderId, keepList, newImages, existingList, cleanup = true) {
   const dir = path.join(ASM_IMG_DIR, String(orderId));
   fs.mkdirSync(dir, { recursive: true });
   const keep = Array.isArray(keepList) ? keepList : (existingList || []);
@@ -368,7 +370,7 @@ function persistAsmImages(orderId, keepList, newImages, existingList) {
     fs.writeFileSync(path.join(dir, name), buf);
     final.push(name);
   });
-  fs.readdirSync(dir).forEach(f => {
+  if (cleanup) fs.readdirSync(dir).forEach(f => {
     if (f.startsWith('item-')) return; // 明细行图片由 persistAsmItemImages 管理，不在这里清理
     if (!final.includes(f)) fs.unlinkSync(path.join(dir, f));
   });
@@ -381,7 +383,7 @@ function removeAsmImages(orderId) {
 
 // 夹具明细行图片：item.new_image 为 base64 dataURL，落盘为文件后 item.image 只存文件名；
 // 校验旧文件名（前端回传保留的 image）防止伪造/穿越，不存在的置空。
-function persistAsmItemImages(orderId, items) {
+function persistAsmItemImages(orderId, items, cleanup = true) {
   if (!Array.isArray(items)) return;
   const dir = path.join(ASM_IMG_DIR, String(orderId));
   fs.mkdirSync(dir, { recursive: true });
@@ -407,7 +409,7 @@ function persistAsmItemImages(orderId, items) {
   }
   // 清理不再被任何明细行引用的旧行图（用户移除/更换图片后）
   const used = new Set(items.filter(it => typeof it.image === 'string').map(it => it.image));
-  fs.readdirSync(dir).forEach(f => {
+  if (cleanup) fs.readdirSync(dir).forEach(f => {
     if (f.startsWith('item-') && !used.has(f)) fs.unlinkSync(path.join(dir, f));
   });
 }
@@ -575,6 +577,50 @@ app.post('/api/assembly/:id/quote', (req, res) => {
   res.json(getOrderById('assembly', order.id));
 });
 
+// 草稿保存在业务数据文件中，但不进入正式订单列表或审核流程。
+const DRAFT_TYPES = ['injection', 'slush', 'spray', 'assembly'];
+app.get('/api/order-drafts', (req, res) => {
+  const source = req.query.source;
+  if (!['engineering', 'assembly'].includes(source)) return res.status(400).json({ error: '无效的草稿来源' });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json((loadData().order_drafts || []).filter(d => d.source === source).map(({ id, type, title, updated_at }) => ({ id, type, title, updated_at })).reverse());
+});
+app.get('/api/order-drafts/:id', (req, res) => {
+  const draft = (loadData().order_drafts || []).find(d => d.id === req.params.id);
+  if (!draft) return res.status(404).json({ error: '草稿不存在' });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(draft);
+});
+app.post('/api/order-drafts', (req, res) => {
+  const { id, type, source, title, payload, order_id, base_updated_at } = req.body || {};
+  if (!DRAFT_TYPES.includes(type) || !['engineering', 'assembly'].includes(source) || (source === 'assembly' && type !== 'assembly') || !payload || typeof payload !== 'object' || Array.isArray(payload)) return res.status(400).json({ error: '草稿内容无效' });
+  const data = structuredClone(loadData());
+  data.order_drafts ||= [];
+  const orderId = order_id ? +order_id : null;
+  const previous = id && data.order_drafts.find(d => d.id === id);
+  if (id && (!previous || previous.type !== type || previous.source !== source || previous.order_id !== orderId)) return res.status(409).json({ error: '草稿不存在或关联单据已改变，请重新打开' });
+  if (!id && orderId && !data[`${type}_orders`].some(o => o.id === orderId)) return res.status(404).json({ error: '原单据不存在' });
+  const now = new Date().toISOString();
+  const draft = { id: id || crypto.randomUUID(), type, source, title: String(title || '').slice(0, 200), payload, order_id: orderId, base_updated_at: previous ? previous.base_updated_at : (base_updated_at || null), updated_at: now };
+  if (previous) data.order_drafts[data.order_drafts.indexOf(previous)] = draft;
+  else data.order_drafts.push(draft);
+  try { saveData(data); } catch { return res.status(500).json({ error: '草稿保存失败，请重试' }); }
+  res.json({ id: draft.id });
+});
+app.delete('/api/order-drafts/:id', (req, res) => {
+  const data = structuredClone(loadData());
+  data.order_drafts = (data.order_drafts || []).filter(d => d.id !== req.params.id);
+  try { saveData(data); } catch { return res.status(500).json({ error: '删除失败，请重试' }); }
+  res.json({ success: true });
+});
+function validateDraftSubmission(draftId, type, order) {
+  if (!draftId) return null;
+  const draft = (loadData().order_drafts || []).find(d => d.id === draftId);
+  if (!draft || draft.type !== type || draft.order_id !== (order?.id || null)) return '草稿不存在或与单据不匹配，请重新打开';
+  if (order && (order.updated_at || null) !== draft.base_updated_at) return '原单据在暂存后已被修改，请先核对原单据，避免覆盖其他修改';
+  return null;
+}
+
 // ─── 路由工厂 ─────────────────────────────────────────────────────────────────
 ['injection', 'slush', 'spray', 'assembly'].forEach(type => {
   app.get(`/api/${type}`, (req, res) => res.json(getOrders(type)));
@@ -586,7 +632,9 @@ app.post('/api/assembly/:id/quote', (req, res) => {
 
   app.post(`/api/${type}`, (req, res) => {
     try {
-      const { items, ...header } = req.body;
+      const { items, draft_id: draftId, ...header } = req.body;
+      const draftError = validateDraftSubmission(draftId, type, null);
+      if (draftError) return res.status(409).json({ error: draftError });
       if (type === 'assembly') {
         const error = validateAssemblyOrder(header, items);
         if (error) return res.status(400).json({ error });
@@ -598,7 +646,15 @@ app.post('/api/assembly/:id/quote', (req, res) => {
       // 夹具申请单图片：new_images 为 base64 dataURL 数组，落盘为文件，订单只存文件名
       const newImages = type === 'assembly' ? header.new_images : undefined;
       if (type === 'assembly') delete header.new_images;
-      const created = createOrder(type, header, items);
+      if (type === 'assembly' && draftId) {
+        // Stage image files before committing the order and consuming its draft.
+        // Do not remove old files before the atomic data save succeeds.
+        const id = loadData().nextId;
+        header.images = persistAsmImages(id, [], newImages, [], false);
+        persistAsmItemImages(id, items, false);
+        return res.status(201).json(createOrder(type, header, items, draftId));
+      }
+      const created = createOrder(type, header, items, draftId);
       if (type === 'assembly') {
         const data = loadData();
         const o = data.assembly_orders.find(x => x.id === created.id);
@@ -631,7 +687,10 @@ app.post('/api/assembly/:id/quote', (req, res) => {
       const data = loadData();
       const order = data[`${type}_orders`].find(o => o.id === +req.params.id);
       if (type !== 'assembly' && checkLock(req, res, order, '修改')) return;
-      const { items, ...header } = req.body;
+      const { items, draft_id: draftId, ...header } = req.body;
+      if (draftId && !order) return res.status(404).json({ error: '原单据不存在' });
+      const draftError = validateDraftSubmission(draftId, type, order);
+      if (draftError) return res.status(409).json({ error: draftError });
       if (type === 'assembly' && order) {
         if (!['未报价', '已驳回'].includes(order.status)) return res.status(403).json({ error: '已报价单据请先审核驳回，再修改并重新报价' });
         const error = validateAssemblyOrder({ ...order, ...header }, items === undefined ? getOrderById(type, order.id).items : items);
@@ -662,7 +721,12 @@ app.post('/api/assembly/:id/quote', (req, res) => {
         imgReq = { keep: header.images, newImages: header.new_images };
         delete header.images; delete header.new_images;
       }
-      const updated = updateOrder(type, req.params.id, header, items);
+      if (draftId && imgReq && order) {
+        header.images = persistAsmImages(order.id, imgReq.keep, imgReq.newImages, order.images, false);
+        if (Array.isArray(items)) persistAsmItemImages(order.id, items, false);
+        return res.json(updateOrder(type, req.params.id, header, items, draftId));
+      }
+      const updated = updateOrder(type, req.params.id, header, items, draftId);
       if (updated && imgReq) {
         const d2 = loadData();
         const o2 = d2.assembly_orders.find(o => o.id === +req.params.id);

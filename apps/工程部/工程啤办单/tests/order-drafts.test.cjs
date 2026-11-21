@@ -44,7 +44,7 @@ test('drafts survive restart and only become orders on successful submission', a
       const all = (await req('/order-drafts?source=engineering')).body;
       assert.equal(all.length,4);
       const draft = all.find(d => d.type === 'injection');
-      const body = {draft_id:draft.id, product_name:'测试产品', status:'待审核', items:[{mold_name:'测试模'}]};
+      const body = {draft_id:draft.id,draft_version:1, product_name:'测试产品', status:'待审核', items:[{mold_name:'测试模'}]};
       const saved = await req('/injection','POST',body);
       assert.equal(saved.status,201); assert.equal(saved.body.status,'待审核');
       assert.equal((await req('/order-drafts/'+draft.id)).status,404);
@@ -54,7 +54,7 @@ test('drafts survive restart and only become orders on successful submission', a
     await t.test('assembly images and draft are committed together even after a disk failure', async () => {
       const draft = (await req('/order-drafts?source=engineering')).body.find(d => d.type === 'assembly');
       const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2p8AAAAASUVORK5CYII=';
-      const body = {draft_id:draft.id, product_name:'夹具测试', client_name:'测试客户', supervisor:'段新辉', items:[{product_name:'测试明细',new_image:image}]};
+      const body = {draft_id:draft.id,draft_version:1, product_name:'夹具测试', client_name:'测试客户', supervisor:'段新辉', items:[{product_name:'测试明细',new_image:image}]};
       fs.mkdirSync(path.join(dir,'data.json.tmp'));
       assert.equal((await req('/assembly','POST',body)).status,500);
       assert.equal((await req('/order-drafts/'+draft.id)).status,200);
@@ -66,15 +66,26 @@ test('drafts survive restart and only become orders on successful submission', a
       assert.equal((await req('/order-drafts/'+draft.id)).status,404);
       assert.equal((await req('/assembly','POST',body)).status,409);
     });
+    await t.test('stale draft tabs cannot overwrite, delete or submit another saved revision', async () => {
+      const original = {type:'spray',source:'engineering',payload:{version:1,notes:'first'}};
+      const created = (await req('/order-drafts','POST',original)).body;
+      const revised = await req('/order-drafts','POST',{...original,id:created.id,base_version:1,payload:{version:1,notes:'newer'}});
+      assert.equal(revised.status,200);
+      assert.equal((await req('/order-drafts','POST',{...original,id:created.id,base_version:1})).status,409);
+      assert.equal((await req('/order-drafts/'+created.id,'DELETE',{base_version:1})).status,409);
+      assert.equal((await req('/spray','POST',{draft_id:created.id,draft_version:1,items:[]})).status,409);
+      assert.equal((await req('/order-drafts/'+created.id)).body.payload.notes,'newer');
+      assert.equal((await req('/order-drafts/'+created.id,'DELETE',{base_version:2})).status,200);
+    });
     await t.test('invalid submissions preserve draft; conflicting edits cannot overwrite original', async () => {
       const assembly = (await req('/order-drafts','POST',{type:'assembly',source:'engineering',payload:{version:1}})).body;
-      assert.equal((await req('/assembly','POST',{draft_id:assembly.id,items:[]})).status,400);
+      assert.equal((await req('/assembly','POST',{draft_id:assembly.id,draft_version:1,items:[]})).status,400);
       assert.equal((await req('/order-drafts/'+assembly.id)).status,200);
       const order = (await req('/injection')).body[0];
       const draft = await req('/order-drafts','POST',{type:'injection',source:'engineering',order_id:order.id,base_updated_at:order.updated_at,payload:{version:1}});
       await new Promise(resolve => setTimeout(resolve, 5));
       assert.equal((await req('/injection/'+order.id,'PUT',{reason:'另一人修改'})).status,200);
-      assert.equal((await req('/injection/'+order.id,'PUT',{draft_id:draft.body.id,reason:'覆盖'})).status,409);
+      assert.equal((await req('/injection/'+order.id,'PUT',{draft_id:draft.body.id,draft_version:1,reason:'覆盖'})).status,409);
       assert.equal((await req('/injection/'+order.id)).body.reason,'另一人修改');
       assert.equal((await req('/order-drafts/'+draft.body.id)).status,200);
     });

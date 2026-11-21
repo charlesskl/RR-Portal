@@ -3,6 +3,7 @@
   const source = location.pathname.endsWith('/assembly.html') ? 'assembly' : 'engineering';
   const types = { injection: ['啤办单', 'injModal', 'inj'], slush: ['搪胶单', 'slushModal', 'slush'], spray: ['喷油单', 'sprayModal', 'spray'], assembly: ['夹具申请单', 'asmModal', 'asm'] };
   window.activeOrderDraftId = null;
+  window.activeOrderDraftVersion = null;
   let restoring = false;
 
   const toolbar = source === 'engineering' ? document.getElementById('newOrderBtn')?.parentElement : document.querySelector('.container-fluid .no-print .d-flex.gap-2.align-items-center');
@@ -25,7 +26,7 @@
     if (source === 'assembly' && type !== 'assembly') continue;
     const modal = document.getElementById(modalId);
     if (!modal) continue;
-    modal.addEventListener('show.bs.modal', () => { if (!restoring) window.activeOrderDraftId = null; });
+    modal.addEventListener('show.bs.modal', () => { if (!restoring) { window.activeOrderDraftId = null; window.activeOrderDraftVersion = null; } });
     modal.addEventListener('hide.bs.modal', event => { if (modal._savingDraft) event.preventDefault(); });
     const button = document.createElement('button');
     button.type = 'button';
@@ -76,10 +77,11 @@
       const number = document.getElementById(`${prefix}-order_number`)?.value.trim() || '';
       const product = document.getElementById(`${prefix}-product_name`)?.value.trim() || '';
       const orderId = document.getElementById(`${prefix}-id`)?.value || null;
-      const response = await apiFetch('/api/order-drafts', {method:'POST', headers:{'Content-Type':'application/json', 'X-User':encodeURIComponent(user)}, body:JSON.stringify({id:window.activeOrderDraftId, type, source, order_id:orderId, title:[number, product].filter(Boolean).join(' / '), base_updated_at: modal.dataset.orderUpdatedAt || null, payload:capture(modal, type)})});
+      const response = await apiFetch('/api/order-drafts', {method:'POST', headers:{'Content-Type':'application/json', 'X-User':encodeURIComponent(user)}, body:JSON.stringify({id:window.activeOrderDraftId, base_version:window.activeOrderDraftVersion, type, source, order_id:orderId, title:[number, product].filter(Boolean).join(' / '), base_updated_at: modal.dataset.orderUpdatedAt || null, payload:capture(modal, type)})});
       const data = await response.json();
       if (!response.ok || data.error) throw new Error(data.error || '保存失败');
       window.activeOrderDraftId = data.id;
+      window.activeOrderDraftVersion = data.version;
       showToast('草稿已保存，可以继续录入或稍后打开', 'success');
     } catch (e) { showToast(e.message || '草稿保存失败，请重试', 'danger'); }
     finally {
@@ -120,8 +122,8 @@
         del.className = 'btn btn-outline-danger btn-sm'; del.textContent = '删除';
         del.onclick = async () => {
           if (!confirm('确定删除这份草稿吗？')) return;
-          try { const user = source === 'engineering' ? currentUser : '夹具部'; if (!user) { showLoginModal(); return; } const r = await apiFetch('/api/order-drafts/' + draft.id, {method:'DELETE', headers:{'X-User':encodeURIComponent(user)}}); if (!r.ok) throw new Error(); await refreshDrafts(); }
-          catch { showToast('删除失败，请重试', 'danger'); }
+          try { const user = source === 'engineering' ? currentUser : '夹具部'; if (!user) { showLoginModal(); return; } const r = await apiFetch('/api/order-drafts/' + draft.id, {method:'DELETE', headers:{'Content-Type':'application/json','X-User':encodeURIComponent(user)},body:JSON.stringify({base_version:draft.version})}); const result = await r.json(); if (!r.ok) throw new Error(result.error || '删除失败，请重试'); await refreshDrafts(); }
+          catch (e) { showToast(e.message || '删除失败，请重试', 'danger'); }
         };
         actions.append(open, del); row.append(text, actions); container.appendChild(row);
       }
@@ -190,6 +192,7 @@
       bootstrap.Modal.getOrCreateInstance(modal).show();
       restoring = false;
       window.activeOrderDraftId = id;
+      window.activeOrderDraftVersion = draft.version;
     } catch (e) { restoring = false; showToast(e.message || '打开草稿失败', 'danger'); }
   }
 })();

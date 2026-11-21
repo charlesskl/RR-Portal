@@ -583,40 +583,44 @@ app.get('/api/order-drafts', (req, res) => {
   const source = req.query.source;
   if (!['engineering', 'assembly'].includes(source)) return res.status(400).json({ error: '无效的草稿来源' });
   res.setHeader('Cache-Control', 'no-store');
-  res.json((loadData().order_drafts || []).filter(d => d.source === source).map(({ id, type, title, updated_at }) => ({ id, type, title, updated_at })).reverse());
+  res.json((loadData().order_drafts || []).filter(d => d.source === source).map(({ id, type, title, updated_at, version = 1 }) => ({ id, type, title, updated_at, version })).reverse());
 });
 app.get('/api/order-drafts/:id', (req, res) => {
   const draft = (loadData().order_drafts || []).find(d => d.id === req.params.id);
   if (!draft) return res.status(404).json({ error: '草稿不存在' });
   res.setHeader('Cache-Control', 'no-store');
-  res.json(draft);
+  res.json({ ...draft, version: draft.version || 1 });
 });
 app.post('/api/order-drafts', (req, res) => {
-  const { id, type, source, title, payload, order_id, base_updated_at } = req.body || {};
+  const { id, type, source, title, payload, order_id, base_updated_at, base_version } = req.body || {};
   if (!DRAFT_TYPES.includes(type) || !['engineering', 'assembly'].includes(source) || (source === 'assembly' && type !== 'assembly') || !payload || typeof payload !== 'object' || Array.isArray(payload)) return res.status(400).json({ error: '草稿内容无效' });
   const data = structuredClone(loadData());
   data.order_drafts ||= [];
   const orderId = order_id ? +order_id : null;
   const previous = id && data.order_drafts.find(d => d.id === id);
   if (id && (!previous || previous.type !== type || previous.source !== source || previous.order_id !== orderId)) return res.status(409).json({ error: '草稿不存在或关联单据已改变，请重新打开' });
+  if (previous && base_version !== (previous.version || 1)) return res.status(409).json({ error: '草稿已被其他窗口修改，请保留当前填写内容并重新核对草稿' });
   if (!id && orderId && !data[`${type}_orders`].some(o => o.id === orderId)) return res.status(404).json({ error: '原单据不存在' });
   const now = new Date().toISOString();
-  const draft = { id: id || crypto.randomUUID(), type, source, title: String(title || '').slice(0, 200), payload, order_id: orderId, base_updated_at: previous ? previous.base_updated_at : (base_updated_at || null), updated_at: now };
+  const draft = { id: id || crypto.randomUUID(), version: previous ? (previous.version || 1) + 1 : 1, type, source, title: String(title || '').slice(0, 200), payload, order_id: orderId, base_updated_at: previous ? previous.base_updated_at : (base_updated_at || null), updated_at: now };
   if (previous) data.order_drafts[data.order_drafts.indexOf(previous)] = draft;
   else data.order_drafts.push(draft);
   try { saveData(data); } catch { return res.status(500).json({ error: '草稿保存失败，请重试' }); }
-  res.json({ id: draft.id });
+  res.json({ id: draft.id, version: draft.version });
 });
 app.delete('/api/order-drafts/:id', (req, res) => {
   const data = structuredClone(loadData());
+  const draft = (data.order_drafts || []).find(d => d.id === req.params.id);
+  if (draft && req.body?.base_version !== (draft.version || 1)) return res.status(409).json({ error: '草稿已被其他窗口修改，请刷新列表核对后再删除' });
   data.order_drafts = (data.order_drafts || []).filter(d => d.id !== req.params.id);
   try { saveData(data); } catch { return res.status(500).json({ error: '删除失败，请重试' }); }
   res.json({ success: true });
 });
-function validateDraftSubmission(draftId, type, order) {
+function validateDraftSubmission(draftId, type, order, draftVersion) {
   if (!draftId) return null;
   const draft = (loadData().order_drafts || []).find(d => d.id === draftId);
   if (!draft || draft.type !== type || draft.order_id !== (order?.id || null)) return '草稿不存在或与单据不匹配，请重新打开';
+  if (draftVersion !== (draft.version || 1)) return '草稿已被其他窗口修改，请保留当前填写内容并重新核对草稿';
   if (order && (order.updated_at || null) !== draft.base_updated_at) return '原单据在暂存后已被修改，请先核对原单据，避免覆盖其他修改';
   return null;
 }
@@ -632,8 +636,8 @@ function validateDraftSubmission(draftId, type, order) {
 
   app.post(`/api/${type}`, (req, res) => {
     try {
-      const { items, draft_id: draftId, ...header } = req.body;
-      const draftError = validateDraftSubmission(draftId, type, null);
+      const { items, draft_id: draftId, draft_version: draftVersion, ...header } = req.body;
+      const draftError = validateDraftSubmission(draftId, type, null, draftVersion);
       if (draftError) return res.status(409).json({ error: draftError });
       if (type === 'assembly') {
         const error = validateAssemblyOrder(header, items);
@@ -687,9 +691,9 @@ function validateDraftSubmission(draftId, type, order) {
       const data = loadData();
       const order = data[`${type}_orders`].find(o => o.id === +req.params.id);
       if (type !== 'assembly' && checkLock(req, res, order, '修改')) return;
-      const { items, draft_id: draftId, ...header } = req.body;
+      const { items, draft_id: draftId, draft_version: draftVersion, ...header } = req.body;
       if (draftId && !order) return res.status(404).json({ error: '原单据不存在' });
-      const draftError = validateDraftSubmission(draftId, type, order);
+      const draftError = validateDraftSubmission(draftId, type, order, draftVersion);
       if (draftError) return res.status(409).json({ error: draftError });
       if (type === 'assembly' && order) {
         if (!['未报价', '已驳回'].includes(order.status)) return res.status(403).json({ error: '已报价单据请先审核驳回，再修改并重新报价' });

@@ -1253,6 +1253,7 @@ function saveOrder(type) {
     receive_time:      (type === 'spray' ? document.getElementById('spray-receive_time')?.value      : null) || null,
     eng_complete_time: (type === 'spray' ? document.getElementById('spray-eng_complete_time')?.value : null) || null,
     draft_id: window.activeOrderDraftId || null,
+    draft_version: window.activeOrderDraftVersion || null,
     items: type === 'injection' ? collectRows('injItemsBody', injFields)
          : type === 'slush'     ? collectRows('slushItemsBody', slushFields)
          :                        collectRows('sprayItemsBody', sprayFields),
@@ -1391,6 +1392,7 @@ function saveAsmOrder() {
     status: document.getElementById('asm-status').value,
     items: items,
     draft_id: window.activeOrderDraftId || null,
+    draft_version: window.activeOrderDraftVersion || null,
   };
   const url = id ? `/api/assembly/${id}` : '/api/assembly';
   const method = id ? 'PUT' : 'POST';

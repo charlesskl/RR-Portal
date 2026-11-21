@@ -674,6 +674,7 @@ function saveOrder() {
     images:        asmImages.filter(im => !im.isNew).map(im => im.name),
     new_images:    asmImages.filter(im => im.isNew).map(im => im.dataUrl),
     draft_id: window.activeOrderDraftId || null,
+    draft_version: window.activeOrderDraftVersion || null,
   };
 
   const url    = id ? `/api/assembly/${id}` : '/api/assembly';

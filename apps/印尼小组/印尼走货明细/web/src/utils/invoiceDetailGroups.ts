@@ -1,3 +1,17 @@
+const normalizeInvoiceCompany = (company: string) => company.normalize('NFKC').replace(/\s+/g, '')
+const mergedInvoiceCompanies = new Set([
+  '东莞华登塑胶制品有限公司',
+  '华康塑胶制品(东源)有限公司',
+  '东莞兴信塑胶制品有限公司',
+  '河源市港正五金制造有限公司',
+  '华兴玩具制品（河源）有限公司',
+  '华登（河源）玩具制品有限公司',
+].map(normalizeInvoiceCompany))
+
+export function shouldMergeInvoiceCompany(company?: string): boolean {
+  return Boolean(company && mergedInvoiceCompanies.has(normalizeInvoiceCompany(company)))
+}
+
 // Invoice summaries use the displayed product name and declaration unit within one customs company.
 // Source HS values remain unchanged in the main table; the summary code comes from 商品汇总表.
 export function invoiceDetailGroups(rows: Array<{ index: number; name: string; hs?: string; unit: string }>): number[][] {

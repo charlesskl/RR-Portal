@@ -41,7 +41,7 @@ it.each(['rri', 'rrm', 'legacy'])('金额完整显示、合同和发票保留有
     expect(rows).toHaveLength(2)
     for (const address of rows) {
       const cell = sheet[column + address.slice(1)], price = prices[Number(sheet[address].v) - 1]
-      expect(cell.f).toBeTruthy()
+      expect(generic ? sheet['F' + address.slice(1)].f : cell.f).toBeTruthy()
       // Template formula caches may be absent; the number format must keep the complete source price on recalculation.
       // SSF cannot render mixed mandatory/optional fractional digits; verify the
       // full precision equivalent, keeping the original OOXML format optional.
@@ -54,9 +54,9 @@ it.each(['rri', 'rrm', 'legacy'])('金额完整显示、合同和发票保留有
   for (const [serial, label] of [[3, '吨'], [4, '卷']] as const) {
     const row = Object.keys(generic).find(address => /^B\d+$/.test(address) && generic[address].v === serial)!.slice(1)
     expect(generic['G' + row].v).toBe(label)
-    expect(generic['G' + row].f).toContain("'单位对照'!$A:$A,'单位对照'!$B:$B")
-    expect(generic['G' + row].f).not.toContain(`"${label}"`)
-    expect(generic['G' + row].f).toContain('UPPER(TRIM(')
+    expect(generic['F' + row].f).toContain("'单位对照'!$A:$A,'单位对照'!$B:$B")
+    expect(generic['F' + row].f).not.toContain(`"${label}"`)
+    expect(generic['F' + row].f).toContain('UPPER(TRIM(')
   }
   expect(main.J6.v).toBe('TNE'); expect(main.J7.v).toBe('ROLL')
   const styles = parse(await zip.file('xl/styles.xml')!.async('string'))

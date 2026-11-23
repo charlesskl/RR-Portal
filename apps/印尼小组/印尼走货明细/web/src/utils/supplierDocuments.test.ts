@@ -529,13 +529,14 @@ describe('supplier document export', () => {
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
     ;['千克', '个', '套', '米', '个'].forEach((unit, i) => {
       expect(wb.Sheets['发票'][`G${i + 9}`].v).toBe(unit)
-      expect(wb.Sheets['发票'][`G${i + 9}`].f).toContain("'UNIT-TEST'!$J:$J")
+      expect(wb.Sheets['发票'][`F${i + 9}`].f).toContain("'UNIT-TEST'!$J:$J")
       const declarationQuantity = i === 0 ? original[i].kg : original[i].qty
       const paidAmount = original[i].qty * original[i].price * original[i].purchase_charge_ratio
       const main = wb.Sheets['UNIT-TEST']
       const invoice = wb.Sheets['发票']
       expect(invoice[`F${i + 9}`].v).toBe(declarationQuantity)
-      expect(invoice[`F${i + 9}`].f).toContain(`SUMIFS('UNIT-TEST'!$K:$K,'UNIT-TEST'!$E:$E,$D${i + 9}`)
+      expect(invoice[`F${i + 9}`].f).toContain(`'UNIT-TEST'!$A:$A=$B${i + 9}`)
+      expect(invoice[`F${i + 9}`].F).toBe(`F${i + 9}:L${i + 9}`)
       expect(main[`J${i + 4}`].v).toBe(codes[i])
       expect(main[`K${i + 4}`].v).toBe(declarationQuantity)
       expect(main[`L${i + 4}`].v).toBe(original[i].qty)
@@ -561,14 +562,16 @@ describe('supplier document export', () => {
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
     const invoice = wb.Sheets['发票']
     expect(invoice.F9.v).toBe(0.17); expect(invoice.F10.v).toBe(13.31)
-    expect(invoice.F9.f).toContain("SUMIFS('WEIGHT-TEST'!$K:$K")
-    expect(invoice.F10.f).toContain("SUMIFS('WEIGHT-TEST'!$K:$K")
+    expect(invoice.F9.f).toContain("'WEIGHT-TEST'!$K:$K")
+    expect(invoice.F10.f).toContain("'WEIGHT-TEST'!$K:$K")
     expect(invoice.G9.v).toBe('千克'); expect(invoice.G10.v).toBe('千克')
-    expect(invoice.G9.f).toContain("'单位对照'!$A:$A,'单位对照'!$B:$B")
+    expect(invoice.F9.f).toContain("'单位对照'!$A:$A,'单位对照'!$B:$B")
     expect(invoice.F11.f).toBe('SUM(F9:F10)')
     expect(invoice.F11.v).toBeCloseTo(13.48, 8)
-    expect(invoice.I9.f).toContain("SUMIFS('WEIGHT-TEST'!$AA:$AA")
-    expect(invoice.I10.f).toContain("SUMIFS('WEIGHT-TEST'!$AA:$AA")
+    expect(invoice.F9.f).toContain("'WEIGHT-TEST'!$AA:$AA")
+    expect(invoice.I9.f).toBeUndefined()
+    expect(invoice.F10.f).toContain("'WEIGHT-TEST'!$AA:$AA")
+    expect(invoice.I10.f).toBeUndefined()
     // 主表送货数量和采购单位保持不变。
     expect(wb.Sheets['WEIGHT-TEST'].L4.v).toBe(600)
     expect(wb.Sheets['WEIGHT-TEST'].M4.v).toBe('个')
@@ -590,7 +593,7 @@ describe('supplier document export', () => {
     expect(wb.Sheets['DECLARATION'].F4.v).toBe('PB螺丝')
     expect(wb.Sheets['DECLARATION'].G4.v).toBe('PB screw')
     expect(invoice.D9.v).toBe('螺丝')
-    expect(invoice.D9.f).toContain('UNIQUE(')
+    expect(invoice.D9.f).toContain('LOOKUP(')
     expect(invoice.D9.f).toContain("'DECLARATION'!AR:AR=$D$11")
     expect(invoice.E9.v).toBe('0|0|铁制|353MPa|无牌|1008|2.0mm-4.0mm')
     expect(invoice.E9.f).toContain("XLOOKUP(D9,'商品汇总表'!$B:$B,'商品汇总表'!$D:$D,\"\")")
@@ -622,7 +625,8 @@ describe('supplier document export', () => {
         expect(invoice[`C${row}`].f).toContain(`XLOOKUP(D${row},'商品汇总表'!$B:$B,'商品汇总表'!$A:$A,"")`)
         expect(invoice[`D${row}`].v).not.toBe(wb.Sheets['GROUP-TEST'][`F${mainRow}`].v)
         expect(wb.Sheets['GROUP-TEST'][`AR${mainRow}`].v).toBe(cell.v)
-        expect(invoice[`I${row}`].f).toContain(`SUMIFS('GROUP-TEST'!$AA:$AA,'GROUP-TEST'!$E:$E,$D${row}`)
+        expect(invoice[`F${row}`].f).toContain("XLOOKUP(1,_xlpm.match,'GROUP-TEST'!$AA:$AA")
+        expect(invoice[`F${row}`].F).toBe(`F${row}:L${row}`)
         expect(invoice[`I${row}`].v).toBeCloseTo(Number(invoice[`F${row}`].v) * Number(invoice[`H${row}`].v), 8)
       }
       expect(invoice[`F${totalRow}`].f).toBe(`SUM(F${detailRows[0]}:F${detailRows.at(-1)})`)
@@ -679,13 +683,13 @@ describe('supplier document export', () => {
     const specs = [
       { name: 'PB螺丝', kg: 2, price: 5 }, { name: 'PWB螺丝', kg: 3, price: 7 },
       { name: 'M3螺母', kg: 0, price: 9 }, { name: 'M4螺母', kg: 0, price: 10 },
-      { name: 'PB螺丝', kg: 4, price: 11, company: '乙报关公司' },
+      { name: 'PB螺丝', kg: 4, price: 11, company: '华康塑胶制品(东源)有限公司' },
       { name: 'PB螺丝', kg: 1, price: 2, hs: '002' },
       { name: 'PB螺丝', kg: 1, price: 3, unit: 'PCE' },
       { name: '彩盒', kg: 1, price: 4 },
     ]
     const items = specs.map((spec, index) => ({ material_id: index + 1, qty: spec.kg > 0 ? 10 : 0, kg: spec.kg,
-      price: spec.price, cartons: 1, customs_company: spec.company || '甲报关公司', supplier: seller.keyword }))
+      price: spec.price, cartons: 1, customs_company: spec.company || '东莞华登塑胶制品有限公司', supplier: seller.keyword }))
     const file = await buildCustomsWorkbook({
       templateBuffer: variant === 'legacy' ? templateBuffer : variant === 'RRI' ? rriTemplateBuffer : rrmTemplateBuffer,
       items, materials: new Map(specs.map((spec, index) => [index + 1, { id: index + 1, product_code: `P${index + 1}`,
@@ -730,7 +734,7 @@ describe('supplier document export', () => {
   it('exports 256 merged source rows with valid range formulas and linked auxiliary totals', async () => {
     const items = Array.from({ length: 256 }, (_, index) => ({
       material_id: index + 1, qty: 10, kg: 1, price: 2, cartons: 1, qty_per_carton: '10',
-      customs_company: '甲报关公司', supplier: seller.keyword, contract_no: 'LARGE-C', invoice_no: 'LARGE-I',
+      customs_company: '东莞华登塑胶制品有限公司', supplier: seller.keyword, contract_no: 'LARGE-C', invoice_no: 'LARGE-I',
     }))
     const file = await buildCustomsWorkbook({
       templateBuffer: rrmTemplateBuffer, items, seller,
@@ -756,7 +760,7 @@ describe('supplier document export', () => {
       .filter(([address, cell]) => /^A\d+$/.test(address) && typeof cell.v === 'number')).toHaveLength(256)
   }, 30000)
   it.each(['legacy', 'RRI', 'RRM'])('looks up generic invoice commodity numbers in the catalogue, preserving main HS values (%s)', async variant => {
-    const items = [1, 2, 3].map(id => ({ material_id: id, qty: 1, supplier: seller.keyword }))
+    const items = [1, 2, 3].map(id => ({ material_id: id, qty: 1, supplier: seller.keyword, customs_company: '东莞华登塑胶制品有限公司' }))
     const materials = new Map(items.map(item => [item.material_id, {
       id: item.material_id, supplier: seller.keyword, name_zh: '测试物料',
       product_code: `P${item.material_id}`, hs_cn: item.material_id === 1 ? '0123456789' : '', hs_id: '99999999',

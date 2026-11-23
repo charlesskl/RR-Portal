@@ -32,7 +32,7 @@ it.each(['rri', 'rrm', 'legacy'])('发票按商品名查编号、公司筛选去
   const materials = new Map(names.map((name, i) => [i + 1, { id: i + 1, name_zh: name, product_code: 'SYN-' + i,
     hs_cn: name.includes('螺丝') ? '7318159090' : '9999999999', unit_kg: i === 1 ? 'GRM' : i === 3 ? 'ROLL' : 'KGM', net_per_pc: 1 }]))
   const items = names.map((_, i) => ({ material_id: i + 1, outbound_id: i + 1, qty: i + 1, kg: i + 1,
-    price: 2, currency: 'US$', cartons: 1, customs_company: i % 2 ? '乙公司' : '甲公司', supplier: 'Synthetic supplier' }))
+    price: 2, currency: 'US$', cartons: 1, customs_company: i % 2 ? '华康塑胶制品(东源)有限公司' : '东莞华登塑胶制品有限公司', supplier: 'Synthetic supplier' }))
   const before = structuredClone(items)
   const blob = await buildCustomsWorkbook({ templateBuffer: await inputZip.generateAsync({ type: 'arraybuffer' }),
     items, materials, productHs: new Map(), images: new Map(),
@@ -123,11 +123,11 @@ it('整家公司同名同单位全部合并、不同单位分开，单位公式�
   value.textContent = '测试卷单位'; inline.appendChild(value); cell.appendChild(inline)
   input.file(path, new XMLSerializer().serializeToString(doc))
   const specs = [
-    ['搪胶件-A', 'KGM', 2, 1, '001', '甲公司'], ['搪胶件-B', 'KGM', 3, 2, '002', '甲公司'],
-    ['成份商标', 'KGM', 4, 3, '003', '甲公司'], ['成份商标', 'KGM', 5, 4, '004', '甲公司'],
-    ['白色弹力棉带', 'ROLL', 6, 5, '005', '甲公司'], ['白色弹力棉带', 'ROLL', 7, 6, '006', '甲公司'],
-    ['独立商品', 'KGM', 8, 7, '007', '甲公司'], ['成份商标', 'KGM', 9, 8, '008', '乙公司'],
-    ['成份商标', 'PCE', 10, 9, '009', '甲公司'],
+    ['搪胶件-A', 'KGM', 2, 1, '001', '东莞华登塑胶制品有限公司'], ['搪胶件-B', 'KGM', 3, 2, '002', '东莞华登塑胶制品有限公司'],
+    ['成份商标', 'KGM', 4, 3, '003', '东莞华登塑胶制品有限公司'], ['成份商标', 'KGM', 5, 4, '004', '东莞华登塑胶制品有限公司'],
+    ['白色弹力棉带', 'ROLL', 6, 5, '005', '东莞华登塑胶制品有限公司'], ['白色弹力棉带', 'ROLL', 7, 6, '006', '东莞华登塑胶制品有限公司'],
+    ['独立商品', 'KGM', 8, 7, '007', '东莞华登塑胶制品有限公司'], ['成份商标', 'KGM', 9, 8, '008', '华康塑胶制品(东源)有限公司'],
+    ['成份商标', 'PCE', 10, 9, '009', '东莞华登塑胶制品有限公司'],
   ] as const
   const items = specs.map(([, , qty, price, , company], i) => ({ material_id: i + 1, outbound_id: i + 1,
     qty, kg: qty, price, currency: 'US$', cartons: 1, customs_company: company }))
@@ -159,7 +159,7 @@ it('同名不同单位汇总对单位空格规范化，重算不遗漏金额和�
   const output = await buildCustomsWorkbook({
     templateBuffer: new Uint8Array(readFileSync(new URL('../../public/template-customs-rrm.xlsx', import.meta.url))).buffer,
     items: units.map((_, i) => ({ material_id: i + 1, outbound_id: i + 1, qty: i + 2, kg: i + 2,
-      price: 10, currency: 'US$', cartons: 1, customs_company: '甲公司' })),
+      price: 10, currency: 'US$', cartons: 1, customs_company: '东莞华登塑胶制品有限公司' })),
     materials: new Map(units.map((unit, i) => [i + 1, { id: i + 1, name_zh: '合成同名商品', unit_kg: unit, net_per_pc: 1 }])),
     images: new Map(), productHs: new Map(), form: { customer: 'RRM', containerNo: 'UNIT-SPACE' },
   })
@@ -169,4 +169,60 @@ it('同名不同单位汇总对单位空格规范化，重算不遗漏金额和�
   for (const row of [9, 10]) for (const [column, source] of Object.entries({ F: 'K', I: 'AA', J: 'P', K: 'Q', L: 'AT' })) {
     expect(invoice[`${column}${row}`].f).toBe(`SUMPRODUCT(--('UNIT-SPACE'!$E$4:$E$6=$D${row}),--('UNIT-SPACE'!$AR$4:$AR$6=$D$11),--(UPPER(TRIM('UNIT-SPACE'!$J$4:$J$6))=UPPER(TRIM('UNIT-SPACE'!$J$${row === 9 ? 4 : 6}))),'UNIT-SPACE'!$${source}$4:$${source}$6)`)
   }
+}, 60000)
+
+it.each(['rri', 'rrm', 'legacy'])('仅六家公司合并，科驰立及其他公司逐条保留金额和单位（%s）', async variant => {
+  const allowed = ['东莞华登塑胶制品有限公司', '华康塑胶制品(东源)有限公司', '东莞兴信塑胶制品有限公司',
+    '河源市港正五金制造有限公司', '华兴玩具制品（河源）有限公司', '华登（河源）玩具制品有限公司']
+  const companies = [...allowed, '东莞市科驰立实业有限公司', '其他公司', '东莞华登塑胶制品有限公司（分公司）']
+  const items = companies.flatMap((company, i) => [1, 2].map((qty, j) => ({ material_id: i * 2 + j + 1,
+    outbound_id: i * 2 + j + 1, qty, kg: qty, price: qty * 10, currency: 'US$', cartons: 1,
+    customs_company: company, supplier: 'SYNTHETIC', contract_no: 'ALLOWLIST-C', invoice_no: 'ALLOWLIST-I' })))
+  const original = structuredClone(items)
+  const file = await buildCustomsWorkbook({
+    templateBuffer: Uint8Array.from(readFileSync(new URL('../../public/' + (variant === 'legacy' ? 'template-customs.xlsx' : `template-customs-${variant}.xlsx`), import.meta.url))).buffer,
+    items, materials: new Map(items.map(item => [item.material_id, { id: item.material_id, name_zh: '成份商标', unit_kg: 'KGM', net_per_pc: 1 }])),
+    images: new Map(), productHs: new Map(), form: { customer: variant === 'rrm' ? 'RRM' : 'RRI', containerNo: 'MERGE-ALLOWLIST' },
+  })
+  const bytes = await file.arrayBuffer(), book = XLSX.read(bytes, { type: 'array' }), invoice = book.Sheets['发票']
+  const zip = await JSZip.loadAsync(bytes), sheet = parse(await zip.file(await sheetPath(zip, '发票'))!.async('string'))
+  const styles = parse(await zip.file('xl/styles.xml')!.async('string'))
+  const cells = new Map(Array.from(sheet.getElementsByTagNameNS(ns, 'c')).map(cell => [cell.getAttribute('r'), cell]))
+  const xfs = Array.from(styles.getElementsByTagNameNS(ns, 'cellXfs')[0].getElementsByTagNameNS(ns, 'xf'))
+  const fills = Array.from(styles.getElementsByTagNameNS(ns, 'fills')[0].getElementsByTagNameNS(ns, 'fill'))
+  const color = (address: string) => {
+    const xf = xfs[Number(cells.get(address)!.getAttribute('s'))]
+    return fills[Number(xf.getAttribute('fillId'))].getElementsByTagNameNS(ns, 'fgColor')[0]?.getAttribute('rgb') || ''
+  }
+  let first = 9
+  for (const company of companies) {
+    const footer = Number(Object.keys(invoice).find(address => /^D\d+$/.test(address) && invoice[address].v === company)!.slice(1))
+    const merge = allowed.includes(company), rows = Array.from({ length: footer - first }, (_, i) => first + i)
+    expect(rows).toHaveLength(merge ? 1 : 2)
+    expect(rows.map(r => invoice[`F${r}`].v)).toEqual(merge ? [3] : [1, 2])
+    expect(rows.map(r => invoice[`I${r}`].v)).toEqual(merge ? [50] : [10, 40])
+    expect(invoice[`I${footer}`].v).toBe(50)
+    for (const r of rows) {
+      expect(invoice[`G${r}`].v).toBe('千克')
+      if (merge) {
+        expect(invoice[`D${r}`].f).toContain('UNIQUE(')
+        for (const c of ['F', 'I', 'J', 'K', 'L']) expect(invoice[`${c}${r}`].f).toMatch(/^SUMIFS\(/)
+      } else {
+        expect(invoice[`D${r}`].f).toContain('LOOKUP(')
+        expect(invoice[`D${r}`].f).toContain(`A:A=B${r}`)
+        expect(invoice[`F${r}`].F).toBe(`F${r}:L${r}`)
+        expect(invoice[`F${r}`].f).toContain(`$A:$A=$B${r}`)
+        expect(invoice[`I${r}`].f).toBeUndefined()
+      }
+      for (const c of ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']) {
+        if (merge) expect(color(c + r)).toBe('FFC6E0B4')
+        else expect(color(c + r)).not.toBe('FFC6E0B4')
+      }
+    }
+    first = footer + 1
+  }
+  expect(invoice[`I${first}`].v).toBe(450)
+  expect(book.Sheets['销售合同'].I53.v).toBe(450)
+  expect(Object.entries(book.Sheets['MERGE-ALLOWLIST']).filter(([a, c]) => /^A\d+$/.test(a) && typeof c.v === 'number')).toHaveLength(18)
+  expect(items).toEqual(original)
 }, 60000)

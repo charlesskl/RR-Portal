@@ -13,7 +13,7 @@ import { isPaperRope, shipmentCbmPerCarton, shipmentCbmTotal, shipmentNetTotalKg
 import { bindInvoiceLookupSerial, documentRow, rebindDocumentFormula, type DocumentTableLayout } from './documentTemplateFormula'
 import auxiliaryDocumentLayout from './auxiliaryDocumentLayout.json'
 import { AUXILIARY_TABLES, auxiliaryDetailFormulas } from './auxiliaryDocumentFormula'
-import { invoiceDetailGroups } from './invoiceDetailGroups'
+import { invoiceDetailGroups, shouldMergeInvoiceCompany } from './invoiceDetailGroups'
 import { consolidateShipmentItems } from './shipmentConsolidation'
 import { shipmentImages } from './shipmentImages'
 import { appendShipmentDocumentSheets, shipmentDocumentBatches } from './shipmentDocumentOverflow'
@@ -2288,9 +2288,9 @@ async function groupGenericInvoice(zip: JSZip, mainName: string, companies: stri
     .find(cell => cell.getAttribute('r') === 'I23')?.getAttribute('s')
   const subtotalRows: number[] = []
   const newRows = new Map<number, number>()
-  const detailGroups = new Map([...groups].map(([company, indices]) => [company, invoiceDetailGroups(indices.map(index => ({
-    index, name: String(sourceValue('E', index)), hs: String(sourceValue('B', index)), unit: String(sourceValue('J', index)),
-  })))]))
+  const detailGroups = new Map([...groups].map(([company, indices]) => [company, shouldMergeInvoiceCompany(company)
+    ? invoiceDetailGroups(indices.map(index => ({ index, name: String(sourceValue('E', index)), unit: String(sourceValue('J', index)) })))
+    : indices.map(index => [index])]))
   const mainRef = (column: string) => formulaRef(mainName, `${column}:${column}`).replace(/^=/, '')
   const unitValues = await prepareInvoiceUnits(zip, unitSheet)
   const unitFormula = (ref: string) => `_xlfn.XLOOKUP(UPPER(TRIM(${ref})),'单位对照'!$A:$A,'单位对照'!$B:$B,${ref})`
@@ -2305,7 +2305,7 @@ async function groupGenericInvoice(zip: JSZip, mainName: string, companies: stri
     const sourceNames = [...new Map(indices.map(index => {
       const name = String(sourceValue('E', index)); return [name.toLowerCase(), name] as const
     })).values()]
-    const canAggregate = names.every(name => name.trim()) && indices.every(index => String(sourceValue('J', index)).trim())
+    const canAggregate = shouldMergeInvoiceCompany(company) && names.every(name => name.trim()) && indices.every(index => String(sourceValue('J', index)).trim())
       && ![...groups.keys()].some(other => other !== company && other.toLowerCase() === company.toLowerCase())
     const uniqueNames = canAggregate && names.length === sourceNames.length
       && names.every((name, index) => name.toLowerCase() === sourceNames[index].toLowerCase())

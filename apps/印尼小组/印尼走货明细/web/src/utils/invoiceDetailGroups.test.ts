@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { invoiceDetailGroups, invoiceDetailSumFormula } from './invoiceDetailGroups'
+import { invoiceDetailGroups, invoiceDetailSumFormula, shouldMergeInvoiceCompany } from './invoiceDetailGroups'
 
 it.each(['螺丝', '螺母', '五金配件', '塑胶件', '搪胶件', '毛绒裁片', '成份商标', '白色弹力棉带'])('merges %s with matching names/units', name => {
   expect(invoiceDetailGroups([0, 1].map(index => ({ index, name, hs: '001', unit: 'KGM' })))).toEqual([[0, 1]])
@@ -62,3 +62,12 @@ it('rejects an overlong sparse formula instead of producing an invalid Excel wor
   const references = Array.from({ length: 256 }, (_, index) => `'${'A'.repeat(31)}'!AA${index * 2 + 4}`)
   expect(() => invoiceDetailSumFormula(references)).toThrow(/发票合并明细公式.*8192.*减少/)
 })
+
+
+it.each([
+  '东莞华登塑胶制品有限公司', '华康塑胶制品(东源)有限公司', '东莞兴信塑胶制品有限公司',
+  '河源市港正五金制造有限公司', '华兴玩具制品（河源）有限公司', '华登（河源）玩具制品有限公司',
+  ' 华康塑胶制品（东源）有限公司 ', '华登(河源)玩具制品有限公司',
+])('仅指定公司的完整名称允许合并：%s', company => expect(shouldMergeInvoiceCompany(company)).toBe(true))
+it.each(['东莞市科驰立实业有限公司', '深圳市华胜益出口贸易有限公司', '其他公司',
+  '东莞华登塑胶制品有限公司（分公司）', '', undefined])('其他公司保留逐行明细：%s', company => expect(shouldMergeInvoiceCompany(company)).toBe(false))

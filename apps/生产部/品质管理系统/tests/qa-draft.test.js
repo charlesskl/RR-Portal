@@ -169,3 +169,22 @@ test('old QA drafts with missing source fields compare using the same inherited 
  assert.equal(h.fixture.sameEditableValues(old,current),true);
  assert.equal(h.fixture.sameEditableValues(old,{...current,deliveryNo:'0002'}),false);
 });
+
+
+test('QA applicants follow inspectors for individual and combined selections',()=>{
+ const h=harness(),records=[{id:1,qc:' 曹维 '},{id:2,qc:'曹维'},{id:3,qc:'王雨'},{id:4,qc:''},{id:5,qc:0},{id:6,qc:'—'}];
+ assert.equal(h.fixture.applicationSelection(1,records,'2026-11-24').defaults.requester,'曹维');
+ assert.equal(h.fixture.applicationSelection([1,2],records,'2026-11-24').defaults.requester,'曹维');
+ assert.equal(h.fixture.applicationSelection([1,2,3,4],records,'2026-11-24').defaults.requester,'曹维、王雨');
+ assert.equal(h.fixture.applicationSelection([4,5,6],records,'2026-11-24').defaults.requester,'');
+ assert.throws(()=>h.fixture.applicationSelection([1,2],[{id:1,qc:'王'.repeat(80)},{id:2,qc:'李'}],'2026-11-24'),/检验员姓名过多/);
+});
+test('empty saved applicants inherit inspectors while manual names and sample details remain intact',()=>{
+ const h=harness();h.context.defaults={requester:'曹维'};
+ const saved={...h.fixture.formValues(),requester:'',sampleQty:'12 PCS',description:'1. 原样板说明'};
+ h.fixture.applyValues(saved);
+ const filled=h.fixture.formValues();assert.equal(filled.requester,'曹维');assert.equal(filled.sampleQty,'12 PCS');assert.equal(filled.description,saved.description);
+ assert.equal(h.fixture.sameEditableValues(saved,filled),true);
+ h.fixture.applyValues({...saved,requester:'实际申请人'});assert.equal(h.fixture.formValues().requester,'实际申请人');
+ assert.equal(h.fixture.sameEditableValues(saved,h.fixture.formValues()),false);
+});

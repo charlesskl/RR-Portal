@@ -71,6 +71,7 @@
   }
   function sameEditableValues(left, right) {
     const normalize = data => ({ ...singleNameInDescription(data), receivedDate:'',
+      requester:typeof data?.requester === 'string' && data.requester.trim() ? data.requester : session?.defaults?.requester || '',
       supplier:typeof data?.supplier === 'string' ? data.supplier : session?.defaults?.supplier || '',
       deliveryNo:typeof data?.deliveryNo === 'string' ? data.deliveryNo : session?.defaults?.deliveryNo || '' });
     return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
@@ -116,6 +117,7 @@
     for (const key of ['customer','productName','productNo','department','requester','ageGrade','source','receivedDate','sampleQty','description','reportNo','stage','purpose','language','supplier','deliveryNo']) {
       if (key !== 'receivedDate' && typeof data[key] === 'string') document.getElementById('qa_' + key).value = data[key];
     }
+    if (typeof data.requester !== 'string' || !data.requester.trim()) document.getElementById('qa_requester').value = session?.defaults?.requester || '';
     document.getElementById('qa_receivedDate').value = session?.generationDate || generationDate();
     document.querySelectorAll('[name="qa_standard"],[name="qa_test"]').forEach(el => {
       const list = el.name === 'qa_standard' ? data.standards : data.tests;
@@ -294,8 +296,8 @@
           <p class="qa-record-info" id="qaRecordInfo"></p>
           <div class="qa-form-grid">
             ${field('customer','客户', 'text', 'maxlength="120"')}${field('productName','产品名称', 'text', 'maxlength="180"')}${field('productNo','产品编号', 'text', 'maxlength="100"')}
-            ${field('department','申请部门', 'text', 'maxlength="80"')}${field('requester','申请人（实际姓名）', 'text', 'maxlength="80" placeholder="请填写实际申请人姓名"')}${field('ageGrade','年龄（选填）', 'text', 'maxlength="40"')}
-            ${field('source','样板来源', 'text', 'maxlength="80"')}${field('receivedDate','到板日期（生成当天）', 'date', 'readonly')}${field('sampleQty','样板数量', 'text', 'maxlength="60" placeholder="填写实际送样数量，如 3 PCS"')}
+            ${field('department','申请部门', 'text', 'maxlength="80"')}${field('requester','申请人（默认检验员）', 'text', 'maxlength="80" placeholder="自动带入检验员，可修改"')}${field('ageGrade','年龄（选填）', 'text', 'maxlength="40" list="qa_age_options" placeholder="选择或手动填写年龄"')}<datalist id="qa_age_options">${['3+','6+','3M+','18M+'].map(v => `<option value="${v}"></option>`).join('')}</datalist>
+            ${field('source','样板来源', 'text', 'maxlength="80"')}${field('receivedDate','到板日期（生成当天）', 'date', 'readonly')}${field('sampleQty','样板数量', 'text', 'maxlength="60" list="qa_quantity_options" placeholder="选择或手动填写数量"')}<datalist id="qa_quantity_options">${['6PCS','12PCS','24PCS'].map(v => `<option value="${v}"></option>`).join('')}</datalist>
             <label class="form-group qa-form-wide"><span>样板描述</span><textarea class="form-input" id="qa_description" rows="5" maxlength="2000" placeholder="填写样板状态、测试要求或需要说明的内容"></textarea></label>
             <div class="qa-form-wide qa-source-fields">${field('supplier','供应商（描述栏底部）','text','maxlength="2000"')}${field('deliveryNo','送货单号（描述栏底部）','text','maxlength="4000"')}</div>
             ${field('reportNo','报告编号（可修改）', 'text', 'maxlength="100"')}
@@ -372,13 +374,15 @@
     if (records.some(record => !record)) throw new Error('找不到所选的验货记录，请刷新后重新选择');
     const unique = key => [...new Set(records.map(record => String(record[key] ?? '').trim()).filter(Boolean))];
     const productNos = unique('productNo');
+    const requester = unique('qc').filter(name => !['0','-','—'].includes(name)).join('、');
+    if (requester.length > 80) throw new Error('所选检验员姓名过多，请减少记录后再生成申请');
     const recordIds = combined ? ids.map(Number).sort((a,b) => a-b) : null;
     const record = combined ? { id:'group:' + recordIds.join(','), supplier:unique('supplier').join('、') } : { ...records[0] };
     const defaults = {
       customer:unique('client').join('、').length <= 120 ? unique('client').join('、') : '',
       productName:'',
       productNo:productNos.join('、').length <= 100 ? productNos.join('、') : '',
-      department:'品质部', requester:'', ageGrade:'', source:'来料',
+      department:'品质部', requester, ageGrade:'', source:'来料',
       receivedDate:today, sampleQty:'',
       description:records.map((item,index) => (index+1) + '. ' + (item.productName || '未填写款式名称') +
         (productNos.length > 1 ? '（货号：' + (item.productNo || '未填写') + '）' : '')).join('\n'),

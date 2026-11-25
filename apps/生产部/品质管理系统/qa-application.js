@@ -296,7 +296,7 @@
           <p class="qa-record-info" id="qaRecordInfo"></p>
           <div class="qa-form-grid">
             ${field('customer','客户', 'text', 'maxlength="120"')}${field('productName','产品名称', 'text', 'maxlength="180"')}${field('productNo','产品编号', 'text', 'maxlength="100"')}
-            ${field('department','申请部门', 'text', 'maxlength="80"')}${field('requester','申请人（默认检验员）', 'text', 'maxlength="80" placeholder="自动带入检验员，可修改"')}${field('ageGrade','年龄（选填）', 'text', 'maxlength="40" list="qa_age_options" placeholder="选择或手动填写年龄"')}<datalist id="qa_age_options">${['3+','6+','3M+','18M+'].map(v => `<option value="${v}"></option>`).join('')}</datalist>
+            ${field('department','申请部门', 'text', 'maxlength="80"')}${field('requester','申请人（默认检验员）', 'text', 'maxlength="80" placeholder="自动带入检验员，可修改"')}${field('ageGrade','年龄（选填）', 'text', 'maxlength="40" list="qa_age_options" placeholder="选择或手动填写年龄"')}<datalist id="qa_age_options">${['3+','6+','6M+','18M+'].map(v => `<option value="${v}"></option>`).join('')}</datalist>
             ${field('source','样板来源', 'text', 'maxlength="80"')}${field('receivedDate','到板日期（生成当天）', 'date', 'readonly')}${field('sampleQty','样板数量', 'text', 'maxlength="60" list="qa_quantity_options" placeholder="选择或手动填写数量"')}<datalist id="qa_quantity_options">${['6PCS','12PCS','24PCS'].map(v => `<option value="${v}"></option>`).join('')}</datalist>
             <label class="form-group qa-form-wide"><span>样板描述</span><textarea class="form-input" id="qa_description" rows="5" maxlength="2000" placeholder="填写样板状态、测试要求或需要说明的内容"></textarea></label>
             <div class="qa-form-wide qa-source-fields">${field('supplier','供应商（描述栏底部）','text','maxlength="2000"')}${field('deliveryNo','送货单号（描述栏底部）','text','maxlength="4000"')}</div>

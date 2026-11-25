@@ -1341,6 +1341,10 @@ const SCHEMA_SQL = `
     updatedAt TEXT NOT NULL,
     updatedBy TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS qa_field_options (
+    field TEXT NOT NULL, value TEXT NOT NULL, createdAt TEXT NOT NULL, createdBy TEXT NOT NULL,
+    PRIMARY KEY (field,value)
+  );
   CREATE TABLE IF NOT EXISTS qa_application_groups (
     recordId TEXT PRIMARY KEY,
     data TEXT NOT NULL,
@@ -1898,6 +1902,31 @@ const QA_FIELD_LIMITS = { customer:120, productName:180, productNo:100, departme
   ageGrade:40, source:80, receivedDate:10, sampleQty:60, description:2000, reportNo:100,
   stage:10, purpose:180, language:2 };
 const QA_SOURCE_LIMITS = { supplier:2000, deliveryNo:4000 };
+const QA_OPTION_DEFAULTS = { ageGrade:['3+','6+','6M+','18M+'], sampleQty:['6PCS','12PCS','24PCS'] };
+function readQAOptions(db) {
+  const options = {};
+  for (const [field,defaults] of Object.entries(QA_OPTION_DEFAULTS)) {
+    options[field] = [...new Set([...defaults,...db.prepare('SELECT value FROM qa_field_options WHERE field=? ORDER BY rowid').all(field).map(row => row.value)])];
+  }
+  return options;
+}
+function addQAOption(db, body, username) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['field','value'].includes(key)) ||
+      typeof body.field !== 'string' || !Object.hasOwn(QA_OPTION_DEFAULTS,body.field) || typeof body.value !== 'string') Auth.fail(400,'下拉选项格式不正确');
+  const field = body.field, value = body.value.trim();
+  if (!value || value.length > QA_FIELD_LIMITS[field] || /[\u0000-\u001f\u007f]/.test(value)) Auth.fail(400,'下拉选项为空、过长或含无效字符');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const exists = QA_OPTION_DEFAULTS[field].includes(value) || db.prepare('SELECT 1 FROM qa_field_options WHERE field=? AND value=?').get(field,value);
+    if (!exists) {
+      if (db.prepare('SELECT COUNT(*) count FROM qa_field_options WHERE field=?').get(field).count >= 100) Auth.fail(400,'该字段最多可添加100个选项');
+      db.prepare('INSERT INTO qa_field_options(field,value,createdAt,createdBy) VALUES(?,?,?,?)').run(field,value,new Date().toISOString(),username);
+    }
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  return readQAOptions(db);
+}
+
 function validatedQAData(input, combined = false, fallback = null) {
   if (!input || typeof input !== 'object' || Array.isArray(input) ||
       Object.keys(input).some(key => !Object.hasOwn(QA_FIELD_LIMITS, key) && !Object.hasOwn(QA_SOURCE_LIMITS,key) && !['standards','tests'].includes(key))) Auth.fail(400, 'QA申请数据格式不正确');
@@ -2217,6 +2246,12 @@ const server = http.createServer(async (req, res) => {
     const db = _dbs.get(companyId), user = session.user;
     if (!db) Auth.fail(503, '品质系统尚未就绪');
 
+    if (p === '/api/qa-options' && ['GET','POST'].includes(req.method)) {
+      Auth.requirePermission(user,'records','v');
+      if (req.method === 'GET') return sendJson(res,200,{ok:true,options:readQAOptions(db)});
+      Auth.requirePermission(user,'records','e');
+      return sendJson(res,200,{ok:true,options:addQAOption(db,await readBody(req),user.username)});
+    }
     if (p === '/api/qa-application' && ['GET','POST'].includes(req.method)) {
       Auth.requirePermission(user, 'records', 'v');
       const rawId = url.searchParams.get('recordId');

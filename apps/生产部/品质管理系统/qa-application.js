@@ -31,6 +31,52 @@
   const checked = key => [...document.querySelectorAll('[name="qa_' + key + '"]:checked')].map(el => el.value);
   const box = checked => `<span class="qa-check${checked ? ' checked' : ''}"></span>`;
   const field = (key, label, type = 'text', extra = '') => `<label class="form-group"><span>${label}</span><input class="form-input" id="qa_${key}" type="${type}" ${extra}></label>`;
+  const optionDefaults = { ageGrade:['3+','6+','6M+','18M+'], sampleQty:['6PCS','12PCS','24PCS'] };
+  const optionListIds = { ageGrade:'qa_age_options', sampleQty:'qa_quantity_options' };
+  function optionField(key, label, limit, placeholder) {
+    return `<div class="form-group"><label for="qa_${key}"><span>${label}</span></label><div class="qa-option-input"><input class="form-input" id="qa_${key}" maxlength="${limit}" list="${optionListIds[key]}" placeholder="${placeholder}"><button type="button" class="btn-secondary qa-option-add" data-field="${key}" title="将当前输入保存为下拉选项">添加到下拉</button></div><datalist id="${optionListIds[key]}"></datalist></div>`;
+  }
+  function renderOptions(options = {}) {
+    for (const [key,defaults] of Object.entries(optionDefaults)) {
+      const list = document.getElementById(optionListIds[key]);
+      list.replaceChildren();
+      for (const value of new Set([...defaults,...(Array.isArray(options[key]) ? options[key] : [])])) {
+        if (typeof value !== 'string') continue;
+        const item = document.createElement('option'); item.value = value; list.appendChild(item);
+      }
+    }
+  }
+  async function requestOptions(context, body) {
+    checkActor(context);
+    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(),12000);
+    try {
+      const response = await window.__QC_REQUEST('/api/qa-options',{ method:body ? 'POST' : 'GET', signal:controller.signal,
+        ...(body ? {headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : {}) });
+      const result = await response.json(); checkActor(context);
+      if (!response.ok || !result.ok || !result.options) throw new Error(result.error || '读取或保存下拉选项失败');
+      return result.options;
+    } finally { clearTimeout(timeout); }
+  }
+  async function loadOptions(context) {
+    try {
+      const options = await requestOptions(context);
+      if (session === context) renderOptions(options);
+    } catch (error) { if (session === context) showToast('读取下拉选项失败，仍可手动填写；' + error.message,'error'); }
+    finally { context.optionsLoading = false; updateControls(context); }
+  }
+  async function addOption(key) {
+    const context = session;
+    if (!context?.editable || context.loading || context.optionsLoading || context.optionSaving || busy) return;
+    const text = value(key).trim();
+    if (!text) { showToast('请先输入要添加的内容','error'); document.getElementById('qa_'+key).focus(); return; }
+    context.optionSaving = true; updateControls(context);
+    try {
+      const options = await requestOptions(context,{field:key,value:text});
+      if (session !== context) return;
+      renderOptions(options); showToast('已保存到当前公司的下拉选项','success');
+    } catch (error) { if (session === context) showToast(error.message,'error'); }
+    finally { context.optionSaving = false; updateControls(context); }
+  }
 
   function actor() {
     const auth = window.__QC_AUTH;
@@ -141,6 +187,7 @@
     document.querySelectorAll('#qaApplicationForm input,#qaApplicationForm select,#qaApplicationForm textarea').forEach(el => {
       el.disabled = context.loading || busy || !context.editable;
     });
+    document.querySelectorAll('.qa-option-add').forEach(button => { button.disabled = !context.editable || context.loading || context.optionsLoading || context.optionSaving || busy; });
     document.getElementById('qaSave').disabled = !context.editable || context.loading || busy || !context.loaded || context.conflicted;
     document.getElementById('qaExport').disabled = context.loading || busy || !context.loaded;
     document.getElementById('qaPreviewTab').disabled = context.loading || busy;
@@ -296,8 +343,8 @@
           <p class="qa-record-info" id="qaRecordInfo"></p>
           <div class="qa-form-grid">
             ${field('customer','客户', 'text', 'maxlength="120"')}${field('productName','产品名称', 'text', 'maxlength="180"')}${field('productNo','产品编号', 'text', 'maxlength="100"')}
-            ${field('department','申请部门', 'text', 'maxlength="80"')}${field('requester','申请人（默认检验员）', 'text', 'maxlength="80" placeholder="自动带入检验员，可修改"')}${field('ageGrade','年龄（选填）', 'text', 'maxlength="40" list="qa_age_options" placeholder="选择或手动填写年龄"')}<datalist id="qa_age_options">${['3+','6+','6M+','18M+'].map(v => `<option value="${v}"></option>`).join('')}</datalist>
-            ${field('source','样板来源', 'text', 'maxlength="80"')}${field('receivedDate','到板日期（生成当天）', 'date', 'readonly')}${field('sampleQty','样板数量', 'text', 'maxlength="60" list="qa_quantity_options" placeholder="选择或手动填写数量"')}<datalist id="qa_quantity_options">${['6PCS','12PCS','24PCS'].map(v => `<option value="${v}"></option>`).join('')}</datalist>
+            ${field('department','申请部门', 'text', 'maxlength="80"')}${field('requester','申请人（默认检验员）', 'text', 'maxlength="80" placeholder="自动带入检验员，可修改"')}${optionField('ageGrade','年龄（选填）',40,'选择或手动填写年龄')}
+            ${field('source','样板来源', 'text', 'maxlength="80"')}${field('receivedDate','到板日期（生成当天）', 'date', 'readonly')}${optionField('sampleQty','样板数量',60,'选择或手动填写数量')}
             <label class="form-group qa-form-wide"><span>样板描述</span><textarea class="form-input" id="qa_description" rows="5" maxlength="2000" placeholder="填写样板状态、测试要求或需要说明的内容"></textarea></label>
             <div class="qa-form-wide qa-source-fields">${field('supplier','供应商（描述栏底部）','text','maxlength="2000"')}${field('deliveryNo','送货单号（描述栏底部）','text','maxlength="4000"')}</div>
             ${field('reportNo','报告编号（可修改）', 'text', 'maxlength="100"')}
@@ -323,6 +370,7 @@
       </div>
       <div class="modal-footer"><button type="button" class="btn-secondary" id="qaCancel">关闭</button><button type="button" class="btn-secondary" id="qaSave">保存申请</button><button type="button" class="btn-primary" id="qaExport">导出 QA 申请表 PDF</button></div>
     </section>`;
+    overlay.querySelectorAll('.qa-option-add').forEach(button => { button.onclick = () => { void addOption(button.dataset.field); }; });
     overlay.querySelector('#qaClose').onclick = () => closeQAApplication();
     overlay.querySelector('#qaCancel').onclick = () => closeQAApplication();
     overlay.querySelector('#qaEditTab').onclick = () => showPanel(false);
@@ -401,7 +449,7 @@
       // Finish the previous form before another selection can replace its fields.
       if (session) closeQAApplication();
       const overlay = ensureDialog();
-      session = { ...identity,...selection,trigger,generationDate:today,loading:true,loaded:false,version:null,conflicted:false };
+      session = { ...identity,...selection,trigger,generationDate:today,loading:true,loaded:false,version:null,conflicted:false,optionsLoading:true };
       previewFit = true;
       document.getElementById('qa_description').maxLength = selection.recordIds ? 24000 : 2000;
       for (const [key, v] of Object.entries(selection.defaults)) document.getElementById('qa_' + key).value = String(v);
@@ -412,11 +460,13 @@
       document.getElementById('qaRecordInfo').textContent = selection.recordIds
         ? '已合并 ' + selection.records.length + ' 条记录，款式名称已按序填入样板描述；再次勾选相同记录可继续编辑此申请。'
         : '来源记录：' + [selection.record.supplier, selection.record.productNo, selection.record.productName].filter(Boolean).join(' · ');
+      renderOptions();
       showPanel(false);
       overlay.classList.add('show');
       const context = session;
       document.getElementById('qaClose').focus();
       await loadApplication(context);
+      if (session === context) await loadOptions(context);
       if (session === context && context.editable) document.getElementById('qa_sampleQty').focus();
     } catch (error) { showToast(error.message, 'error'); }
   }

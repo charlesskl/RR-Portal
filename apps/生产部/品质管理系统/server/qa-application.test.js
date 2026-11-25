@@ -158,3 +158,45 @@ test('source fields use existing permission and conflict checks and reject inval
  assert.equal((await request(route,{session:admin,method:'POST',body:{baseVersion:0,data:model({supplier:'另一家',deliveryNo:'2'})}})).status,409);
  assert.deepEqual((await request(route,{session:admin})).json.application,before);
 });
+
+test('custom QA dropdown options persist across clients and restart without changing inspections',async()=>{
+ const route='/api/qa-options',before=recordSnapshot();
+ const defaults={ageGrade:['3+','6+','6M+','18M+'],sampleQty:['6PCS','12PCS','24PCS']};
+ assert.deepEqual((await request(route,{session:reader})).json.options,defaults);
+ const add=async(field,value,session=admin)=>request(route,{session,method:'POST',body:{field,value}});
+ assert.equal((await add('ageGrade',' 12+ ')).status,200);
+ assert.equal((await add('sampleQty','36PCS')).status,200);
+ assert.equal((await add('ageGrade','12+')).json.options.ageGrade.filter(v=>v==='12+').length,1);
+ assert.equal((await add('ageGrade','6M+')).json.options.ageGrade.filter(v=>v==='6M+').length,1);
+ const concurrent=await Promise.all(Array.from({length:4},()=>add('sampleQty','48PCS')));
+ assert.ok(concurrent.every(r=>r.status===200));
+ assert.deepEqual((await request(route,{session:reader})).json.options,{ageGrade:[...defaults.ageGrade,'12+'],sampleQty:[...defaults.sampleQty,'36PCS','48PCS']});
+ const other=await login('testadmin',B);
+ assert.deepEqual((await request(route,{session:other,company:B})).json.options,defaults);
+ await stop();await start();
+ assert.deepEqual((await request(route,{session:reader})).json.options.ageGrade,[...defaults.ageGrade,'12+']);
+ assert.equal(recordSnapshot(),before);
+});
+test('custom QA options enforce view/edit permission, CSRF and text limits atomically',async()=>{
+ const route='/api/qa-options',before=(await request(route,{session:admin})).json.options;
+ assert.equal((await request(route)).status,401);
+ assert.equal((await request(route,{session:hidden})).status,403);
+ assert.equal((await request(route,{session:reader,method:'POST',body:{field:'ageGrade',value:'8+'}})).status,403);
+ assert.equal((await request(route,{session:admin,method:'POST',csrf:false,body:{field:'ageGrade',value:'8+'}})).status,403);
+ assert.equal((await request(route,{session:admin,method:'POST',body:null})).status,415);
+ for(const body of [[],{field:['ageGrade'],value:'8+'},{field:'unknown',value:'x'},{field:'__proto__',value:'x'},{field:'ageGrade',value:''},{field:'ageGrade',value:'   '},
+  {field:'ageGrade',value:'x'.repeat(41)},{field:'sampleQty',value:'x'.repeat(61)},{field:'ageGrade',value:'3+\n4+'},{field:'ageGrade',value:'\0'},
+  {field:'ageGrade',value:12},{field:'ageGrade',value:'8+',extra:true}]) {
+  assert.equal((await request(route,{session:admin,method:'POST',body})).status,400);
+ }
+ assert.deepEqual((await request(route,{session:admin})).json.options,before);
+ database(A,db=>{
+  for(let i=0;db.prepare("SELECT COUNT(*) count FROM qa_field_options WHERE field='ageGrade'").get().count<100;i++) {
+   db.prepare('INSERT INTO qa_field_options(field,value,createdAt,createdBy) VALUES(?,?,?,?)').run('ageGrade','capacity-'+i,'2026-11-25','testadmin');
+  }
+ });
+ const full=(await request(route,{session:admin})).json.options;
+ assert.equal((await request(route,{session:admin,method:'POST',body:{field:'ageGrade',value:'over-capacity'}})).status,400);
+ assert.equal((await request(route,{session:admin,method:'POST',body:{field:'ageGrade',value:'12+'}})).status,200);
+ assert.deepEqual((await request(route,{session:admin})).json.options,full);
+});

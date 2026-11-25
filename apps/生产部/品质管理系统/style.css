@@ -3314,3 +3314,10 @@ body.theme-light #loginPassword {
   margin: 0 -4px !important; padding: 0 4px !important;
   border-bottom: 1px solid #555 !important; overflow-wrap: anywhere !important;
 }
+
+/* 可手动录入并保存为公司共用下拉选项。 */
+.qa-option-input { display: flex; align-items: center; gap: 6px; }
+.qa-option-input .form-input { flex: 1; min-width: 0; }
+.qa-option-input .qa-option-add { flex-shrink: 0; padding: 8px; font-size: 12px; white-space: nowrap; }
+
+.qa-form-grid .form-group > label > span { font-size: 12px; color: var(--text-dim); }

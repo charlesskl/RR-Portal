@@ -4,7 +4,7 @@ const jazwares = require('./jazwares');
 
 // 顺序重要：JAZ 和 skycastle 都有 "Purchase Order"，但 JAZ 额外有 "PO # :Date :" 特征
 // 先检 tomy 再 jaz 再 skycastle
-const parsers = [tomy, jazwares, skycastle];
+const parsers = [require('./skycastle-current'), tomy, jazwares, skycastle];
 
 /**
  * 自动检测PO类型并解析

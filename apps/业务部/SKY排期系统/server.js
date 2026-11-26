@@ -114,7 +114,7 @@ app.post('/api/po/upload', uploadPDF.array('files', 50), async (req, res) => {
           const names = raw.SheetNames.map(n => n.toLowerCase());
           const type = names.some(n => n.includes('一二代')) ? 'skycastle' : 'tomy';
           const poCol = type === 'tomy' ? 5 : 6;
-          const sheets = type === 'tomy' ? ['总排期'] : ['一二代排期', '三代排期', '蛋糕系列'];
+          const sheets = type === 'tomy' ? ['总排期'] : ['一二代排期', '三代排期', '四代排期', '蛋糕系列'];
           const existingPOs = new Set();
           for (const name of sheets) {
             const ws = raw.Sheets[name];
@@ -210,12 +210,13 @@ app.post('/api/po/write/:sessionId', async (req, res) => {
     const { wb, type } = await writeToExcel(templatePath, session.results, { factory });
 
     const exportFile = path.join(exportsDir, `排期_${uuidv4()}.xlsx`);
-    await require('./full-workbook').writeFullWorkbook(templatePath, exportFile, wb, type, session.results);
+    await require('./full-workbook').writeFullWorkbook(templatePath, exportFile, wb, type, session.results, req.body.dateConfirmation);
 
     res.download(exportFile, `排期_已入录_${new Date().toLocaleDateString('zh-CN')}.xlsx`, () => {
       try { fs.unlinkSync(exportFile); } catch (e) { /* ignore */ }
     });
   } catch (err) {
+    if (err.token && err.changes) return res.status(409).json({error:err.message,dateConfirmation:err.token,changes:err.changes});
     res.status(500).json({ error: err.message });
   }
 });

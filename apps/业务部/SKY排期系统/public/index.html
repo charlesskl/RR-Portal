@@ -469,6 +469,7 @@
           </div>
           <div class="po-meta">${metaHtml}</div>
           ${tableHtml}
+          ${(po.fees || []).map(fee => `<p class="po-meta">${escapeHtml(fee.description)} · USD ${escapeHtml(Number(fee.amount).toFixed(2))}（单列费用）</p>`).join('')}
         `;
         container.appendChild(card);
       });
@@ -540,12 +541,21 @@
 
       try {
         await saveSession();
-        const resp = await fetch(`./api/po/write/${currentSession}`, {
+        const requestExport = dateConfirmation => fetch(`./api/po/write/${currentSession}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ templateId, factory: templateType === 'tomy' ? undefined : undefined }),
+          body: JSON.stringify({ templateId, dateConfirmation }),
         });
 
+        let resp = await requestExport();
+        if (resp.status === 409) {
+          const change = await resp.json();
+          if (!change.dateConfirmation) throw new Error(change.error);
+          const message = change.changes.map(([sheet,po,sku,label,from,to]) =>
+            `${sheet} · ${po} · ${sku} · ${label}  ${from} → ${to}`).join('\n');
+          if (!window.confirm('按新 PO 更新以下日期？\n'+message)) return;
+          resp = await requestExport(change.dateConfirmation);
+        }
         if (!resp.ok) {
           const err = await resp.json();
           throw new Error(err.error);

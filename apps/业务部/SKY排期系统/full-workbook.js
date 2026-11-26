@@ -31,7 +31,7 @@ function originalValue(cell, strings) {
   const value = children(cell,'v')[0]?.textContent || '';
   return cell.getAttribute('t') === 's' ? strings[Number(value)] : value;
 }
-async function createDateWriter(zip, book) {
+async function createDateWriter(zip, book, strings) {
   const styles = await readXml(zip, 'xl/styles.xml');
   const root = styles.documentElement;
   const xfs = children(root, 'cellXfs')[0];
@@ -44,7 +44,39 @@ async function createDateWriter(zip, book) {
   const workbookPr = children(book.documentElement, 'workbookPr')[0];
   const offset = ['1', 'true'].includes(workbookPr?.getAttribute('date1904')) ? 1462 : 0;
   const addedStyles = new Map();
+  const yellowStyles = new Map();
+  let yellowId;
+  function highlight(cell) {
+    const index = Number(cell.getAttribute('s') || 0);
+    if (yellowId === undefined) {
+      const fills = children(root,'fills')[0];
+      const entries = children(fills,'fill');
+      yellowId = entries.findIndex(f => {
+        const pattern = children(f,'patternFill')[0];
+        return pattern?.getAttribute('patternType') === 'solid' &&
+          children(pattern,'fgColor')[0]?.getAttribute('rgb') === 'FFFFFF00';
+      });
+      if (yellowId < 0) {
+        const fill = styles.createElementNS(NS,'fill');
+        const pattern = styles.createElementNS(NS,'patternFill');
+        pattern.setAttribute('patternType','solid');
+        const color = styles.createElementNS(NS,'fgColor');
+        color.setAttribute('rgb','FFFFFF00');
+        pattern.appendChild(color); fill.appendChild(pattern); fills.appendChild(fill);
+        yellowId = entries.length; fills.setAttribute('count',String(yellowId+1));
+      }
+    }
+    if (Number(styleRows[index].getAttribute('fillId'))===yellowId) return;
+    if (!yellowStyles.has(index)) {
+      const clone=styleRows[index].cloneNode(true);
+      clone.setAttribute('fillId',String(yellowId)); clone.setAttribute('applyFill','1');
+      yellowStyles.set(index,styleRows.length);
+      xfs.appendChild(clone);styleRows.push(clone);xfs.setAttribute('count',String(styleRows.length));
+    }
+    cell.setAttribute('s',String(yellowStyles.get(index)));
+  }
   return {
+    highlight, offset, strings,
     write(cell, value, code) {
       const index = Number(cell.getAttribute('s') || 0);
       const existing = styleRows[index];
@@ -80,7 +112,7 @@ async function createDateWriter(zip, book) {
       return value - offset;
     },
     save() {
-      if (addedStyles.size) zip.file('xl/styles.xml', xml.serializeToString(styles));
+      if (addedStyles.size || yellowStyles.size) zip.file('xl/styles.xml', xml.serializeToString(styles));
     },
   };
 }
@@ -88,7 +120,14 @@ function writeCell(doc, row, source, dates) {
   const letters = column(source.address);
   const cells = children(row, 'c');
   let cell = cells.find(c=>column(c.getAttribute('r')) === letters);
+  if (source.value == null || source.value === '') return;
   if (cell && children(cell,'f').length) return;
+  if (cell && dates) {
+    const numeric = typeof source.value === 'number';
+    const old = originalValue(cell, dates.strings);
+    const next = numeric && source.numFmt?.startsWith('yyyy/') ? source.value - dates.offset : source.value;
+    if (numeric ? old !== '' && Number(old) === next : old === String(next)) return;
+  }
   if (!cell) {
     cell = doc.createElementNS(NS,'c');
     cell.setAttribute('r',letters + row.getAttribute('r'));
@@ -107,8 +146,9 @@ function writeCell(doc, row, source, dates) {
     child.appendChild(t);
   }
   cell.insertBefore(child,children(cell,'extLst')[0] || null);
+  dates?.highlight(cell);
 }
-function updateQuantityTotals(doc, row, delta, type, strings) {
+function updateQuantityTotals(doc, row, delta, type, strings, dates) {
   const quantityCol = type === 'jaz_costume' ? 11 : 10;
   const raw = new Map(children(row, 'c').map(c => [colNum(column(c.getAttribute('r'))), c]));
   const quantity = delta.getCell(quantityCol).value;
@@ -125,7 +165,7 @@ function updateQuantityTotals(doc, row, delta, type, strings) {
     if (!Number.isFinite(Number(value)) || Number(value) <= 0 || (factor && children(factor, 'f').length)) {
       throw new Error('原表缺少可核对的用量或装箱数，请核对后更新');
     }
-    writeCell(doc, row, {address:delta.getCell(totalCol).address, value:calculate(quantity,Number(value))});
+    writeCell(doc, row, {address:delta.getCell(totalCol).address, value:calculate(quantity,Number(value))}, dates);
   }
   if (type === 'skycastle') {
     update(11, 12, (qty, rate) => qty * rate);
@@ -135,14 +175,14 @@ function updateQuantityTotals(doc, row, delta, type, strings) {
   }
 }
 
-async function addDiversionSheet(zip, book, rels, generatedSheet, names, dates) {
+async function addSupplementSheet(zip, book, rels, generatedSheet, names, dates) {
   const sheets = elements(book, 'sheets')[0];
   const sheetIds = elements(book,'sheet').map(sheet=>Number(sheet.getAttribute('sheetId')));
   let id = Math.max(0,...sheetIds) + 1;
   while (zip.file(`xl/worksheets/sheet${id}.xml`) ||
     Array.from(rels.documentElement.childNodes).some(r=>r.getAttribute?.('Id') === `skyHint${id}`)) id++;
-  let name = '扣数提示';
-  for (let n = 2; names.has(name); n++) name = '扣数提示' + n;
+  let name = generatedSheet.name;
+  for (let n = 2; names.has(name); n++) name = generatedSheet.name + n;
   const sheet = book.createElementNS(NS,'sheet');
   const relationshipNS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
   sheet.setAttribute('name',name);
@@ -170,13 +210,57 @@ async function addDiversionSheet(zip, book, rels, generatedSheet, names, dates) 
   zip.file(`xl/worksheets/sheet${id}.xml`,xml.serializeToString(doc));
   zip.file('[Content_Types].xml',xml.serializeToString(types));
   zip.file('xl/_rels/workbook.xml.rels',xml.serializeToString(rels));
+  names.set(name,sheet);
 }
-async function writeFullWorkbook(original, output, generated, type, orders) {
+async function updateFees(zip, file, generated, styles) {
+  const doc = await readXml(zip, file);
+  const data = elements(doc, 'sheetData')[0];
+  const existingRows = children(data, 'row');
+  const index = new Map();
+  let last = 0;
+  for (const row of existingRows) {
+    const number = Number(row.getAttribute('r'));
+    last = Math.max(last, number);
+    const values = new Map(children(row, 'c').map(cell => [
+      colNum(column(cell.getAttribute('r'))), originalValue(cell, styles.strings),
+    ]));
+    if (number === 1) {
+      generated.getRow(1).eachCell((cell, col) => {
+        if (values.get(col) !== cell.value) throw Error('原费用明细表头与 PO 费用格式不符');
+      });
+      continue;
+    }
+    if (!values.get(1) && !values.get(2)) continue;
+    const id = key(values.get(1), values.get(2));
+    if (index.has(id)) throw Error('原费用明细含同 PO 同名费用，请核对');
+    index.set(id, row);
+  }
+  if (!existingRows.some(row => row.getAttribute('r') === '1')) throw Error('原费用明细缺少表头');
+  generated.eachRow((source, number) => {
+    if (number === 1) return;
+    const id = key(source.getCell(1).value, source.getCell(2).value);
+    let row = index.get(id);
+    if (!row) {
+      row = doc.createElementNS(NS, 'row');
+      row.setAttribute('r', String(++last));
+      data.appendChild(row);
+      index.set(id, row);
+    }
+    source.eachCell(cell => writeCell(doc, row, cell, styles));
+  });
+  const dimension = elements(doc, 'dimension')[0];
+  if (dimension) dimension.parentNode.removeChild(dimension);
+  zip.file(file, xml.serializeToString(doc));
+}
+async function writeFullWorkbook(original, output, generated, type, orders, confirmation) {
   const zip = await JSZip.loadAsync(await fs.readFile(original));
   const book = await readXml(zip,'xl/workbook.xml');
-  const dates = await createDateWriter(zip, book);
+
   const rels = await readXml(zip,'xl/_rels/workbook.xml.rels');
   const strings = zip.file('xl/sharedStrings.xml') ? elements(await readXml(zip,'xl/sharedStrings.xml'),'si').map(s=>elements(s,'t').map(t=>t.textContent).join('')) : [];
+  const dates = await createDateWriter(zip,book,strings);
+  if (type !== 'skycastle') dates.highlight = () => {};
+  const changes = [];
   const src = new Map(elements(book,'sheet').map(s=>[s.getAttribute('name'),s]));
   const ids = new Map(Array.from(rels.documentElement.childNodes).filter(n=>n.nodeType===1).map(r=>[r.getAttribute('Id'),r.getAttribute('Target')]));
   const expected = new Set();
@@ -192,8 +276,14 @@ async function writeFullWorkbook(original, output, generated, type, orders) {
   const written = [new Set(), new Set()];
   if (!expected.size) throw new Error('没有可写入的订单');
   for (const sheet of generated.worksheets) {
-    if (sheet.name === '扣数提示') {
-      await addDiversionSheet(zip,book,rels,sheet,src,dates);
+    if (sheet.name === '费用明细' && src.has(sheet.name)) {
+      const sheetId = src.get(sheet.name).getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id');
+      const target = ids.get(sheetId);
+      await updateFees(zip, target.startsWith('/') ? target.slice(1) : path.join('xl', target), sheet, dates);
+      continue;
+    }
+    if (sheet.name === '扣数提示' || sheet.name === '费用明细') {
+      await addSupplementSheet(zip,book,rels,sheet,src,dates);
       continue;
     }
     const name = sheet.name.replace(/-粘贴用$/,'');
@@ -239,7 +329,21 @@ async function writeFullWorkbook(original, output, generated, type, orders) {
         row.setAttribute('r',String(last));
         data.appendChild(row);
       }
-      if (existing && !order) updateQuantityTotals(doc,row,delta,type,strings);
+      if (existing && delta.skyDateColumns) {
+        for (const n of delta.skyDateColumns) {
+          const c = delta.getCell(n);
+          const oldCell = children(row,'c').find(v=>colNum(column(v.getAttribute('r'))) === n);
+          const old = originalValue(oldCell,strings);
+          const iso = serial => new Date((serial-25569)*86400000).toISOString().slice(0,10);
+          const before = old === '' ? '空' : Number.isFinite(Number(old)) ? iso(Number(old)+dates.offset) : old.slice(0,10);
+          const after = iso(c.value);
+          if (before !== after) {
+            if (oldCell && children(oldCell,'f').length) throw Error(name+' 的计划日期由公式计算，请核对原表');
+            changes.push([name,delta.getCell(pc).text,delta.getCell(sc).text,order?'出货期':n===delta.skyDateColumns[0]?'计划出货期':'计划验货期',before,after]);
+          }
+        }
+      }
+      if (existing && !order) updateQuantityTotals(doc,row,delta,type,strings,dates);
       const revisionColumns = type === 'skycastle' ? (order ? [2,6,78,79,80] : [10,15,16,40,41,42])
         : type === 'tomy' ? (order ? [6,7,55,56,57] : [10,13,...(src.has('KIK总排期') || src.has('RRM总排期') ? [25,26,27] : [23,24,25])])
         : type === 'jaz_plastic' ? (order ? [2,3,7,42,43,44] : [5,10,13,14,26,27,28])
@@ -255,12 +359,12 @@ async function writeFullWorkbook(original, output, generated, type, orders) {
           const targetCell = children(row, 'c').find(c => colNum(column(c.getAttribute('r'))) === n);
           const previous = originalValue(targetCell, strings);
           const additions = String(note.value).split('；').filter(part => !previous.split('；').includes(part));
-          if (additions.length) writeCell(doc,row,{address:note.address,value:[previous,...additions].filter(Boolean).join('；')});
+          if (additions.length) writeCell(doc,row,{address:note.address,value:[previous,...additions].filter(Boolean).join('；')},dates);
         });
       }
       delta.eachCell((c,n)=>{
         const productQty = order && n >= firstProduct && n <= lastProduct;
-        if (!existing || productQty || revisionColumns.includes(n)) writeCell(doc,row,c,dates);
+        if (!existing || (delta.skyRevisionColumns ? delta.skyRevisionColumns.includes(n) : productQty || revisionColumns.includes(n))) writeCell(doc,row,c,dates);
       });
     }
     const dim = elements(doc,'dimension')[0];
@@ -268,6 +372,10 @@ async function writeFullWorkbook(original, output, generated, type, orders) {
     zip.file(file,xml.serializeToString(doc));
   }
   if (written.some(s=>s.size !== expected.size)) throw new Error('部分 PO 明细没有对应的接单或排期工作表，请核对模板');
+  if (changes.length) {
+    const token = require('node:crypto').createHash('sha256').update(JSON.stringify(changes)).digest('hex');
+    if (confirmation !== token) throw Object.assign(new Error('请确认修改单的日期变化'),{changes,token});
+  }
   const calc = elements(book,'calcPr')[0];
   if (calc) calc.setAttribute('fullCalcOnLoad','1');
   dates.save();

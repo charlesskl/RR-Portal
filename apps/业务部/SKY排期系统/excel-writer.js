@@ -295,7 +295,7 @@ function getExistingPOs(raw, type) {
     sheets = ['JWC客排', 'JWC仓排'];
     poCol = 7;  // col 8 "现PO" (0-indexed 7)
   } else {
-    sheets = ['一二代排期', '三代排期', '蛋糕系列'];
+    sheets = ['一二代排期', '三代排期', '四代排期', '蛋糕系列'];
     poCol = 6;
   }
 
@@ -506,8 +506,15 @@ async function writeToExcel(excelPath, poResults, options = {}) {
   }
 
   if (type === 'skycastle') {
-    pasteWriteSkyCastle(wb, raw, poResults, lookup);
+    if (raw.Sheets['四代排期']) require('./sky-current-layout').writeCurrentLayout(wb, raw, poResults);
+    else pasteWriteSkyCastle(wb, raw, poResults, lookup);
     buildDivertSheet(wb, poResults);
+    const fees = poResults.flatMap(po => (po.fees || []).map(fee => [po.poNumber,fee.description,fee.quantity,fee.unitPrice,fee.amount]));
+    if (fees.length) {
+      const detail = wb.addWorksheet('费用明细');
+      detail.addRow(['PO号','费用项目','数量','单价USD','金额USD']);
+      fees.forEach(row => detail.addRow(row));
+    }
     return { wb, type };
 
   } else if (type === 'tomy') {

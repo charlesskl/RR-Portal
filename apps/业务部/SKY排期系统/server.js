@@ -195,11 +195,11 @@ app.post('/api/po/write/:sessionId', async (req, res) => {
     const templatePath = path.join(uploadsDir, templateFiles[0]);
 
     // 用 exceljs 写入，保留原文件所有格式
-    const { wb, type } = await writeToExcel(templatePath, session.results, { factory });
+    const { wb, type, orders } = await writeToExcel(templatePath, session.results, { factory });
 
     const exportFile = path.join(exportsDir, `排期_${uuidv4()}.xlsx`);
     if (type === 'skycastle') {
-      await require('./paste-workbook').writePasteWorkbook(templatePath, exportFile, wb, session.results);
+      await require('./paste-workbook').writePasteWorkbook(templatePath, exportFile, wb, orders);
     } else {
       await require('./full-workbook').writeFullWorkbook(templatePath, exportFile, wb, type, session.results, req.body.dateConfirmation);
     }

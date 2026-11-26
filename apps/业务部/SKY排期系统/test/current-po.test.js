@@ -92,8 +92,7 @@ test('按主档写入四代，确认后更新两个计划日期，仅变更处�
   const replay = new Excel.Workbook();
   await replay.xlsx.readFile(again);
   assert.equal(replay.worksheets.length,read.worksheets.length);
-  assert.equal(replay.getWorksheet('费用明细').rowCount,2);
-  assert.equal(replay.getWorksheet('费用明细').getCell('E2').value,3);
+  assert.equal(replay.getWorksheet('费用明细'), undefined);
   const revised = replay.getWorksheet('四代排期').getRow(3);
   assert.equal(revised.getCell(13).value,22);
   assert.equal(revised.getCell(15).value,3);
@@ -188,4 +187,46 @@ test('粘贴副本保留两行表头、列宽和合并区域，只输出本批 P
     assert.equal(sheet.getRow(3).getCell(pc).value,'PO0000001');
     assert.equal(sheet.getRow(3).getCell(sc).fill.fgColor.argb,'FFFFFF00');
   }
+});
+
+test('订单返工费保留原备注，只记一次总额', () => {
+  const po = autoParse(sample.replace('Rework Cost','Rework Cost (case pack 24 -> 12)')+'\nNOTES\nQty from TEST\nBILL TO','test.pdf');
+  assert.equal(po.items[0].remark,'Qty from TEST；Rework Cost (case pack 24 -> 12):$3');
+  assert.equal(po.items[0].amount,10);
+});
+
+test('带 zzOther 的贴纸服务按商品数量逐货号记单价，数量不符时提示核对', () => {
+  const text = sample.slice(0,sample.indexOf('Sample product')) + `Sample A
+SKU: TEST-A
+840 0.88 739.20
+Sample B
+SKU: TEST-B
+480 0.93 446.40
+Other
+importer label cost
+SKU: zzOther
+1,320 0.02 26.40
+Total units: 2,640
+Total (USD): $1,212.00`;
+  const po = autoParse(text,'test.pdf');
+  assert.equal(po.error,undefined);
+  assert.deepEqual(po.items.map(x=>[x.partNo,x.quantity,x.amount,x.remark]),[
+    ['TEST-A',840,739.20,'Importer Label Cost:$0.02一张'],
+    ['TEST-B',480,446.40,'Importer Label Cost:$0.02一张'],
+  ]);
+  const partial = text.replace('1,320 0.02 26.40','840 0.02 16.80').replace('2,640','2,160').replace('1,212.00','1,202.40');
+  assert.match(autoParse(partial,'test.pdf').error,/贴纸数量/);
+});
+
+test('旧预览中的 zzOther 贴纸费转换为货号备注，重复转换不重复收费', () => {
+  const { normalizeServiceRows } = require('../parsers/sky-fees');
+  const original = {items:[
+    {partNo:'PART',quantity:12,amount:24,remark:'留样'},
+    {partNo:'zzOther',description:'Other\nimporter label cost',quantity:12,unitPrice:0.03,amount:0.36},
+  ]};
+  const normalized = normalizeServiceRows(original);
+  assert.equal(normalized.items.length,1);
+  assert.equal(normalized.items[0].remark,'留样；Importer Label Cost:$0.03一张');
+  assert.deepEqual(normalizeServiceRows(normalized),normalized);
+  assert.equal(original.items.length,2);
 });

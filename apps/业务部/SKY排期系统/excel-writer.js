@@ -511,16 +511,12 @@ async function writeToExcel(excelPath, poResults, options = {}) {
   }
 
   if (type === 'skycastle') {
+    const {normalizeServiceRows} = require('./parsers/sky-fees');
+    poResults = poResults.map(normalizeServiceRows);
     if (raw.Sheets['四代排期']) require('./sky-current-layout').writeCurrentLayout(wb, raw, poResults);
     else pasteWriteSkyCastle(wb, raw, poResults, lookup);
     buildDivertSheet(wb, poResults);
-    const fees = poResults.flatMap(po => (po.fees || []).map(fee => [po.poNumber,fee.description,fee.quantity,fee.unitPrice,fee.amount]));
-    if (fees.length) {
-      const detail = wb.addWorksheet('费用明细');
-      detail.addRow(['PO号','费用项目','数量','单价USD','金额USD']);
-      fees.forEach(row => detail.addRow(row));
-    }
-    return { wb, type };
+    return { wb, type, orders: poResults };
 
   } else if (type === 'tomy') {
     pasteWriteTomy(wb, raw, poResults, lookup, options.factory);
@@ -702,7 +698,7 @@ function pasteWriteSkyCastle(wb, raw, poResults, lookup) {
 
       // 新单默认状态
       setCellRow(sRow, cols.fileTime, '欠');
-      if (item.remark) {
+      if (item.remark?.split('；').some(note => !/^Rework Cost\b/i.test(note))) {
         setCellRow(sRow, cols.needLabel, '需要(产品贴纸）');
       } else {
         setCellRow(sRow, cols.needLabel, '不需要');

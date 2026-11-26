@@ -1,5 +1,6 @@
 const Excel = require('exceljs');
 const XLSX = require('xlsx');
+const {appendRemarks} = require('./parsers/sky-fees');
 
 const yellow = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
 const key = (po, sku) => JSON.stringify([String(po ?? '').trim(), String(sku ?? '').trim()]);
@@ -47,7 +48,7 @@ async function writePasteWorkbook(template, destination, generated, orders) {
   const copy = new Excel.Workbook();
   const written = {order: new Set(), schedule: new Set()};
   for (const delta of generated.worksheets) {
-    if (['费用明细', '扣数提示'].includes(delta.name)) {
+    if (delta.name === '扣数提示') {
       const extra = copy.addWorksheet(delta.name);
       delta.eachRow(row => extra.addRow(row.values));
       continue;
@@ -86,6 +87,9 @@ async function writePasteWorkbook(template, destination, generated, orders) {
         target.value = isDate ? new Date((cell.value - 25569) * 86400000) : cell.value;
         if (isDate) target.numFmt = cell.numFmt;
         const previous = original && displayValue(original.getCell(col));
+        if (previous && !order && headers.Sheets[name][XLSX.utils.encode_cell({r:0,c:col-1})]?.v === '备注') {
+          target.value = appendRemarks(previous, cell.value);
+        }
         const comparable = v => v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? '');
         if (comparable(previous) !== comparable(target.value)) target.fill = yellow;
       });

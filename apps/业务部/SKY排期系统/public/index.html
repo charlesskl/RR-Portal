@@ -471,7 +471,6 @@
           </div>
           <div class="po-meta">${metaHtml}</div>
           ${tableHtml}
-          ${(po.fees || []).map(fee => `<p class="po-meta">${escapeHtml(fee.description)} · USD ${escapeHtml(Number(fee.amount).toFixed(2))}（单列费用）</p>`).join('')}
         `;
         container.appendChild(card);
       });

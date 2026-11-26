@@ -99,3 +99,93 @@ test('按主档写入四代，确认后更新两个计划日期，仅变更处�
   assert.equal(revised.getCell(15).value,3);
   assert.equal(revised.getCell(15).fill.fgColor.argb,'FFFFFF00');
 });
+
+function sampleWithNotes(customer, notes) {
+  return sample.replace('SKU: SAMPLE-4', 'SKU: SAMPLE-4\n' + customer) + '\nNOTES\n' + notes + '\nBILL TO';
+}
+
+test('按商品客户和 NOTES 区分 Jazwares 两种包装，不从收货地、文件名或数量推断', () => {
+  const read = (customer, notes) => autoParse(sampleWithNotes(customer, notes), 'Jazwares_US.pdf');
+  const buyer = 'Jazwares,\nLLC\n[TEST]';
+  const note = '12pcs from REF01\nShip To: JAZWARES - WALMART CANADA (IMPORT)\n';
+  assert.equal(read(buyer, '(1) US PACKAGING').items[0].customerPackaging, 'Jazwares客版（美文）');
+  assert.equal(read(buyer, note + 'Packaging: 2L').items[0].customerPackaging, 'Jazwares客版（2L）');
+  assert.equal(read('Another Buyer', note + 'Packaging: 2L').items[0].customerPackaging, undefined);
+  assert.equal(read(buyer, note).items[0].customerPackaging, undefined);
+  assert.match(read(buyer, 'Packaging: 2L\nUS PACKAGING').error, /核对包装版本/);
+});
+
+test('重新导入只更新匹配订单的三个包装版本栏，改动标黄', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sky-packaging-'));
+  t.after(() => fs.rm(dir, {recursive: true, force: true}));
+  const template = new Excel.Workbook();
+  const master = template.addWorksheet('名称');
+  master.addRow(['货号','系列','名称']);
+  master.addRow(['SAMPLE-4','四代','样品']);
+  const order = template.addWorksheet('总接单');
+  order.getRow(1).getCell(12).value='单价USD';
+  order.getRow(1).getCell(13).value='金额USD';
+  order.getRow(1).getCell(14).value='金额HKD';
+  order.addRow(['接单期','出货期','CUSTOMER PO','PO号','货号','数量','包装版本','系列']);
+  const sched = template.addWorksheet('四代排期');
+  sched.addRow(['接单期','系列','客名','生产车间','国家','CUSTOMER PO','PO号','货号','产品名称','数量','贴纸用量','总贴纸用量','外箱','总箱数','计划出货期','计划验货期','备注','单价USD','金额USD','金额HKD']);
+  sched.getRow(2).getCell(24).value = '做货版本';
+  sched.getRow(2).getCell(29).value = '彩盒/CDU(版本）';
+  const input=path.join(dir,'template.xlsx');
+  await template.xlsx.writeFile(input);
+  async function apply(file, note, dest) {
+    const po=autoParse(sampleWithNotes('Jazwares, LLC',note),'test.pdf');
+    const {wb,type}=await writeToExcel(file,[po]);
+    await writeFullWorkbook(file,dest,wb,type,[po]);
+    const result=new Excel.Workbook();
+    await result.xlsx.readFile(dest);
+    return result;
+  }
+  let file=input;
+  for (const [i,note,expected] of [[1,'US PACKAGING','美文'],[2,'Packaging: 2L','2L'],[3,'核对中','2L']]) {
+    const dest=path.join(dir,i+'.xlsx');
+    const result=await apply(file,note,dest);
+    for (const [sheet,addr] of [['总接单','G3'],['四代排期','X3'],['四代排期','AC3']]) {
+      const cell=result.getWorksheet(sheet).getCell(addr);
+      assert.equal(cell.value,'Jazwares客版（'+expected+'）');
+      assert.equal(cell.fill.fgColor.argb,'FFFFFF00');
+    }
+    file=dest;
+  }
+});
+
+test('粘贴副本保留两行表头、列宽和合并区域，只输出本批 PO，原文件逐字节不变', async t => {
+  const {writePasteWorkbook} = require('../paste-workbook');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(),'paste-test-'));
+  t.after(() => fs.rm(dir,{recursive:true,force:true}));
+  const file = path.join(dir,'original.xlsx'), output = path.join(dir,'copy.xlsx');
+  const source = new Excel.Workbook(), delta = new Excel.Workbook();
+  for (const [name,pc,sc] of [['总接单',4,5],['三代排期',7,8]]) {
+    const sheet = source.addWorksheet(name);
+    sheet.mergeCells('A1:B1');
+    sheet.getCell('A1').value = '订单';
+    sheet.getRow(2).getCell(pc).value = 'PO号';
+    sheet.getColumn(sc).width = 26;
+    sheet.getRow(3).getCell(pc).value = 'HISTORICAL';
+    sheet.getRow(3).getCell(sc).value = 'OLD';
+    const row = delta.addWorksheet(name+'-粘贴用').addRow([]);
+    row.getCell(pc).value = 'PO0000001';
+    row.getCell(sc).value = 'TEST';
+  }
+  source.addWorksheet('历史记录').getCell('A1').value='历史';
+  await source.xlsx.writeFile(file);
+  const before = await fs.readFile(file);
+  await writePasteWorkbook(file,output,delta,[{client:'Sky Castle',poNumber:'PO0000001',items:[{partNo:'TEST'}]}]);
+  assert.deepEqual(await fs.readFile(file), before);
+  const copy = new Excel.Workbook();
+  await copy.xlsx.readFile(output);
+  assert.deepEqual(copy.worksheets.map(s=>s.name),['总接单','三代排期']);
+  for (const [sheet,pc,sc] of [[copy.worksheets[0],4,5],[copy.worksheets[1],7,8]]) {
+    assert.deepEqual(sheet.model.merges,['A1:B1']);
+    assert.equal(sheet.getColumn(sc).width,26);
+    assert.equal(sheet.rowCount,3);
+    assert.equal(sheet.getRow(2).getCell(pc).value,'PO号');
+    assert.equal(sheet.getRow(3).getCell(pc).value,'PO0000001');
+    assert.equal(sheet.getRow(3).getCell(sc).fill.fgColor.argb,'FFFFFF00');
+  }
+});

@@ -28,7 +28,7 @@ const FILL_PINK = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF99C
  *   Jazwares + NL 语言 → "Jazwares客版（NL）"
  *   COUK / Character Options / Smyths → "Toy客版本"
  *   US Generic / Sky Castle English artwork → "第三代美文版" 或 "第二代美文版"（按系列）
- *   Jazwares + US Generic → "Jazwares/美文客版"
+ *   Jazwares + US Generic → "Jazwares客版（美文）"
  *   韩国 / 希腊 → "韩国客版" / "希腊客版"
  *   其他 → 原文
  */
@@ -36,7 +36,6 @@ function standardizePackaging(rawPackaging, po, series) {
   if (!rawPackaging) return '';
   const text = String(rawPackaging).trim();
   const shipTo = (po.shipTo || '').toLowerCase();
-  const isJazwares = /jazwares|walmart/i.test(shipTo) || /jazwares|walmart/i.test(text);
   const isCharOption = /character options|smyths|ukco/i.test(shipTo) || /\bCOUK\b/i.test(text);
   const isKorean = /korea|韩国/i.test(shipTo);
   const isGreek = /greek|greece|希腊/i.test(shipTo);
@@ -47,7 +46,7 @@ function standardizePackaging(rawPackaging, po, series) {
   const langMatch = text.match(/(\d+)L\s+[A-Z]+(?:\/[A-Z]+)+/i);
   if (langMatch) {
     const n = langMatch[1];
-    if (isJazwares) return `Jazwares客版（${n}L）`;
+    if (n !== '2' && /^jazwares\b/i.test(shipTo)) return `Jazwares客版（${n}L）`;
     return `${n}L客版`;
   }
 
@@ -58,7 +57,6 @@ function standardizePackaging(rawPackaging, po, series) {
 
   // 3. US Generic / Sky Castle English → 美文版
   if (isUSGeneric) {
-    if (isJazwares) return 'Jazwares/美文客版';
     if (series === '三代') return '第三代美文版';
     if (series === '二代' || series === '一代') return '第二代美文版';
     return '美文版';
@@ -634,7 +632,7 @@ function pasteWriteSkyCastle(wb, raw, poResults, lookup) {
       const series = prodInfo['系列'] || inferSeries(item.partNo);
 
       // 标准化包装命名（按客户+系列映射到用户习惯的叫法）
-      const pkgName = standardizePackaging(po.packaging, po, series);
+      const pkgName = item.customerPackaging || standardizePackaging(po.packaging, po, series);
 
       // 总接单（新格式）
       const oRow = wsOrder.addRow([]);
@@ -644,6 +642,7 @@ function pasteWriteSkyCastle(wb, raw, poResults, lookup) {
       setCellRow(oRow, 4, po.poNumber);
       setCellRow(oRow, 5, item.partNo);
       setCellRow(oRow, 6, item.quantity);
+      if (item.customerPackaging) oRow.skyPackagingColumns = [7];
       setCellRow(oRow, 7, pkgName);                 // 包装版（标准化）
       setCellRow(oRow, 8, series);
       const pc = matchProdCol(pMap, item.partNo);
@@ -716,6 +715,7 @@ function pasteWriteSkyCastle(wb, raw, poResults, lookup) {
       if (skyRemark.length) setCellRow(sRow, cols.remark, skyRemark.join('；'));
 
       // 做货版本 和 彩盒/CDU版本 用标准化后的包装名
+      if (item.customerPackaging) sRow.skyPackagingColumns = [cols.makeVersion, cols.boxVersion];
       if (pkgName) {
         setCellRow(sRow, cols.makeVersion, pkgName);
         setCellRow(sRow, cols.boxVersion, pkgName);

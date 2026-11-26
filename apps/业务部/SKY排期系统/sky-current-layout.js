@@ -69,13 +69,24 @@ function writeCurrentLayout(wb,raw,orders) {
       for(const [i,v] of [item.unitPrice,usd,Math.round(usd*7.75*100)/100].entries())fill(row,table.h1,moneyCols[i],v);
       const revisions=[column(header,'数量'),...dateCols,...moneyCols.map(k=>column(table.h1,k))];
       if(isOrder){
-        put('包装版本',po.packaging);put('系列',info['系列']);
+        put('包装版本',item.customerPackaging || po.packaging);
+        if (item.customerPackaging) revisions.push(column(header,'包装版本'));
+        put('系列',info['系列']);
         const candidates=[];
         table.h2.forEach((val,i)=>{if(String(val||'').split('/').map(s=>s.trim()).includes(item.partNo))candidates.push(i+1);});
         if(candidates.length>1)throw Error('产品数量栏重复：'+item.partNo);
         if(candidates.length){row.getCell(candidates[0]).value=item.quantity;revisions.push(candidates[0]);}
       }else{
         put('系列',info['系列']);
+        if (item.customerPackaging && table.h2) {
+          table.h2.forEach((label, i) => {
+            const key = String(label || '').normalize('NFKC').replace(/\s/g, '');
+            if (key === '做货版本' || /^彩盒\/CDU(?:版本|\(版本\))$/i.test(key)) {
+              row.getCell(i + 1).value = item.customerPackaging;
+              revisions.push(i + 1);
+            }
+          });
+        }
         const country=table.h1.indexOf('国家');if(country>=0 && item.country)row.getCell(country+1).value=item.country;
         const customer=table.h1.indexOf('客名');if(customer>=0 && po.customerName)row.getCell(customer+1).value=po.customerName;
         put('产品名称',info['名称']||item.description);

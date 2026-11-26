@@ -365,7 +365,7 @@ async function writeFullWorkbook(original, output, generated, type, orders, conf
       }
       delta.eachCell((c,n)=>{
         const productQty = order && n >= firstProduct && n <= lastProduct;
-        if (!existing || (delta.skyRevisionColumns ? delta.skyRevisionColumns.includes(n) : productQty || revisionColumns.includes(n))) writeCell(doc,row,c,dates);
+        if (!existing || (delta.skyRevisionColumns ? delta.skyRevisionColumns.includes(n) : productQty || revisionColumns.includes(n) || delta.skyPackagingColumns?.includes(n))) writeCell(doc,row,c,dates);
       });
     }
     const dim = elements(doc,'dimension')[0];

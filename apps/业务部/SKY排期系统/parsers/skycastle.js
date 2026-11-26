@@ -1,3 +1,4 @@
+const { endsWithJazwaresCustomer, packagingFromNotes } = require('./jazwares-packaging');
 /**
  * Sky Castle PO PDF 解析器
  *
@@ -315,6 +316,16 @@ function parse(text, filename) {
     result.amendNote = amendMatch[1].trim();
   }
 
+  const shipToName = shipToMatch?.[1].trim().split(/\n/)[0] || '';
+  if (endsWithJazwaresCustomer(shipToName)) {
+    try {
+      const version = packagingFromNotes(result.notes);
+      if (version) for (const item of result.items) item.customerPackaging = version;
+    } catch (err) {
+      result.error = err.message;
+      result.items = [];
+    }
+  }
   return result;
 }
 

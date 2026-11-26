@@ -198,9 +198,13 @@ app.post('/api/po/write/:sessionId', async (req, res) => {
     const { wb, type } = await writeToExcel(templatePath, session.results, { factory });
 
     const exportFile = path.join(exportsDir, `排期_${uuidv4()}.xlsx`);
-    await require('./full-workbook').writeFullWorkbook(templatePath, exportFile, wb, type, session.results, req.body.dateConfirmation);
+    if (type === 'skycastle') {
+      await require('./paste-workbook').writePasteWorkbook(templatePath, exportFile, wb, session.results);
+    } else {
+      await require('./full-workbook').writeFullWorkbook(templatePath, exportFile, wb, type, session.results, req.body.dateConfirmation);
+    }
 
-    res.download(exportFile, `排期_已入录_${new Date().toLocaleDateString('zh-CN')}.xlsx`, () => {
+    res.download(exportFile, `${type === 'skycastle' ? '排期粘贴副本' : '排期_已入录'}_${new Date().toLocaleDateString('zh-CN')}.xlsx`, () => {
       try { fs.unlinkSync(exportFile); } catch (e) { /* ignore */ }
     });
   } catch (err) {

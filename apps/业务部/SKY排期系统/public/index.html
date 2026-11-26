@@ -252,6 +252,7 @@
 
         templateId = data.templateId;
         templateType = data.type;
+        document.getElementById('btnWrite').textContent = templateType === 'skycastle' ? '下载粘贴副本' : '写入排期Excel';
         const typeNames = { skycastle: 'Sky Castle排期', tomy: 'TOMY排期', jaz_plastic: 'JAZ塑胶排期', jaz_costume: 'JAZ戏服排期', unknown: '未知格式' };
 
         document.getElementById('templateName').textContent = file.name;
@@ -353,7 +354,7 @@
       document.getElementById('statErrors').textContent = errorCount;
 
       document.getElementById('toolbarInfo').textContent =
-        templateId ? `将写入: ${document.getElementById('templateName').textContent}` : '请先上传排期Excel';
+        templateType === 'skycastle' ? '副本仅含本批 PO。按表名从第 3 行复制明细。' : templateId ? `将写入: ${document.getElementById('templateName').textContent}` : '请先上传排期Excel';
 
       // Cards
       const container = document.getElementById('poCards');
@@ -426,7 +427,8 @@
                     <tr>
                       <td class="text-muted">${itemIdx + 1}</td>
                       <td><span class="editable" contenteditable="true" data-po="${poIdx}" data-item="${itemIdx}" data-field="partNo">${escapeHtml(item.partNo)}</span></td>
-                      <td><span class="editable" contenteditable="true" data-po="${poIdx}" data-item="${itemIdx}" data-field="description">${escapeHtml(item.description || '')}</span></td>
+                      <td><span class="editable" contenteditable="true" data-po="${poIdx}" data-item="${itemIdx}" data-field="description">${escapeHtml(item.description || '')}</span>
+                        ${item.customerPackaging ? `<div class="text-muted">包装版本 · ${escapeHtml(item.customerPackaging)}</div>` : ''}</td>
                       <td><span class="editable" contenteditable="true" data-po="${poIdx}" data-item="${itemIdx}" data-field="dueDate">${escapeHtml(item.dueDate)}</span></td>
                       <td><span class="editable" contenteditable="true" data-po="${poIdx}" data-item="${itemIdx}" data-field="country">${escapeHtml(item.country)}</span></td>
                       <td class="text-right"><span class="editable" contenteditable="true" data-po="${poIdx}" data-item="${itemIdx}" data-field="quantity">${item.quantity.toLocaleString()}</span></td>
@@ -537,7 +539,7 @@
         showToast('请先上传排期Excel和PO文件', 'error');
         return;
       }
-      showLoading('正在写入排期Excel...');
+      showLoading('正在生成排期文件…');
 
       try {
         await saveSession();
@@ -565,10 +567,10 @@
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `排期_已入录_${new Date().toLocaleDateString('zh-CN')}.xlsx`;
+        a.download = `${templateType === 'skycastle' ? '排期粘贴副本' : '排期_已入录'}_${new Date().toLocaleDateString('zh-CN')}.xlsx`;
         a.click();
         URL.revokeObjectURL(url);
-        showToast('已成功写入排期Excel！', 'success');
+        showToast('排期文件已生成', 'success');
       } catch (err) {
         showToast(`写入失败: ${err.message}`, 'error');
       } finally {

@@ -2,7 +2,7 @@ const Excel = require('exceljs');
 const XLSX = require('xlsx');
 const {appendRemarks} = require('./parsers/sky-fees');
 
-const yellow = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+const {writePasteStyles} = require('./full-workbook');
 const key = (po, sku) => JSON.stringify([String(po ?? '').trim(), String(sku ?? '').trim()]);
 
 function displayValue(cell) {
@@ -46,6 +46,8 @@ async function writePasteWorkbook(template, destination, generated, orders) {
   await reference.xlsx.readFile(template, {ignoreNodes: ['drawing', 'dataValidations', 'conditionalFormatting']});
   const headers = XLSX.readFile(template, {sheetRows: 2, cellDates: true});
   const copy = new Excel.Workbook();
+  copy._themes = reference._themes; // Keep theme-based font and colour references valid.
+  const layouts = new Map();
   const written = {order: new Set(), schedule: new Set()};
   for (const delta of generated.worksheets) {
     if (delta.name === '扣数提示') {
@@ -64,14 +66,24 @@ async function writePasteWorkbook(template, destination, generated, orders) {
     const source = reference.getWorksheet(name);
     if (!source) throw Error('排期缺少工作表 ' + name);
     const matches = new Map();
+    let lastDetail, firstStyledRow;
     source.eachRow((row, n) => {
       if (n <= 2) return;
-      const id = key(displayValue(row.getCell(poCol)), displayValue(row.getCell(skuCol)));
+      if (!firstStyledRow && row.hasValues === false && row.cellCount) firstStyledRow = row;
+      const po = displayValue(row.getCell(poCol)), sku = displayValue(row.getCell(skuCol));
+      if (!po || !sku) return;
+      lastDetail = row;
+      const id = key(po, sku);
       if (!expected.has(id)) return;
       if (matches.has(id)) throw Error(name + ' 中有重复的 PO 和货号，无法核对更新位置');
       matches.set(id, row);
     });
     const sheet = copy.addWorksheet(name);
+    sheet.properties.defaultRowHeight = source.properties.defaultRowHeight;
+    sheet.properties.defaultColWidth = source.properties.defaultColWidth;
+    const width = source.columnCount;
+    const layout = {sourceRows: new Map([[1,1],[2,2]]), dates: new Set(), changed: new Set()};
+    layouts.set(name, layout);
     copyHeaders(source, sheet, headers.Sheets[name]);
     rows.forEach((row, i) => {
       const id = key(row.getCell(poCol).value, row.getCell(skuCol).value);
@@ -80,22 +92,30 @@ async function writePasteWorkbook(template, destination, generated, orders) {
       seen.add(id);
       const original = matches.get(id);
       const out = sheet.getRow(i + 3);
+      const styleRow = original || lastDetail || firstStyledRow;
+      if (styleRow) layout.sourceRows.set(out.number, styleRow.number);
+      out.height = styleRow?.height ?? source.properties.defaultRowHeight;
+      for (let col = 1; col <= width; col++) {
+        const style = styleRow?.getCell(col).style ?? source.getColumn(col).style;
+        // Setting a yellow fill must not mutate a style shared by neighbouring cells.
+        out.getCell(col).style = {...style};
+      }
       row.eachCell((cell, col) => {
         if (cell.value == null || cell.value === '') return;
         const target = out.getCell(col);
         const isDate = typeof cell.value === 'number' && cell.numFmt?.startsWith('yyyy/');
         target.value = isDate ? new Date((cell.value - 25569) * 86400000) : cell.value;
-        if (isDate) target.numFmt = cell.numFmt;
+        if (isDate) layout.dates.add(target.address);
         const previous = original && displayValue(original.getCell(col));
         if (previous && !order && headers.Sheets[name][XLSX.utils.encode_cell({r:0,c:col-1})]?.v === '备注') {
           target.value = appendRemarks(previous, cell.value);
         }
         const comparable = v => v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? '');
-        if (comparable(previous) !== comparable(target.value)) target.fill = yellow;
+        if (comparable(previous) !== comparable(target.value)) layout.changed.add(target.address);
       });
     });
   }
   if (Object.values(written).some(set => set.size !== expected.size)) throw Error('部分明细未能对应接单表或排期表');
-  await copy.xlsx.writeFile(destination);
+  await writePasteStyles(template, destination, copy, layouts);
 }
 module.exports = { writePasteWorkbook };

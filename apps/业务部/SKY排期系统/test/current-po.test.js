@@ -167,7 +167,14 @@ test('粘贴副本保留两行表头、列宽和合并区域，只输出本批 P
     sheet.getColumn(sc).width = 26;
     sheet.getRow(3).getCell(pc).value = 'HISTORICAL';
     sheet.getRow(3).getCell(sc).value = 'OLD';
+    sheet.getRow(3).height = 27;
+    sheet.getRow(3).getCell(sc).font = {name:'宋体',size:9,color:{argb:'FFFF00FF'}};
+    sheet.getRow(3).getCell(1).numFmt = 'yyyy/m/d"周"aaa';
+    sheet.getRow(3).getCell(2).border = {bottom:{style:'thin'}};
+    sheet.getRow(3).getCell(2).alignment = {horizontal:'center',wrapText:true};
     const row = delta.addWorksheet(name+'-粘贴用').addRow([]);
+    row.getCell(1).value = 46000;
+    row.getCell(1).numFmt = 'yyyy/mm/dd';
     row.getCell(pc).value = 'PO0000001';
     row.getCell(sc).value = 'TEST';
   }
@@ -183,6 +190,13 @@ test('粘贴副本保留两行表头、列宽和合并区域，只输出本批 P
     assert.deepEqual(sheet.model.merges,['A1:B1']);
     assert.equal(sheet.getColumn(sc).width,26);
     assert.equal(sheet.rowCount,3);
+    assert.equal(sheet.getRow(3).height,27);
+    assert.equal(sheet.getRow(3).getCell(sc).font.name,'宋体');
+    assert.equal(sheet.getRow(3).getCell(sc).font.color.argb,'FFFF00FF');
+    assert.equal(sheet.getCell('A3').numFmt,'yyyy/m/d"周"aaa');
+    assert.equal(sheet.getCell('B3').border.bottom.style,'thin');
+    assert.equal(sheet.getCell('B3').alignment.wrapText,true);
+    assert.equal(sheet.getCell('B3').value,null);
     assert.equal(sheet.getRow(2).getCell(pc).value,'PO号');
     assert.equal(sheet.getRow(3).getCell(pc).value,'PO0000001');
     assert.equal(sheet.getRow(3).getCell(sc).fill.fgColor.argb,'FFFFFF00');

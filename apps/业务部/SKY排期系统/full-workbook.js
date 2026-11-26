@@ -383,4 +383,62 @@ async function writeFullWorkbook(original, output, generated, type, orders, conf
   zip.file('xl/workbook.xml',xml.serializeToString(book));
   await fs.writeFile(output,await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'}));
 }
-module.exports = { writeFullWorkbook };
+// Read only style references for the few source rows included in a paste copy.
+async function sheetFiles(zip) {
+  const book = await readXml(zip, 'xl/workbook.xml');
+  const rels = await readXml(zip, 'xl/_rels/workbook.xml.rels');
+  const files = new Map(Array.from(rels.documentElement.childNodes).filter(n => n.nodeType === 1).map(rel => {
+    const target = rel.getAttribute('Target');
+    return [rel.getAttribute('Id'), target.startsWith('/') ? target.slice(1) : path.join('xl', target)];
+  }));
+  const relNS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  return new Map(elements(book, 'sheet').map(sheet => [
+    sheet.getAttribute('name'), files.get(sheet.getAttributeNS(relNS, 'id')),
+  ]));
+}
+
+async function writePasteStyles(template, destination, copy, layouts) {
+  const source = await JSZip.loadAsync(await fs.readFile(template));
+  const output = await JSZip.loadAsync(await copy.xlsx.writeBuffer());
+  const sourceFiles = await sheetFiles(source), outputFiles = await sheetFiles(output);
+  output.file('xl/styles.xml', await source.file('xl/styles.xml').async('nodebuffer'));
+  const book = await readXml(output, 'xl/workbook.xml');
+  const styles = await createDateWriter(output, book, []);
+  for (const [name, layout] of layouts) {
+    const rows = new Map([...layout.sourceRows.values()].map(n => [n, new Map()]));
+    const columns = new Map(), rowStyles = new Map();
+    const parser = new (require('saxes').SaxesParser)({xmlns:true});
+    let selected;
+    parser.on('opentag', tag => {
+      if (tag.uri !== NS) return;
+      const attr = k => tag.attributes[k]?.value;
+      if (tag.local === 'col' && attr('style')) {
+        for (let i = +attr('min'); i <= Math.min(+attr('max'), 16384); i++) columns.set(i, attr('style'));
+      } else if (tag.local === 'row') {
+        const n = +attr('r');
+        selected = rows.get(n);
+        if (selected && attr('s')) rowStyles.set(n, attr('s'));
+      } else if (tag.local === 'c' && selected && attr('s')) {
+        selected.set(column(attr('r')), attr('s'));
+      }
+    });
+    parser.on('closetag', tag => { if (tag.local === 'row') selected = undefined; });
+    parser.write(await source.file(sourceFiles.get(name)).async('string')).close();
+    const file = outputFiles.get(name);
+    const sheet = await readXml(output, file);
+    for (const row of elements(sheet, 'row')) {
+      const sourceRow = layout.sourceRows.get(+row.getAttribute('r'));
+      for (const cell of children(row, 'c')) {
+        const ref = cell.getAttribute('r'), col = column(ref);
+        const originalStyle = rows.get(sourceRow)?.get(col) ?? rowStyles.get(sourceRow) ?? columns.get(colNum(col)) ?? '0';
+        cell.setAttribute('s', originalStyle);
+        if (layout.dates.has(ref)) styles.write(cell, 0, 'yyyy/mm/dd');
+        if (layout.changed.has(ref)) styles.highlight(cell);
+      }
+    }
+    output.file(file, xml.serializeToString(sheet));
+  }
+  styles.save();
+  await fs.writeFile(destination, await output.generateAsync({type:'nodebuffer', compression:'DEFLATE'}));
+}
+module.exports = { writeFullWorkbook, writePasteStyles };

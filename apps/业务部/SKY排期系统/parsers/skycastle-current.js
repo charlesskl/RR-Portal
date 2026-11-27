@@ -1,4 +1,4 @@
-const { endsWithJazwaresCustomer, packagingFromNotes } = require('./jazwares-packaging');
+const { endsWithJazwaresCustomer, packagingFromNotes, skyCastleUSPackage } = require('./jazwares-packaging');
 // The current Sky Castle form prints one SKU block followed by a quantity,
 // unit price and USD amount. Service blocks can carry the placeholder SKU zzOther.
 const {itemsWithFeeRemarks} = require('./sky-fees');
@@ -32,7 +32,7 @@ function parse(text, filename) {
         return !(footer && footer[1] === result.poNumber) && !/^-- \d+ of \d+ --$/.test(line.trim());
       }).join('\n');
     result.notes = text.split(/\bNOTES\b/i)[1]?.split(/BILL TO/i)[0]?.trim() || '';
-    result.packaging = result.notes.match(/Packaging Version:\s*([^\n]+)/i)?.[1] || result.notes.match(/\(1\)\s*([^\n]*PACKAGING)/i)?.[1] || '';
+    result.packaging = result.notes.match(/Packaging Version:\s*([^\n]+)/i)?.[1] || result.notes.match(/\(1\)\s*([^\n]*PACKAGING)/i)?.[1] || skyCastleUSPackage(result.notes);
     const shipTo=text.match(/(?:^|\n)SHIP TO\s*\n([\s\S]*?)\nProduct\s*\//i)?.[1] || '';
     result.shipTo=shipTo;result.customerName=shipTo.split('\n')[0].replace(/\s*\[[^\]]+\].*$/,'').trim();
     const country=shipTo.trim().split('\n').filter(line => !/^[+()\d .-]+$/.test(line.trim())).pop();

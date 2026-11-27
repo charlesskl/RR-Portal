@@ -19,7 +19,7 @@ public static class SchedulePoTracking
         public string? Spec { get; init; }
         public string? Supplier { get; init; }
         public string? Unit { get; init; }
-        public decimal PurchaseQty { get; init; }
+        public decimal? PurchaseQty { get; init; }
         public decimal ReceivedQty { get; init; }
         public decimal SpareQty { get; init; }
         public decimal OutboundQty { get; init; }
@@ -105,13 +105,15 @@ public static class SchedulePoTracking
         _ => Key(value),
     };
 
+    static bool CountsTowardShipment(string status) => status is "shipped" or "arrived" or "loaded";
+
     public static List<Material> Build(Identity requested, IReadOnlyList<Identity> history,
         IReadOnlyList<PurchaseLine> purchases, IReadOnlyList<Movement> movements)
     {
         var target = Normalize(requested);
         var evidence = history.Select(Normalize).Distinct().ToList();
         var knownCodes = history.Select(v => v.Code).Append(requested.Code).ToArray();
-        var overallocated = movements.Where(m => m.OutboundId.HasValue).GroupBy(m => m.OutboundId)
+        var overallocated = movements.Where(m => CountsTowardShipment(m.Status) && m.OutboundId.HasValue).GroupBy(m => m.OutboundId)
             .Where(g => g.Any(m => !m.OutboundQty.HasValue) || g.Sum(m => Math.Max(0, m.Qty)) > g.First().OutboundQty)
             .Select(g => g.Key).ToHashSet();
         var result = new List<Material>();
@@ -147,14 +149,14 @@ public static class SchedulePoTracking
             foreach (var movement in related)
             {
                 var issues = new List<string>();
-                var active = movement.Status is "shipped" or "arrived" or "loaded";
+                var active = CountsTowardShipment(movement.Status);
                 if (movement.PoItemId != line.Id) issues.Add("未关联到该采购明细的具体出库批次，未计入");
                 if (!movement.OutboundId.HasValue) issues.Add("缺少具体出库批次，未计入");
                 if (!line.MaterialId.HasValue || movement.MaterialId != line.MaterialId || movement.OutboundMaterialId != line.MaterialId)
                     issues.Add("货柜、出库与采购的物料关联不一致，未计入");
                 if (Unit(movement.Unit) != Unit(line.Unit)) issues.Add("货柜数量单位与采购单位不同，未计入");
                 if (!movement.HasQuantity || movement.Qty < 0) issues.Add("走货数量缺失或无效，未计入");
-                if (movement.OutboundId.HasValue && overallocated.Contains(movement.OutboundId)) issues.Add("该出库批次的货柜分配超过出库数量，待核对");
+                if (active && movement.OutboundId.HasValue && overallocated.Contains(movement.OutboundId)) issues.Add("该出库批次的货柜分配超过出库数量，待核对");
                 if (!active && movement.Status != "draft") issues.Add("货柜状态无法确认，未计入");
                 if (active || movement.Status != "draft") material.issues.AddRange(issues);
                 material.records.Add(new Record
@@ -165,8 +167,8 @@ public static class SchedulePoTracking
                     issues = issues,
                 });
             }
-            if (assigned && line.PurchaseQty <= 0) material.issues.Add("采购数量未填写，待核对");
-            var activeRecords = material.records.Where(r => r.status is "shipped" or "arrived" or "loaded").ToList();
+            if (assigned && line.PurchaseQty is null or <= 0) material.issues.Add("采购数量未填写，待核对");
+            var activeRecords = material.records.Where(r => CountsTowardShipment(r.status)).ToList();
             if (assigned && activeRecords.Sum(r => r.qty ?? 0) > line.ReceivedQty + line.SpareQty)
                 material.issues.Add("已装箱及已走货数量超过累计入库，无法确认正品和备品数量");
             if (material.issues.Count == 0)
@@ -186,7 +188,7 @@ public static class SchedulePoTracking
                 material.shipped_spare_qty = activeRecords.Where(r => r.status is "shipped" or "arrived").Sum(r => r.spare_qty);
                 material.pending_qty = activeRecords.Where(r => r.status == "loaded").Sum(r => r.regular_qty);
                 material.pending_spare_qty = activeRecords.Where(r => r.status == "loaded").Sum(r => r.spare_qty);
-                material.remaining_qty = Math.Max(0, line.PurchaseQty - shipped);
+                material.remaining_qty = line.PurchaseQty is decimal purchased ? Math.Max(0, purchased - shipped) : null;
                 material.status = material.remaining_qty == 0 ? "complete" : material.shipped_qty > 0 ? "partial" : "unshipped";
             }
             result.Add(material);

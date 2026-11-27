@@ -38,7 +38,7 @@ public class SchedulePoTrackingController(ISqlConnectionFactory factory) : Contr
                 i.product_code AS "ProductCode",i.tomy_po AS "OrderNos",i.material_id AS "MaterialId",
                 COALESCE(NULLIF(i.material_name,''),m.name_zh) AS "MaterialName",COALESCE(i.spec,m.spec) AS "Spec",
                 po.supplier AS "Supplier",COALESCE(NULLIF(trim(i.purchase_unit),''),'个') AS "Unit",
-                COALESCE(i.purchase_qty,i.qty,0) AS "PurchaseQty",
+                COALESCE(i.purchase_qty,i.qty) AS "PurchaseQty",
                 COALESCE((SELECT SUM(r.qty) FROM po_receipts r WHERE r.po_item_id=i.id),0) AS "ReceivedQty",
                 COALESCE((SELECT SUM(r.spare_qty) FROM po_receipts r WHERE r.po_item_id=i.id),0) AS "SpareQty",
                 COALESCE((SELECT SUM(o.qty) FROM outbound o WHERE o.po_item_id=i.id),0) AS "OutboundQty"

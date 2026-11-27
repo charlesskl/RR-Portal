@@ -106,6 +106,43 @@ public sealed class SchedulePoTrackingIntegrationTests
         Assert.Equal(1, shared.GetProperty("review_count").GetInt32());
     });
 
+    [Fact]
+    public async Task Draft_does_not_invalidate_a_fully_allocated_batch_until_loaded() => await Database(async (db, controller) =>
+    {
+        await db.ExecuteAsync("""
+            INSERT INTO shipments VALUES(4,'draft','DRAFT',NULL,NULL);
+            INSERT INTO shipment_items VALUES(4,4,10,7,'IRRIHS0443','PCS',1);
+            """);
+        var row = (await View(controller)).GetProperty("materials")[0];
+        Assert.Equal(1500m, row.GetProperty("shipped_qty").GetDecimal());
+        Assert.Equal(1000m, row.GetProperty("pending_qty").GetDecimal());
+        var draft = row.GetProperty("records").EnumerateArray().Single(r => r.GetProperty("status").GetString() == "draft");
+        Assert.False(draft.GetProperty("counted").GetBoolean());
+
+        await db.ExecuteAsync("UPDATE shipments SET status='loaded' WHERE id=4");
+        var overallocated = (await View(controller)).GetProperty("materials")[0];
+        Assert.Equal("review", overallocated.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, overallocated.GetProperty("shipped_qty").ValueKind);
+    });
+
+    [Fact]
+    public async Task Purchase_quantity_preserves_legacy_fallback_zero_and_unknown() => await Database(async (db, controller) =>
+    {
+        await db.ExecuteAsync("UPDATE po_items SET purchase_qty=NULL WHERE id=1");
+        var legacy = (await View(controller)).GetProperty("materials")[0];
+        Assert.Equal(2500m, legacy.GetProperty("purchase_qty").GetDecimal());
+
+        await db.ExecuteAsync("UPDATE po_items SET qty=NULL WHERE id=1");
+        var unknown = (await View(controller)).GetProperty("materials")[0];
+        Assert.Equal(JsonValueKind.Null, unknown.GetProperty("purchase_qty").ValueKind);
+        Assert.Equal(JsonValueKind.Null, unknown.GetProperty("remaining_qty").ValueKind);
+        Assert.Equal("review", unknown.GetProperty("status").GetString());
+
+        await db.ExecuteAsync("UPDATE po_items SET purchase_qty=0, qty=2500 WHERE id=1");
+        var zero = (await View(controller)).GetProperty("materials")[0];
+        Assert.Equal(0m, zero.GetProperty("purchase_qty").GetDecimal());
+    });
+
     static async Task<string?> Snapshot(NpgsqlConnection db) => await db.ExecuteScalarAsync<string>("""
         SELECT jsonb_build_array(
             (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM schedules t),

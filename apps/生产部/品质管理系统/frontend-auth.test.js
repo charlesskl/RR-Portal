@@ -34,7 +34,8 @@ function browser({ authenticated = true, pathname = '/qc/', cached = [], handler
     document: { readyState: 'loading', addEventListener(event, fn) { if (event === 'DOMContentLoaded') listeners.push(fn); },
       getElementById: id => elements.get(id) || Array.from(elements.values()).find(el => el.id === id) || null, querySelector: selector => selector === '#loginFields button' ? button : null,
       querySelectorAll: () => [], createElement: () => element('created-' + elements.size), body: { appendChild() {} } },
-    localStorage: { getItem: key => store.get(key) || null, setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) },
+    localStorage: { get length() { return store.size; }, key: index => Array.from(store.keys())[index] || null,
+      getItem: key => store.get(key) || null, setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) },
     XMLHttpRequest: class { open(method, url, async) { this.url = url; assert.equal(async, false); } send() {
       calls.push({ url: this.url, method: 'XHR' }); this.status = status; this.responseText = JSON.stringify(data);
     } },
@@ -538,7 +539,7 @@ for (const kind of ['deleted', 'updated', 'timezone-format', 'collision']) test(
   const before = b.calls.length; assert.equal(await b.ctx.__QC_SYNC_NOW(), false); assert.equal(b.calls.length, before);
   for (const action of ['createRecord','editRecord','deleteRecord','batchDelete','reviewRecord','importData']) assert.equal(b.ctx.can(action), false);
   const banner = [...b.elements.values()].find(el => el.id === 'qcSyncNotice');
-  assert.deepEqual(banner.children.slice(-2).map(el => el.textContent), ['下载草稿 Excel','放弃待恢复草稿']);
+  assert.deepEqual(banner.children.slice(-3).map(el => el.textContent), ['继续录入','放弃待恢复草稿','下载草稿 Excel']);
   assert.equal(b.ctx.__QC_DOWNLOAD_BLOCKED_DRAFT(), true);
   assert.equal([...b.elements.values()].find(el => el.download).clicked, true);
 });
@@ -834,4 +835,72 @@ for (const kind of ['actor', 'business', 'version', 'other-audit', 'reason', 'in
   const { b, key, original } = await recoveryDraft({ initial, local: [local], server: [saved] });
   assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED, true); assert.equal(b.store.get(key), original);
   assert.deepEqual(plain(b.run('state.records')), [saved]);
+});
+
+test('continue entry preserves conflicting draft and does not replay it when a new record syncs or after refresh', async () => {
+  const initial=[versioned(1,'original')], local=[versioned(1,'unsynced-old','2026-11-03T03:00:00Z')];
+  const server=[versioned(1,'server-latest','2026-11-03T02:00:00Z')];
+  const {b,key,original}=await recoveryDraft({initial,local,server});
+  const oldBackup=[...b.store].find(([k])=>k.includes('_conflict_')); assert.equal(oldBackup[1],original);
+  const before=b.calls.filter(c=>c.method==='POST').length;
+  assert.equal(b.ctx.__QC_CONTINUE_AFTER_CONFLICT(),true);
+  assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED,false); assert.equal(b.store.has(key),false);
+  assert.equal(b.store.get(oldBackup[0]),original); assert.equal(b.calls.filter(c=>c.method==='POST').length,before);
+  assert.deepEqual(plain(b.run('state.records')),server); assert.equal(b.ctx.can('createRecord'),true);
+  const newRow=versioned(501,'fresh-entry','2026-11-04T01:00:00Z');
+  b.store.set(prefix+'records',JSON.stringify({records:[...server,newRow],nextId:502}));
+  assert.equal(await b.ctx.__QC_SYNC_NOW(),false);
+  const request=b.calls.filter(c=>c.method==='POST').at(-1).parsed;
+  assert.deepEqual(request.records.map(x=>x.productNo),['fresh-entry']); assert.equal(b.store.get(oldBackup[0]),original);
+  const resumed=browser({cached:[...b.store]}); resumed.setBootstrap({...bootstrap(),records:server,nextId:501});
+  assert.equal(resumed.ctx.__QC_BOOTSTRAP(),true); resumed.ctx.initData();
+  assert.equal(resumed.ctx.__QC_DRAFT_RECOVERY_BLOCKED,false);
+  assert.equal(resumed.store.get(oldBackup[0]),original);
+  assert.deepEqual(plain(resumed.run('state.records')).map(x=>x.productNo),['server-latest','fresh-entry']);
+  const banner=[...resumed.elements.values()].find(el=>el.id==='qcSyncNotice');
+  assert.ok(banner.children.some(el=>el.textContent==='下载已保留草稿'));
+});
+
+test('continue entry remains blocked if backup marker cannot be saved or another tab changed the draft', async () => {
+  for (const mode of ['quota','changed']) {
+    const {b,key,original}=await recoveryDraft({initial:[versioned(1,'original')],local:[versioned(1,'edit')],server:[]});
+    const backup=[...b.store].find(([k])=>k.includes('_conflict_'));
+    if (mode==='quota') { const set=b.ctx.localStorage.setItem; b.ctx.localStorage.setItem=(k,v)=>{if(k.includes('_parked_')) throw Error('quota');set(k,v);}; }
+    else b.store.set(key,JSON.stringify({...JSON.parse(original),token:'newer'}));
+    assert.equal(b.ctx.__QC_CONTINUE_AFTER_CONFLICT(),false); assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED,true);
+    assert.equal(b.store.get(backup[0]),original); assert.equal(b.ctx.can('createRecord'),false);
+    if (mode==='quota') assert.equal(b.store.get(key),original); else assert.equal(JSON.parse(b.store.get(key)).token,'newer');
+  }
+});
+
+test('saved conflict download remains bound to the original company and account', async()=>{
+  const {b}=await recoveryDraft({initial:[versioned(1,'original')],local:[versioned(1,'edit')],server:[]});
+  const initialBanner=[...b.elements.values()].find(el=>el.id==='qcSyncNotice');
+  const originalButton=initialBanner.children.filter(el=>el.textContent==='下载草稿 Excel').at(-1);
+  assert.equal(originalButton.onclick({type:'click'}),true);
+  assert.equal(b.ctx.__QC_CONTINUE_AFTER_CONFLICT(),true);
+  const banner=[...b.elements.values()].find(el=>el.id==='qcSyncNotice');
+  const saved=banner.children.filter(el=>el.textContent==='下载已保留草稿').at(-1); assert.ok(saved);
+  const beforeOwn=[...b.elements.values()].filter(el=>el.download).length;
+  saved.onclick(); assert.equal([...b.elements.values()].filter(el=>el.download).length,beforeOwn+1);
+  b.setBootstrap(bootstrap({username:'alice',role:'viewer',enabled:true})); b.ctx.__QC_BOOTSTRAP();
+  const before=[...b.elements.values()].filter(el=>el.download).length;
+  saved.onclick(); assert.equal([...b.elements.values()].filter(el=>el.download).length,before);
+});
+
+test('continued entry can be confirmed by server without touching archived conflict', async()=>{
+  let offline=true;
+  const b=browser({handler:url=>url.includes('/api/records') && offline ? {ok:false,status:500} : undefined});
+  const initial=[versioned(1,'original')], server=[versioned(1,'server','2026-11-03T02:00:00Z')];
+  b.setBootstrap({...bootstrap(),records:initial}); b.ctx.__QC_BOOTSTRAP();
+  b.store.set(prefix+'records',JSON.stringify({records:[versioned(1,'old-edit','2026-11-03T03:00:00Z')],nextId:501}));
+  await b.ctx.__QC_SYNC_NOW(); const old=b.store.get(prefix+'pending_records_qc-admin');
+  b.setBootstrap({...bootstrap(),records:server}); b.ctx.__QC_BOOTSTRAP(); b.ctx.initData();
+  assert.equal(b.ctx.__QC_CONTINUE_AFTER_CONFLICT(),true); offline=false;
+  b.store.set(prefix+'records',JSON.stringify({records:[...server,versioned(501,'new-entry')],nextId:502}));
+  assert.equal(await b.ctx.__QC_SYNC_NOW(),true);
+  const request=b.calls.filter(c=>c.method==='POST').at(-1).parsed;
+  assert.deepEqual(request.records.map(r=>r.productNo),['new-entry']);
+  assert.equal(b.store.has(prefix+'pending_records_qc-admin'),false);
+  assert.equal([...b.store].find(([k])=>k.includes('_conflict_'))[1],old);
 });

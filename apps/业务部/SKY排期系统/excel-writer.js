@@ -513,7 +513,7 @@ async function writeToExcel(excelPath, poResults, options = {}) {
   if (type === 'skycastle') {
     const {normalizeServiceRows} = require('./parsers/sky-fees');
     poResults = poResults.map(normalizeServiceRows);
-    if (raw.Sheets['四代排期']) require('./sky-current-layout').writeCurrentLayout(wb, raw, poResults);
+    if (raw.Sheets['四代排期']) require('./sky-current-layout').writeCurrentLayout(wb, raw, poResults, standardizePackaging);
     else pasteWriteSkyCastle(wb, raw, poResults, lookup);
     buildDivertSheet(wb, poResults);
     return { wb, type, orders: poResults };

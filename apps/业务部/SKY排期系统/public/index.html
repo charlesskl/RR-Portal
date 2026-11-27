@@ -428,7 +428,7 @@
                       <td class="text-muted">${itemIdx + 1}</td>
                       <td><span class="editable" contenteditable="true" data-po="${poIdx}" data-item="${itemIdx}" data-field="partNo">${escapeHtml(item.partNo)}</span></td>
                       <td><span class="editable" contenteditable="true" data-po="${poIdx}" data-item="${itemIdx}" data-field="description">${escapeHtml(item.description || '')}</span>
-                        ${item.customerPackaging ? `<div class="text-muted">包装版本 · ${escapeHtml(item.customerPackaging)}</div>` : ''}</td>
+                        ${(item.customerPackaging || po.packaging) ? `<div class="text-muted">包装版本 · ${escapeHtml(item.customerPackaging || po.packaging)}</div>` : ''}</td>
                       <td><span class="editable" contenteditable="true" data-po="${poIdx}" data-item="${itemIdx}" data-field="dueDate">${escapeHtml(item.dueDate)}</span></td>
                       <td><span class="editable" contenteditable="true" data-po="${poIdx}" data-item="${itemIdx}" data-field="country">${escapeHtml(item.country)}</span></td>
                       <td class="text-right"><span class="editable" contenteditable="true" data-po="${poIdx}" data-item="${itemIdx}" data-field="quantity">${item.quantity.toLocaleString()}</span></td>

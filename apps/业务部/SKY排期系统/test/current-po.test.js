@@ -153,6 +153,34 @@ test('重新导入只更新匹配订单的三个包装版本栏，改动标黄',
   }
 });
 
+test('普通客户的三代美文版同步写入总接单与两处排期版本栏', async t => {
+  const {writePasteWorkbook} = require('../paste-workbook');
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'sky-generic-version-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const template=new Excel.Workbook();
+  const master=template.addWorksheet('名称');
+  master.addRow(['货号','系列','名称']);
+  master.addRow(['SAMPLE-4','三代','样品']);
+  const order=template.addWorksheet('总接单');
+  order.addRow([null,null,null,null,null,null,null,null,'单价USD','金额USD','金额HKD']);
+  order.addRow(['接单期','出货期','CUSTOMER PO','PO号','货号','数量','包装版本','系列']);
+  template.addWorksheet('四代排期');
+  const schedule=template.addWorksheet('三代排期');
+  schedule.addRow(['接单期','系列','客名','生产车间','国家','CUSTOMER PO','PO号','货号','产品名称','数量','贴纸用量','总贴纸用量','外箱','总箱数','计划出货期','计划验货期','备注','单价USD','金额USD','金额HKD']);
+  schedule.getCell('AE2').value='做货版本';
+  schedule.getCell('AG2').value='彩盒/CDU(版本）';
+  const input=path.join(dir,'in.xlsx'), output=path.join(dir,'out.xlsx');
+  await template.xlsx.writeFile(input);
+  const po=autoParse(sampleWithNotes('Toysmith','(1) Packaging Version: Sky Castle Generic US PACKAGING'),'test.pdf');
+  const {wb,orders}=await writeToExcel(input,[po]);
+  await writePasteWorkbook(input,output,wb,orders);
+  const result=new Excel.Workbook();
+  await result.xlsx.readFile(output);
+  for(const [sheet,addr] of [['总接单','G3'],['三代排期','AE3'],['三代排期','AG3']]) {
+    assert.equal(result.getWorksheet(sheet).getCell(addr).value,'第三代美文版');
+  }
+});
+
 test('粘贴副本保留两行表头、列宽和合并区域，只输出本批 PO，原文件逐字节不变', async t => {
   const {writePasteWorkbook} = require('../paste-workbook');
   const dir = await fs.mkdtemp(path.join(os.tmpdir(),'paste-test-'));

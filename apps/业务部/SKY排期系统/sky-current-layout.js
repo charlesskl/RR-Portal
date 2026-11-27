@@ -16,7 +16,7 @@ function fill(row,header,label,value,date=false) {
     cell.value=ms/86400000+25569;cell.numFmt='yyyy/mm/dd';
   } else cell.value=value;
 }
-function writeCurrentLayout(wb,raw,orders) {
+function writeCurrentLayout(wb,raw,orders,standardizePackaging) {
   const master=new Map();
   if (!raw.Sheets['名称']) throw Error('排期缺少货号与系列对应的名称表');
   const [head,...items]=rows(raw.Sheets['名称']);
@@ -49,6 +49,7 @@ function writeCurrentLayout(wb,raw,orders) {
     const info=Object.fromEntries(head.map((key,i)=>[key,hits[0][i]]));
     const target=queues.get(seriesSheet[info['系列']]);
     if(!target)throw Error(item.partNo+' 缺少对应的系列排期：'+info['系列']);
+    const version = item.customerPackaging || standardizePackaging(po.packaging, po, info['系列']);
     const deliveryDate = item.dueDate || po.shippingDate;
     if (!deliveryDate) throw Error(po.poNumber + ' 缺少出货日期');
     for(const [table,isOrder] of [[order,true],[target,false]]){
@@ -69,8 +70,8 @@ function writeCurrentLayout(wb,raw,orders) {
       for(const [i,v] of [item.unitPrice,usd,Math.round(usd*7.75*100)/100].entries())fill(row,table.h1,moneyCols[i],v);
       const revisions=[column(header,'数量'),...dateCols,...moneyCols.map(k=>column(table.h1,k))];
       if(isOrder){
-        put('包装版本',item.customerPackaging || po.packaging);
-        if (item.customerPackaging) revisions.push(column(header,'包装版本'));
+        put('包装版本',version);
+        if (version) revisions.push(column(header,'包装版本'));
         put('系列',info['系列']);
         const candidates=[];
         table.h2.forEach((val,i)=>{if(String(val||'').split('/').map(s=>s.trim()).includes(item.partNo))candidates.push(i+1);});
@@ -78,11 +79,11 @@ function writeCurrentLayout(wb,raw,orders) {
         if(candidates.length){row.getCell(candidates[0]).value=item.quantity;revisions.push(candidates[0]);}
       }else{
         put('系列',info['系列']);
-        if (item.customerPackaging && table.h2) {
+        if (version && table.h2) {
           table.h2.forEach((label, i) => {
             const key = String(label || '').normalize('NFKC').replace(/\s/g, '');
             if (key === '做货版本' || /^彩盒\/CDU(?:版本|\(版本\))$/i.test(key)) {
-              row.getCell(i + 1).value = item.customerPackaging;
+              row.getCell(i + 1).value = version;
               revisions.push(i + 1);
             }
           });

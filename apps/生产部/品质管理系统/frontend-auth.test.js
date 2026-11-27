@@ -13,10 +13,10 @@ const admin = { username: 'qc-admin', name: '品质', role: 'admin', enabled: tr
 const auth = user => ({ ok: true, user: user || admin, companies: [company], csrfToken: 'synthetic-csrf' });
 const bootstrap = user => ({ ...auth(user), records: [], nextId: 501, users: [admin], partners: [], defectLib: [] });
 const tick = () => new Promise(resolve => setImmediate(resolve));
-function browser({ authenticated = true, pathname = '/qc/', cached = [], handler, storageFull = false, selectedCompany = company } = {}) {
+function browser({ authenticated = true, pathname = '/qc/', cached = [], handler, storageFull = false, selectedCompany = company, serverCompany = selectedCompany, historyState = null } = {}) {
   const store = new Map(cached), elements = new Map(), calls = [], messages = [], listeners = [], unloadListeners = new Set();
   if (selectedCompany !== company) store.set('xingxin_qms_company',selectedCompany);
-  let data = { ...bootstrap(),companies:[selectedCompany] }, status = authenticated ? 200 : 401, reloads = 0, shows = 0;
+  let data = { ...bootstrap(),companies:[serverCompany] }, status = authenticated ? 200 : 401, reloads = 0, shows = 0;
   function element(id, value = '') {
     const el = { id, value, textContent: '', innerHTML: '', style: {}, dataset: {}, disabled: false, children: [],
       setAttribute() {}, focus() {}, click() { this.clicked = true; }, remove() { this.removed = true; }, appendChild(child) { this.children.push(child); },
@@ -31,7 +31,7 @@ function browser({ authenticated = true, pathname = '/qc/', cached = [], handler
     setTimeout() {}, clearTimeout() {}, setInterval() {}, requestAnimationFrame() {},
     addEventListener(event, fn) { if (event === 'beforeunload') unloadListeners.add(fn); },
     removeEventListener(event, fn) { if (event === 'beforeunload') unloadListeners.delete(fn); }, navigator: {},
-    location: { pathname, search: '', hash: '', reload() { reloads++; } }, history: { replaceState(...args) { ctx.replaced = args[2]; } },
+    location: { pathname, search: '', hash: '', reload() { reloads++; } }, history: { state: historyState, replaceState(state, title, url) { this.state = state; ctx.replaced = url; } },
     document: { readyState: 'loading', addEventListener(event, fn) { if (event === 'DOMContentLoaded') listeners.push(fn); },
       getElementById: id => elements.get(id) || Array.from(elements.values()).find(el => el.id === id) || null, querySelector: selector => selector === '#loginFields button' ? button : null,
       querySelectorAll: () => [], createElement: () => element('created-' + elements.size), body: { appendChild() {} } },
@@ -51,7 +51,7 @@ function browser({ authenticated = true, pathname = '/qc/', cached = [], handler
           return response;
         });
       }
-      const value = recordSync ? confirmation() : url.includes('/api/session') || url.includes('/api/login') ? { ...auth(),companies:[selectedCompany] } : url.includes('/api/ai/status') ? { ready: false } : { ok: true };
+      const value = recordSync ? confirmation() : url.includes('/api/session') || url.includes('/api/login') ? { ...auth(),companies:[serverCompany] } : url.includes('/api/ai/status') ? { ready: false } : { ok: true };
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(value) });
     }, confirm: () => true,
   };
@@ -123,6 +123,43 @@ test('company switch never carries password/hash or creates target-company sessi
   const b = browser(); b.store.set('xingxin_qms_switch_ticket', 'old'); b.ctx.swPickCompany('hy-huakang-a');
   assert.equal(b.store.get('xingxin_qms_company'), 'hy-huakang-a'); assert.equal(b.reloads, 1);
   assert.equal(b.store.has('xingxin_qms_switch_ticket'), false); assert.equal(b.store.has('xingxin_qms_hy-huakang-a_session'), false);
+});
+
+test('selecting a company with exhausted storage survives login and another reload', async () => {
+  const key = 'xingxin_qms_company', target = 'sy-huadeng';
+  const initial = browser({ authenticated: false, storageFull: true, historyState: { keep: 7 } });
+  initial.ctx.selectSite('hunan');
+  initial.ctx.pickCompany(target);
+  assert.equal(initial.reloads, 1);
+  assert.equal(initial.store.has(key), false);
+  assert.deepEqual(plain(initial.ctx.history.state), { keep: 7, [key]: target });
+
+  const options = { storageFull: true, serverCompany: target, historyState: initial.ctx.history.state };
+  const form = browser({ ...options, authenticated: false });
+  form.setBootstrap({ ...bootstrap(), companies: [target] });
+  form.elements.get('loginUsername').value = admin.username;
+  form.elements.get('loginPassword').value = 'fixture-password';
+  await form.ctx.login();
+  assert.equal(form.shows, 1);
+  assert.ok(form.calls.some(call => call.url.endsWith('/api/login?company=' + target)));
+  assert.ok(form.calls.some(call => call.url.endsWith('/api/bootstrap?company=' + target)));
+  const refreshed = browser(options);
+  assert.equal(refreshed.ctx.__QC_COMPANY, target);
+  assert.equal(refreshed.ctx.__QC_BOOTSTRAP(), true);
+  assert.equal(refreshed.ctx.getCurrentUser().username, admin.username);
+
+  const writable = browser({ historyState: form.ctx.history.state });
+  writable.ctx.swPickCompany('hy-huakang-a');
+  assert.equal(writable.store.get(key), 'hy-huakang-a');
+  assert.deepEqual(plain(writable.ctx.history.state), { keep: 7 });
+});
+
+test('if neither company preference can be written the selector stays open', () => {
+  const b = browser({ authenticated: false, storageFull: true });
+  b.ctx.history.replaceState = () => { throw new Error('history unavailable'); };
+  b.ctx.pickCompany('sy-huadeng');
+  assert.equal(b.reloads, 0);
+  assert.equal(b.messages.at(-1).type, 'error');
 });
 
 test('logout sends same-origin cookie and CSRF; server failure keeps current authenticated screen', async () => {

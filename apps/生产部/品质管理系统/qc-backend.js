@@ -24,6 +24,8 @@
     COMPANY = localStorage.getItem(COMPANY_KEY) || 'dg-xingxin';
     if (LEGACY[COMPANY]) { COMPANY = LEGACY[COMPANY]; localStorage.setItem(COMPANY_KEY, COMPANY); }
   } catch (e) {}
+  var tabCompany = window.history?.state?.[COMPANY_KEY];
+  if (typeof tabCompany === 'string' && tabCompany) COMPANY = tabCompany;
   window.__QC_COMPANY = COMPANY;
   window.__QC_COMPANY_KEY = COMPANY_KEY;
   window.__QC_STORAGE_PREFIX = 'xingxin_qms_' + COMPANY + '_';

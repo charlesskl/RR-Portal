@@ -278,7 +278,21 @@ function backToSites()      { _selView = 'sites'; renderCompanySelector(); }
 function pickCompany(id) {
   if (!QC_COMPANIES.some(c => c.id === id)) return;
   if (id !== getCompany()) {
-    try { localStorage.setItem(window.__QC_COMPANY_KEY || 'xingxin_qms_company', id); } catch(e) {}
+    const key = window.__QC_COMPANY_KEY || 'xingxin_qms_company';
+    let saved = false;
+    try { localStorage.setItem(key, id); saved = true; } catch (_) {}
+    // The current history entry survives reload even when local storage is full.
+    try {
+      if (!saved || window.history?.state?.[key]) {
+        const next = { ...history.state };
+        if (saved) delete next[key];
+        else next[key] = id;
+        history.replaceState(next, '');
+      }
+    } catch (_) {
+      showToast('无法保存所选公司，请稍后重试。', 'error');
+      return;
+    }
     location.reload();   /* 换子公司 = 重新加载，bootstrap 拉取该公司的独立数据 */
     return;
   }

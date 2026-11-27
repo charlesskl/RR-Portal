@@ -6,6 +6,7 @@ import dayjs from 'dayjs'
 import { api } from '../api/client'
 import { parseScheduleWorkbook } from '../utils/scheduleImport'
 import { purchaseItemCodes } from '../utils/purchaseCustoms'
+import SchedulePoTrackingDrawer, { type TrackingSelection } from '../components/SchedulePoTrackingDrawer'
 import { scheduleLineKey, scheduleManualPlaced, toggleScheduleManual, scheduleAutoPlaced,
   scheduleActualProduction, scheduleProductionOverride, schedulePurchasePlaced } from '../utils/scheduleLineStatus'
 
@@ -475,7 +476,7 @@ function DetailView({ detail }: { detail: ScheduleDetail }) {
         items={[
           {
             key: 'rows', label: `本周明细 (${fRows.length}${placedCount ? ` · 采购已下 ${placedCount}` : ''}${productionPlacedCount ? ` · 生产已下 ${productionPlacedCount}` : ''})`,
-            children: <SchedRowsTable rows={fRows} statusOf={statusOf} changedFields={changedFields}
+            children: <SchedRowsTable rows={fRows} scheduleId={detail.id} statusOf={statusOf} changedFields={changedFields}
               isPlaced={isPlaced} isAutoPlaced={isAutoPlaced} onToggleManual={toggleManual}
               isProductionPlaced={isProductionPlaced} isActualProductionPlaced={isActualProductionPlaced}
               productionDataLoaded={productionDataLoaded} onToggleProductionManual={toggleProductionManual}
@@ -485,7 +486,7 @@ function DetailView({ detail }: { detail: ScheduleDetail }) {
             key: 'unplaced', label: `未下单 (${fUnplaced.length})`,
             children: fUnplaced.length === 0
               ? <Empty description="暂无未下单排期" />
-              : <SchedRowsTable rows={fUnplaced} statusOf={statusOf} changedFields={changedFields}
+              : <SchedRowsTable rows={fUnplaced} scheduleId={detail.id} statusOf={statusOf} changedFields={changedFields}
                   isPlaced={isPlaced} isAutoPlaced={isAutoPlaced} onToggleManual={toggleManual}
                   isProductionPlaced={isProductionPlaced} isActualProductionPlaced={isActualProductionPlaced}
                   productionDataLoaded={productionDataLoaded} onToggleProductionManual={toggleProductionManual}
@@ -495,7 +496,7 @@ function DetailView({ detail }: { detail: ScheduleDetail }) {
             key: 'add', label: `新增 (${fAdded.length})`,
             children: fAdded.length === 0
               ? <Empty description="无新增" />
-              : <SchedRowsTable rows={fAdded} highlight="add" />,
+              : <SchedRowsTable rows={fAdded} scheduleId={detail.id} highlight="add" />,
           },
           {
             key: 'rm', label: `删除 (${fRemoved.length})`,
@@ -515,8 +516,9 @@ function DetailView({ detail }: { detail: ScheduleDetail }) {
   )
 }
 
-function SchedRowsTable({ rows, highlight, statusOf, changedFields, isPlaced, isAutoPlaced, isProductionPlaced, isActualProductionPlaced, productionDataLoaded, onToggleManual, onToggleProductionManual, matCostInfo, matCostTotalUsd }: {
+function SchedRowsTable({ rows, scheduleId, highlight, statusOf, changedFields, isPlaced, isAutoPlaced, isProductionPlaced, isActualProductionPlaced, productionDataLoaded, onToggleManual, onToggleProductionManual, matCostInfo, matCostTotalUsd }: {
   rows: SchedRow[]
+  scheduleId?: number
   highlight?: 'add' | 'rm'
   statusOf?: (r: SchedRow) => 'new' | 'modified' | 'overdue' | 'normal'
   changedFields?: Map<string, Record<string, { from: any; to: any }>>
@@ -530,6 +532,7 @@ function SchedRowsTable({ rows, highlight, statusOf, changedFields, isPlaced, is
   matCostInfo?: (r: SchedRow) => { usd: number; orig: string } | null
   matCostTotalUsd?: number
 }) {
+  const [tracking, setTracking] = useState<TrackingSelection | null>(null)
   function classOf(r: SchedRow): string {
     if (highlight === 'add') return 'sched-row-add'
     if (highlight === 'rm') return 'sched-row-rm'
@@ -601,7 +604,10 @@ function SchedRowsTable({ rows, highlight, statusOf, changedFields, isPlaced, is
         { title: '第三客户', dataIndex: 'endCustomer', width: 140, ellipsis: true },
         { title: '货号', dataIndex: 'code', width: 100 },
         { title: '品名', dataIndex: 'productName', width: 200, ellipsis: true, onCell: cellHi('productName'), render: cellTip('productName') },
-        { title: '订单 PO', dataIndex: 'orderNo', width: 120 },
+        { title: '订单 PO', dataIndex: 'orderNo', width: 150, render: (value, row) => scheduleId && value?.trim() && row.code?.trim()
+          ? <Button type="link" style={{ padding: 0, whiteSpace: 'normal', height: 'auto', textAlign: 'left' }}
+              aria-label={`查看 ${value} 的物料走货进度`} onClick={() => setTracking({ orderNo: value, code: row.code, source: row.source })}>{value}</Button>
+          : value },
         { title: 'CUST PO', dataIndex: 'customerPO', width: 110 },
         { title: '数量', dataIndex: 'qty', width: 80, align: 'right', onCell: cellHi('qty'), render: cellTip('qty') },
         { title: '总箱数', dataIndex: 'cartons', width: 80, align: 'right' },
@@ -634,6 +640,7 @@ function SchedRowsTable({ rows, highlight, statusOf, changedFields, isPlaced, is
         </Table.Summary>
       ) : undefined}
     />
+    {scheduleId && <SchedulePoTrackingDrawer scheduleId={scheduleId} selection={tracking} onClose={() => setTracking(null)} />}
     </>
   )
 }

@@ -36,7 +36,7 @@ function parse(text, filename) {
     const shipTo=text.match(/(?:^|\n)SHIP TO\s*\n([\s\S]*?)\nProduct\s*\//i)?.[1] || '';
     result.shipTo=shipTo;result.customerName=shipTo.split('\n')[0].replace(/\s*\[[^\]]+\].*$/,'').trim();
     const country=shipTo.trim().split('\n').filter(line => !/^[+()\d .-]+$/.test(line.trim())).pop();
-    const totals=/(?:^|[ \t])(\d[\d,]*)[ \t]+([\d,]+\.\d+)[ \t]+([\d,]+\.\d{2})[ \t]*$/gm;
+    const totals=/(?:^|[ \t])(\d[\d,]*)[ \t]+(0|[\d,]+\.\d+)[ \t]+(0|[\d,]+\.\d{2})[ \t]*$/gm;
     let cursor=0;
     for(const match of body.matchAll(totals)){
       const block=body.slice(cursor,match.index).trim();cursor=match.index+match[0].length;
@@ -63,7 +63,8 @@ function parse(text, filename) {
         const customerPackaging = endsWithJazwaresCustomer(afterSku) ? packagingFromNotes(result.notes) : undefined;
         const upcs = [...afterSku.matchAll(/\bUPC\s*[#:]?\s*(\d{8,14})\b/gi)].map(hit => hit[1]);
         if (customerPackaging && shipTo.trim() === country) result.customerName = 'Jazwares, LLC';
-        result.items.push({upcs,customerPackaging,partNo:skus[0][1],description:block.split(/\nSKU:/i)[0].trim(),quantity,unitPrice,amount,country:country==='United States'?'美国':country,dueDate:result.shippingDate,remark:result.notes.match(/^Qty from[^\n]*/mi)?.[0] || ''});
+        const isSample = /^Toysmith$/i.test(result.customerName) && /^Toysmith Item#\s*\d+\s*\(\s*-*\s*Sample\s*\)\s*$/im.test(description);
+        result.items.push({...(isSample ? {isSample:true} : {}),upcs,customerPackaging,partNo:skus[0][1],description:block.split(/\nSKU:/i)[0].trim(),quantity,unitPrice,amount,country:country==='United States'?'美国':country,dueDate:result.shippingDate,remark:result.notes.match(/^Qty from[^\n]*/mi)?.[0] || ''});
       } else throw Error('存在未识别的商品或费用行');
     }
     if (body.slice(cursor).trim()) throw Error('存在未识别的商品或费用行');

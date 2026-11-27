@@ -294,3 +294,38 @@ test('从 NOTES 的 Package 字段识别美文版，进口贴纸说明不作为�
   assert.equal(parse('Sample buyer', '* Package: importer label').packaging, '');
   assert.equal(parse('Sample buyer', '* Package: Sky Castle US packaging (in French)').packaging, '');
 });
+
+test('Toysmith 大货与显式样品分别导出，缺主档列入待核对并保留原货号', async t => {
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'sky-samples-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const template=new Excel.Workbook();
+  const master=template.addWorksheet('名称');
+  master.addRow(['货号','系列','名称']);master.addRow(['KNOWN','四代','已建档产品']);
+  const order=template.addWorksheet('总接单');
+  order.getRow(1).getCell(10).value='单价USD';
+  order.getRow(1).getCell(11).value='金额USD';
+  order.getRow(1).getCell(12).value='金额HKD';
+  order.addRow(['接单期','出货期','CUSTOMER PO','PO号','货号','数量','包装版本','系列']);
+  const sheet=template.addWorksheet('四代排期');
+  sheet.addRow(['接单期','系列','客名','生产车间','国家','CUSTOMER PO','PO号','货号','产品名称','数量','贴纸用量','总贴纸用量','外箱','总箱数','计划出货期','计划验货期','备注','单价USD','金额USD','金额HKD']);
+  sheet.getRow(2).getCell(23).value='做货版本';
+  const input=path.join(dir,'in.xlsx'), output=path.join(dir,'out.xlsx');
+  await template.xlsx.writeFile(input);
+  const pdfText=sample.replace('Product / Service','SHIP TO\nToysmith [TEST]\nUnited States\nProduct / Service')
+    .replace(/Sample product[\s\S]*?Total \(USD\): \$13\.00/, [
+      'Toysmith Item# 1','SKU: KNOWN','10 0 0','Toysmith Item# 1 (--- Sample)','SKU: KNOWN','2 0 0',
+      'Toysmith Item# 2 (--- Sample)','SKU: UNLISTED','1 2.00 2.00','Total units: 13','Total (USD): $2.00',
+    ].join('\n'));
+  const po=autoParse(pdfText,'sample.pdf');
+  assert.deepEqual(po.items.map(i=>!!i.isSample),[false,true,true]);
+  const {wb,orders}=await writeToExcel(input,[po]);
+  const {writePasteWorkbook}=require('../paste-workbook');
+  await writePasteWorkbook(input,output,wb,orders);
+  const read=new Excel.Workbook();await read.xlsx.readFile(output);
+  assert.equal(read.getWorksheet('总接单').getCell('F3').value,10);
+  assert.equal(read.getWorksheet('总接单（样品）').getCell('F3').value,2);
+  assert.equal(read.getWorksheet('四代排期').getCell('Q4').value,'Sample');
+  assert.equal(read.getWorksheet('待核对').getCell('H3').value,'UNLISTED');
+  assert.equal(read.getWorksheet('待核对').getCell('B3').value,null);
+  await assert.rejects(writePasteWorkbook(input,output,wb,[po,po]),/重复/);
+});

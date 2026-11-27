@@ -142,3 +142,30 @@ test('两货号原表导出并重读，手写富文本保留，追加整单胶�
   assert.deepEqual(again.value,a.value);
   assert.equal(oldFee.text,'客户留样');
 });
+
+test('零价以整数 0 打印时仍保留大货和样品明细并核对总数、金额', () => {
+  const source = `No.: PO0000002
+Status: Active
+Created: Jan 1, 2026
+Delivery date: Jan 2, 2026
+${header}
+Product A
+SKU: A1
+Demo Customer 12 0 0
+Product A (--- Sample)
+SKU: A1
+Demo Customer 2 0 0
+Product B
+SKU: B2
+Demo Customer 3 1.10 3.30
+Total units: 17
+Total (USD): $3.30`;
+  const po = parse(source, 'synthetic.pdf');
+  assert.equal(po.error, undefined);
+  assert.deepEqual(po.items.map(r => [r.partNo, r.quantity, r.unitPrice, r.amount]), [
+    ['A1', 12, 0, 0], ['A1', 2, 0, 0], ['B2', 3, 1.10, 3.30],
+  ]);
+  assert.match(po.items[1].description, /Sample/);
+  assert.ok(parse(source.replace('12 0 0', '12 0 1.00'), 'synthetic.pdf').error);
+  assert.ok(parse(source.replace('Total units: 17', 'Total units: 16'), 'synthetic.pdf').error);
+});

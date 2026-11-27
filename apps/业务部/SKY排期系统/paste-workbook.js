@@ -1,6 +1,6 @@
 const Excel = require('exceljs');
 const XLSX = require('xlsx');
-const {appendRemarks} = require('./parsers/sky-fees');
+const {mergeFeeRemarks, tapeLineNotes} = require('./parsers/sky-fees');
 
 const {writePasteStyles} = require('./full-workbook');
 const key = (po, sku) => JSON.stringify([String(po ?? '').trim(), String(sku ?? '').trim()]);
@@ -32,7 +32,9 @@ function copyHeaders(source, target, cachedHeaders) {
 
 async function writePasteWorkbook(template, destination, generated, orders) {
   const expected = new Set();
+  const feeNotes = new Map();
   for (const po of orders) {
+    feeNotes.set(po.poNumber, [...(po.items || []).flatMap(item => item.feeRemarks || []), ...tapeLineNotes(po.fees)]);
     if (po.error || po.client !== 'Sky Castle' || !po.items?.length) throw Error('请核对 PO 明细与排期模板');
     for (const item of po.items) {
       if (!po.poNumber?.trim() || !item.partNo?.trim()) throw Error('缺少 PO 号或货号');
@@ -85,6 +87,8 @@ async function writePasteWorkbook(template, destination, generated, orders) {
     const layout = {sourceRows: new Map([[1,1],[2,2]]), dates: new Set(), changed: new Set()};
     layouts.set(name, layout);
     copyHeaders(source, sheet, headers.Sheets[name]);
+    const remarkCol = !order && Array.from({length:width}, (_, i) => i + 1).find(col =>
+        headers.Sheets[name][XLSX.utils.encode_cell({r:0,c:col-1})]?.v === '备注');
     rows.forEach((row, i) => {
       const id = key(row.getCell(poCol).value, row.getCell(skuCol).value);
       const seen = order ? written.order : written.schedule;
@@ -100,16 +104,32 @@ async function writePasteWorkbook(template, destination, generated, orders) {
         // Setting a yellow fill must not mutate a style shared by neighbouring cells.
         out.getCell(col).style = {...style};
       }
+      const recognized = feeNotes.get(row.getCell(poCol).value) || [];
+      if (original && remarkCol) {
+        const from = original.getCell(remarkCol);
+        const prev = displayValue(from);
+        const oldText = from.text;
+        const value = mergeFeeRemarks(oldText, row.getCell(remarkCol).text, recognized);
+        const target = out.getCell(remarkCol);
+        if (value === oldText) {
+          target.value = prev;
+        } else {
+          // Retain existing text runs when the only change is an appended charge.
+          if (prev?.richText && value.startsWith(oldText + '；')) {
+            target.value = {richText: [...prev.richText, {text:value.slice(oldText.length)}]};
+          } else {
+            target.value = value || null;
+          }
+          layout.changed.add(target.address);
+        }
+      }
       row.eachCell((cell, col) => {
-        if (cell.value == null || cell.value === '') return;
+        if (cell.value == null || cell.value === '' || (original && col === remarkCol)) return;
         const target = out.getCell(col);
         const isDate = typeof cell.value === 'number' && cell.numFmt?.startsWith('yyyy/');
         target.value = isDate ? new Date((cell.value - 25569) * 86400000) : cell.value;
         if (isDate) layout.dates.add(target.address);
         const previous = original && displayValue(original.getCell(col));
-        if (previous && !order && headers.Sheets[name][XLSX.utils.encode_cell({r:0,c:col-1})]?.v === '备注') {
-          target.value = appendRemarks(previous, cell.value);
-        }
         const comparable = v => v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? '');
         if (comparable(previous) !== comparable(target.value)) layout.changed.add(target.address);
       });

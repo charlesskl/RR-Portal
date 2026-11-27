@@ -282,3 +282,15 @@ test('旧预览中的 zzOther 贴纸费转换为货号备注，重复转换不�
   assert.deepEqual(normalizeServiceRows(normalized),normalized);
   assert.equal(original.items.length,2);
 });
+
+test('从 NOTES 的 Package 字段识别美文版，进口贴纸说明不作为版本', () => {
+  const parse = (customer, notes) => autoParse(sampleWithNotes(customer, notes), 'sample.pdf');
+  const note = '* Package: Sky Castle US packaging (in English) + importer label';
+  const general = parse('Sample buyer', note);
+  assert.equal(general.packaging, 'Sky Castle US packaging');
+  assert.equal(general.items[0].customerPackaging, undefined);
+  assert.equal(parse('Jazwares, LLC', note).items[0].customerPackaging, 'Jazwares客版（美文）');
+  assert.match(parse('Jazwares, LLC', note + '\nPackaging: 2L').error, /请核对包装版本/);
+  assert.equal(parse('Sample buyer', '* Package: importer label').packaging, '');
+  assert.equal(parse('Sample buyer', '* Package: Sky Castle US packaging (in French)').packaging, '');
+});

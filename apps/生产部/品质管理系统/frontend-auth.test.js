@@ -13,9 +13,10 @@ const admin = { username: 'qc-admin', name: '品质', role: 'admin', enabled: tr
 const auth = user => ({ ok: true, user: user || admin, companies: [company], csrfToken: 'synthetic-csrf' });
 const bootstrap = user => ({ ...auth(user), records: [], nextId: 501, users: [admin], partners: [], defectLib: [] });
 const tick = () => new Promise(resolve => setImmediate(resolve));
-function browser({ authenticated = true, pathname = '/qc/', cached = [], handler } = {}) {
+function browser({ authenticated = true, pathname = '/qc/', cached = [], handler, storageFull = false, selectedCompany = company, serverCompany = selectedCompany, historyState = null } = {}) {
   const store = new Map(cached), elements = new Map(), calls = [], messages = [], listeners = [], unloadListeners = new Set();
-  let data = bootstrap(), status = authenticated ? 200 : 401, reloads = 0, shows = 0;
+  if (selectedCompany !== company) store.set('xingxin_qms_company',selectedCompany);
+  let data = { ...bootstrap(),companies:[serverCompany] }, status = authenticated ? 200 : 401, reloads = 0, shows = 0;
   function element(id, value = '') {
     const el = { id, value, textContent: '', innerHTML: '', style: {}, dataset: {}, disabled: false, children: [],
       setAttribute() {}, focus() {}, click() { this.clicked = true; }, remove() { this.removed = true; }, appendChild(child) { this.children.push(child); },
@@ -30,11 +31,11 @@ function browser({ authenticated = true, pathname = '/qc/', cached = [], handler
     setTimeout() {}, clearTimeout() {}, setInterval() {}, requestAnimationFrame() {},
     addEventListener(event, fn) { if (event === 'beforeunload') unloadListeners.add(fn); },
     removeEventListener(event, fn) { if (event === 'beforeunload') unloadListeners.delete(fn); }, navigator: {},
-    location: { pathname, search: '', hash: '', reload() { reloads++; } }, history: { replaceState(...args) { ctx.replaced = args[2]; } },
+    location: { pathname, search: '', hash: '', reload() { reloads++; } }, history: { state: historyState, replaceState(state, title, url) { this.state = state; ctx.replaced = url; } },
     document: { readyState: 'loading', addEventListener(event, fn) { if (event === 'DOMContentLoaded') listeners.push(fn); },
       getElementById: id => elements.get(id) || Array.from(elements.values()).find(el => el.id === id) || null, querySelector: selector => selector === '#loginFields button' ? button : null,
       querySelectorAll: () => [], createElement: () => element('created-' + elements.size), body: { appendChild() {} } },
-    localStorage: { getItem: key => store.get(key) || null, setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) },
+    localStorage: { getItem: key => store.get(key) || null, setItem: (key, value) => { if (storageFull) throw new Error('QuotaExceededError'); return store.set(key,value); }, removeItem: key => store.delete(key) },
     XMLHttpRequest: class { open(method, url, async) { this.url = url; assert.equal(async, false); } send() {
       calls.push({ url: this.url, method: 'XHR' }); this.status = status; this.responseText = JSON.stringify(data);
     } },
@@ -50,7 +51,7 @@ function browser({ authenticated = true, pathname = '/qc/', cached = [], handler
           return response;
         });
       }
-      const value = recordSync ? confirmation() : url.includes('/api/session') || url.includes('/api/login') ? auth() : url.includes('/api/ai/status') ? { ready: false } : { ok: true };
+      const value = recordSync ? confirmation() : url.includes('/api/session') || url.includes('/api/login') ? { ...auth(),companies:[serverCompany] } : url.includes('/api/ai/status') ? { ready: false } : { ok: true };
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(value) });
     }, confirm: () => true,
   };
@@ -122,6 +123,43 @@ test('company switch never carries password/hash or creates target-company sessi
   const b = browser(); b.store.set('xingxin_qms_switch_ticket', 'old'); b.ctx.swPickCompany('hy-huakang-a');
   assert.equal(b.store.get('xingxin_qms_company'), 'hy-huakang-a'); assert.equal(b.reloads, 1);
   assert.equal(b.store.has('xingxin_qms_switch_ticket'), false); assert.equal(b.store.has('xingxin_qms_hy-huakang-a_session'), false);
+});
+
+test('selecting a company with exhausted storage survives login and another reload', async () => {
+  const key = 'xingxin_qms_company', target = 'sy-huadeng';
+  const initial = browser({ authenticated: false, storageFull: true, historyState: { keep: 7 } });
+  initial.ctx.selectSite('hunan');
+  initial.ctx.pickCompany(target);
+  assert.equal(initial.reloads, 1);
+  assert.equal(initial.store.has(key), false);
+  assert.deepEqual(plain(initial.ctx.history.state), { keep: 7, [key]: target });
+
+  const options = { storageFull: true, serverCompany: target, historyState: initial.ctx.history.state };
+  const form = browser({ ...options, authenticated: false });
+  form.setBootstrap({ ...bootstrap(), companies: [target] });
+  form.elements.get('loginUsername').value = admin.username;
+  form.elements.get('loginPassword').value = 'fixture-password';
+  await form.ctx.login();
+  assert.equal(form.shows, 1);
+  assert.ok(form.calls.some(call => call.url.endsWith('/api/login?company=' + target)));
+  assert.ok(form.calls.some(call => call.url.endsWith('/api/bootstrap?company=' + target)));
+  const refreshed = browser(options);
+  assert.equal(refreshed.ctx.__QC_COMPANY, target);
+  assert.equal(refreshed.ctx.__QC_BOOTSTRAP(), true);
+  assert.equal(refreshed.ctx.getCurrentUser().username, admin.username);
+
+  const writable = browser({ historyState: form.ctx.history.state });
+  writable.ctx.swPickCompany('hy-huakang-a');
+  assert.equal(writable.store.get(key), 'hy-huakang-a');
+  assert.deepEqual(plain(writable.ctx.history.state), { keep: 7 });
+});
+
+test('if neither company preference can be written the selector stays open', () => {
+  const b = browser({ authenticated: false, storageFull: true });
+  b.ctx.history.replaceState = () => { throw new Error('history unavailable'); };
+  b.ctx.pickCompany('sy-huadeng');
+  assert.equal(b.reloads, 0);
+  assert.equal(b.messages.at(-1).type, 'error');
 });
 
 test('logout sends same-origin cookie and CSRF; server failure keeps current authenticated screen', async () => {
@@ -480,7 +518,8 @@ test('complete write failure keeps only page memory and warns; storage recovery 
   let reject = true;
   const b = browser({ handler: url => url.includes('/api/records') ? Promise.resolve({ ok: !reject, status: reject ? 500 : 200 }) : undefined });
   setPendingRecord(b); const recoverStorage = failDraftStorage(b, true); await b.ctx.__QC_SYNC_NOW();
-  assert.equal(b.unloadListeners.size, 1); assert.equal(b.ctx.__QC_BOOTSTRAP(), false); assert.equal(b.unloadListeners.size, 1);
+  assert.equal(b.unloadListeners.size, 1); assert.equal(b.ctx.__QC_BOOTSTRAP(), true); assert.equal(b.unloadListeners.size, 1);
+  b.ctx.initData(); assert.equal(b.run('state.records[0].productNo'),'quota-draft');
   recoverStorage(); b.setBootstrap(bootstrap()); assert.equal(b.ctx.__QC_BOOTSTRAP(), true); b.ctx.initData();
   assert.equal(b.run('state.records[0].productNo'), 'quota-draft');
   reject = false; assert.equal(await b.ctx.__QC_SYNC_NOW(), true); assert.equal(b.unloadListeners.size, 0);
@@ -834,4 +873,45 @@ for (const kind of ['actor', 'business', 'version', 'other-audit', 'reason', 'in
   const { b, key, original } = await recoveryDraft({ initial, local: [local], server: [saved] });
   assert.equal(b.ctx.__QC_DRAFT_RECOVERY_BLOCKED, true); assert.equal(b.store.get(key), original);
   assert.deepEqual(plain(b.run('state.records')), [saved]);
+});
+
+
+for (const selectedCompany of ['dg-xingxin','sy-huadeng','dg-huadeng-a']) test('storage quota cannot block a verified login or load stale mirrors for '+selectedCompany,async()=>{
+ const key='xingxin_qms_'+selectedCompany+'_',old=JSON.stringify({records:[{id:10,productNo:'old-cache'}],nextId:11});
+ const preserved=[['unrelated-app','keep-me'],[key+'pending_records_other-user','keep-other-owner-draft'],['xingxin_qms_qa_application_draft:'+selectedCompany+':someone:1','keep-qa-draft']];
+ const b=browser({authenticated:false,storageFull:true,selectedCompany,cached:[[key+'records',old],...preserved]});
+ const fresh={...bootstrap(),companies:[selectedCompany],records:[{id:20,productNo:'current-server'}],nextId:21,
+  users:[{...admin,password:'never-cache-this'}],partners:[{name:'server-partner'}],defectLib:[{name:'server-defect'}]};
+ b.setBootstrap(fresh);b.elements.get('loginUsername').value=admin.username;b.elements.get('loginPassword').value='password';
+ await b.ctx.login();
+ assert.equal(b.shows,1);assert.equal(b.ctx.__QC_BACKEND_OK,true);assert.equal(b.ctx.getCurrentUser().username,admin.username);
+ assert.equal(b.run('state.records[0].productNo'),'current-server');assert.equal(b.store.get(key+'records'),old);
+ assert.equal(b.ctx._getUsers()[0].password,undefined);assert.equal(b.ctx._loadPartners()[0].name,'server-partner');assert.equal(b.ctx._getDefectLib()[0].name,'server-defect');
+ for(const [k,v] of preserved)assert.equal(b.store.get(k),v);
+ assert.doesNotMatch(b.elements.get('loginError').textContent,/quota|数据加载失败/i);
+ b.setBootstrap({...fresh,records:[{id:21,productNo:'newer-server'}]});assert.equal(b.ctx.__QC_BOOTSTRAP(),true);b.ctx.initData();assert.equal(b.run('state.records[0].productNo'),'newer-server');
+ b.setBootstrap({},401);assert.equal(b.ctx.__QC_BOOTSTRAP(),false);assert.equal(b.ctx.getCurrentUser(),null);
+});
+test('memory mirror edits still require server confirmation and retain unprotected drafts when every write fails',async()=>{
+ let succeed=false;
+ const b=browser({storageFull:true,handler:url=>url.includes('/api/records')?Promise.resolve({ok:succeed,status:succeed?200:500}):undefined});
+ b.ctx.initData();b.run("state.records=[{id:501,productNo:'page-only-new-record'}];state.nextId=502");
+ b.ctx.__QC_SYNC_NOW();await tick(); // install normal writers; no local edit is submitted yet
+ assert.equal(b.ctx.persist(),true);await tick();await tick();
+ const posts=b.calls.filter(c=>c.method==='POST'&&c.url.includes('/api/records'));
+ assert.equal(posts.at(-1).parsed.records[0].productNo,'page-only-new-record');assert.equal(b.unloadListeners.size,1);
+ assert.equal(b.store.has(prefix+'pending_records_qc-admin'),false);
+ assert.equal(b.ctx.__QC_BOOTSTRAP(),true);b.ctx.initData();assert.equal(b.run('state.records[0].productNo'),'page-only-new-record');assert.equal(b.unloadListeners.size,1);
+ succeed=true;assert.equal(await b.ctx.__QC_SYNC_NOW(),true);assert.equal(b.unloadListeners.size,0);
+});
+test('failed mirror writes remain scoped to their authenticated owner and never replace durable draft storage',()=>{
+ const b=browser();const restore=failDraftStorage(b,true);
+ b.ctx.__QC_CACHE_SET(prefix+'records',JSON.stringify({records:[{id:100,productNo:'admin-only-memory'}],nextId:101}));
+ assert.equal(b.ctx.__QC_CACHE_GET(prefix+'records').includes('admin-only-memory'),true);
+ assert.throws(()=>b.ctx.__QC_CACHE_SET(prefix+'pending_records_qc-admin','draft'),/未知缓存键/);
+ b.ctx.__QC_ACCEPT_AUTH(auth({...admin,username:'alice'}));
+ assert.equal(b.ctx.__QC_CACHE_GET(prefix+'records').includes('admin-only-memory'),false);
+ b.setBootstrap({...bootstrap({...admin,username:'alice'}),records:[{id:200,productNo:'alice-server'}]});assert.equal(b.ctx.__QC_BOOTSTRAP(),true);b.ctx.initData();assert.equal(b.run('state.records[0].productNo'),'alice-server');
+ restore();b.ctx.__QC_CACHE_SET(prefix+'records',JSON.stringify({records:[{id:201,productNo:'durable-again'}],nextId:202}));
+ assert.equal(b.ctx.__QC_CACHE_GET(prefix+'records'),b.store.get(prefix+'records'));
 });

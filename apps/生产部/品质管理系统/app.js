@@ -56,6 +56,14 @@ const STORAGE_KEYS = {
   partners:     STORAGE_PREFIX + 'partners',       /* 供应商&客户名单 */
 };
 const LS_KEY = STORAGE_KEYS.records;   /* 主数据 key */
+function _cacheGet(key) {
+  return typeof window.__QC_CACHE_GET === 'function' ? window.__QC_CACHE_GET(key) : localStorage.getItem(key);
+}
+function _cacheSet(key, raw) {
+  if (typeof window.__QC_CACHE_SET === 'function') return window.__QC_CACHE_SET(key,raw);
+  localStorage.setItem(key,raw); return true;
+}
+
 /* # 列短码：内部 ID 是随机安全整数（降低多机同时录入撞号的概率）。
    界面显示 6 位「数字+英文」短码（36 进制，36^6≈21亿组合），悬停可见完整号。 */
 function _shortId(id) {
@@ -185,10 +193,10 @@ function _liveUser() { return getCurrentUser(); }
 
 function initUsers() {
   const users = _getUsers().map(u => { const copy = { ...u }; delete copy.password; delete copy.newPassword; return copy; });
-  localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(users));
+  _cacheSet(STORAGE_KEYS.users, JSON.stringify(users));
 }
 function _getUsers() {
-  try { const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.users)); return Array.isArray(users) ? users : []; }
+  try { const users = JSON.parse(_cacheGet(STORAGE_KEYS.users)); return Array.isArray(users) ? users : []; }
   catch(e) { return []; }
 }
 async function _saveUsers(users) {
@@ -270,7 +278,21 @@ function backToSites()      { _selView = 'sites'; renderCompanySelector(); }
 function pickCompany(id) {
   if (!QC_COMPANIES.some(c => c.id === id)) return;
   if (id !== getCompany()) {
-    try { localStorage.setItem(window.__QC_COMPANY_KEY || 'xingxin_qms_company', id); } catch(e) {}
+    const key = window.__QC_COMPANY_KEY || 'xingxin_qms_company';
+    let saved = false;
+    try { localStorage.setItem(key, id); saved = true; } catch (_) {}
+    // The current history entry survives reload even when local storage is full.
+    try {
+      if (!saved || window.history?.state?.[key]) {
+        const next = { ...history.state };
+        if (saved) delete next[key];
+        else next[key] = id;
+        history.replaceState(next, '');
+      }
+    } catch (_) {
+      showToast('无法保存所选公司，请稍后重试。', 'error');
+      return;
+    }
     location.reload();   /* 换子公司 = 重新加载，bootstrap 拉取该公司的独立数据 */
     return;
   }
@@ -833,7 +855,7 @@ async function _deleteUser(username) {
 
 function initData() {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = _cacheGet(LS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.records) && parsed.records.length >= 0) {
@@ -847,7 +869,7 @@ function initData() {
 }
 
 function persist() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(state)); return true; } catch(e) { return false; }
+  try { _cacheSet(LS_KEY, JSON.stringify(state)); return true; } catch(e) { return false; }
 }
 
 function recStatus(r) { return r.status || 'approved'; }
@@ -2373,10 +2395,10 @@ async function refreshRecordsPage() {
       records: data.records,
       nextId: data.nextId || (data.records.reduce((m, r) => Math.max(m, Number(r.id) || 0), 30) + 1),
     };
-    localStorage.setItem(LS_KEY, JSON.stringify(state));
-    if (Array.isArray(data.users)) localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(data.users));
-    if (Array.isArray(data.defectLib)) localStorage.setItem(STORAGE_KEYS.defectLib, JSON.stringify(data.defectLib));
-    if (Array.isArray(data.partners))  localStorage.setItem(STORAGE_KEYS.partners,  JSON.stringify(data.partners));
+    _cacheSet(LS_KEY, JSON.stringify(state));
+    if (Array.isArray(data.users)) _cacheSet(STORAGE_KEYS.users, JSON.stringify(data.users));
+    if (Array.isArray(data.defectLib)) _cacheSet(STORAGE_KEYS.defectLib, JSON.stringify(data.defectLib));
+    if (Array.isArray(data.partners))  _cacheSet(STORAGE_KEYS.partners,  JSON.stringify(data.partners));
 
     _partners = null;
     _selectedIds.clear();
@@ -2769,14 +2791,14 @@ function batchDelete() {
 let _partners = null;
 function _loadPartners() {
   if (_partners === null) {
-    try { _partners = JSON.parse(localStorage.getItem(STORAGE_KEYS.partners) || '[]'); } catch(e) { _partners = []; }
+    try { _partners = JSON.parse(_cacheGet(STORAGE_KEYS.partners) || '[]'); } catch(e) { _partners = []; }
     if (!Array.isArray(_partners)) _partners = [];
   }
   return _partners;
 }
 function _savePartners(p) {
   _partners = Array.isArray(p) ? p : [];
-  try { localStorage.setItem(STORAGE_KEYS.partners, JSON.stringify(_partners)); } catch(e) {}
+  try { _cacheSet(STORAGE_KEYS.partners, JSON.stringify(_partners)); } catch(e) {}
 }
 function managedNames(type) {
   return _loadPartners().filter(p => p.type === type).map(p => p.name).filter(Boolean);
@@ -3986,11 +4008,11 @@ const _DEFAULT_DEFECT_LIB = [
 ];
 
 function _getDefectLib() {
-  try { return JSON.parse(localStorage.getItem(_DEFECT_LIB_KEY)) || null; }
+  try { return JSON.parse(_cacheGet(_DEFECT_LIB_KEY)) || null; }
   catch(e) { return null; }
 }
 function _saveDefectLib(lib) {
-  localStorage.setItem(_DEFECT_LIB_KEY, JSON.stringify(lib));
+  _cacheSet(_DEFECT_LIB_KEY, JSON.stringify(lib));
 }
 
 /* 首次启动初始化 */
@@ -7591,7 +7613,7 @@ function applyTheme(theme) {
   const t = theme === 'light' ? 'light' : 'dark';
   document.body.classList.remove('theme-dark', 'theme-light');
   document.body.classList.add('theme-' + t);
-  localStorage.setItem(STORAGE_KEYS.theme, t);
+  try { localStorage.setItem(STORAGE_KEYS.theme, t); } catch (_) {}
   /* 同步下拉框选中状态 */
   const sel = document.getElementById('themeSelect');
   if (sel) sel.value = t;
@@ -7637,7 +7659,8 @@ function _cc() {
 
 document.addEventListener('DOMContentLoaded', () => {
   /* 0. 主题初始化（最先执行，避免闪白） */
-  const savedTheme = localStorage.getItem(STORAGE_KEYS.theme) || 'dark';
+  let savedTheme = 'dark';
+  try { savedTheme = localStorage.getItem(STORAGE_KEYS.theme) || 'dark'; } catch (_) {}
   applyTheme(savedTheme);
 
   /* 1. 载入数据（有 localStorage 用 localStorage，否则用 SEED） */

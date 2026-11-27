@@ -4,7 +4,7 @@
    必须在 app.js 之前加载（这样本文件的 DOMContentLoaded 处理器先执行）。
 
    做两件事：
-     1【开机预加载】app.js 的 init 之前，同步拉取后端全量数据写入 localStorage，
+     1【开机预加载】app.js 的 init 之前，同步拉取后端全量数据写入工作缓存（优先 localStorage），
         使 initData / initUsers / initDefectLib 直接读到服务器数据（多浏览器共享）。
      2【数据同步】记录、名单及不良库写入后排队同步；账号操作等服务器确认。
 
@@ -24,6 +24,8 @@
     COMPANY = localStorage.getItem(COMPANY_KEY) || 'dg-xingxin';
     if (LEGACY[COMPANY]) { COMPANY = LEGACY[COMPANY]; localStorage.setItem(COMPANY_KEY, COMPANY); }
   } catch (e) {}
+  var tabCompany = window.history?.state?.[COMPANY_KEY];
+  if (typeof tabCompany === 'string' && tabCompany) COMPANY = tabCompany;
   window.__QC_COMPANY = COMPANY;
   window.__QC_COMPANY_KEY = COMPANY_KEY;
   window.__QC_STORAGE_PREFIX = 'xingxin_qms_' + COMPANY + '_';
@@ -35,6 +37,25 @@
     defectLib: PREFIX + 'defect_library',
     partners:  PREFIX + 'partners',
   };
+
+  // Server mirrors may exceed browser quota; they are working copies, not draft backups.
+  // Keep only failed mirror writes in memory. Never intercept draft or unrelated storage.
+  var memoryCache = Object.create(null);
+  var cacheOwner = null;
+  function cacheKey(key) { return Object.keys(KEY).some(function (name) { return KEY[name] === key; }); }
+  function cacheGet(key) {
+    if (!cacheKey(key)) throw new Error('未知缓存键');
+    if (Object.prototype.hasOwnProperty.call(memoryCache,key)) return memoryCache[key];
+    try { return localStorage.getItem(key); } catch (_) { return null; }
+  }
+  function cacheSet(key, raw) {
+    if (!cacheKey(key)) throw new Error('未知缓存键');
+    try { localStorage.setItem(key,raw); delete memoryCache[key]; }
+    catch (_) { memoryCache[key] = raw; }
+    return true;
+  }
+  window.__QC_CACHE_GET = cacheGet;
+  window.__QC_CACHE_SET = cacheSet;
 
   /* API 基址：从当前页面路径推导，兼容根部署(/) 与子路径部署(/qc/)。
      根: '' → /api/...   子路径: '/qc' → /qc/api/...（nginx 会剥掉 /qc/ 前缀） */
@@ -91,6 +112,7 @@
     }
   }
   function clearAuth(message) {
+    memoryCache = Object.create(null); cacheOwner = null;
     window.__QC_AUTH = null;
     window.__QC_BACKEND_OK = false;
     notice('', false);
@@ -102,6 +124,8 @@
     if (!data || !data.user || typeof data.user.username !== 'string' || data.user.enabled !== true ||
         !Array.isArray(data.companies) || data.companies.indexOf(COMPANY) === -1 ||
         typeof data.csrfToken !== 'string' || !data.csrfToken) throw new Error('服务器会话无效，请重新登录');
+    if (cacheOwner !== data.user.username) memoryCache = Object.create(null);
+    cacheOwner = data.user.username;
     window.__QC_AUTH = { user: publicUser(data.user), companies: data.companies.slice(), csrfToken: data.csrfToken, company: COMPANY };
     window.__QC_BACKEND_OK = true;
     window.__QC_AUTH_NOTICE = '';
@@ -340,7 +364,7 @@
     if (!owner || !window.__QC_AUTH || window.__QC_AUTH.user.username !== owner) return false;
     var draft, previous;
     try {
-      var state = JSON.parse(localStorage.getItem(KEY.records) || '{}');
+      var state = JSON.parse(cacheGet(KEY.records) || '{}');
       draft = { owner: owner, company: COMPANY, revision: recordRevision, token: recordToken,
         state: state, baseline: recordBaseline, changedIds: pendingRecordChanges(state).map(function (row) { return row.id; }), deletedIds: window.__QC_PENDING_DELETES.slice(),
         deleteRevisions: Object.assign({}, deleteRevisions), nextDeleteRevision: nextDeleteRevision, replacement: window.__QC_FORCE_REPLACE || false };
@@ -427,7 +451,7 @@
         });
         merged = merged.filter(function (r) { return deleted.indexOf(r.id) === -1; });
       }
-      localStorage.setItem(KEY.records, JSON.stringify({ records: merged,
+      cacheSet(KEY.records, JSON.stringify({ records: merged,
         nextId: Math.max(Number(serverState.nextId) || 31, Number(draft.state.nextId) || 31, merged.reduce(function (n, r) { return Math.max(n, r.id + 1); }, 31)) }));
       recordToken = typeof draft.token === 'string' ? draft.token : newRecordToken();
       recordRevision = Number.isSafeInteger(draft.revision) && draft.revision > 0 ? draft.revision : 1;
@@ -471,7 +495,7 @@
     };
   };
 
-  /* ── 开机：同步 XHR 拉全量（必须同步，才能赶在 app.js 的 init 之前写好 localStorage）── */
+  /* ── 开机：同步 XHR 拉全量（必须同步，才能赶在 app.js 的 init 之前准备好工作缓存）── */
   function syncBootstrap() {
     try {
       var xhr = new XMLHttpRequest();
@@ -486,10 +510,10 @@
       acceptAuth(data);
       if (!Array.isArray(data.records)) throw new Error('服务器数据格式不正确');
       var serverState = { records: data.records, nextId: data.nextId || 31 };
-      localStorage.setItem(KEY.records, JSON.stringify(serverState));
-      localStorage.setItem(KEY.users, JSON.stringify(Array.isArray(data.users) ? data.users.map(publicUser) : []));
-      if (Array.isArray(data.defectLib)) localStorage.setItem(KEY.defectLib, JSON.stringify(data.defectLib));
-      if (Array.isArray(data.partners)) localStorage.setItem(KEY.partners, JSON.stringify(data.partners));
+      cacheSet(KEY.records, JSON.stringify(serverState));
+      cacheSet(KEY.users, JSON.stringify(Array.isArray(data.users) ? data.users.map(publicUser) : []));
+      if (Array.isArray(data.defectLib)) cacheSet(KEY.defectLib, JSON.stringify(data.defectLib));
+      if (Array.isArray(data.partners)) cacheSet(KEY.partners, JSON.stringify(data.partners));
       restoreRecordDraft(serverState);
       return true;
     } catch (e) {
@@ -540,7 +564,7 @@
   window.__QC_SAVE_USERS = function (users) {
     return pushUsers(users).then(function (ok) {
       if (!ok) return false;
-      localStorage.setItem(KEY.users, JSON.stringify(users.map(publicUser)));
+      cacheSet(KEY.users, JSON.stringify(users.map(publicUser)));
       return window.__QC_REFRESH_SESSION().then(function () { return true; }, function () { return true; });
     });
   };
@@ -563,7 +587,7 @@
     if (window.__QC_MAINTENANCE && window.__QC_MAINTENANCE.blocked) return Promise.resolve(false);
     if (!window.__QC_AUTH || window.__QC_AUTH.user.username !== owner || draftOwner !== owner || epoch !== recordQueueEpoch) return Promise.resolve(false);
     try {
-      var st = JSON.parse(localStorage.getItem(KEY.records) || '{}');
+      var st = JSON.parse(cacheGet(KEY.records) || '{}');
       var sentRevision = recordRevision;
       var sentToken = recordToken;
       var sentDeleteRevision = nextDeleteRevision;
@@ -612,11 +636,11 @@
             });
           }
           try {
-            var current = JSON.parse(localStorage.getItem(KEY.records) || '{}');
+            var current = JSON.parse(cacheGet(KEY.records) || '{}');
             var updated = applyConfirmedRows(current.records || []);
             if (JSON.stringify(updated) !== JSON.stringify(current.records)) {
               current.records = updated;
-              localStorage.setItem(KEY.records, JSON.stringify(current));
+              cacheSet(KEY.records, JSON.stringify(current));
             }
             if (typeof state !== 'undefined' && state && Array.isArray(state.records)) state.records = applyConfirmedRows(state.records);
           } catch (_) {
@@ -666,17 +690,17 @@
   }
   function pushUsers(users) {
     var u = users;
-    if (!Array.isArray(u)) { try { u = JSON.parse(localStorage.getItem(KEY.users) || '[]'); } catch (e) { u = []; } }
+    if (!Array.isArray(u)) { try { u = JSON.parse(cacheGet(KEY.users) || '[]'); } catch (e) { u = []; } }
     return post(API_BASE + '/api/users?company=' + COMPANY, { users: u });
   }
   function pushPartners(list) {
     var l = list;
-    if (!Array.isArray(l)) { try { l = JSON.parse(localStorage.getItem(KEY.partners) || '[]'); } catch (e) { l = []; } }
+    if (!Array.isArray(l)) { try { l = JSON.parse(cacheGet(KEY.partners) || '[]'); } catch (e) { l = []; } }
     return post(API_BASE + '/api/partners?company=' + COMPANY, { partners: l });
   }
   function pushDefects(lib) {
     var l = lib;
-    if (!Array.isArray(l)) { try { l = JSON.parse(localStorage.getItem(KEY.defectLib) || '[]'); } catch (e) { l = []; } }
+    if (!Array.isArray(l)) { try { l = JSON.parse(cacheGet(KEY.defectLib) || '[]'); } catch (e) { l = []; } }
     return post(API_BASE + '/api/defects?company=' + COMPANY, { defectLib: l });
   }
 
@@ -735,10 +759,10 @@
     return pushRecords();
   };
 
-  /* 本文件早于 app.js 加载：立即预加载，确保 app.js 初始化前 localStorage 已是服务器数据 */
+  /* 本文件早于 app.js 加载：立即预加载，确保 app.js 初始化前工作缓存已是服务器数据 */
   try {
-    var cachedUsers = JSON.parse(localStorage.getItem(KEY.users) || '[]');
-    if (Array.isArray(cachedUsers)) localStorage.setItem(KEY.users, JSON.stringify(cachedUsers.map(publicUser)));
+    var cachedUsers = JSON.parse(cacheGet(KEY.users) || '[]');
+    if (Array.isArray(cachedUsers)) cacheSet(KEY.users, JSON.stringify(cachedUsers.map(publicUser)));
   } catch (_) {}
   syncBootstrap();
 

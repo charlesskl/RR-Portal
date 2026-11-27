@@ -310,13 +310,13 @@ test('failed localStorage write preserves the form and queue, and retry saves ex
   b.setQuota(false); b.ctx.saveRecord({ continueEntry: true });
   assert.equal(b.json('state.records').length, 1); assert.equal(b.ctx.__qcQueue.idx, 1); assert.equal(b.elements.get('f_productNo').value, 'P2');
 });
-test('actual backend writer preserves the save result and posts the successfully cached records', async () => {
+test('actual backend writer preserves the save result and posts both durable and memory-cached records', async () => {
   const b = browser({ backend: true }); b.start(); b.ctx.saveRecord({ continueEntry: true });
   assert.equal(b.ctx.__qcQueue.idx, 1); await b.ctx.__QC_SYNC_NOW();
   assert.equal(b.requests.length, 2); assert.equal(b.requests[0].body.records[0].productNo, 'P1');
   b.setQuota(true); b.ctx.saveRecord({ continueEntry: true }); await b.ctx.__QC_SYNC_NOW();
-  assert.equal(b.ctx.__qcQueue.idx, 1); assert.equal(b.elements.get('f_productNo').value, 'P2');
-  assert.equal(b.json('state.records').length, 1); assert.equal(b.requests.at(-1).body.records.length, 1);
+  assert.equal(b.ctx.__qcQueue.idx, 2); assert.equal(b.elements.get('f_productNo').value, 'P3');
+  assert.equal(b.json('state.records').length, 2); assert.deepEqual(b.requests.at(-1).body.records.map(r=>r.productNo),['P1','P2']);
 });
 test('new AQL defaults do not rewrite an old record or its edit form fallback', () => {
   const b = browser(); b.run("state.records=[{id:1,date:'2026-10-01',supplier:'Test Supplier',aqlLevel:'MAJ 0.65'}]");

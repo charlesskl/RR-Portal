@@ -73,13 +73,14 @@
       banner.textContent = message;
       /* 例行「服务器已保存修改」不占用底部横幅：全宽横幅会盖住右下角的操作提示（toast）。
          横幅只留给错误/草稿等需要用户处理的状态。 */
-      banner.style.display = (message && error) ? '' : 'none';
+      var savedDrafts = savedConflictDrafts();
+      banner.style.display = (message && error) || savedDrafts.length ? '' : 'none';
       var hasRecordFailure = Object.keys(failedWrites).some(function (url) { return url.indexOf('/api/records') !== -1; });
       if (error && blockedRecovery && document.createElement) {
-        ['下载草稿 Excel', '放弃待恢复草稿'].forEach(function (label, index) {
+        ['继续录入', '放弃待恢复草稿', '下载草稿 Excel'].forEach(function (label, index) {
           var button = document.createElement('button');
           button.type = 'button'; button.textContent = label; button.className = 'btn-secondary'; button.style.marginLeft = '12px';
-          button.onclick = index ? discardBlockedDraft : downloadBlockedDraft;
+          button.onclick = [continueAfterConflict, discardBlockedDraft, function () { return downloadBlockedDraft(); }][index];
           banner.appendChild(button);
         });
       } else if (error && hasRecordFailure && document.createElement) {
@@ -87,6 +88,15 @@
         retry.type = 'button'; retry.textContent = '重试同步'; retry.className = 'btn-primary'; retry.style.marginLeft = '12px';
         retry.onclick = function () { window.__QC_SYNC_NOW(); };
         banner.appendChild(retry);
+      } else if (savedDrafts.length && document.createElement) {
+        if (!error) banner.textContent = '冲突草稿已保留在本机，可继续录入；请下载核对原草稿。';
+        savedDrafts.forEach(function (draft, index) {
+          var download = document.createElement('button');
+          download.type = 'button'; download.textContent = '下载已保留草稿' + (savedDrafts.length > 1 ? ' ' + (index + 1) : '');
+          download.className = 'btn-secondary'; download.style.marginLeft = '12px';
+          download.onclick = function () { downloadSavedDraft(draft); };
+          banner.appendChild(download);
+        });
       }
     }
   }
@@ -231,7 +241,7 @@
     return ids.every(function (id) { return Object.prototype.hasOwnProperty.call(current.versions, id) && current.versions[id] === baseline.versions[id]; });
   }
   function recoveryMessage() {
-    return '当前公司、账号「' + (blockedRecovery ? blockedRecovery.owner : '') + '」的验货草稿与服务器记录存在冲突或缺少原始断点，已显示服务器最新数据并保留原草稿；验货修改和重试已暂停。请先下载原草稿核对，或明确放弃待恢复草稿；不会覆盖或恢复已删除记录。' +
+    return '当前公司、账号「' + (blockedRecovery ? blockedRecovery.owner : '') + '」的验货草稿与服务器记录存在冲突或缺少原始断点，已显示服务器最新数据并保留原草稿；点击“继续录入”会保留旧草稿并从服务器数据继续，旧草稿不会自动同步，请下载核对。' +
       (blockedRecovery && !blockedRecovery.backupKey ? ' 独立备份未写入，原草稿仍保留，请勿清理浏览器数据。' : '');
   }
   function recoveryIsCurrent() {
@@ -250,10 +260,58 @@
     window.__QC_DRAFT_RECOVERY_BLOCKED = true;
     notice(recoveryMessage(), true);
   }
-  function draftDownloadPackage(raw) {
+  function savedConflictDrafts() {
+    if (!window.__QC_AUTH || window.__QC_AUTH.company !== COMPANY || !window.__QC_AUTH.user) return [];
+    var owner = window.__QC_AUTH.user.username, prefix = draftKey(owner) + '_parked_', saved = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var marker = localStorage.key(i);
+        if (!marker || marker.indexOf(prefix) !== 0) continue;
+        var backupKey = localStorage.getItem(marker);
+        if (!backupKey || backupKey.indexOf(draftKey(owner) + '_conflict_') !== 0) continue;
+        var raw = localStorage.getItem(backupKey);
+        if (raw !== null) saved.push({ owner: owner, raw: raw, backupKey: backupKey });
+      }
+    } catch (_) { return []; }
+    return saved;
+  }
+  function continueAfterConflict() {
+    if (!recoveryIsCurrent()) return false;
+    var recovery = blockedRecovery, key = draftKey(recovery.owner);
+    var marker = recovery.backupKey && key + '_parked_' + recovery.backupKey.slice((key + '_conflict_').length);
+    try {
+      if (!marker || localStorage.getItem(recovery.backupKey) !== recovery.raw) throw new Error('backup unavailable');
+      var volatile = volatileRecordDrafts[recovery.owner], stored = localStorage.getItem(key);
+      if (volatile && JSON.stringify(volatile.draft) !== recovery.raw) throw new Error('draft changed');
+      if (stored && stored !== recovery.raw) throw new Error('draft changed');
+      var existing = localStorage.getItem(marker);
+      if (existing && existing !== recovery.backupKey) throw new Error('marker collision');
+      if (!existing) localStorage.setItem(marker, recovery.backupKey);
+      if (localStorage.getItem(marker) !== recovery.backupKey || localStorage.getItem(recovery.backupKey) !== recovery.raw) throw new Error('backup unavailable');
+      if (localStorage.getItem(key) !== stored) throw new Error('draft changed');
+      if (stored) localStorage.removeItem(key);
+      if (localStorage.getItem(key) !== null) throw new Error('draft not cleared');
+      delete volatileRecordDrafts[recovery.owner]; updateUnloadGuard();
+      recordQueueEpoch++;
+      delete failedWrites[apiUrl('/api/records')]; delete failedWrites[apiUrl('/api/records/replace')];
+      blockedRecovery = null; window.__QC_DRAFT_RECOVERY_BLOCKED = false;
+      notice('冲突草稿已保留在本机，可继续录入。', false);
+      return true;
+    } catch (_) {
+      notice(recoveryMessage() + ' 无法安全保留草稿或草稿已变化，请先下载并联系管理员。', true);
+      return false;
+    }
+  }
+  function downloadSavedDraft(draft) {
+    if (!draft || !window.__QC_AUTH || window.__QC_AUTH.company !== COMPANY || window.__QC_AUTH.user.username !== draft.owner) return false;
+    return downloadBlockedDraft(draft);
+  }
+  window.__QC_CONTINUE_AFTER_CONFLICT = continueAfterConflict;
+  function draftDownloadPackage(raw, savedRecovery) {
     var draft = JSON.parse(raw.replace(/^\uFEFF/, ''));
+    var recovery = savedRecovery || blockedRecovery;
     if (!draft || !draft.state || !Array.isArray(draft.state.records) ||
-        !blockedRecovery || draft.owner !== blockedRecovery.owner || draft.company !== COMPANY) {
+        !recovery || draft.owner !== recovery.owner || draft.company !== COMPANY) {
       throw new Error('原草稿的公司、账号或记录格式无效');
     }
     // 顶层 records 与普通 JSON 备份一致，旧版“导入 JSON”也能识别。
@@ -270,13 +328,14 @@
       draftRecovery: { originalRaw: raw }
     };
   }
-  function downloadBlockedDraft() {
-    if (!recoveryIsCurrent()) return false;
+  function downloadBlockedDraft(savedRecovery) {
+    if (savedRecovery ? (!window.__QC_AUTH || window.__QC_AUTH.company !== COMPANY || window.__QC_AUTH.user.username !== savedRecovery.owner) : !recoveryIsCurrent()) return false;
+    var recovery = savedRecovery || blockedRecovery;
     try {
-      var content = blockedRecovery.raw, converted = false;
+      var content = recovery.raw, converted = false;
       var packaged = null;
       try {
-        packaged = draftDownloadPackage(content);
+        packaged = draftDownloadPackage(content, recovery);
         converted = true;
       } catch (_) { /* 损坏草稿仍须允许下载原文，不影响已有备份保护。 */ }
       if (converted) {
@@ -285,12 +344,12 @@
       }
       var blob = new Blob([content], { type: converted ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/json;charset=utf-8' });
       var url = URL.createObjectURL(blob), link = document.createElement('a');
-      link.href = url; link.download = '品质未同步草稿-' + COMPANY + '-' + blockedRecovery.owner + (converted ? '.xlsx' : '.json');
+      link.href = url; link.download = '品质未同步草稿-' + COMPANY + '-' + recovery.owner + (converted ? '.xlsx' : '.json');
       document.body.appendChild(link); link.click(); link.remove();
       setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-      if (!converted) notice(recoveryMessage() + ' 已下载原始草稿；内容不完整，暂不能作为备份导入。', true);
+      if (!converted) notice((savedRecovery ? '已保留草稿' : recoveryMessage()) + ' 已下载原始草稿；内容不完整，暂不能作为备份导入。', true);
       return true;
-    } catch (_) { notice(recoveryMessage() + ' 下载失败，请保留此页面并联系管理员。', true); return false; }
+    } catch (_) { notice((savedRecovery ? '已保留草稿' : recoveryMessage()) + ' 下载失败，请保留此页面并联系管理员。', true); return false; }
   }
   function discardBlockedDraft() {
     if (!recoveryIsCurrent() || !window.confirm('确定放弃当前公司、账号「' + blockedRecovery.owner + '」的这份待恢复草稿？服务器记录不会改变。请先下载并核对原草稿。')) return false;
@@ -373,7 +432,10 @@
       recordBaseline = baselineOf(serverState);
       recordBaselineSignatures = Object.create(null);
       serverState.records.forEach(function (row) { recordBaselineSignatures[row.id] = recordSignature(row); });
-      if (!draft || draft.owner !== owner || draft.company !== COMPANY) return;
+      if (!draft || draft.owner !== owner || draft.company !== COMPANY) {
+        if (savedConflictDrafts().length) notice('冲突草稿已保留在本机，可继续录入。', false);
+        return;
+      }
       if (!draft.state || !Array.isArray(draft.state.records)) { blockDraftRecovery(draft, originalRaw); return; }
       var serverById = Object.create(null), indexOfId = Object.create(null), merged = serverState.records.slice();
       merged.forEach(function (r, i) { serverById[r.id] = r; indexOfId[r.id] = i; });

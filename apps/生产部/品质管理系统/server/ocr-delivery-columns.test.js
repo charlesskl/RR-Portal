@@ -522,3 +522,32 @@ test('product-number paper rows reach OCR preview and sequential record forms wi
  assert.equal(x.b.ctx.saveRecord({continueEntry:true}),true,JSON.stringify(x.b.messages));assert.equal(x.b.elements.get('f_qty').value,'10000');assert.equal(x.b.elements.get('f_orderNo').value,'FDZA20260002-01');
  assert.equal(x.b.ctx.saveRecord(),true);assert.deepEqual(plain(x.b.json('state.records.map(r=>[r.productNo,r.qty,r.orderNo])')),[['SR1001CDU-24',2310,'FDZA20260001-01'],['SR1002',10000,'FDZA20260002-01']]);
 });
+
+const emptyPaperRows=[
+ '| | | | | | | | | | | |',
+ '|\t|\t|\t|\t|\t|\t|\t|\t|\t|\t|',
+ '| \u200b | \u2060 | \u200d | | | | | | | | |',
+ '｜　｜　｜　｜　｜　｜　｜　｜　｜　｜　｜　｜',
+ '| <br> | <br/> | <br /> | | | | | | | | |',
+];
+for(const [index,row] of emptyPaperRows.entries())test('fully empty OCR paper row is not a pending goods item: '+index,()=>{
+ const fields=runtime().parse(paperTable()+'\n'+row+'\n'+row);
+ assert.deepEqual(fields.items.map(r=>[r.productNo,r.qty]),[['SR1001CDU-24','2310'],['SR1002','10000']]);
+});
+test('unknown or unreadable cell contents are retained, unlike fully empty table rows',()=>{
+ const rows=[['3','','','','','PCS','?','','','',''],['4','PO-UNKNOWN','SKU-UNKNOWN','','','PCS','','','','','']];
+ const fields=runtime().parse(paperTable(paperHeader,[...paperRows,...rows]));
+ assert.equal(fields.items.length,4);assert.ok(fields.items.slice(2).every(r=>r.quantityNeedsReview));
+});
+
+test('provider preserves original evidence while supplying a display copy without empty table outlines',async()=>{
+ const raw=paperTable()+'\n'+emptyPaperRows.join('\n'),r=runtime([raw]),result=await r.extract();
+ assert.equal(r.calls(),1);assert.equal(result.rawText,raw);assert.equal(result.fields.items.length,2);
+ assert.equal(result.displayText,paperTable().replace(/\n[|]+$/,''));
+});
+
+test('only empty table outlines never invent a goods row and do not erase unreadable text',()=>{
+ assert.deepEqual(runtime().parse(emptyPaperRows.join('\n')).items,[]);
+ const raw=paperTable()+'\n|3|PO-UNKNOWN|SKU-UNKNOWN|?||PCS|||||';
+ const fields=runtime().parse(raw);assert.equal(fields.items.length,3);assert.equal(fields.items[2].quantityNeedsReview,true);
+});

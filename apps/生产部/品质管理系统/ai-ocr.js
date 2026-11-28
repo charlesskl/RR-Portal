@@ -285,7 +285,7 @@
             if (!usableItems(body.fields) || rotatedPending) {
               /* 有内容但解析不出明细（待核对原文）：留底，转正尝试全部失败后回退到它，不丢原文 */
               if (!pendingFallback && usableItems(body.fields)) {
-                pendingFallback = { fields: body.fields, rawText: body.rawText, image: small, angle: angle };
+                pendingFallback = { fields: body.fields, rawText: body.rawText, displayText:body.displayText, image: small, angle: angle };
               }
               if ([90, 180, 270].indexOf(body.needRotate) !== -1 && !candidates) {
                 var correction = body.needRotate === 180 ? 180 : (body.needRotate === 270 ? 90 : 270);
@@ -299,7 +299,7 @@
                 return attempt(next);
               }
               if (pendingFallback) {
-                body = { ok: true, fields: pendingFallback.fields, rawText: pendingFallback.rawText, needsManualReview: true };
+                body = { ok: true, fields: pendingFallback.fields, rawText: pendingFallback.rawText, displayText:pendingFallback.displayText, needsManualReview: true };
                 small = pendingFallback.image;
                 angle = pendingFallback.angle;
               } else {
@@ -311,7 +311,7 @@
             op.snapshot = committed;
             var n = applyFields(body.fields);
             window.__qcOcrResultContext = committed;
-            if (body.rawText) setV('ocrRawText', body.rawText);
+            if (body.rawText) setV('ocrRawText', typeof body.displayText === 'string' ? body.displayText : body.rawText);
             var manual = body.needsManualReview || body.fields.items.some(function (item) { return item && (item.quantityNeedsReview || item.orderNoNeedsReview); });
             setT('ocrStatus', manual ? '识别结果需要人工核对，请逐行确认 PO、数量和单位后保存' :
               'AI 识别完成' + (n > 1 ? ('（共 ' + n + ' 行货品，已填第 1 行）') : ''));
@@ -399,7 +399,7 @@
       .then(function (body) {
         if (revision !== textRevision || !sameActor(actor) || input.value !== raw) return false;
         if (!usableItems(body.fields)) throw new Error('原文没有可核对的货品明细，请检查表头和行内容');
-        applyFields(body.fields); setV('ocrRawText', raw); window.__qcOcrTextActor = actor;
+        applyFields(body.fields); setV('ocrRawText', typeof body.displayText === 'string' ? body.displayText : raw); window.__qcOcrTextActor = actor;
         window.__qcOcrResultContext = imageApi() && imageApi().snapshot();
         setT('ocrStatus', body.needsManualReview ? '部分明细需核对，请查看下方对应表' : '原文提取完成，请核对下方列对应后应用');
         return true;

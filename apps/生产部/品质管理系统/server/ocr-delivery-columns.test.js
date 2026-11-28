@@ -551,3 +551,14 @@ test('only empty table outlines never invent a goods row and do not erase unread
  const raw=paperTable()+'\n|3|PO-UNKNOWN|SKU-UNKNOWN|?||PCS|||||';
  const fields=runtime().parse(raw);assert.equal(fields.items.length,3);assert.equal(fields.items[2].quantityNeedsReview,true);
 });
+
+test('empty OCR table outlines keep unrelated contract fragments separated',async()=>{
+  const source = [contractHeading, '|1|PO2026001', '| \u200b | |', '7-01||合成吊牌||PCS|20000|200|20|'].join('\n');
+  const result = await runtime([source]).extract();
+  for (const text of [source, result.displayText]) {
+    const items = runtime().parse(text).items;
+    assert.ok(items.length > 0);
+    assert.ok(items.some(item => item.quantityNeedsReview));
+    assert.ok(!items.some(item => item.orderNo === 'PO20260017-01'));
+  }
+});

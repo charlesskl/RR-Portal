@@ -217,10 +217,20 @@ function _ocrDeliverySchema(cells, partial = false) {
 /* Empty table outlines may contain zero-width OCR artifacts. Drop only rows
    whose cells contain no data; a number, question mark or dash still needs review. */
 function _stripEmptyOcrTableRows(source) {
-  return String(source || '').split(/\r?\n/).filter(line => {
-    const outline = line.replace(/<br\s*\/?>/gi,'');
-    return !/[|｜\t]/.test(outline) || !/^[\s|｜\u200b-\u200d\u2060\ufeff]*$/.test(outline);
-  }).join('\n');
+  const lines = [];
+  let gap = false;
+  for (const line of String(source || '').split(/\r?\n/)) {
+    const outline = line.replace(/<br\s*\/?>/gi, '');
+    if (/[|｜\t]/.test(outline) && /^[\s|｜\u200b-\u200d\u2060\ufeff]*$/.test(outline)) {
+      gap = true;
+      continue;
+    }
+    // Keep a boundary so wrapped cells cannot join across discarded rows.
+    if (gap && lines.length && lines.at(-1).trim() && line.trim()) lines.push('');
+    lines.push(line);
+    gap = false;
+  }
+  return lines.join('\n');
 }
 
 /* Preserve real cell boundaries from TSV, fullwidth table rules and wrapped
@@ -2390,7 +2400,7 @@ const server = http.createServer(async (req, res) => {
       if (!body || !body.image) return sendJson(res, 400, { ok: false, error: '缺少 image 字段（base64 dataURL）' });
       try {
         const r = await aiVisionExtract(body.image);
-        return sendJson(res, 200, { ok: true, fields: r.fields, usage: r.usage, rawText: r.rawText, needRotate: r.needRotate || 0, needsManualReview: r.needsManualReview === true });
+        return sendJson(res, 200, { ok: true, fields: r.fields, usage: r.usage, rawText: r.rawText, displayText: r.displayText, needRotate: r.needRotate || 0, needsManualReview: r.needsManualReview === true });
       } catch (e) {
         const code = e.code === 'NO_AI' ? 503 : e.code === 'OCR_TIMEOUT' ? 504 : 502;
         return sendJson(res, code, { ok: false, error: String(e && e.message || e), code: e.code || 'ERR' });

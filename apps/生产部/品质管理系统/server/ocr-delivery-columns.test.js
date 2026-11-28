@@ -477,3 +477,48 @@ for(const wrap of ['<br>','\n']) {
     assert.equal(result.fields.items[0].qty,'20000');
   });
 }
+
+const paperHeader=['序','客户订单号','产品编号','产品名称','订单数量','单位','送货数量','备品数','单重G','总重KG','备注'];
+const paperRows=[
+  ['1','FDZA20260001-0<br>1','SR1001CDU-24','SR1001CDU-24<br>PDQ(Jazwares美<br>客版)','2600','PCS','2310','','0.43','0.9933',''],
+  ['2','FDZA20260002-01','SR1002','SR1002彩卡底（美<br>文版）','10000','PCS','10000','100','','','1600*6+550'],
+];
+function paperTable(headers=paperHeader,rows=paperRows) {
+ return '合成纸品有限公司\n送货单\n发货单号：HD-TEST-1106\n发货日期：2026-11-27\n|'+headers.join('|')+'|\n|'+headers.map(()=>'---').join('|')+'|\n'+rows.map(row=>'|'+row.join('|')+'|').join('\n')+'\n||||||||||||';
+}
+test('paper delivery product-number header maps both rows using delivered quantities, not order, spare, weight or packing values',()=>{
+ const fields=runtime().parse(paperTable());
+ assert.equal(fields.deliveryNo,'HD-TEST-1106');assert.equal(fields.date,'2026-11-27');
+ assert.deepEqual(fields.items.map(r=>({productNo:r.productNo,productName:r.productName,qty:r.qty,unit:r.unit,orderNo:r.orderNo})),[
+  {productNo:'SR1001CDU-24',productName:'SR1001CDU-24 PDQ(Jazwares美 客版)',qty:'2310',unit:'PCS',orderNo:'FDZA20260001-01'},
+  {productNo:'SR1002',productName:'SR1002彩卡底（美 文版）',qty:'10000',unit:'PCS',orderNo:'FDZA20260002-01'},
+ ]);
+ assert.notEqual(fields.manualReviewRequired,true);assert.ok(fields.items.every(r=>!r.quantityNeedsReview));
+});
+for(const sku of ['产品编号','產品編號'])test('product-number alias supports positioned TSV and HTML: '+sku,()=>{
+ const head=paperHeader.map(h=>h==='产品编号'?sku:h);
+ const tsv=head.join('\t')+'\n'+paperRows.map(row=>row.join('\t')).join('\n');
+ const html='<table><tr>'+head.map(h=>'<th>'+h+'</th>').join('')+'</tr>'+paperRows.map(row=>'<tr>'+row.map(v=>'<td>'+v+'</td>').join('')+'</tr>').join('')+'</table>';
+ for(const raw of [tsv,html])assert.deepEqual(runtime().parse(raw).items.map(r=>[r.productNo,r.qty,r.orderNo]),[['SR1001CDU-24','2310','FDZA20260001-01'],['SR1002','10000','FDZA20260002-01']]);
+});
+test('product-number aliases keep delivery column ambiguity and damaged rows under review',()=>{
+ for(const head of [paperHeader.map(h=>h==='送货数量'?'累计交货数量':h),paperHeader.map(h=>h==='备品数'?'送货数量':h),paperHeader.map(h=>h==='单重G'?'货号':h)])pending(runtime().parse(paperTable(head)),paperTable(head));
+ const damaged=paperRows.map(row=>row.slice());damaged[0][6]='';
+ const fields=runtime().parse(paperTable(paperHeader,damaged));
+ assert.equal(fields.items.length,2);assert.equal(fields.items[0].quantityNeedsReview,true);assert.equal(fields.items[1].qty,'10000');
+});
+test('provider output with product-number columns needs no additional model inference',async()=>{
+ const fixture=runtime([paperTable()]),fields=await fixture.extract();
+ assert.equal(fixture.calls(),1);assert.deepEqual(fields.fields.items.map(r=>r.qty),['2310','10000']);
+});
+
+test('product-number paper rows reach OCR preview and sequential record forms with their own PO and delivered quantity',async()=>{
+ const front=fs.readFileSync(path.join(app,'frontend-ocr-rotation.test.js'),'utf8'),end=front.indexOf("test('manual rotations");
+ const context={require,__dirname:app,Buffer,AbortController,setImmediate,console};vm.runInNewContext(front.slice(0,end)+';this.make=fixture;',context);
+ const raw=paperTable(),fields=runtime().parse(raw),x=context.make();x.upload();x.responses.push({ok:true,fields,rawText:raw});x.b.ctx.openAddModal();
+ await x.b.ctx.startOcr();assert.match(x.b.elements.get('ocrItemsPreview').innerHTML,/SR1001CDU-24/);assert.match(x.b.elements.get('ocrItemsPreview').innerHTML,/2310/);
+ x.b.ctx.getSupplierOptions=()=>['合成纸品有限公司'];x.b.ctx.applyOcrToForm();
+ assert.equal(x.b.elements.get('f_qty').value,'2310');assert.equal(x.b.elements.get('f_orderNo').value,'FDZA20260001-01');
+ assert.equal(x.b.ctx.saveRecord({continueEntry:true}),true,JSON.stringify(x.b.messages));assert.equal(x.b.elements.get('f_qty').value,'10000');assert.equal(x.b.elements.get('f_orderNo').value,'FDZA20260002-01');
+ assert.equal(x.b.ctx.saveRecord(),true);assert.deepEqual(plain(x.b.json('state.records.map(r=>[r.productNo,r.qty,r.orderNo])')),[['SR1001CDU-24',2310,'FDZA20260001-01'],['SR1002',10000,'FDZA20260002-01']]);
+});

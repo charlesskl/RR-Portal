@@ -423,7 +423,7 @@ async function writePasteStyles(template, destination, copy, layouts) {
       }
     });
     parser.on('closetag', tag => { if (tag.local === 'row') selected = undefined; });
-    parser.write(await source.file(sourceFiles.get(name)).async('string')).close();
+    parser.write(await source.file(sourceFiles.get(layout.sourceName || name)).async('string')).close();
     const file = outputFiles.get(name);
     const sheet = await readXml(output, file);
     for (const row of elements(sheet, 'row')) {

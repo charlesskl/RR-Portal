@@ -3,7 +3,7 @@ const XLSX = require('xlsx');
 const {mergeFeeRemarks, tapeLineNotes} = require('./parsers/sky-fees');
 
 const {writePasteStyles} = require('./full-workbook');
-const key = (po, sku) => JSON.stringify([String(po ?? '').trim(), String(sku ?? '').trim()]);
+const key = (po, sku, sample = false) => JSON.stringify([String(po ?? '').trim(), String(sku ?? '').trim(), sample]);
 
 function displayValue(cell) {
   return cell.type === Excel.ValueType.Formula ? cell.result ?? null : cell.value;
@@ -38,7 +38,7 @@ async function writePasteWorkbook(template, destination, generated, orders) {
     if (po.error || po.client !== 'Sky Castle' || !po.items?.length) throw Error('请核对 PO 明细与排期模板');
     for (const item of po.items) {
       if (!po.poNumber?.trim() || !item.partNo?.trim()) throw Error('缺少 PO 号或货号');
-      const id = key(po.poNumber, item.partNo);
+      const id = key(po.poNumber, item.partNo, item.isSample === true);
       if (expected.has(id)) throw Error('本批次含重复 PO 号和货号，请核对');
       expected.add(id);
     }
@@ -58,16 +58,19 @@ async function writePasteWorkbook(template, destination, generated, orders) {
       continue;
     }
     const name = delta.name.replace(/-粘贴用$/, '');
-    const order = name === '总接单';
+    const sourceName = delta.skySourceName || name;
+    const order = sourceName === '总接单';
     const [poCol, skuCol] = delta.skyKeyColumns ?? (order ? [4, 5] : [7, 8]);
     const rows = [];
     delta.eachRow(row => {
-      if (expected.has(key(row.getCell(poCol).value, row.getCell(skuCol).value))) rows.push(row);
+      if (expected.has(key(row.getCell(poCol).value, row.getCell(skuCol).value, row.skySample))) rows.push(row);
     });
     if (!rows.length) continue;
-    const source = reference.getWorksheet(name);
+    const source = reference.getWorksheet(sourceName);
     if (!source) throw Error('排期缺少工作表 ' + name);
     const matches = new Map();
+    const remarkCol = !order && Array.from({length:source.columnCount}, (_, i) => i + 1).find(col =>
+      headers.Sheets[sourceName][XLSX.utils.encode_cell({r:0,c:col-1})]?.v === '备注');
     let lastDetail, firstStyledRow;
     source.eachRow((row, n) => {
       if (n <= 2) return;
@@ -75,7 +78,9 @@ async function writePasteWorkbook(template, destination, generated, orders) {
       const po = displayValue(row.getCell(poCol)), sku = displayValue(row.getCell(skuCol));
       if (!po || !sku) return;
       lastDetail = row;
-      const id = key(po, sku);
+      if (name === '待核对' || name === '总接单（样品）') return;
+      const sample = Boolean(remarkCol && /(?:^|[；;\n])\s*Sample\s*(?:$|[；;\n])/i.test(row.getCell(remarkCol).text));
+      const id = key(po, sku, sample);
       if (!expected.has(id)) return;
       if (matches.has(id)) throw Error(name + ' 中有重复的 PO 和货号，无法核对更新位置');
       matches.set(id, row);
@@ -84,13 +89,11 @@ async function writePasteWorkbook(template, destination, generated, orders) {
     sheet.properties.defaultRowHeight = source.properties.defaultRowHeight;
     sheet.properties.defaultColWidth = source.properties.defaultColWidth;
     const width = source.columnCount;
-    const layout = {sourceRows: new Map([[1,1],[2,2]]), dates: new Set(), changed: new Set()};
+    const layout = {sourceName, sourceRows: new Map([[1,1],[2,2]]), dates: new Set(), changed: new Set()};
     layouts.set(name, layout);
-    copyHeaders(source, sheet, headers.Sheets[name]);
-    const remarkCol = !order && Array.from({length:width}, (_, i) => i + 1).find(col =>
-        headers.Sheets[name][XLSX.utils.encode_cell({r:0,c:col-1})]?.v === '备注');
+    copyHeaders(source, sheet, headers.Sheets[sourceName]);
     rows.forEach((row, i) => {
-      const id = key(row.getCell(poCol).value, row.getCell(skuCol).value);
+      const id = key(row.getCell(poCol).value, row.getCell(skuCol).value, row.skySample);
       const seen = order ? written.order : written.schedule;
       if (seen.has(id)) throw Error('同一 PO 明细重复导出，请核对');
       seen.add(id);

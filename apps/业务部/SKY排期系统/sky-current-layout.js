@@ -26,11 +26,12 @@ function writeCurrentLayout(wb,raw,orders,standardizePackaging) {
     const refs=master.get(sku)||[];refs.push(r);master.set(sku,refs);
   }
   const queues=new Map();
-  function prepare(name){
-    if(!raw.Sheets[name])throw Error('原排期缺少 '+name);
-    const [h1,h2]=rows(raw.Sheets[name]);
+  function prepare(name, sourceName = name){
+    if(!raw.Sheets[sourceName])throw Error('原排期缺少 '+sourceName);
+    const [h1,h2]=rows(raw.Sheets[sourceName]);
     const sheet=wb.addWorksheet(name+'-粘贴用');
-    const header = name === '总接单' ? h2 : h1;
+    sheet.skySourceName = sourceName;
+    const header = sourceName === '总接单' ? h2 : h1;
     if (header?.some(value => String(value ?? '').trim() === 'PO号')) {
       const keys = [column(header, 'PO号'), column(header, '货号')];
       sheet.skyKeyColumns = keys;
@@ -45,15 +46,20 @@ function writeCurrentLayout(wb,raw,orders,standardizePackaging) {
   const seriesSheet={'一代':'一二代排期','二代':'一二代排期','一二代':'一二代排期','三代':'三代排期','四代':'四代排期','蛋糕':'蛋糕系列','蛋糕系列':'蛋糕系列'};
   for(const po of orders)for(const item of po.items){
     const hits=master.get(item.partNo)||[];
-    if(hits.length!==1)throw Error(item.partNo+' 在名称表中没有唯一的完整货号');
-    const info=Object.fromEntries(head.map((key,i)=>[key,hits[0][i]]));
-    const target=queues.get(seriesSheet[info['系列']]);
+    const needsReview = !hits.length && /^Toysmith$/i.test(po.customerName || '') && po.items.some(line => line.isSample);
+    if(hits.length!==1 && !needsReview)throw Error(item.partNo+' 在名称表中没有唯一的完整货号');
+    const info=hits.length ? Object.fromEntries(head.map((key,i)=>[key,hits[0][i]])) : {};
+    const target=needsReview
+      ? queues.get('待核对') || prepare('待核对', schedNames.find(n => queues.has(n)))
+      : queues.get(seriesSheet[info['系列']]);
     if(!target)throw Error(item.partNo+' 缺少对应的系列排期：'+info['系列']);
-    const version = item.customerPackaging || standardizePackaging(po.packaging, po, info['系列']);
+    const version = item.customerPackaging || (!needsReview && standardizePackaging(po.packaging, po, info['系列'])) || '';
     const deliveryDate = item.dueDate || po.shippingDate;
     if (!deliveryDate) throw Error(po.poNumber + ' 缺少出货日期');
-    for(const [table,isOrder] of [[order,true],[target,false]]){
+    const orderTable = item.isSample ? queues.get('总接单（样品）') || prepare('总接单（样品）', '总接单') : order;
+    for(const [table,isOrder] of [[orderTable,true],[target,false]]){
       const row=table.sheet.addRow([]);
+      row.skySample = item.isSample === true;
       const header=isOrder?table.h2:table.h1;
       const put=(label,val,date)=>fill(row,header,label,val,date);
       const dateCols = [];
@@ -93,7 +99,8 @@ function writeCurrentLayout(wb,raw,orders,standardizePackaging) {
         put('产品名称',info['名称']||item.description);
         put('贴纸用量',info['贴纸用量']);if(info['贴纸用量'])put('总贴纸用量',item.quantity*info['贴纸用量']);
         put('外箱',info['装箱数']);if(info['装箱数'])put('总箱数',Math.ceil(item.quantity/info['装箱数']));
-        put('生产车间',info['车间']);put('备注',item.remark);
+        put('生产车间',info['车间']);
+        put('备注',[item.remark, item.isSample ? 'Sample' : '', needsReview ? '名称表缺少完整货号，系列待核对' : ''].filter(Boolean).join('；'));
         row.skyTotals = {
           quantity: column(header, '数量'),
           sticker: ['贴纸用量', '总贴纸用量'].map(label => column(header, label, true)),

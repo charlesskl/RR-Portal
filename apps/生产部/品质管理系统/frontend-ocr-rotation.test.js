@@ -651,3 +651,15 @@ test('a single unresolved contract PO also requires correction before saving',as
   x.b.elements.get('f_orderNo').value='FDJA20261237-01';assert.equal(x.b.ctx.saveRecord(),true);
   assert.equal(x.b.json('state.records[0].orderNo'),'FDJA20261237-01');
 });
+
+test('OCR uses server display text without empty outlines and keeps the actual goods preview',async()=>{
+ const x=fixture(),response=valid();response.rawText='original goods\n| | | |';response.displayText='original goods';
+ x.upload();x.responses.push(response);await x.b.ctx.startOcr();
+ assert.equal(x.value('ocrRawText'),'original goods');assert.equal(x.b.ctx.__qcAiResult.items.length,1);
+ assert.match(x.b.elements.get('ocrItemsPreview').innerHTML,/SYNTHETIC-01/);
+});
+test('manual text reparse uses the same server-cleaned display copy without dropping uncertain goods',async()=>{
+ const x=fixture(),response=valid();response.fields.items.push({productNo:'',productName:'待核对原行：3 ?',qty:'',quantityNeedsReview:true});response.needsManualReview=true;response.displayText='goods\n|3|?|';
+ x.b.elements.get('ocrRawText').value='goods\n| | |\n|3|?|';x.responses.push(response);await x.b.ctx.reparseOcrText();
+ assert.equal(x.value('ocrRawText'),response.displayText);assert.equal(x.b.ctx.__qcAiResult.items.length,2);assert.equal(x.b.ctx.__qcAiResult.items[1].quantityNeedsReview,true);
+});

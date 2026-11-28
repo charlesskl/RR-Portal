@@ -20,7 +20,8 @@ test('isolated real OCR HTTP, explicit save, SQLite and reopen retain rows and p
     if (model) { model.closeAllConnections(); await new Promise(resolve => model.close(resolve)); }
     fs.rmSync(root, { recursive: true, force: true });
   });
-  const raw = '|订单号|货号|品名|数量|单位|\n|PO-SYNTH-1|SKU001|同名合成件|100|PCS|\n|PO-SYNTH-2|SKU001|同名合成件|100|PCS|';
+  const goodsText = '|订单号|货号|品名|数量|单位|\n|PO-SYNTH-1|SKU001|同名合成件|100|PCS|\n|PO-SYNTH-2|SKU001|同名合成件|100|PCS|';
+  const raw = goodsText + '\n| \u200b | <br> | |';
   const replies = [raw, '供应商：合成供应商有限公司\n日期：2026-11-06\n送货单号：DN-SYNTH-01'];
   let modelCalls = 0;
   model = http.createServer(async (req, res) => {
@@ -147,6 +148,10 @@ test('isolated real OCR HTTP, explicit save, SQLite and reopen retain rows and p
   assert.equal(modelCalls,0,'reparsing incomplete PO text must not upload an image or invoke OCR');
   const ocr = await request('/api/ai/ocr-extract', 'POST', image, admin);
   assert.equal(ocr.status, 200); assert.equal(ocr.json.ok, true); assert.equal(modelCalls, 2);
+  assert.equal(ocr.json.displayText, goodsText);
+  const reparsed = await request('/api/ai/ocr-parse', 'POST', {text: raw}, admin);
+  assert.equal(reparsed.status, 200);
+  assert.equal(reparsed.json.displayText, goodsText);
   assert.equal(ocr.json.rawText, raw); assert.equal(ocr.json.needsManualReview, false);
   assert.equal(ocr.json.fields.supplier, '合成供应商有限公司'); assert.equal(ocr.json.fields.deliveryNo, 'DN-SYNTH-01');
   assert.deepEqual(ocr.json.fields.items.map(it => [it.orderNo, it.qty]), [['PO-SYNTH-1', '100'], ['PO-SYNTH-2', '100']]);

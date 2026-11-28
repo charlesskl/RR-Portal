@@ -214,6 +214,25 @@ function _ocrDeliverySchema(cells, partial = false) {
     ...Object.fromEntries(Object.entries(matches).map(([key, indexes]) => [key, indexes[0]])) };
 }
 
+/* Empty table outlines may contain zero-width OCR artifacts. Drop only rows
+   whose cells contain no data; a number, question mark or dash still needs review. */
+function _stripEmptyOcrTableRows(source) {
+  const lines = [];
+  let gap = false;
+  for (const line of String(source || '').split(/\r?\n/)) {
+    const outline = line.replace(/<br\s*\/?>/gi, '');
+    if (/[|｜\t]/.test(outline) && /^[\s|｜\u200b-\u200d\u2060\ufeff]*$/.test(outline)) {
+      gap = true;
+      continue;
+    }
+    // Keep a boundary so wrapped cells cannot join across discarded rows.
+    if (gap && lines.length && lines.at(-1).trim() && line.trim()) lines.push('');
+    lines.push(line);
+    gap = false;
+  }
+  return lines.join('\n');
+}
+
 /* Preserve real cell boundaries from TSV, fullwidth table rules and wrapped
    Markdown cells. Never infer missing columns from ordinary spaces, or attach
    a following independently framed/numbered row to an incomplete goods row. */
@@ -290,6 +309,7 @@ function parseDeliveryNote(text, options = {}) {
     return fields;
   }
   if (grounding) rawText = grounding.text;
+  rawText = _stripEmptyOcrTableRows(rawText);
   const decodeHtml = value => value.replace(/&(#x[\da-f]+|#\d+|nbsp|amp|lt|gt|quot|apos);/gi, (entity, code) => {
     if (code[0] !== '#') return { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[code.toLowerCase()];
     const point = /^#x/i.test(code) ? parseInt(code.slice(2), 16) : Number(code.slice(1));
@@ -1291,7 +1311,7 @@ async function aiVisionExtract(dataUrl) {
       console.warn('[AI] Optional header recovery unavailable');
     }
   }
-  return { fields, usage: data.usage || null, rawText: content, needRotate, needsManualReview };
+  return { fields, usage: data.usage || null, rawText: content, displayText: _stripEmptyOcrTableRows(content), needRotate, needsManualReview };
 }
 
 /* ── 记录表列顺序（写入/读取都按这个顺序）── */
@@ -2372,7 +2392,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       if (!body || typeof body.text !== 'string' || !body.text.trim() || body.text.length > 200000) Auth.fail(400, '请提供有效的识别原文（不超过20万字）');
       const fields = parseDeliveryNote(body.text);
-      return sendJson(res, 200, { ok: true, fields, needsManualReview: fields.manualReviewRequired === true || fields.items.some(item => item.quantityNeedsReview || item.orderNoNeedsReview) });
+      return sendJson(res, 200, { ok: true, fields, displayText: _stripEmptyOcrTableRows(body.text), needsManualReview: fields.manualReviewRequired === true || fields.items.some(item => item.quantityNeedsReview || item.orderNoNeedsReview) });
     }
     if (p === '/api/ai/ocr-extract' && req.method === 'POST') {
       const body = await readBody(req);
@@ -2380,7 +2400,7 @@ const server = http.createServer(async (req, res) => {
       if (!body || !body.image) return sendJson(res, 400, { ok: false, error: '缺少 image 字段（base64 dataURL）' });
       try {
         const r = await aiVisionExtract(body.image);
-        return sendJson(res, 200, { ok: true, fields: r.fields, usage: r.usage, rawText: r.rawText, needRotate: r.needRotate || 0, needsManualReview: r.needsManualReview === true });
+        return sendJson(res, 200, { ok: true, fields: r.fields, usage: r.usage, rawText: r.rawText, displayText: r.displayText, needRotate: r.needRotate || 0, needsManualReview: r.needsManualReview === true });
       } catch (e) {
         const code = e.code === 'NO_AI' ? 503 : e.code === 'OCR_TIMEOUT' ? 504 : 502;
         return sendJson(res, code, { ok: false, error: String(e && e.message || e), code: e.code || 'ERR' });
